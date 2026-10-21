@@ -303,23 +303,33 @@ type ToastPayload struct {
 	Message  string `json:"message"`
 }
 
+// ConnWriter writes envelopes as JSON lines. A writer made with NewConnWriter
+// writes synchronously on the caller's goroutine; one made with
+// NewQueuedConnWriter never blocks the caller (see queue.go).
 type ConnWriter struct {
 	w  io.Writer
 	mu sync.Mutex
+
+	q *sendQueue // nil for a synchronous writer
 }
 
+// NewConnWriter returns a synchronous writer: Send blocks until the line has
+// been written to w.
 func NewConnWriter(w io.Writer) *ConnWriter {
 	return &ConnWriter{w: w}
 }
 
 func (w *ConnWriter) Send(env Envelope) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
 	data, err := json.Marshal(env)
 	if err != nil {
 		return err
 	}
 	data = append(data, '\n')
+	if w.q != nil {
+		return w.q.enqueue(data)
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	_, err = w.w.Write(data)
 	return err
 }
