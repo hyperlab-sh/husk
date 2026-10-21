@@ -158,6 +158,8 @@ Keys use the `slot_key` spelling (`"f4"`, `"ctrl+g"`, `"alt+2"`, `"n"`, `" "`) a
 
 A palette command whose ID equals a rail item's ID activates that rail item, so a plugin can list its rail items as commands. The activity rail lists rail items in registration order.
 
+All chrome is derived from what plugins declared. With no plugins connected the rail holds only Home, the slot explorer and the palette; the palette lists only the host's `husk.*` workbench commands; the top bar lists only declared rail shortcuts. The footer always shows the host keys (home, resize, docks, palette, quit) and adds the `description`-bearing `hello.keybindings` of the plugin owning the focused surface (those scoped to that surface or unscoped, at most four, first declaration wins per key). Bindings without a `description` are not advertised.
+
 ## Published slots, hooks and events
 
 Plugins can publish extension points for other plugins. Resource IDs use the
