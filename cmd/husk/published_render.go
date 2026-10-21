@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/hyperlab-sh/husk/pkg/huskipc"
 )
@@ -63,24 +64,71 @@ func (r *publicationRegistry) replaceAnchors(owner, line string, width, y int) (
 	return rendered, visibleHits
 }
 
-// renderPublished is shared by rendering and input routing; coordinates are
-// always relative to the host surface's content, in terminal cells, not bytes.
+// regionDraw is one region rectangle of a publishedLayout: its cells are
+// cleared and its contribution lines drawn over the source rows.
+type regionDraw struct {
+	X, Y, W, H int
+	Lines      []string
+}
+
+// publishedLayout is a surface's published content, laid out but not drawn:
+// the anchor-substituted source rows (clipped to the width, not padded), the
+// region rectangles in stacking order, and the contribution hits. Rendering
+// draws it onto the canvas; input routing reads only the hits.
+type publishedLayout struct {
+	Width, Height int
+	Rows          []string
+	Regions       []regionDraw
+	Hits          []contributionHit
+}
+
+// draw paints the layout with its top-left content cell at (x, y). Each row
+// is parsed from a zero pen, so a style a plugin line leaves open stops at
+// its last character; each region clears its whole rectangle before its own
+// lines are drawn, so nothing under it shows through or bleeds into it.
+func (l publishedLayout) draw(c *canvas, x, y int) {
+	c.blitLines(x, y, l.Width, l.Height, l.Rows)
+	for _, r := range l.Regions {
+		c.blitLines(x+r.X, y+r.Y, r.W, r.H, r.Lines)
+	}
+}
+
+// renderPublished draws the layout on a scratch canvas and returns its rows,
+// each exactly width cells, for callers that want strings.
 func (r *publicationRegistry) renderPublished(surface huskipc.SlotID, owner string, source []string, width, height int) ([]string, []contributionHit) {
-	if width <= 0 || height <= 0 {
+	l := r.layoutPublished(surface, owner, source, width, height)
+	if l.Width <= 0 || l.Height <= 0 {
 		return nil, nil
 	}
-	rows := make([]string, height)
-	var hits []contributionHit
+	c := newCanvas(l.Width, l.Height)
+	l.draw(c, 0, 0)
+	rows := make([]string, l.Height)
 	for y := range rows {
+		rows[y] = uv.Line(c.buf.Lines[y]).Render()
+	}
+	c.release()
+	return rows, l.Hits
+}
+
+// layoutPublished is shared by rendering and input routing; coordinates are
+// always relative to the host surface's content, in terminal cells, not bytes.
+func (r *publicationRegistry) layoutPublished(surface huskipc.SlotID, owner string, source []string, width, height int) publishedLayout {
+	if width <= 0 || height <= 0 {
+		return publishedLayout{}
+	}
+	l := publishedLayout{Width: width, Height: height, Rows: make([]string, height)}
+	var hits []contributionHit
+	for y := range l.Rows {
 		line := ""
 		if y < len(source) {
 			line = source[y]
 		}
 		var rowHits []contributionHit
-		rows[y], rowHits = r.replaceAnchors(owner, line, width, y)
-		// A plugin line may leave a style open; close it before the padding
-		// and the frame edge so it cannot paint cells the plugin does not own.
-		rows[y] = fitLineWidth(closeSGR(rows[y]), width)
+		l.Rows[y], rowHits = r.replaceAnchors(owner, line, width, y)
+		// Clip with the "…" tail; the canvas blanks the rest of the row.
+		if ansi.StringWidth(l.Rows[y]) > width {
+			l.Rows[y] = ansi.Truncate(l.Rows[y], width, "…")
+		}
 		hits = append(hits, rowHits...)
 	}
 	ids := make([]string, 0)
@@ -137,11 +185,8 @@ func (r *publicationRegistry) renderPublished(surface huskipc.SlotID, owner stri
 				break
 			}
 		}
-		// Each fragment is closed before the next is appended (and before its
-		// own padding), so no colour crosses a region edge; see closeSGR.
-		for i, text := range regionRows {
-			rows[y+i] = fitLineWidth(closeSGR(ansi.Cut(rows[y+i], 0, x)), x) + fitLineWidth(closeSGR(text), w) + fitLineWidth(closeSGR(ansi.Cut(rows[y+i], x+w, width)), width-x-w)
-		}
+		l.Regions = append(l.Regions, regionDraw{X: x, Y: y, W: w, H: h, Lines: regionRows})
 	}
-	return rows, hits
+	l.Hits = hits
+	return l
 }
