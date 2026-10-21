@@ -27,6 +27,7 @@
     { "title": "Overview", "path": "/", "icon": "home" },
     { "title": "Getting Started", "path": "/getting-started/", "icon": "zap" },
     { "title": "Architecture", "path": "/architecture/", "icon": "layers" },
+    { "title": "Design Notes", "path": "/design/", "icon": "book-open" },
     { "title": "GitHub", "path": "https://github.com/hyperlab-sh/husk", "icon": "github", "external": true }
   ],
   "plugins": {
