@@ -81,7 +81,7 @@ Messages in `pkg/huskipc/protocol.go`:
 | `slot_update` | plugin to host | Render a slot |
 | `slot_resize` | host to plugin | Slot dimensions changed |
 | `slot_key`, `slot_mouse` | host to plugin | Input routed to a focused slot |
-| `key_state` | host to plugin | Modifier state, such as Alt held |
+| `key_state` | host to plugin | Modifier state, such as Alt held. Sent on transitions only; on terminal blur the host sends `up` for every modifier and held key it had reported (a latched Alt stays) |
 | `workspace_context` | plugin to host, then broadcast | Selected workspace (`cwd`, label, repo) |
 | `command_invoke` | host to plugin | A palette command was chosen |
 

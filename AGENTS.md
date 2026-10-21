@@ -32,7 +32,7 @@ Registry, published-slot rendering/routing and protocol compatibility tests live
 
 | Path | Purpose |
 | :--- | :--- |
-| `cmd/husk/` | Host workbench: slots, dock/palette, mouse resize, activity rail. Files: `main.go` (flags, startup, `--dump-frame` driver), `model.go` (model type, `Init`/`Update`, key-state), `transport.go` (accept/spawn/stream/cleanup), `input.go` (keys, mouse, drag), `commands.go` (rail buttons, palette), `layout.go` (`recomputeLayout`, rects, frames), `render.go` (`View` and helpers), `demo.go` (`--demo-frame` / `--demo pubslots` fixtures only); `modifiers_darwin.go` polls Alt/Option via Quartz at 25Hz |
+| `cmd/husk/` | Host workbench: slots, dock/palette, mouse resize, activity rail. Files: `main.go` (flags, startup, `--dump-frame` driver), `model.go` (model type, `Init`/`Update`, key-state), `transport.go` (accept/spawn/stream/cleanup), `input.go` (keys, mouse, drag), `commands.go` (rail buttons, palette), `layout.go` (`recomputeLayout`, rects, frames), `render.go` (`View` and helpers), `demo.go` (`--demo-frame` / `--demo pubslots` fixtures only); `modifiers_darwin.go` polls Alt/Option via Quartz (see "Modifier polling" below) |
 | `pkg/huskipc/` | IPC envelope and legacy payloads (`protocol.go`), published extension payloads (`published.go`), JSON-lines reader/writer; `queue.go` is the non-blocking queued writer the host uses per connection (bounded queue, write deadline, disconnect on overflow/timeout). Never call a synchronous `NewConnWriter` from `Update` on a real connection |
 | `pkg/manifest/` | `husk-plugin.json` parsing (`manifest.go`): id, name, version, language, description, command (argv, relative to the manifest dir), transport (`socket` default \| `stdio`), slots |
 | `pkg/theme/` | Styling (being moved to Charm defaults) |
@@ -41,6 +41,8 @@ Registry, published-slot rendering/routing and protocol compatibility tests live
 `View` is pure: it reads the model and never writes it (`TestViewIsPure` deep-compares a rendered model with an unrendered twin). Derived UI such as the architecture explorer is built locally in the render function, never stored in `slotUpdates`; state changes belong in `Update`. String splicing (`spliceOverlay`, the region compositor in `published_render.go`) closes open SGR state at every fragment boundary with `closeSGR` (`sgr.go`), because `ansi.Cut` keeps every escape of the line, including those past the cut. Slot content is clipped to the inner rect, never wrapped or scrolled (`surfaceContentLines`).
 
 Minimum terminal size is 84x24 (`minTermWidth`/`minTermHeight` in `layout.go`): below it `View` renders `renderTooSmall`, a frame that exactly fills the real terminal; `m.width`/`m.height` hold the real size and are never clamped.
+
+Modifier polling: the OS modifier poll (`pollOSModifiers`, darwin only) is the only way to see a bare Alt/Option press. It runs every 40ms while a modifier, held key or input from the last 2s is active, every 150ms when idle, and not at all while the terminal is blurred. `View` sets `ReportFocus`, so `tea.BlurMsg` clears OS-derived modifiers and held keys (broadcasting `key_state` up; a latched Alt from `?` or `--hold-alt` survives) and lets the tick chain lapse; `tea.FocusMsg` restarts it. Terminals without focus reporting never send `BlurMsg` and keep polling.
 
 IPC messages: `hello`/`welcome`, `slot_update`, `slot_resize`, `slot_key`, `slot_mouse`, `key_state`, `workspace_context`, `command_invoke`, toasts. Plugin placements: `modal`, `full-canvas`, `stage`.
 
