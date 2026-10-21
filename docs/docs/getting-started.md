@@ -17,15 +17,16 @@ go test ./pkg/...
 
 ```bash
 ./bin/husk                                # empty workbench: no plugins without flags
+go build -o plugins/reference/reference ./plugins/reference   # the reference plugins run this binary
 ./bin/husk --plugin-dir ./plugins         # load every bundled plugin via its manifest
-./bin/husk --plugin ./plugins/project-git # load one plugin (directory, husk-plugin.json, or executable)
+./bin/husk --plugin ./plugins/reference   # load one plugin (directory, husk-plugin.json, or executable)
 ```
 
 Non-interactive frame dumps are useful for checking rendering without a terminal:
 
 ```bash
 ./bin/husk --dump-frame                                # empty workbench
-./bin/husk --dump-frame --plugin-dir ./plugins --rail stage
+./bin/husk --dump-frame --plugin-dir ./plugins    # reference plugins: frame, filled row-action slot
 ./bin/husk --dump-frame --hold-alt                     # rail shows shortcuts instead of icons
 ```
 
@@ -35,14 +36,14 @@ A plugin directory contains a `husk-plugin.json`:
 
 ```json
 {
-  "id": "bash.project-git",
-  "name": "Project Git Stage",
+  "id": "go.reference",
+  "name": "Reference plugin",
   "version": "0.1.0",
-  "language": "Bash",
-  "description": "Lazygit-style git stage",
-  "command": ["./plugin.sh"],
+  "language": "Go",
+  "description": "Declares a frame, a published slot, a hook and an event",
+  "command": ["./reference"],
   "transport": "stdio",
-  "slots": ["workspace-stage"]
+  "slots": ["main-stage"]
 }
 ```
 
@@ -52,6 +53,20 @@ A plugin directory contains a `husk-plugin.json`:
 - `transport` is `socket` (default; the plugin connects to the Unix socket named by `HUSK_SOCKET_PATH`) or `stdio` (the same JSON-lines protocol over stdin/stdout).
 - `--plugin <path>` accepts an executable, a plugin directory, or a `husk-plugin.json` path, and may be repeated. `--plugin-dir <dir>` loads every immediate subdirectory of `<dir>` that contains a `husk-plugin.json`, and may also be repeated.
 
+## Reference plugin
+
+`plugins/reference` is the plugin to copy when starting a new one. It is about 300 lines of Go on top of `pkg/huskipc` and uses every extension point:
+
+| Feature | Where in `plugins/reference/main.go` |
+| :--- | :--- |
+| Frame (`border`, `label`, `close`) | `hello.frames` for `main-stage` |
+| Published inline slot `go.reference.row-actions` | `hello.published_slots`; rows carry the `ESC ] husk;slot=…;key=… ESC \` anchor |
+| Hook `go.reference.before-refresh` | declared in `hello.hooks`; `r` calls it and the replies are shown |
+| Event `go.reference.selection-changed` | declared in `hello.events`; `j`/`k` emit it |
+| Width and height | read from `welcome.slot_sizes` and `slot_resize`, never hard-coded; it re-renders only when the size or its content changes, not on `key_state` |
+
+A plugin cannot contribute to its own slot, so the same binary also runs as `plugins/reference-actions` (`--contributor`): it fills the slot with an `[inspect]` action, subscribes to the hook and the event, answers the hook and toasts on a click. It may start before the publisher has declared anything, so it retries its setup when the host answers with `protocol_error` (and never answers one). Build the binary first (`go build -o plugins/reference/reference ./plugins/reference`), then `husk --dump-frame --plugin-dir ./plugins` renders the framed surface with `[inspect]` beside each row. `go test ./plugins/reference` drives both roles over pipes.
+
 ## Activity rail
 
 The rail on the left starts a plugin in one of three placements.
@@ -60,7 +75,7 @@ The rail on the left starts a plugin in one of three placements.
 | :--- | :--- | :--- |
 | `modal` | — | Floating overlay |
 | `full-canvas` | — | Replaces the whole canvas right of the rail |
-| `stage` | `project-git` (`F4`) | Fills the canvas but keeps the sidebar visible |
+| `stage` | — | Fills the canvas but keeps the sidebar visible |
 
 Husk binds no keys to any plugin. Each rail item opens from a click on the rail or from the `shortcut` its plugin declares; pressing the shortcut again closes it.
 

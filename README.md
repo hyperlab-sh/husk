@@ -8,15 +8,16 @@ Husk is an application-agnostic TUI workbench; everything app-specific lives in 
 
 ## Status
 
-Early. The workbench core, IPC protocol, activity rail, command palette, mouse-resizable slots and plugin manifests work. The bundled plugins (`project-git`) are mock UIs. See the [documentation](docs/) and the open work in beads.
+Early. The workbench core, IPC protocol, activity rail, command palette, mouse-resizable slots and plugin manifests work. The bundled plugins are a small reference plugin pair (`plugins/reference`, `plugins/reference-actions`). See the [documentation](docs/) and the open work in beads.
 
 ## Quick start
 
 ```bash
 go build -o bin/husk ./cmd/husk
 ./bin/husk                                # empty workbench, no plugins
+go build -o plugins/reference/reference ./plugins/reference   # the reference plugins run this binary
 ./bin/husk --plugin-dir ./plugins         # load every bundled plugin
-./bin/husk --plugin ./plugins/project-git # load one plugin (dir, manifest, or executable)
+./bin/husk --plugin ./plugins/reference   # load one plugin (dir, manifest, or executable)
 ```
 
 Frame dumps render without a terminal:
@@ -36,11 +37,11 @@ The layout has nine slots (`activity-rail`, `sidebar-navigation`, `sidebar-list`
 | :--- | :--- | :--- |
 | `modal` | — | Floating overlay |
 | `full-canvas` | — | Replaces the whole canvas right of the rail |
-| `stage` | `project-git` (`F4`) | Fills the canvas but keeps the sidebar |
+| `stage` | — | Fills the canvas but keeps the sidebar |
 
 Husk binds no application keys. A rail item opens from a rail click or the `shortcut` its plugin declares, and plugins declare further `keybindings` in `hello`; see [Architecture](docs/docs/architecture.md#input-routing).
 
-Plugins can publish namespaced slots, hooks and events for other plugins to attach to. Inline slots expand at row anchors; region slots reserve a rectangle. Husk clips contributions and routes their clicks to the contributor, fans out asynchronous hooks, and delivers events only to subscribers. Try `husk --dump-frame --demo pubslots` for a self-contained two-plugin frame. See [Architecture](docs/docs/architecture.md#published-slots-hooks-and-events) for message shapes and lifecycle.
+Plugins can publish namespaced slots, hooks and events for other plugins to attach to. Inline slots expand at row anchors; region slots reserve a rectangle. Husk clips contributions and routes their clicks to the contributor, fans out asynchronous hooks, and delivers events only to subscribers. Try `husk --dump-frame --demo pubslots` for a self-contained two-plugin frame, or read [`plugins/reference`](plugins/reference/main.go): a small Go plugin that declares a frame, a published slot, a hook and an event and sizes itself from `slot_resize`, paired with `plugins/reference-actions`, which fills its slot. See [Architecture](docs/docs/architecture.md#published-slots-hooks-and-events) for message shapes and lifecycle.
 
 ### Surfaces and frames
 
@@ -52,14 +53,14 @@ A plugin directory contains a `husk-plugin.json` manifest:
 
 ```json
 {
-  "id": "bash.project-git",
-  "name": "Project Git Stage",
+  "id": "go.reference",
+  "name": "Reference plugin",
   "version": "0.1.0",
-  "language": "Bash",
-  "description": "Lazygit-style git stage",
-  "command": ["./plugin.sh"],
+  "language": "Go",
+  "description": "Declares a frame, a published slot, a hook and an event",
+  "command": ["./reference"],
   "transport": "stdio",
-  "slots": ["workspace-stage"]
+  "slots": ["main-stage"]
 }
 ```
 
