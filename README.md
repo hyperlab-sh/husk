@@ -66,6 +66,7 @@ A plugin directory contains a `husk-plugin.json` manifest:
 
 - `command` is the executable plus args, relative to the manifest directory.
 - `transport` is `socket` (default; the plugin connects to the Unix socket named by `HUSK_SOCKET_PATH`) or `stdio` (the plugin speaks the same JSON-lines protocol on stdin/stdout).
+- `published_slots`, `hooks` and `events` (optional) declare the plugin's extension points up front, with the same shapes as the `hello` fields; Husk registers them before the plugin connects. See [Architecture](docs/docs/architecture.md#declaring-in-the-manifest).
 - `--plugin <path>` accepts an executable, a plugin directory, or a `husk-plugin.json` path, and may be repeated. `--plugin-dir <dir>` loads every immediate subdirectory of `<dir>` that contains a `husk-plugin.json`, and may also be repeated.
 
 ## Keys

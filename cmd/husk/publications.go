@@ -46,17 +46,17 @@ func (m *WorkbenchModel) registerPublications(hello huskipc.HelloPayload) (err e
 		}
 	}
 	for _, s := range hello.PublishedSlots {
-		if err = m.registry.declareSlot(id, s); err != nil {
+		if err = m.registry.declareSlotFromHello(id, s); err != nil {
 			return err
 		}
 	}
 	for _, h := range hello.Hooks {
-		if err = declareNamedInfo(m.registry.Hooks, id, h.ID, h.Title, h.Description); err != nil {
+		if err = declareNamedFromHello(m.registry.Hooks, id, h.ID, h.Title, h.Description); err != nil {
 			return err
 		}
 	}
 	for _, e := range hello.Events {
-		if err = declareNamedInfo(m.registry.Events, id, e.ID, e.Title, e.Description); err != nil {
+		if err = declareNamedFromHello(m.registry.Events, id, e.ID, e.Title, e.Description); err != nil {
 			return err
 		}
 	}
