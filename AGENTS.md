@@ -38,6 +38,8 @@ Registry, published-slot rendering/routing and protocol compatibility tests live
 | `pkg/theme/` | Styling (being moved to Charm defaults) |
 | `plugins/` | Out-of-process plugins, each a directory with a `husk-plugin.json` and its code; currently `project-git` (stage, Bash `plugin.sh` mock UI). The module path is `github.com/hyperlab-sh/husk`; `pkg/huskipc` and `pkg/theme` are imported externally, so keep them stable |
 
+Minimum terminal size is 84x24 (`minTermWidth`/`minTermHeight` in `layout.go`): below it `View` renders `renderTooSmall`, a frame that exactly fills the real terminal; `m.width`/`m.height` hold the real size and are never clamped.
+
 IPC messages: `hello`/`welcome`, `slot_update`, `slot_resize`, `slot_key`, `slot_mouse`, `key_state`, `workspace_context`, `command_invoke`, toasts. Plugin placements: `modal`, `full-canvas`, `stage`.
 
 A plugin that stops reading is disconnected (queue of 1,024 messages, 5s write deadline), never waited on; every disconnect reason (EOF, read error, write timeout, queue overflow) is logged and toasted. Policy: `docs/docs/architecture.md` "Outbound queue and disconnect policy".
