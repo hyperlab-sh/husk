@@ -647,26 +647,16 @@ func (m *WorkbenchModel) drawCommandPalette(c *canvas) {
 		Render("❯ ") +
 		lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.Ink)).Render(m.paletteQuery+"█")
 
+	iw := palW - 4
+	rule := lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.Border)).Render(strings.Repeat("─", iw))
 	var rows []string
-	rows = append(rows, hdr, prompt, lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.Border)).Render(strings.Repeat("─", palW-4)))
+	rows = append(rows, hdr, "", prompt, "", rule)
 
 	maxItems := min(12, len(cmds))
-	for i := 0; i < maxItems; i++ {
-		c := cmds[i]
-		sel := i == m.paletteCursor
-		cat := lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.AccentSecondary)).Render(fmt.Sprintf("[%s]", c.Category))
-		title := lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.Ink)).Render(c.Title)
-		short := ""
-		if c.Shortcut != "" {
-			short = lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.Warning)).Render(c.Shortcut)
-		}
-		left := fmt.Sprintf(" %s %s", cat, title)
-		gap := max(1, (palW-4)-ansi.StringWidth(left)-ansi.StringWidth(short)-1)
-		line := fitLineWidth(left+strings.Repeat(" ", gap)+short+" ", palW-4)
-		if sel {
-			line = lipgloss.NewStyle().Background(lipgloss.Color(m.palette.SurfaceSelected)).Bold(true).Render(line)
-		}
-		rows = append(rows, line)
+	shown := cmds[:maxItems]
+	cols := paletteColumns(shown, iw)
+	for i, c := range shown {
+		rows = append(rows, m.paletteRow(c, i == m.paletteCursor, iw, cols))
 	}
 	if len(cmds) == 0 {
 		rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.InkSubtle)).Render("  No matching commands"))
@@ -682,6 +672,106 @@ func (m *WorkbenchModel) drawCommandPalette(c *canvas) {
 	x := max(2, (m.width-palW)/2)
 	y := max(3, m.height/6)
 	c.blitBlock(x, y, box)
+}
+
+// Palette row layout: one lead cell, the tag column, a gap, the title, a gap,
+// the right-aligned hint column, one trailing cell. Below paletteHintMinWidth
+// inner cells the hint column is dropped; below paletteTagMinWidth the tag
+// column goes too. The title is the only flexible column, so it is the one
+// that is truncated.
+const (
+	paletteHintMinWidth = 56
+	paletteTagMinWidth  = 36
+	paletteMaxTagWidth  = 16
+	paletteMaxHintWidth = 14
+	paletteMinTitle     = 10
+)
+
+// paletteCols holds the resolved column widths of a palette list; a zero tag
+// or hint width means the column is not drawn.
+type paletteCols struct {
+	tag, title, hint int
+}
+
+// paletteTag is the text of a command's tag cell.
+func paletteTag(c paletteCommand) string {
+	if c.Category == "" {
+		return ""
+	}
+	return "[" + c.Category + "]"
+}
+
+// paletteColumns resolves column widths for rows within an inner width of iw
+// cells. Widths are measured in terminal cells, so wide glyphs count as two.
+func paletteColumns(cmds []paletteCommand, iw int) paletteCols {
+	var tagW, hintW int
+	for _, c := range cmds {
+		tagW = max(tagW, ansi.StringWidth(paletteTag(c)))
+		hintW = max(hintW, ansi.StringWidth(c.Shortcut))
+	}
+	tagW = min(tagW, paletteMaxTagWidth)
+	hintW = min(hintW, paletteMaxHintWidth)
+	if iw < paletteHintMinWidth {
+		hintW = 0
+	}
+	if iw < paletteTagMinWidth {
+		tagW = 0
+	}
+	for {
+		title := iw - 2 // lead and trailing cells
+		if tagW > 0 {
+			title -= tagW + 1
+		}
+		if hintW > 0 {
+			title -= hintW + 1
+		}
+		if title >= paletteMinTitle || (tagW == 0 && hintW == 0) {
+			return paletteCols{tag: tagW, title: max(title, 0), hint: hintW}
+		}
+		// Too tight: the hint goes first, then the tag.
+		if hintW > 0 {
+			hintW = 0
+		} else {
+			tagW = 0
+		}
+	}
+}
+
+// paletteCell truncates s to w cells (wide-glyph safe), pads the remainder
+// and styles the whole cell so the background covers every cell.
+func paletteCell(s string, w int, right bool, st lipgloss.Style) string {
+	s = ansi.Truncate(s, w, "…")
+	pad := strings.Repeat(" ", max(0, w-ansi.StringWidth(s)))
+	if right {
+		return st.Render(pad + s)
+	}
+	return st.Render(s + pad)
+}
+
+// paletteRow renders one palette list row exactly iw cells wide, with the
+// row background on every cell and the selected row highlighted end to end.
+func (m *WorkbenchModel) paletteRow(c paletteCommand, sel bool, iw int, cols paletteCols) string {
+	bg := lipgloss.Color(m.palette.Surface)
+	if sel {
+		bg = lipgloss.Color(m.palette.SurfaceSelected)
+	}
+	base := lipgloss.NewStyle().Background(bg)
+	if sel {
+		base = base.Bold(true)
+	}
+	var b strings.Builder
+	b.WriteString(base.Render(" "))
+	if cols.tag > 0 {
+		b.WriteString(paletteCell(paletteTag(c), cols.tag, false, base.Foreground(lipgloss.Color(m.palette.AccentSecondary))))
+		b.WriteString(base.Render(" "))
+	}
+	b.WriteString(paletteCell(c.Title, cols.title, false, base.Foreground(lipgloss.Color(m.palette.Ink))))
+	if cols.hint > 0 {
+		b.WriteString(base.Render(" "))
+		b.WriteString(paletteCell(c.Shortcut, cols.hint, true, base.Foreground(lipgloss.Color(m.palette.Warning))))
+	}
+	b.WriteString(base.Render(" "))
+	return fitLineWidth(b.String(), iw)
 }
 
 func fitLineWidth(s string, width int) string {
