@@ -15,6 +15,20 @@ Husk is the host. Plugins are separate processes that Husk spawns and supervises
 
 The host socket is local-user only. Husk creates a fresh `0700` directory (`husk-*`) under `$XDG_RUNTIME_DIR`, or under a `mkdtemp` directory in the system temp dir when that variable is unset or unusable, and binds `husk.sock` inside it with mode `0600`. The path is exported to plugins as `HUSK_SOCKET_PATH`. On every accepted connection the host reads the peer uid from the kernel (`SO_PEERCRED` on Linux, `LOCAL_PEERCRED` on macOS) and closes the connection unless it equals the host uid; if the credentials cannot be read, the connection is refused. The socket and its directory are removed on shutdown. Platforms without a supported credential API refuse all socket connections; use stdio transport there.
 
+### Outbound queue and disconnect policy
+
+The host never writes to a plugin from its event loop. Each connection has a bounded outbound queue (1,024 messages) drained by its own writer goroutine, and every write has a 5-second deadline (`SetWriteDeadline` on sockets, a watchdog that closes the pipe on stdio). A plugin that stops reading therefore cannot freeze the workbench; the host disconnects it instead:
+
+| Cause | Reason shown |
+| :--- | :--- |
+| Queue overflows (the plugin fell more than 1,024 messages behind) | `stopped reading: send queue full (1024 messages)` |
+| One write takes longer than 5 seconds | `stopped reading: write timed out after 5s` |
+| A write fails | `write error: …` |
+| The plugin closes its end | `connection closed (EOF)` |
+| Reading fails, such as a line over 4 MB | `read error: …` |
+
+The host drops the connection rather than individual messages, so a plugin never sees a stream with holes in it. Every disconnect is logged as `husk: plugin <id> disconnected: <reason>` on stderr (held until exit while the TUI owns the terminal) and shown as a warning toast. Disconnecting removes the plugin's surfaces, rail items and publications as described under [Events and lifetime](#events-and-lifetime). A plugin whose `hello` is rejected receives its `protocol_error` before the connection is closed.
+
 ## Slots
 
 Husk uses a nine-slot layout modeled on `bb`.
