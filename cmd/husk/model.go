@@ -390,7 +390,8 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.modTickOn = false
 			return m, nil
 		}
-		if osMods, ok := m.pollMods(); ok {
+		osMods, polled := m.pollMods()
+		if polled {
 			if m.altLatched {
 				osMods.Alt = true
 			}
@@ -402,6 +403,12 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				delete(m.heldKeys, k)
 				m.broadcastKeyState("up", k, false)
 			}
+		}
+		if !polled && len(m.heldKeys) == 0 {
+			// No OS modifier source and nothing to expire: let the chain lapse
+			// so an idle process does no work. A key press restarts it.
+			m.modTickOn = false
+			return m, nil
 		}
 		return m, waitForModifierTick(m.modifierTickInterval(now))
 
@@ -476,7 +483,12 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		m.lastInput = time.Now()
-		return m.handleKey(msg)
+		next, cmd := m.handleKey(msg)
+		if len(m.heldKeys) > 0 {
+			// A lapsed chain (no OS modifier source) restarts to expire the held key.
+			cmd = tea.Batch(cmd, m.startModifierTick())
+		}
+		return next, cmd
 
 	case tea.PasteMsg:
 		// v1 delivered bracketed paste as a key whose string was wrapped in
