@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -37,6 +38,57 @@ type Plugin struct {
 
 	// Dir is the directory the manifest (or executable) was found in.
 	Dir string `json:"-"`
+
+	// Path is the husk-plugin.json file the plugin was parsed from. It is
+	// empty for implicit plugins (a bare executable or command line), which
+	// declare nothing for a hello to be checked against.
+	Path string `json:"-"`
+}
+
+// CheckHello verifies a plugin's hello against this manifest: the plugin_id
+// must equal the manifest id and, for plugins parsed from a manifest file,
+// the surfaces the hello claims must be exactly the manifest's slots (order
+// and duplicates are irrelevant). It returns nil for implicit plugins.
+func (p *Plugin) CheckHello(pluginID string, slots []string) error {
+	if p.Path == "" {
+		return nil
+	}
+	if pluginID != p.ID {
+		return fmt.Errorf("hello plugin_id %q does not match manifest id %q", pluginID, p.ID)
+	}
+	want, got := stringSet(p.Slots), stringSet(slots)
+	var extra, missing []string
+	for s := range got {
+		if !want[s] {
+			extra = append(extra, s)
+		}
+	}
+	for s := range want {
+		if !got[s] {
+			missing = append(missing, s)
+		}
+	}
+	if len(extra) == 0 && len(missing) == 0 {
+		return nil
+	}
+	sort.Strings(extra)
+	sort.Strings(missing)
+	var parts []string
+	if len(extra) > 0 {
+		parts = append(parts, "claims undeclared slots ["+strings.Join(extra, " ")+"]")
+	}
+	if len(missing) > 0 {
+		parts = append(parts, "omits declared slots ["+strings.Join(missing, " ")+"]")
+	}
+	return fmt.Errorf("hello from %q disagrees with its manifest: %s", p.ID, strings.Join(parts, "; "))
+}
+
+func stringSet(in []string) map[string]bool {
+	out := make(map[string]bool, len(in))
+	for _, s := range in {
+		out[s] = true
+	}
+	return out
 }
 
 // ResolvedCommand returns the command ready to execute:
@@ -142,6 +194,7 @@ func parseFile(path string) (*Plugin, error) {
 	if abs, err := filepath.Abs(p.Dir); err == nil {
 		p.Dir = abs
 	}
+	p.Path = filepath.Join(p.Dir, filepath.Base(path))
 	if err := p.validate(); err != nil {
 		return nil, fmt.Errorf("manifest: %s: %w", path, err)
 	}
@@ -181,7 +234,11 @@ func Load(path string) (*Plugin, error) {
 			Dir:       filepath.Dir(abs),
 		}, nil
 	}
-	if parts := splitCommand(path); len(parts) > 1 {
+	parts, err := splitCommand(path)
+	if err != nil {
+		return nil, fmt.Errorf("manifest: plugin path %s not found and is not a valid command: %w", path, err)
+	}
+	if len(parts) > 1 {
 		return &Plugin{
 			ID:        parts[0],
 			Name:      parts[0],
@@ -220,21 +277,66 @@ func LoadDir(dir string) ([]*Plugin, error) {
 	return plugins, nil
 }
 
-func splitCommand(path string) []string {
-	var parts []string
-	cur := ""
-	for _, r := range path {
-		if r == ' ' {
-			if cur != "" {
-				parts = append(parts, cur)
-				cur = ""
+// splitCommand splits a command line into arguments. Arguments are separated
+// by runs of spaces or tabs. Single quotes keep everything literal up to the
+// closing quote; double quotes keep spaces and honour backslash escapes of
+// '"' and '\\'; outside quotes a backslash escapes the next character. A quoted
+// empty string yields an empty argument. An unterminated quote or a trailing
+// backslash is an error rather than a silently mangled command.
+func splitCommand(line string) ([]string, error) {
+	var (
+		parts   []string
+		cur     strings.Builder
+		inArg   bool
+		quote   rune
+		escaped bool
+	)
+	for _, r := range line {
+		switch {
+		case escaped:
+			if quote == '"' && r != '"' && r != '\\' {
+				cur.WriteRune('\\')
 			}
-			continue
+			cur.WriteRune(r)
+			escaped = false
+		case quote == '\'':
+			if r == '\'' {
+				quote = 0
+			} else {
+				cur.WriteRune(r)
+			}
+		case quote == '"':
+			switch r {
+			case '"':
+				quote = 0
+			case '\\':
+				escaped = true
+			default:
+				cur.WriteRune(r)
+			}
+		case r == '\'' || r == '"':
+			quote, inArg = r, true
+		case r == '\\':
+			escaped, inArg = true, true
+		case r == ' ' || r == '\t':
+			if inArg {
+				parts = append(parts, cur.String())
+				cur.Reset()
+				inArg = false
+			}
+		default:
+			cur.WriteRune(r)
+			inArg = true
 		}
-		cur += string(r)
 	}
-	if cur != "" {
-		parts = append(parts, cur)
+	if quote != 0 {
+		return nil, fmt.Errorf("unterminated %c quote", quote)
 	}
-	return parts
+	if escaped {
+		return nil, errors.New("trailing backslash")
+	}
+	if inArg {
+		parts = append(parts, cur.String())
+	}
+	return parts, nil
 }
