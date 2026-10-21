@@ -575,6 +575,8 @@ func (m *WorkbenchModel) renderHotspotArchitectureStage() string {
 		row1 := fmt.Sprintf(" %s %s  %s  %s", numBadge, idText, titleText, ownerPill)
 		row2 := "      " + subtle.Render(slot.Description)
 		if selected {
+			// InkSubtle on SurfaceSelected is 4.42:1; InkMuted clears 4.5:1.
+			row2 = "      " + subStyle.Render(slot.Description)
 			row1 = lipgloss.NewStyle().Background(lipgloss.Color(m.palette.SurfaceSelected)).Render(fitLineWidth(row1, innerW))
 			row2 = lipgloss.NewStyle().Background(lipgloss.Color(m.palette.SurfaceSelected)).Render(fitLineWidth(row2, innerW))
 		}
