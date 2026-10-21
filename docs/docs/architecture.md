@@ -43,6 +43,6 @@ Messages in `pkg/huskipc/protocol.go`:
 
 ## Design rule
 
-Husk follows `bb`'s dogfooding rule: an API that performs a core action must be the path core itself uses. Husk knows nothing about Herdr, so Herdr support has to go through the public protocol like any third-party plugin.
+Husk follows `bb`'s dogfooding rule: an API that performs a core action must be the path core itself uses. Husk knows nothing about any application, so application support has to go through the public protocol like any other plugin.
 
 Background and trade-offs are in the design research notes, kept outside the repository.
