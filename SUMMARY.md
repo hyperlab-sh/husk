@@ -7,7 +7,7 @@ The session originated from an architectural pivot: instead of forking and modif
 - **Husk**: Host workbench written in **Go** using Charm libraries (`bubbletea`, `lipgloss`, `bubbles`, `x/ansi`).
 - **Dolphin**: The primary Herdr client, architected as an out-of-process Husk plugin (targeted for Rust).
 - **Process Plugin Model**: All plugins run as independent OS processes communicating via newline-delimited JSON IPC over Unix sockets (`HUSK_SOCKET_PATH`) or `stdio` pipes, making plugins completely language-agnostic.
-- **Slot Model Counterpart**: Adopts the 9-slot layout structure from `bb` (`/work/lab/bb/plugins/plugin-api-docs`):
+- **Slot Model Counterpart**: Adopts the 9-slot layout structure from `bb`:
   - `⓪ activity-rail` (Far-left navigation icon bar)
   - `① sidebar-navigation` (Mode & view switcher)
   - `② sidebar-list` (Primary list of spaces, trees, agents)
@@ -19,11 +19,11 @@ The session originated from an architectural pivot: instead of forking and modif
   - `⑧ app-overlay / modal-surface` (Command palette & floating modal plugins)
   - Dynamic surfaces: `full-canvas` (Canvas minus rail) and `workspace-stage` (Canvas minus sidebar).
 
-Comprehensive research documentation comparing frameworks, languages, and prior art was compiled into `/work/lab/dolphin/research/00` through `09`.
+Comprehensive research on frameworks, languages, and prior art was compiled alongside this project.
 
 ---
 
-## 2. Implemented Components (`/work/lab/husk`)
+## 2. Implemented Components
 
 ### A. Husk Workbench Core (`cmd/husk`)
 - Built with Charm's `bubbletea` and `lipgloss`.

@@ -1,21 +1,19 @@
 # Husk — Agent Instructions
 
-Husk is a minimal, domain-agnostic TUI workbench in Go (bubbletea + lipgloss). It only provides **slots**, **hooks** and **events**; every plugin is an independent OS process speaking newline-delimited JSON over a Unix socket (`HUSK_SOCKET_PATH`) or stdio, in any language. The layout mirrors `bb`'s 9-slot model (`/work/lab/bb/plugins/plugin-api-docs`). Husk is the host for Dolphin (repo `hyperlab-sh/dolphin`, an agentic development environment TUI backed by Herdr) but must stay application-agnostic: nothing Herdr- or Dolphin-specific belongs in this repo. Design research is not in the repo: it lives in the space's local-only `notes/research/` (`../../notes/research/` from the worktree). The docs site (docmd) is in `docs/`.
-
-This is a hyper space: project files live in `worktrees/main/`; `bin/`, `data/`, `notes/`, `scratch/` at the space root are local-only. Read `HYPER.md` at the space root for layout rules.
+Husk is a minimal, domain-agnostic TUI workbench in Go (bubbletea + lipgloss). It only provides **slots**, **hooks** and **events**; every plugin is an independent OS process speaking newline-delimited JSON over a Unix socket (`HUSK_SOCKET_PATH`) or stdio, in any language. The layout mirrors `bb`'s 9-slot model. Husk is the host for Dolphin (repo `hyperlab-sh/dolphin`, an agentic development environment TUI backed by Herdr) but must stay application-agnostic: nothing Herdr- or Dolphin-specific belongs in this repo. The docs site (docmd) is in `docs/`.
 
 ## Build & Test
 
 ```bash
-go build -o ../../bin/husk ./cmd/husk
+go build -o bin/husk ./cmd/husk
 go vet ./...
 
-../../bin/husk                              # run the workbench
-../../bin/husk --dump-frame                 # non-interactive frame dump
-../../bin/husk --dump-frame --rail modal    # also: full-canvas, stage; --hold-alt
+./bin/husk                              # run the workbench
+./bin/husk --dump-frame                 # non-interactive frame dump
+./bin/husk --dump-frame --rail modal    # also: full-canvas, stage; --hold-alt
 ```
 
-There are no Go tests yet. Use `--dump-frame` to check rendering changes. Manifests reference binaries as `./bin/<name>`, resolved against the space root's `bin/`.
+There are no Go tests yet. Use `--dump-frame` to check rendering changes. Manifests reference binaries as `./bin/<name>`.
 
 ## Layout
 
@@ -34,12 +32,12 @@ IPC messages: `hello`/`welcome`, `slot_update`, `slot_resize`, `slot_key`, `slot
 - Plugins must never assume a language; the JSON-lines protocol is the only contract. Changing it means updating `pkg/huskipc/protocol.go` and every plugin.
 - Use Charm's default palette (ANSI / lipgloss presets). Do not add custom hex themes.
 - Conventional commits with detailed messages. No attribution trailers.
-- Project status lives in `STATUS.md` at the space root (local-only, not in the repo); update it when state changes. `SUMMARY.md` is the design history; `README.md` is user-facing.
+- `SUMMARY.md` is the design history; `README.md` is user-facing.
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:1105d646 -->
 ## Beads Issue Tracker
 
-This project uses **bd (beads)** for issue tracking. The database is shared with Dolphin and lives at `/work/lab/.beads` (Husk issues use the `husk-` prefix, Dolphin issues `dolphin-`). Run `bd prime` to see full workflow context and commands.
+This project uses **bd (beads)** for issue tracking. The database is shared with Dolphin (Husk issues use the `husk-` prefix, Dolphin issues `dolphin-`). Run `bd prime` to see full workflow context and commands.
 
 ### Quick Reference
 

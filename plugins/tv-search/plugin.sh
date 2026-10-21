@@ -7,7 +7,7 @@ WIDTH=88
 HEIGHT=24
 CURSOR=0
 QUERY=""
-CURRENT_CWD="/work/lab/husk"
+CURRENT_CWD="."
 CURRENT_WS_LABEL="Dolphin"
 
 C_RESET=$'\033[0m'
@@ -255,16 +255,16 @@ while IFS= read -r line; do
   msg_type=$(printf '%s' "$line" | jq -r '.type // empty' 2>/dev/null || true)
   case "$msg_type" in
     welcome)
-      CURRENT_CWD=$(printf '%s' "$line" | jq -r '.welcome.context.cwd // "/work/lab/husk"')
+      CURRENT_CWD=$(printf '%s' "$line" | jq -r '.welcome.context.cwd // "."')
       ;;
     workspace_context)
-      CURRENT_CWD=$(printf '%s' "$line" | jq -r '.workspace_context.cwd // "/work/lab/husk"')
+      CURRENT_CWD=$(printf '%s' "$line" | jq -r '.workspace_context.cwd // "."')
       CURRENT_WS_LABEL=$(printf '%s' "$line" | jq -r '.workspace_context.workspace_label // "Dolphin"')
       ;;
     rail_activated)
       WIDTH=$(printf '%s' "$line" | jq -r '.rail_activated.width // 88')
       HEIGHT=$(printf '%s' "$line" | jq -r '.rail_activated.height // 24')
-      CURRENT_CWD=$(printf '%s' "$line" | jq -r '.rail_activated.context.cwd // "/work/lab/husk"')
+      CURRENT_CWD=$(printf '%s' "$line" | jq -r '.rail_activated.context.cwd // "."')
       QUERY=""
       CURSOR=0
       render_modal

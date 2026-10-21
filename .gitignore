@@ -9,3 +9,6 @@
 # docmd
 docs/node_modules/
 docs/site/
+
+# build output
+/bin/
