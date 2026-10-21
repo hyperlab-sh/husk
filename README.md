@@ -25,6 +25,7 @@ Frame dumps render without a terminal:
 ./bin/husk --dump-frame                     # default 3-column workbench
 ./bin/husk --dump-frame --hold-alt          # rail shows shortcuts instead of icons
 ./bin/husk --dump-frame --rail modal        # also: full-canvas, stage
+./bin/husk --demo-frame                     # one frame from a built-in demo plugin that declares border+label+close
 ```
 
 ## Concepts
@@ -38,6 +39,10 @@ The layout has nine slots (`activity-rail`, `sidebar-navigation`, `sidebar-list`
 | `stage` | `project-git` | `F4`, `ctrl+e` | Fills the canvas but keeps the sidebar |
 
 See [Architecture](docs/docs/architecture.md) for the protocol.
+
+### Surfaces and frames
+
+A **surface** is a slot's region on screen, and it is a blank canvas: Husk renders plugin content with no border, title or decoration of its own. A **frame** is the chrome a plugin asks for around its content — `border`, `label` (title) and `close` (close button), each independently on or off. Husk draws the frame; the plugin only declares what it wants in its `hello` (`frames`, keyed by slot) or on a rail item (`frame`). An absent declaration means no chrome at all. Clicking a declared close button closes a modal / full-canvas / stage surface exactly like `esc`.
 
 ## Plugin manifests
 
