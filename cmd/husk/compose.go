@@ -188,7 +188,8 @@ func (c *canvas) castShadow(popup uv.Rectangle, ink, canvas color.Color) {
 	}
 }
 
-// darken blends a cell's resolved foreground and background toward black.
+// darken blends a cell's resolved foreground and background (and underline
+// colour, when it has one) toward black.
 func darken(cell *uv.Cell, ink, canvas color.Color) {
 	fg, bg := cell.Style.Fg, cell.Style.Bg
 	if fg == nil {
@@ -199,6 +200,9 @@ func darken(cell *uv.Cell, ink, canvas color.Color) {
 	}
 	cell.Style.Fg = towardBlack(fg)
 	cell.Style.Bg = towardBlack(bg)
+	if cell.Style.UnderlineColor != nil {
+		cell.Style.UnderlineColor = towardBlack(cell.Style.UnderlineColor)
+	}
 }
 
 func towardBlack(c color.Color) color.Color {

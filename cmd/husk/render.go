@@ -47,7 +47,8 @@ func (m *WorkbenchModel) View() tea.View {
 	// Overlays are opaque blocks drawn over the base in z order: each replaces
 	// every cell of its box and nothing it leaves open reaches a cell it did
 	// not write.
-	// Each popup then casts a shadow (castShadow) that darkens what is under it.
+	// The modal and the palette then cast a shadow (castShadow) that darkens
+	// what is under them.
 	ink, canvasBg := lipgloss.Color(m.palette.Ink), lipgloss.Color(m.palette.Canvas)
 	if m.modalOwner().Open() {
 		m.drawModal(c)
@@ -55,7 +56,7 @@ func (m *WorkbenchModel) View() tea.View {
 		c.castShadow(uv.Rect(r.X, r.Y, r.Width, r.Height), ink, canvasBg)
 	}
 	if m.activeToast != nil {
-		c.castShadow(m.drawToast(c), ink, canvasBg)
+		m.drawToast(c) // a toast is not a popup: no shadow
 	}
 	if m.showPalette {
 		c.castShadow(m.drawCommandPalette(c), ink, canvasBg)
@@ -633,9 +634,9 @@ func (m *WorkbenchModel) drawHotspotArchitectureStage(c *canvas) {
 }
 
 // drawToast draws the active toast near the top-right corner.
-func (m *WorkbenchModel) drawToast(c *canvas) uv.Rectangle {
+func (m *WorkbenchModel) drawToast(c *canvas) {
 	if m.activeToast == nil {
-		return uv.Rectangle{}
+		return
 	}
 	borderCol := lipgloss.Color(m.palette.Info)
 	switch m.activeToast.Level {
@@ -658,7 +659,7 @@ func (m *WorkbenchModel) drawToast(c *canvas) uv.Rectangle {
 		Width(toastW).
 		Render(title + "\n" + msg)
 
-	return c.blitBlock(max(2, m.width-toastW-4), 2, box)
+	c.blitBlock(max(2, m.width-toastW-4), 2, box)
 }
 
 // drawCommandPalette draws the command palette box.

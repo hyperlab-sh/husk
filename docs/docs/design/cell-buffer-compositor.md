@@ -273,15 +273,16 @@ Where the code differs from the plan above:
 
 ## Popup shadow
 
-Overlays (modal, toast, command palette) are opaque, so on their own they read
-flat. After each overlay is drawn, `View` calls `canvas.castShadow` with the
-rectangle `blitBlock` returned (the modal uses its slot rect). The shadow is the
+Popups (the modal and the command palette) are opaque, so on their own they
+read flat. After each is drawn, `View` calls `canvas.castShadow` with its rect
+(`blitBlock`'s result for the palette, the slot rect for the modal). Toasts
+are not popups and cast none. The shadow is the
 popup rect shifted 2 columns right and 1 row down, minus the popup itself,
 clipped to the canvas (a popup against an edge just loses the part that falls
 off-screen; it is not flipped).
 
 - Cells under the shadow keep their glyph, width, link and attributes; only
-  `Fg` and `Bg` change, each blended 65% of the way to black
+  `Fg`, `Bg` and the underline colour change, each blended 65% of the way to black
   (`popupShadowStrength`). Black is the target on light themes as well, since
   a shadow darkens.
 - A cell with no foreground or background of its own (plugin cells that
