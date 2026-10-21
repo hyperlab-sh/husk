@@ -50,12 +50,12 @@ func (m *WorkbenchModel) registerPublications(hello huskipc.HelloPayload) (err e
 		}
 	}
 	for _, h := range hello.Hooks {
-		if err = declareNamed(m.registry.Hooks, id, h.ID); err != nil {
+		if err = declareNamedInfo(m.registry.Hooks, id, h.ID, h.Title, h.Description); err != nil {
 			return err
 		}
 	}
 	for _, e := range hello.Events {
-		if err = declareNamed(m.registry.Events, id, e.ID); err != nil {
+		if err = declareNamedInfo(m.registry.Events, id, e.ID, e.Title, e.Description); err != nil {
 			return err
 		}
 	}
@@ -90,7 +90,7 @@ func (m *WorkbenchModel) routePublication(plugin string, env huskipc.Envelope) b
 			err = fmt.Errorf("hook_declare payload required")
 			break
 		}
-		err = declareNamed(m.registry.Hooks, plugin, env.HookDeclare.ID)
+		err = declareNamedInfo(m.registry.Hooks, plugin, env.HookDeclare.ID, env.HookDeclare.Title, env.HookDeclare.Description)
 	case "hook_subscribe":
 		if env.HookSubscribe == nil {
 			err = fmt.Errorf("hook_subscribe payload required")
@@ -114,7 +114,7 @@ func (m *WorkbenchModel) routePublication(plugin string, env huskipc.Envelope) b
 			err = fmt.Errorf("event_declare payload required")
 			break
 		}
-		err = declareNamed(m.registry.Events, plugin, env.EventDeclare.ID)
+		err = declareNamedInfo(m.registry.Events, plugin, env.EventDeclare.ID, env.EventDeclare.Title, env.EventDeclare.Description)
 	case "event_subscribe":
 		if env.EventSubscribe == nil {
 			err = fmt.Errorf("event_subscribe payload required")

@@ -93,6 +93,11 @@ type toastExpireMsg struct {
 
 type modifierTickMsg struct{}
 
+// hookSweepMsg fires while hook calls are pending to expire overdue ones.
+type hookSweepMsg struct{}
+
+const hookSweepInterval = time.Second
+
 type WorkbenchModel struct {
 	socketPath  string
 	listener    net.Listener
@@ -126,13 +131,14 @@ type WorkbenchModel struct {
 	hoverDivider string
 	hoverRailIdx int
 
-	modifiers  huskipc.ModifierState
-	altLatched bool
-	blurred    bool      // terminal reported focus loss
-	modTickOn  bool      // a modifier tick is in flight
-	lastInput  time.Time // last key or mouse event, for tick cadence
-	pollMods   func() (huskipc.ModifierState, bool)
-	heldKeys   map[string]time.Time
+	modifiers   huskipc.ModifierState
+	altLatched  bool
+	blurred     bool      // terminal reported focus loss
+	modTickOn   bool      // a modifier tick is in flight
+	hookSweepOn bool      // a hook sweep tick is in flight
+	lastInput   time.Time // last key or mouse event, for tick cadence
+	pollMods    func() (huskipc.ModifierState, bool)
+	heldKeys    map[string]time.Time
 
 	activeRailID    string // "" (Home), or rail item ID
 	activePlacement huskipc.RailPlacement
@@ -233,6 +239,16 @@ const (
 	modifierTickIdle   = 150 * time.Millisecond
 	modifierActiveFor  = 2 * time.Second
 )
+
+// startHookSweep schedules the next expiry check only while calls are pending,
+// so an idle host runs no extra ticks.
+func (m *WorkbenchModel) startHookSweep() tea.Cmd {
+	if m.hookSweepOn || len(m.registry.Pending) == 0 {
+		return nil
+	}
+	m.hookSweepOn = true
+	return tea.Tick(hookSweepInterval, func(time.Time) tea.Msg { return hookSweepMsg{} })
+}
 
 func waitForModifierTick(d time.Duration) tea.Cmd {
 	return tea.Tick(d, func(time.Time) tea.Msg {
@@ -451,6 +467,11 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.blurred = false
 		return m, m.startModifierTick()
 
+	case hookSweepMsg:
+		m.hookSweepOn = false
+		m.deliverPublications(m.registry.expireHooks(m.registry.Clock.Now()))
+		return m, m.startHookSweep()
+
 	case modifierTickMsg:
 		if m.blurred {
 			m.modTickOn = false
@@ -486,7 +507,7 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.totalIPCEvents++
 		cp.FramesRecv++
 		if m.routePublication(msg.pluginID, msg.env) {
-			return m, waitForIPC(m.subChan)
+			return m, tea.Batch(waitForIPC(m.subChan), m.startHookSweep())
 		}
 		if msg.env.Type == "protocol_error" {
 			// The plugin rejected a host message. Log it and never answer
