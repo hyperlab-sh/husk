@@ -53,6 +53,10 @@ func (m *WorkbenchModel) View() tea.View {
 			cols = append(cols, centerCol)
 
 			if _, ok := m.slotRects[huskipc.SlotSidePanel]; ok {
+				// recomputeLayout narrowed the centre column by surfaceGutter;
+				// fill that gap so the side panel lands on its own rect.
+				blank := strings.Repeat(" ", surfaceGutter)
+				cols = append(cols, strings.Repeat(blank+"\n", lipgloss.Height(centerCol)-1)+blank)
 				rightCol := m.renderSurface(huskipc.SlotSidePanel, "⑦", "side-panel")
 				cols = append(cols, rightCol)
 			}

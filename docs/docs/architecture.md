@@ -67,6 +67,8 @@ Husk has nine fixed slots, modeled on `bb`, plus three placement surfaces (below
 
 Husk assigns no application meaning to a surface; the occupying plugin decides what it shows.
 
+When the side panel is shown, the host leaves one blank column between it and the main header and stage (the centre column is one cell narrower, and `slot_resize` reports that narrower size), so clipped centre text never touches the panel.
+
 Three placement surfaces sit on top of these: `modal-surface` (floating overlay), `full-canvas` (everything right of the rail) and `workspace-stage` (the canvas minus the sidebar).
 
 ## Surfaces and frames
