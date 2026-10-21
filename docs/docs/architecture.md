@@ -111,14 +111,14 @@ Every message is one JSON object on one line (at most 4 MiB, `huskipc.MaxLineByt
 
 ### Versioning
 
-`hello.protocol_version` and `welcome.protocol_version` carry the wire protocol version as `"MAJOR.MINOR"` (`huskipc.ProtocolVersion`, currently `1.0`). A minor release only adds optional fields and message types, which both sides ignore when they do not know them; a major release is a breaking change.
+`hello.protocol_version` and `welcome.protocol_version` carry the wire protocol version as `"MAJOR.MINOR"` (`huskipc.ProtocolVersion`, currently `1.1`). A minor release only adds optional fields and message types, which both sides ignore when they do not know them; a major release is a breaking change.
 
 ```json
 {"type":"hello","hello":{"protocol_version":"1.0","plugin_id":"example.plugin","slots":["main-stage"]}}
-{"type":"welcome","welcome":{"protocol_version":"1.0","host_version":"0.1.0","palette":{},"slot_sizes":{},"focused_slot":"main-stage","context":{},"modifiers":{}}}
+{"type":"welcome","welcome":{"protocol_version":"1.1","host_version":"0.1.0","palette":{},"slot_sizes":{},"focused_slot":"main-stage","context":{},"modifiers":{}}}
 ```
 
-The host accepts a `hello` whose major equals its own, whatever the minor. A `hello` with another major, or a version that is not `MAJOR` or `MAJOR.MINOR`, is rejected with `protocol_error` (`message_type` `hello`, for example `unsupported protocol_version "2.0": host speaks 1.0 (major 1)`) and the connection is closed. A `hello` without `protocol_version` comes from a plugin written before versioning and is treated as major 1. `welcome.host_version` is the host build's version and is informational only; decide compatibility from `protocol_version`. Go plugins can use `huskipc.CheckProtocolVersion`.
+The host accepts a `hello` whose major equals its own, whatever the minor. A `hello` with another major, or a version that is not `MAJOR` or `MAJOR.MINOR`, is rejected with `protocol_error` (`message_type` `hello`, for example `unsupported protocol_version "2.0": host speaks 1.1 (major 1)`) and the connection is closed. A `hello` without `protocol_version` comes from a plugin written before versioning and is treated as major 1. `welcome.host_version` is the host build's version and is informational only; decide compatibility from `protocol_version`. Go plugins can use `huskipc.CheckProtocolVersion`.
 
 `pkg/huskipc` imports only the Go standard library: `FrameSpec` and `Palette` are plain wire structs, and the host converts them to its own `pkg/frame` and `pkg/theme` types, so a Go plugin importing the wire package pulls in no rendering code.
 
@@ -142,7 +142,7 @@ A `protocol_error` sent by a plugin, reporting a host message it could not use, 
 
 Frame declarations ride on existing messages: `hello.frames` (per-slot) and the `frame` field on rail items. Both are optional and additive — an older plugin that omits them simply renders as a blank canvas.
 
-`welcome.palette` and `theme_changed.palette` carry generic colour roles only (`canvas`, `surface*`, `border*`, `ink*`, `accent*`, `success`, `warning`, `danger`, `info`). Values are `#RRGGBB` strings (CharmTone), where earlier hosts sent ANSI/256 indices such as `"63"`; the keys are unchanged, so a plugin that passes them to a terminal-colour API keeps working. A plugin that needs its own colour set, such as one colour per entity, defines it itself.
+`welcome.palette` and `theme_changed.palette` carry generic colour roles only (`canvas`, `surface*`, `border*`, `ink*`, `accent*`, `success`, `warning`, `danger`, `info`). Values are `#RRGGBB` strings (CharmTone), where hosts speaking protocol 1.0 sent ANSI/256 indices such as `"63"`. The JSON shape and keys are unchanged, but the value format is not: a plugin that interpolates a value into `\e[38;5;%sm` or parses it as an integer breaks, while one that passes it to a terminal-colour API keeps working. This is why the host reports protocol `1.1`; a plugin can read `welcome.protocol_version` and treat `1.0` as index values and `1.1` or later as hex. A plugin that needs its own colour set, such as one colour per entity, defines it itself.
 
 ## Input routing
 
