@@ -140,10 +140,10 @@ func builtinCommands() []paletteCommand {
 		{
 			CommandSpec: huskipc.CommandSpec{
 				ID:          "husk.home",
-				Title:       "Activity Rail (🏠 F1): Return to Default 3-Column Workbench",
+				Title:       "Activity Rail (🏠 F1): Return to Default Workbench Layout",
 				Category:    "Rail Plugins",
 				Shortcut:    "f1 / esc",
-				Description: "Restores Sidebar + Main Stage + Side Panel layout",
+				Description: "Restores the default layout: main stage plus any sidebar or side panel a plugin publishes",
 			},
 			PluginID: "husk.core",
 		},

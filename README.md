@@ -23,7 +23,7 @@ go build -o plugins/reference/reference ./plugins/reference   # the reference pl
 Frame dumps render without a terminal:
 
 ```bash
-./bin/husk --dump-frame                     # default 3-column workbench
+./bin/husk --dump-frame                     # default workbench
 ./bin/husk --dump-frame --hold-alt          # rail shows shortcuts instead of icons
 ./bin/husk --dump-frame --rail modal        # also: full-canvas, stage
 ./bin/husk --demo-frame                     # one frame from a built-in demo plugin that declares border+label+close
