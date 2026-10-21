@@ -381,3 +381,43 @@ func TestCheckHello(t *testing.T) {
 		t.Errorf("implicit plugin checked: %v", err)
 	}
 }
+
+func TestParseDeclarations(t *testing.T) {
+	path := writeManifest(t, t.TempDir(), `{
+  "id": "acme.p", "name": "n", "version": "1", "command": ["x"],
+  "slots": ["main-stage"],
+  "published_slots": [
+    {"id": "acme.p.rows", "title": "Rows", "description": "Row actions", "kind": "inline"},
+    {"id": "acme.p.bar", "kind": "region", "rect": {"surface": "main-stage", "x": 1, "y": 2, "width": 30, "height": 3}}
+  ],
+  "hooks": [{"id": "acme.p.before", "title": "Before", "description": "d"}],
+  "events": [{"id": "acme.p.changed"}]
+}`)
+	p, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.PublishedSlots) != 2 || p.PublishedSlots[0].Title != "Rows" || p.PublishedSlots[0].Kind != "inline" {
+		t.Fatalf("PublishedSlots = %+v", p.PublishedSlots)
+	}
+	r := p.PublishedSlots[1].Rect
+	if r == nil || r.Surface != "main-stage" || r.X != 1 || r.Y != 2 || r.Width != 30 || r.Height != 3 {
+		t.Fatalf("rect = %+v", r)
+	}
+	if len(p.Hooks) != 1 || p.Hooks[0].ID != "acme.p.before" || p.Hooks[0].Description != "d" {
+		t.Fatalf("Hooks = %+v", p.Hooks)
+	}
+	if len(p.Events) != 1 || p.Events[0].ID != "acme.p.changed" {
+		t.Fatalf("Events = %+v", p.Events)
+	}
+}
+
+func TestManifestWithoutDeclarationsStillLoads(t *testing.T) {
+	p, err := Load(writeManifest(t, t.TempDir(), validManifest))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.PublishedSlots != nil || p.Hooks != nil || p.Events != nil {
+		t.Fatalf("unexpected declarations: %+v %+v %+v", p.PublishedSlots, p.Hooks, p.Events)
+	}
+}
