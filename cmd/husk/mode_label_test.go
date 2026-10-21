@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"strings"
 	"testing"
 
@@ -52,11 +53,12 @@ func TestWorkbenchModeLabelTracksVisibleSideSurfaces(t *testing.T) {
 			m.showSidebar, m.showSidePane = false, false
 			m.recomputeLayout()
 		}, " Workbench "},
-		{"side panel does not fit", func(m *WorkbenchModel) {
+		{"side panel does not fit beside the sidebar", func(m *WorkbenchModel) {
+			goldenPlugin(m, "p.left", sidebar)
 			goldenPlugin(m, "p.right", panel)
 			m.width = 90
 			m.recomputeLayout()
-		}, " Workbench "},
+		}, " Workbench · Left "},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -99,4 +101,66 @@ func TestHomeCommandTitleHasNoColumnCount(t *testing.T) {
 		}
 	}
 	t.Fatal("husk.home command missing")
+}
+
+func sideRectCount(m *WorkbenchModel) int {
+	n := 0
+	for _, s := range []huskipc.SlotID{
+		huskipc.SlotSidebarNavigation, huskipc.SlotSidebarList, huskipc.SlotSidebarFooter, huskipc.SlotSidePanel,
+	} {
+		if _, ok := m.slotRects[s]; ok {
+			n++
+		}
+	}
+	return n
+}
+
+func TestZeroPluginsLayDownNoSideColumns(t *testing.T) {
+	m := goldenModel()
+	if n := sideRectCount(m); n != 0 {
+		t.Fatalf("zero plugins laid out %d side rects", n)
+	}
+	stage := m.slotRects[huskipc.SlotMainStage]
+	rail := m.slotRects[huskipc.SlotActivityRail]
+	if stage.X != rail.Width || stage.X+stage.Width != goldenW {
+		t.Errorf("stage spans x=%d..%d, want the whole width after the rail (%d..%d)",
+			stage.X, stage.X+stage.Width, rail.Width, goldenW)
+	}
+}
+
+func TestSideColumnAppearsAndGoesWithPlugin(t *testing.T) {
+	m := goldenModel()
+	emptyStageW := m.slotRects[huskipc.SlotMainStage].Width
+
+	cp := &ConnectedPlugin{
+		Info: huskipc.HelloPayload{
+			PluginID: "p.side", Name: "p.side", Version: "0.1.0", Language: "go",
+			Slots: []huskipc.SlotID{huskipc.SlotSidebarList, huskipc.SlotSidePanel},
+		},
+		Writer: huskipc.NewConnWriter(io.Discard),
+	}
+	m.Update(pluginRegisteredMsg{cp})
+	if _, ok := m.slotRects[huskipc.SlotSidebarList]; !ok {
+		t.Fatal("sidebar did not appear when a plugin occupied it")
+	}
+	if _, ok := m.slotRects[huskipc.SlotSidePanel]; !ok {
+		t.Fatal("side panel did not appear when a plugin occupied it")
+	}
+	if w := m.slotRects[huskipc.SlotMainStage].Width; w >= emptyStageW {
+		t.Errorf("stage did not yield space: %d >= %d", w, emptyStageW)
+	}
+	if got := topBarText(m); !strings.Contains(got, " Workbench · Left + Right ") {
+		t.Errorf("label after connect: %q", got)
+	}
+
+	m.Update(pluginDisconnectedMsg{plugin: cp})
+	if n := sideRectCount(m); n != 0 {
+		t.Errorf("%d side rects survived the plugin exit", n)
+	}
+	if w := m.slotRects[huskipc.SlotMainStage].Width; w != emptyStageW {
+		t.Errorf("stage width %d after exit, want %d", w, emptyStageW)
+	}
+	if got := topBarText(m); strings.Contains(got, "·") {
+		t.Errorf("label after exit still names a side: %q", got)
+	}
 }
