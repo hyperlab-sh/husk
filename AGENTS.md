@@ -1,6 +1,6 @@
 # Husk — Agent Instructions
 
-Husk is a minimal, domain-agnostic TUI workbench in Go (Bubble Tea v2 + Lip Gloss v2). It only provides **slots**, **hooks** and **events**; every plugin is an independent OS process speaking newline-delimited JSON over a Unix socket (`HUSK_SOCKET_PATH`) or stdio, in any language. The layout mirrors `bb`'s 9-slot model. Husk must stay application-agnostic: nothing application-specific belongs in this repo. The docs site (docmd) is in `docs/`.
+Husk is a minimal, domain-agnostic TUI workbench in Go (Bubble Tea v2 + Lip Gloss v2). It only provides **slots**, **hooks** and **events**; every plugin is an independent OS process speaking newline-delimited JSON over a Unix socket (`HUSK_SOCKET_PATH`, in a private `0700` directory, socket `0600`, peer uid checked) or stdio, in any language. The layout mirrors `bb`'s 9-slot model. Husk must stay application-agnostic: nothing application-specific belongs in this repo. The docs site (docmd) is in `docs/`.
 
 ## Build & Test
 

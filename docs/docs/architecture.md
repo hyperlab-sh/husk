@@ -11,6 +11,10 @@ The Go host uses Bubble Tea v2 (`charm.land/bubbletea/v2`) for its event loop an
 
 Husk is the host. Plugins are separate processes that Husk spawns and supervises. Husk and a plugin exchange newline-delimited JSON over a Unix socket or stdio. The protocol is the only contract between them, so a plugin can be written in any language.
 
+### Socket security
+
+The host socket is local-user only. Husk creates a fresh `0700` directory (`husk-*`) under `$XDG_RUNTIME_DIR`, or under a `mkdtemp` directory in the system temp dir when that variable is unset or unusable, and binds `husk.sock` inside it with mode `0600`. The path is exported to plugins as `HUSK_SOCKET_PATH`. On every accepted connection the host reads the peer uid from the kernel (`SO_PEERCRED` on Linux, `LOCAL_PEERCRED` on macOS) and closes the connection unless it equals the host uid; if the credentials cannot be read, the connection is refused. The socket and its directory are removed on shutdown. Platforms without a supported credential API refuse all socket connections; use stdio transport there.
+
 ## Slots
 
 Husk uses a nine-slot layout modeled on `bb`.
