@@ -14,7 +14,10 @@ import (
 // (both sides ignore what they do not know); a major bump is a breaking change.
 // The host rejects a hello whose major differs from its own with a
 // protocol_error and closes the connection.
-const ProtocolVersion = "1.0"
+//
+// 1.1: welcome.palette and theme_changed.palette values are "#RRGGBB" strings
+// instead of ANSI/256 indices; the keys are unchanged.
+const ProtocolVersion = "1.1"
 
 // ProtocolMajor is the major component of ProtocolVersion.
 const ProtocolMajor = 1
