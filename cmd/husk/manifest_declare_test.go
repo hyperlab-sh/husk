@@ -3,8 +3,11 @@ package main
 import (
 	"bytes"
 	"io"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hyperlab-sh/husk/pkg/huskipc"
 	"github.com/hyperlab-sh/husk/pkg/manifest"
@@ -208,5 +211,126 @@ func TestHelloRedeclaringManifestSlotViaSlotDeclareIsRejected(t *testing.T) {
 	// A later slot_declare for a manifest-declared id is a duplicate.
 	if err := m.registry.declareSlot("acme.p", huskipc.SlotDeclarePayload{ID: "acme.p.rows", Kind: "inline"}); err == nil || !strings.Contains(err.Error(), "already declared") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestPluginConnectingLateGetsContributionsMadeToItsManifestSlots(t *testing.T) {
+	m := newWorkbenchModel("", nil, t.TempDir())
+	mf := declaringManifest()
+	m.manifests[mf.ID] = mf
+	if err := m.registry.declareFromManifest(mf); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.registry.contribute("other.c", huskipc.SlotContributePayload{SlotID: "acme.p.rows", ID: "other.c.row", Content: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	// The hello omits published_slots: the manifest is the only declaration.
+	hello := `{"type":"hello","hello":{"plugin_id":"acme.p","slots":["main-stage"]}}` + "\n"
+	peer, _ := connectPipePlugin(t, m, hello)
+	defer peer.Close()
+	_ = peer.SetReadDeadline(time.Now().Add(3 * time.Second))
+	got := map[string][]huskipc.SlotContribution{}
+	var order []string
+	err := huskipc.ReadLoop(peer, func(e huskipc.Envelope) {
+		if e.Type == "slot_contributions" {
+			got[e.SlotContributions.SlotID] = e.SlotContributions.Contributions
+			order = append(order, e.SlotContributions.SlotID)
+		}
+		if len(order) == 2 {
+			_ = peer.Close()
+		}
+	})
+	_ = err
+	rows := got["acme.p.rows"]
+	if len(rows) != 1 || rows[0].ID != "other.c.row" || rows[0].PluginID != "other.c" {
+		t.Fatalf("rows contributions = %+v (order %v)", rows, order)
+	}
+	if want := []string{"acme.p.bar", "acme.p.rows"}; !reflect.DeepEqual(order, want) {
+		t.Fatalf("delivery order = %v, want %v", order, want)
+	}
+}
+
+func TestRejectedHelloKeepsManifestDeclarationsAndContributions(t *testing.T) {
+	m := newWorkbenchModel("", nil, t.TempDir())
+	var log bytes.Buffer
+	m.logOut = &log
+	mf := declaringManifest()
+	m.manifests[mf.ID] = mf
+	if err := m.registry.declareFromManifest(mf); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.registry.contribute("other.c", huskipc.SlotContributePayload{SlotID: "acme.p.rows", ID: "other.c.row", Content: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	// An impostor claiming acme.p with a conflicting and an extra declaration.
+	hello := `{"type":"hello","hello":{"plugin_id":"acme.p","slots":["main-stage"],` +
+		`"hooks":[{"id":"acme.p.extra"}],"published_slots":[{"id":"acme.p.rows","title":"Other","kind":"inline"}]}}` + "\n"
+	env, _, m := rejectedFrom(t, m, streamOrigin{}, hello, &log)
+	if env.Type != "protocol_error" {
+		t.Fatalf("got %+v", env)
+	}
+	rows := m.registry.Slots["acme.p.rows"]
+	if rows == nil || !rows.FromManifest || len(rows.Contributions) != 1 {
+		t.Fatalf("manifest slot lost on rollback: %+v", rows)
+	}
+	if m.registry.Slots["acme.p.bar"] == nil || m.registry.Hooks["acme.p.before"] == nil || m.registry.Events["acme.p.changed"] == nil {
+		t.Fatal("manifest declarations lost on rollback")
+	}
+	if m.registry.Hooks["acme.p.extra"] != nil {
+		t.Fatal("hello-only declaration survived rollback")
+	}
+	if m.registry.Occupants[huskipc.SlotMainStage] != "" {
+		t.Fatal("surface claim survived rollback")
+	}
+}
+
+func assertNoDeclarations(t *testing.T, m *WorkbenchModel) {
+	t.Helper()
+	if m.registry.Slots["acme.p.rows"] != nil || m.registry.Slots["acme.p.bar"] != nil || m.registry.Hooks["acme.p.before"] != nil || m.registry.Events["acme.p.changed"] != nil {
+		t.Fatal("declarations remain registered")
+	}
+}
+
+func TestLaunchPluginRollsBackDeclarationsWhenSpawnFails(t *testing.T) {
+	m := newWorkbenchModel("", nil, t.TempDir())
+	mf := declaringManifest()
+	mf.Command = []string{filepath.Join(t.TempDir(), "does-not-exist")}
+	if err := m.launchPlugin(mf); err == nil {
+		t.Fatal("spawn of a nonexistent command succeeded")
+	}
+	assertNoDeclarations(t, m)
+	if m.manifests["acme.p"] != nil || len(m.procs) != 0 {
+		t.Fatal("failed launch left a manifest or process behind")
+	}
+}
+
+func TestLaunchPluginRegistersDeclarationsBeforeHelloAndDropsThemOnEarlyExit(t *testing.T) {
+	t.Setenv("HUSK_FAKE_PLUGIN", "crash")
+	l, path, _, err := listenPrivate(shortTempDir(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, _ := lifecycleModel(t, path, l)
+	mf := declaringManifest()
+	mf.Command = fakeArgv
+	if err := m.launchPlugin(mf); err != nil {
+		t.Fatal(err)
+	}
+	if rows := m.registry.Slots["acme.p.rows"]; rows == nil || !rows.FromManifest {
+		t.Fatal("declarations not registered right after launch")
+	}
+	// A contributor reaches the slot while the plugin is still starting.
+	if _, err := m.registry.contribute("other.c", huskipc.SlotContributePayload{SlotID: "acme.p.rows", ID: "other.c.row"}); err != nil {
+		t.Fatal(err)
+	}
+	// The plugin dies without ever sending hello.
+	msg := awaitMsg[pluginExitedMsg](t, m)
+	m.Update(msg)
+	assertNoDeclarations(t, m)
+	if _, err := m.registry.contribute("other.c", huskipc.SlotContributePayload{SlotID: "acme.p.rows", ID: "other.c.row2"}); err == nil {
+		t.Fatal("contribution to the dead plugin's slot was accepted")
+	}
+	if m.manifests["acme.p"] == nil {
+		t.Fatal("manifest was dropped; a late hello would no longer be checked")
 	}
 }
