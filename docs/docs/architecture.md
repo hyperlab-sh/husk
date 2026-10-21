@@ -25,9 +25,9 @@ The host never writes to a plugin from its event loop. Each connection has a bou
 | One write takes longer than 5 seconds | `stopped reading: write timed out after 5s` |
 | A write fails | `write error: …` |
 | The plugin closes its end | `connection closed (EOF)` |
-| Reading fails, such as a line over 4 MB | `read error: …` |
+| Reading from the connection fails | `read error: …` |
 
-The host drops the connection rather than individual messages, so a plugin never sees a stream with holes in it. Every disconnect is logged as `husk: plugin <id> disconnected: <reason>` on stderr (held until exit while the TUI owns the terminal) and shown as a warning toast. Disconnecting removes the plugin's surfaces, rail items and publications as described under [Events and lifetime](#events-and-lifetime). A plugin whose `hello` is rejected receives its `protocol_error` before the connection is closed.
+The host drops the connection rather than individual messages, so a plugin never sees a stream with holes in it. Every disconnect is logged as `husk: plugin <id> disconnected: <reason>` on stderr (held until exit while the TUI owns the terminal) and shown as a warning toast. Disconnecting removes the plugin's surfaces, rail items and publications as described under [Events and lifetime](#events-and-lifetime). A plugin whose `hello` is rejected receives its `protocol_error` before the connection is closed. A connection that ends without a registered `hello` is logged too (`husk: connection closed before hello: <reason>`, or `connection from plugin "<id>" (not registered) closed: <reason>` after a rejected `hello`), so every end of a read loop leaves a reason. A bad input line does not disconnect; see [Errors](#errors).
 
 ## Slots
 
@@ -75,7 +75,7 @@ Plugin lines may carry ANSI SGR styling. Husk closes any style a line leaves ope
 
 ## Protocol
 
-Messages in `pkg/huskipc/protocol.go`:
+Every message is one JSON object on one line (at most 4 MiB, `huskipc.MaxLineBytes`, excluding the newline), with a `type` and the payload under the key of the same name. Messages in `pkg/huskipc/protocol.go`, published-slot, hook and event messages in `pkg/huskipc/published.go`:
 
 | Message | Direction | Purpose |
 | :--- | :--- | :--- |
@@ -86,6 +86,40 @@ Messages in `pkg/huskipc/protocol.go`:
 | `key_state` | host to plugin | Modifier state, such as Alt held. Sent on transitions only; on terminal blur the host sends `up` for every modifier and held key it had reported (a latched Alt stays) |
 | `workspace_context` | plugin to host, then broadcast | Selected workspace (`cwd`, label, repo) |
 | `command_invoke` | host to plugin | A palette command was chosen |
+| `toast` | plugin to host | Show a notification |
+| `close_modal` | plugin to host | Close the open modal |
+| `protocol_error` | either way | A message was rejected (see [Errors](#errors)) |
+
+### Versioning
+
+`hello.protocol_version` and `welcome.protocol_version` carry the wire protocol version as `"MAJOR.MINOR"` (`huskipc.ProtocolVersion`, currently `1.0`). A minor release only adds optional fields and message types, which both sides ignore when they do not know them; a major release is a breaking change.
+
+```json
+{"type":"hello","hello":{"protocol_version":"1.0","plugin_id":"example.plugin","slots":["main-stage"]}}
+{"type":"welcome","welcome":{"protocol_version":"1.0","host_version":"0.1.0","palette":{},"slot_sizes":{},"focused_slot":"main-stage","context":{},"modifiers":{}}}
+```
+
+The host accepts a `hello` whose major equals its own, whatever the minor. A `hello` with another major, or a version that is not `MAJOR` or `MAJOR.MINOR`, is rejected with `protocol_error` (`message_type` `hello`, for example `unsupported protocol_version "2.0": host speaks 1.0 (major 1)`) and the connection is closed. A `hello` without `protocol_version` comes from a plugin written before versioning and is treated as major 1. `welcome.host_version` is the host build's version and is informational only; decide compatibility from `protocol_version`. Go plugins can use `huskipc.CheckProtocolVersion`.
+
+`pkg/huskipc` imports only the Go standard library: `FrameSpec` and `Palette` are plain wire structs, and the host converts them to its own `pkg/frame` and `pkg/theme` types, so a Go plugin importing the wire package pulls in no rendering code.
+
+### Errors
+
+The host answers every message it cannot use with a `protocol_error` and keeps the connection open:
+
+| Input | `message_type` | `message` |
+| :--- | :--- | :--- |
+| Invalid JSON | `""` | `malformed message: <decoder error>` |
+| A field of the wrong JSON type, such as `"lines": "oops"` | the line's `type` | `malformed message: json: cannot unmarshal …` |
+| A line over 4 MiB | `""` | `line exceeds 4194304 bytes` |
+| No `type` | `""` | `message has no type` |
+| A `type` the host does not accept from plugins, including host-to-plugin types | the `type` | `unknown message type "<type>"` |
+| `slot_update`, `toast` or `workspace_context` without its payload | the `type` | `<type> payload required` |
+| An invalid published-slot, hook or event operation | the `type` | why it was refused |
+
+An oversized line is discarded up to its newline, so the messages after it still arrive. A rejected message has no effect, including any `close_modal` it carries. Each rejection is also logged on stderr as `husk: protocol error from plugin <id>: <message>` (or `from unregistered connection` before a `hello`).
+
+A `protocol_error` sent by a plugin, reporting a host message it could not use, is logged as `husk: plugin <id> rejected a "<type>" message: <message>` and never answered: a peer must not reply to a `protocol_error` with another one, or two strict peers would loop.
 
 Frame declarations ride on existing messages: `hello.frames` (per-slot) and the `frame` field on rail items. Both are optional and additive — an older plugin that omits them simply renders as a blank canvas.
 
