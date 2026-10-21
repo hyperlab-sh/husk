@@ -12,7 +12,7 @@ go test ./pkg/...
 ./bin/husk                              # run the workbench (no plugins by default)
 ./bin/husk --plugin-dir ./plugins       # load bundled plugins via manifests
 ./bin/husk --dump-frame                 # non-interactive frame dump
-./bin/husk --dump-frame --rail modal    # also: full-canvas, stage; --hold-alt
+./bin/husk --dump-frame --rail modal    # opens the first loaded rail item with that placement; also full-canvas, stage; --hold-alt
 ```
 
 Tests live in `pkg/manifest` (manifest parsing) and `pkg/frame` (frame geometry), plus `cmd/husk` host regression tests for frame resolution, sizing and rendering; run them all with `go test ./...`. Use `--dump-frame` to check rendering changes and `--demo-frame` (optionally with `--rail modal|full-canvas|stage`) to render the built-in demo plugin that declares a border+label+close frame. Surfaces are a blank canvas; all plugin-surface chrome (border/label/close) is declared by the plugin (`hello.frames` or rail-item `frame`) and drawn by `cmd/husk` `renderFrame`. Manifests reference binaries as `./bin/<name>`.
@@ -44,7 +44,7 @@ A plugin that stops reading is disconnected (queue of 1,024 messages, 5s write d
 
 ## Conventions
 
-- Husk core stays domain-agnostic: application-specific logic belongs in a plugin, not in `cmd/husk`.
+- Husk core stays domain-agnostic: application-specific logic belongs in a plugin, not in `cmd/husk`. The host hard-codes no plugin command or rail item ID, no application key, and no application colour; keys reach plugins through rail item `shortcut`s, `hello.keybindings` and focused-surface `slot_key` (see `docs/docs/architecture.md`, "Input routing"). `TestHostSourceHasNoApplicationIdentifiers` guards the source.
 - Plugins are launched only via `--plugin` (executable, plugin dir, or `husk-plugin.json`) or `--plugin-dir` (scans immediate subdirectories). There is no default plugin.
 - Plugins must never assume a language; the JSON-lines protocol is the only contract. Changing it means updating `pkg/huskipc/protocol.go` and every plugin.
 - Use Charm's default palette (ANSI / lipgloss presets). Do not add custom hex themes.

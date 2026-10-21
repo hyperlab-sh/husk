@@ -54,11 +54,13 @@ A plugin directory contains a `husk-plugin.json`:
 
 The rail on the left starts a plugin in one of three placements.
 
-| Placement | Example | Shortcut | Behavior |
-| :--- | :--- | :--- | :--- |
-| `modal` | — | `F2`, `ctrl+f` | Floating overlay |
-| `full-canvas` | — | `F3`, `ctrl+g` | Replaces the whole canvas right of the rail |
-| `stage` | `project-git` | `F4`, `ctrl+e` | Fills the canvas but keeps the sidebar visible |
+| Placement | Example | Behavior |
+| :--- | :--- | :--- |
+| `modal` | — | Floating overlay |
+| `full-canvas` | — | Replaces the whole canvas right of the rail |
+| `stage` | `project-git` (`F4`) | Fills the canvas but keeps the sidebar visible |
+
+Husk binds no keys to any plugin. Each rail item opens from a click on the rail or from the `shortcut` its plugin declares; pressing the shortcut again closes it.
 
 ## Keys
 
@@ -67,8 +69,9 @@ The rail on the left starts a plugin in one of three placements.
 | `ctrl+p`, `:` | Command palette |
 | `[`, `]`, `/` | Toggle sidebar, toggle inspector, cycle dock layouts |
 | `=` | Reset slot sizes |
-| `1`, `2`, `3` | Sidebar views: spaces and agents, topology tree, agent mission control |
+| `F1`, `alt+1` | Home workbench |
+| `tab` | Move focus between surfaces |
 | `Esc` | Dismiss a modal or leave full-canvas and stage modes |
 | `q`, `ctrl+c` | Quit and stop all plugin processes |
 
-Slot borders can be resized by dragging them with the mouse.
+Slot borders can be resized by dragging them with the mouse. Every other key goes to the plugin occupying the focused surface, unless a plugin declared a key binding for it.
