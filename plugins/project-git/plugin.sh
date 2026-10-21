@@ -36,7 +36,7 @@ send_hello() {
       slots: ["workspace-stage"],
       rail_items: [
         {
-          id: "rail.project-git",
+          id: "bash.project-git.stage",
           plugin_id: "bash.project-git",
           icon: "",
           label: "Lazygit Stage",
@@ -47,10 +47,10 @@ send_hello() {
       ],
       commands: [
         {
-          id: "gitstage.open",
+          id: "bash.project-git.stage",
           title: "Project Git (Bash Stage): Open Lazygit-Style Project View (Canvas minus Sidebar)",
           category: "Rail Plugins",
-          shortcut: "f4 / ctrl+e",
+          shortcut: "f4",
           description: "Uses the canvas area minus the sidebar, updating live when you switch spaces"
         }
       ]
