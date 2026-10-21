@@ -20,7 +20,10 @@ const (
 // surfaceGutter is the number of blank columns between the centre column
 // (main header and stage) and the side panel, so text clipped at the right
 // edge of the centre never touches the panel's first column. It is carved from
-// the centre; sidePaneW and drag maths are unchanged. The sidebar needs none:
+// the centre; sidePaneW is unchanged. The gutter is inert (it belongs to no
+// slot rect, so clicks and wheel events on it reach no surface) and the
+// sidepanel-width divider band spans the centre's right edge, the gutter and
+// the panel's left edge. The sidebar needs none:
 // its rects are the sidebar width exactly (the resize drag relies on that) and
 // its lines are short row labels.
 const surfaceGutter = 1

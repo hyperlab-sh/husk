@@ -137,3 +137,87 @@ func TestPaletteUnicodeFilterMatches(t *testing.T) {
 		t.Fatalf("unmatched unicode query matched %d commands, want 0", len(got))
 	}
 }
+
+// sidePanelModel lays out a 144x40 workbench with the side panel occupied and
+// the given border declarations for the centre column and the panel.
+func sidePanelModel(t *testing.T, centreBorder, panelBorder bool) *WorkbenchModel {
+	t.Helper()
+	m := sizedModel(t, 144, 40)
+	addTestPlugin(m, "p", map[huskipc.SlotID]frame.Spec{
+		huskipc.SlotMainHeader: {Border: centreBorder},
+		huskipc.SlotMainStage:  {Border: centreBorder},
+		huskipc.SlotSidePanel:  {Border: panelBorder},
+	})
+	for _, s := range []huskipc.SlotID{huskipc.SlotMainHeader, huskipc.SlotMainStage, huskipc.SlotSidePanel} {
+		m.registry.Occupants[s] = "p"
+	}
+	m.recomputeLayout()
+	if _, ok := m.slotRects[huskipc.SlotSidePanel]; !ok {
+		t.Fatal("side panel not laid out")
+	}
+	return m
+}
+
+func TestSidePanelDividerAcrossBorderCombinations(t *testing.T) {
+	for _, tc := range []struct {
+		name                  string
+		centreBorder, panelBd bool
+	}{
+		{"both bordered", true, true},
+		{"centre bordered, panel plain", true, false},
+		{"centre plain, panel bordered", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := sidePanelModel(t, tc.centreBorder, tc.panelBd)
+			side := m.slotRects[huskipc.SlotSidePanel]
+			stage := m.slotRects[huskipc.SlotMainStage]
+			y := stage.Y + 3
+			stageRight := stage.X + stage.Width - 1
+			if side.X-stageRight != surfaceGutter+1 {
+				t.Fatalf("stage right edge %d, panel left %d: gutter not %d", stageRight, side.X, surfaceGutter)
+			}
+			if tc.centreBorder {
+				if got := m.detectDividerAt(stageRight, y); got != "sidepanel-width" {
+					t.Fatalf("centre right border = %q, want sidepanel-width", got)
+				}
+				m.Update(tea.MouseClickMsg{X: stageRight, Y: y, Button: tea.MouseLeft})
+				if m.activeDrag != "sidepanel-width" {
+					t.Fatalf("click on centre border: activeDrag = %q", m.activeDrag)
+				}
+			}
+			if tc.panelBd {
+				if got := m.detectDividerAt(side.X, y); got != "sidepanel-width" {
+					t.Fatalf("panel left border = %q, want sidepanel-width", got)
+				}
+				m.activeDrag = ""
+				m.Update(tea.MouseClickMsg{X: side.X, Y: y, Button: tea.MouseLeft})
+				if m.activeDrag != "sidepanel-width" {
+					t.Fatalf("click on panel border: activeDrag = %q", m.activeDrag)
+				}
+			}
+		})
+	}
+}
+
+// The gutter belongs to no slot rect and is never a drawn border, so it is
+// inert: no divider, no drag, and no surface under it.
+func TestSidePanelGutterIsInert(t *testing.T) {
+	m := sidePanelModel(t, true, true)
+	side := m.slotRects[huskipc.SlotSidePanel]
+	gx := side.X - surfaceGutter
+	for y := 1; y < m.height-1; y += 7 {
+		for _, h := range m.hitOrder() {
+			r := h.Rect
+			if gx >= r.X && gx < r.X+r.Width && y >= r.Y && y < r.Y+r.Height && h.ID != huskipc.SlotActivityRail {
+				t.Fatalf("gutter (%d,%d) is inside slot %s", gx, y, h.ID)
+			}
+		}
+		if got := m.detectDividerAt(gx, y); got != "" {
+			t.Fatalf("gutter (%d,%d) = %q, want no divider", gx, y, got)
+		}
+		m.Update(tea.MouseClickMsg{X: gx, Y: y, Button: tea.MouseLeft})
+		if m.activeDrag != "" {
+			t.Fatalf("click on gutter started drag %q", m.activeDrag)
+		}
+	}
+}

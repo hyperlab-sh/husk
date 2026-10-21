@@ -382,8 +382,11 @@ func (m *WorkbenchModel) dividerBandAt(x, y int) string {
 		}
 	}
 	if sideRect, ok := m.slotRects[huskipc.SlotSidePanel]; ok {
+		// The centre column's right edge sits surfaceGutter cells before the
+		// gutter, so the band spans from that edge to the panel's own left
+		// edge; the blank gutter cell between them is inside it.
 		leftEdge := sideRect.X
-		if x == leftEdge-1 || x == leftEdge {
+		if x >= leftEdge-1-surfaceGutter && x <= leftEdge {
 			return "sidepanel-width"
 		}
 	}
