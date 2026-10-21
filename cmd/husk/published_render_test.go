@@ -140,7 +140,7 @@ func TestPublishedDemoFrame(t *testing.T) {
 	m := newWorkbenchModel("", nil, t.TempDir())
 	m.recomputeLayout()
 	m.seedPubslotsDemo()
-	frame := ansi.Strip(m.View())
+	frame := ansi.Strip(m.View().Content)
 	if strings.Count(frame, "[Inspect]") != 2 || !strings.Contains(frame, "Published region from B") || strings.Contains(frame, "husk;slot=") {
 		t.Fatalf("demo missing composed contributions:\n%s", frame)
 	}
