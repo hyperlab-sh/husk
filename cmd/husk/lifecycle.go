@@ -276,6 +276,13 @@ func (m *WorkbenchModel) handleLifecycleMsg(msg tea.Msg) tea.Cmd {
 			when = " before hello"
 		}
 		m.logf("plugin %s exited%s (%s); stderr log: %s", msg.id, when, msg.status, msg.logPath)
+		if m.plugins[msg.id] == nil {
+			// Exited without a registered connection (before hello, or
+			// never connected): drop the declarations its manifest
+			// registered at launch. The manifest itself stays, so a late
+			// hello is still checked against it.
+			m.deliverPublications(m.registry.removePlugin(msg.id))
+		}
 		for _, line := range msg.stderrTail {
 			m.logf("plugin %s stderr: %s", msg.id, line)
 		}

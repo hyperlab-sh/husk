@@ -340,8 +340,12 @@ manifest's, otherwise the `hello` is rejected with `protocol_error`
 `hello` may also declare extra slots, hooks and events the manifest does not
 list, and a `hello` that omits them keeps the manifest's. A later `slot_declare`,
 `hook_declare` or `event_declare` for a manifest-declared id is a duplicate. The
-declarations are removed when the plugin disconnects, like any other. The
-manifest fields are optional and additive; older manifests are unchanged.
+declarations are removed when the plugin disconnects, or when its process exits
+without ever having connected; a `hello` that is rejected keeps them, together
+with any contributions already made to them. Contributions made to a manifest
+slot before the plugin connects are sent to it as `slot_contributions` snapshots
+right after `welcome`, for every slot it owns whether or not its `hello` lists
+it. The manifest fields are optional and additive; older manifests are unchanged.
 
 On stream EOF, Husk removes the plugin's declarations,
 subscriptions, occupied surfaces and contributions, clears stale surface content,
