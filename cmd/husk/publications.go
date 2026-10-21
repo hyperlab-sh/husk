@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io"
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/hyperlab-sh/husk/pkg/huskipc"
@@ -169,30 +168,6 @@ func (m *WorkbenchModel) disconnectPublications(cp *ConnectedPlugin) {
 	// disconnected occupant never owned a rail item.
 	m.recomputeLayout()
 	m.broadcastSlotResize()
-}
-
-// These fake plugins use the same Hello, IPC routing and rendering paths as
-// external processes, without opening sockets or starting child processes.
-func (m *WorkbenchModel) seedPubslotsDemo() {
-	for _, hello := range []huskipc.HelloPayload{
-		{PluginID: "a", Name: "Row publisher", Slots: []huskipc.SlotID{huskipc.SlotMainStage}, PublishedSlots: []huskipc.SlotDeclarePayload{
-			{ID: "a.agent-line-action", Title: "Row actions", Kind: "inline"},
-			{ID: "a.summary", Title: "Summary region", Kind: "region", Rect: &huskipc.PublishedRect{Surface: huskipc.SlotMainStage, X: 0, Y: 5, Width: 28, Height: 3}},
-		}},
-		{PluginID: "b", Name: "Action contributor"},
-	} {
-		m.Update(pluginRegisteredMsg{&ConnectedPlugin{Info: hello, Writer: huskipc.NewConnWriter(io.Discard)}})
-	}
-	for _, contribution := range []huskipc.SlotContributePayload{
-		{SlotID: "a.agent-line-action", ID: "b.action", Content: "\x1b[32m[Inspect]\x1b[0m", OnClick: "b.inspect"},
-		{SlotID: "a.summary", ID: "b.summary", Content: "Published region from B\nClick Inspect on any row", OnClick: "b.inspect"},
-	} {
-		m.Update(ipcEventMsg{pluginID: "b", env: huskipc.Envelope{Type: "slot_contribute", SlotContribute: &contribution}})
-	}
-	m.Update(ipcEventMsg{pluginID: "a", env: huskipc.Envelope{Type: "slot_update", SlotUpdate: &huskipc.SlotUpdatePayload{
-		PluginID: "a", Slot: huskipc.SlotMainStage, Title: "Published slots demo",
-		Lines: []string{"Plugin A rows; Plugin B actions", "agent one  \x1b]husk;slot=a.agent-line-action;key=one\x1b\\", "agent two  \x1b]husk;slot=a.agent-line-action;key=two\x1b\\"},
-	}}})
 }
 
 // publishedContent composes regions even before the publisher's first frame.
