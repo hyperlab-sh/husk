@@ -58,9 +58,11 @@ func TestViewIsPure(t *testing.T) {
 			}
 			fresh.subChan = rendered.subChan // channel identity differs by construction
 			fresh.quit = rendered.quit
+			fresh.pluginCtx = rendered.pluginCtx // likewise per construction
 			// Func values are never DeepEqual; the modifier poller is injected
 			// state that View does not touch.
 			rendered.pollMods, fresh.pollMods = nil, nil
+			rendered.pluginCancel, fresh.pluginCancel = nil, nil
 			if !reflect.DeepEqual(rendered, fresh) {
 				t.Fatalf("View mutated the model:\nrendered %+v\nfresh    %+v", *rendered, *fresh)
 			}
