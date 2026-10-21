@@ -50,6 +50,40 @@ func legacyKeyString(msg tea.KeyMsg) string {
 	return name
 }
 
+// trackModifierKey folds a bare modifier key event into the modifier state and
+// reports whether the key was one. Terminals send these only when View asks
+// for all keys as escape codes (kitty protocol), which gives platforms without
+// an OS modifier poll real Shift/Ctrl/Alt/Super state. Modifier keys are
+// state, not input: they never reach slot_key, shortcuts or held_keys. Hyper,
+// Meta and ISO level shifts have no ModifierState field and are dropped.
+func (m *WorkbenchModel) trackModifierKey(k tea.Key, down bool) bool {
+	if k.Code < tea.KeyLeftShift || k.Code > tea.KeyIsoLevel5Shift {
+		return false
+	}
+	bit := uint16(1) << (k.Code - tea.KeyLeftShift)
+	if down {
+		m.termMods |= bit
+	} else {
+		m.termMods &^= bit
+	}
+	held := func(left, right rune) bool {
+		return m.termMods&(1<<(left-tea.KeyLeftShift)|1<<(right-tea.KeyLeftShift)) != 0
+	}
+	next := m.modifiers
+	switch k.Code {
+	case tea.KeyLeftShift, tea.KeyRightShift:
+		next.Shift = held(tea.KeyLeftShift, tea.KeyRightShift)
+	case tea.KeyLeftCtrl, tea.KeyRightCtrl:
+		next.Ctrl = held(tea.KeyLeftCtrl, tea.KeyRightCtrl)
+	case tea.KeyLeftAlt, tea.KeyRightAlt:
+		next.Alt = held(tea.KeyLeftAlt, tea.KeyRightAlt) || m.altLatched
+	case tea.KeyLeftSuper, tea.KeyRightSuper:
+		next.Super = held(tea.KeyLeftSuper, tea.KeyRightSuper)
+	}
+	m.syncModifierTransitions(next)
+	return true
+}
+
 func (m *WorkbenchModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := legacyKeyString(msg)
 

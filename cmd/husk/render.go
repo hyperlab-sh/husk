@@ -21,6 +21,7 @@ func (m *WorkbenchModel) View() tea.View {
 		view.ReportFocus = true
 		view.KeyboardEnhancements.ReportEventTypes = true
 		view.KeyboardEnhancements.ReportAlternateKeys = true
+		view.KeyboardEnhancements.ReportAllKeysAsEscapeCodes = true
 		return view
 	}
 	c := newCanvas(m.width, m.height)
@@ -63,6 +64,9 @@ func (m *WorkbenchModel) View() tea.View {
 	// Alternate keys make a shifted symbol's release carry the same shifted
 	// code as its press, so both normalise to the same held-key name.
 	view.KeyboardEnhancements.ReportAlternateKeys = true
+	// All keys as escape codes makes kitty-protocol terminals report bare
+	// modifier presses (trackModifierKey); text keys still decode with Text.
+	view.KeyboardEnhancements.ReportAllKeysAsEscapeCodes = true
 	return view
 }
 
