@@ -142,7 +142,7 @@ func TestPublishedRegionAndModalClicks(t *testing.T) {
 				m := newWorkbenchModel("", nil, t.TempDir())
 				m.width, m.height = 84, 24
 				_, a := addPublicationTestPlugin(m, huskipc.HelloPayload{
-					PluginID: "a", Slots: []huskipc.SlotID{surface}, Frames: map[huskipc.SlotID]frame.Spec{surface: tc.spec},
+					PluginID: "a", Slots: []huskipc.SlotID{surface}, Frames: map[huskipc.SlotID]huskipc.FrameSpec{surface: huskipc.FrameSpec(tc.spec)},
 					PublishedSlots: []huskipc.SlotDeclarePayload{
 						{ID: "a.region", Kind: "region", Rect: &huskipc.PublishedRect{Surface: surface, X: 2, Y: 1, Width: 6, Height: 1}},
 						{ID: "a.inline", Kind: "inline"},
@@ -213,7 +213,7 @@ func TestPublishedRegionAndModalClicks(t *testing.T) {
 
 func TestPublishedBorderlessFrameOccludesContribution(t *testing.T) {
 	m := newWorkbenchModel("", nil, t.TempDir())
-	_, _ = addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "a", Slots: []huskipc.SlotID{huskipc.SlotModalSurface}, Frames: map[huskipc.SlotID]frame.Spec{huskipc.SlotModalSurface: {Label: "Header", Close: true}}, PublishedSlots: []huskipc.SlotDeclarePayload{{ID: "a.inline", Kind: "inline"}}})
+	_, _ = addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "a", Slots: []huskipc.SlotID{huskipc.SlotModalSurface}, Frames: map[huskipc.SlotID]huskipc.FrameSpec{huskipc.SlotModalSurface: {Label: "Header", Close: true}}, PublishedSlots: []huskipc.SlotDeclarePayload{{ID: "a.inline", Kind: "inline"}}})
 	_, b := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "b"})
 	m.Update(ipcEventMsg{pluginID: "b", env: huskipc.Envelope{Type: "slot_contribute", SlotContribute: &huskipc.SlotContributePayload{SlotID: "a.inline", ID: "b.button", Content: strings.Repeat("X", 100), OnClick: "b.click"}}})
 	m.Update(ipcEventMsg{pluginID: "a", env: huskipc.Envelope{Type: "slot_update", SlotUpdate: &huskipc.SlotUpdatePayload{Slot: huskipc.SlotModalSurface, Title: "Panel", Lines: []string{anchor("a.inline", "one")}}}})

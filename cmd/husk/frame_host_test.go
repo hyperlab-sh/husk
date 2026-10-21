@@ -12,8 +12,15 @@ import (
 )
 
 func addTestPlugin(m *WorkbenchModel, id string, frames map[huskipc.SlotID]frame.Spec, items ...huskipc.RailItemSpec) {
+	var wire map[huskipc.SlotID]huskipc.FrameSpec
+	if frames != nil {
+		wire = make(map[huskipc.SlotID]huskipc.FrameSpec, len(frames))
+		for slot, s := range frames {
+			wire[slot] = huskipc.FrameSpec(s)
+		}
+	}
 	m.plugins[id] = &ConnectedPlugin{
-		Info:   huskipc.HelloPayload{PluginID: id, Frames: frames},
+		Info:   huskipc.HelloPayload{PluginID: id, Frames: wire},
 		Writer: huskipc.NewConnWriter(io.Discard),
 	}
 	for _, ri := range items {
@@ -23,7 +30,8 @@ func addTestPlugin(m *WorkbenchModel, id string, frames map[huskipc.SlotID]frame
 }
 
 func framedRailItem(id string, spec frame.Spec, placement huskipc.RailPlacement) huskipc.RailItemSpec {
-	return huskipc.RailItemSpec{ID: id, Icon: "i", Label: id, Placement: placement, Frame: &spec}
+	wire := huskipc.FrameSpec(spec)
+	return huskipc.RailItemSpec{ID: id, Icon: "i", Label: id, Placement: placement, Frame: &wire}
 }
 
 // A modal declaring a frame only through its rail item must get its chrome

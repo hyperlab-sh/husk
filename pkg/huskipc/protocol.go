@@ -1,13 +1,9 @@
 package huskipc
 
 import (
-	"bufio"
 	"encoding/json"
 	"io"
 	"sync"
-
-	"github.com/hyperlab-sh/husk/pkg/frame"
-	"github.com/hyperlab-sh/husk/pkg/theme"
 )
 
 type SlotID string
@@ -51,7 +47,43 @@ type RailItemSpec struct {
 
 	// Frame declares the chrome Husk draws around the surface opened by this
 	// rail item (border / label / close). Absent means a blank canvas.
-	Frame *frame.Spec `json:"frame,omitempty"`
+	Frame *FrameSpec `json:"frame,omitempty"`
+}
+
+// FrameSpec is the chrome a plugin asks Husk to draw around a surface it
+// occupies, sent per slot in hello.frames or on a rail item. Each element is
+// independent; an absent spec means a blank canvas. The host converts it to
+// its own geometry type, so this package stays free of rendering code.
+type FrameSpec struct {
+	Border bool   `json:"border"`
+	Label  string `json:"label,omitempty"`
+	Close  bool   `json:"close,omitempty"`
+}
+
+// Palette is the colour token set sent in welcome and theme_changed. Values are
+// ANSI (0-15) or xterm-256 (16-255) colour codes, or "#rrggbb". It carries only
+// generic roles; a plugin that needs application-specific colours defines its
+// own.
+type Palette struct {
+	Name            string `json:"name"`
+	Canvas          string `json:"canvas"`
+	Surface         string `json:"surface"`
+	SurfaceElevated string `json:"surface_elevated"`
+	SurfaceSelected string `json:"surface_selected"`
+	SurfaceHover    string `json:"surface_hover"`
+	Border          string `json:"border"`
+	BorderSubtle    string `json:"border_subtle"`
+	BorderFocused   string `json:"border_focused"`
+	Ink             string `json:"ink"`
+	InkMuted        string `json:"ink_muted"`
+	InkSubtle       string `json:"ink_subtle"`
+	Accent          string `json:"accent"`
+	AccentSecondary string `json:"accent_secondary"`
+	AccentSoft      string `json:"accent_soft"`
+	Success         string `json:"success"`
+	Warning         string `json:"warning"`
+	Danger          string `json:"danger"`
+	Info            string `json:"info"`
 }
 
 // SlotMeta describes one of the nine fixed host surfaces. Titles and
@@ -205,23 +237,26 @@ type Envelope struct {
 }
 
 type HelloPayload struct {
-	PluginID       string                `json:"plugin_id"`
-	Name           string                `json:"name"`
-	Version        string                `json:"version"`
-	Language       string                `json:"language"`
-	PID            int                   `json:"pid"`
-	Description    string                `json:"description"`
-	Slots          []SlotID              `json:"slots"`
-	RailItems      []RailItemSpec        `json:"rail_items,omitempty"`
-	Commands       []CommandSpec         `json:"commands,omitempty"`
-	Keybindings    []KeybindSpec         `json:"keybindings,omitempty"`
-	PublishedSlots []SlotDeclarePayload  `json:"published_slots,omitempty"`
-	Hooks          []HookDeclarePayload  `json:"hooks,omitempty"`
-	Events         []EventDeclarePayload `json:"events,omitempty"`
+	// ProtocolVersion is the wire protocol version ("MAJOR.MINOR") the plugin
+	// was written against. Absent means a pre-versioning plugin (major 1).
+	ProtocolVersion string                `json:"protocol_version,omitempty"`
+	PluginID        string                `json:"plugin_id"`
+	Name            string                `json:"name"`
+	Version         string                `json:"version"`
+	Language        string                `json:"language"`
+	PID             int                   `json:"pid"`
+	Description     string                `json:"description"`
+	Slots           []SlotID              `json:"slots"`
+	RailItems       []RailItemSpec        `json:"rail_items,omitempty"`
+	Commands        []CommandSpec         `json:"commands,omitempty"`
+	Keybindings     []KeybindSpec         `json:"keybindings,omitempty"`
+	PublishedSlots  []SlotDeclarePayload  `json:"published_slots,omitempty"`
+	Hooks           []HookDeclarePayload  `json:"hooks,omitempty"`
+	Events          []EventDeclarePayload `json:"events,omitempty"`
 
 	// Frames declares per-slot chrome (border / label / close) keyed by slot
 	// ID. Absent entry (or absent map) means the surface is a blank canvas.
-	Frames map[SlotID]frame.Spec `json:"frames,omitempty"`
+	Frames map[SlotID]FrameSpec `json:"frames,omitempty"`
 }
 
 type ModifierState struct {
@@ -241,8 +276,12 @@ type KeyStatePayload struct {
 }
 
 type WelcomePayload struct {
+	// ProtocolVersion is the host's wire protocol version (ProtocolVersion).
+	ProtocolVersion string `json:"protocol_version,omitempty"`
+	// HostVersion is the host build's version, informational only; use
+	// ProtocolVersion for compatibility decisions.
 	HostVersion string                  `json:"host_version"`
-	Palette     theme.Palette           `json:"palette"`
+	Palette     Palette                 `json:"palette"`
 	SlotSizes   map[SlotID]SlotSize     `json:"slot_sizes"`
 	FocusedSlot SlotID                  `json:"focused_slot"`
 	Context     WorkspaceContextPayload `json:"context"`
@@ -288,7 +327,7 @@ type CommandInvokePayload struct {
 }
 
 type ThemeChangedPayload struct {
-	Palette theme.Palette `json:"palette"`
+	Palette Palette `json:"palette"`
 }
 
 type EventPayload struct {
@@ -333,22 +372,4 @@ func (w *ConnWriter) Send(env Envelope) error {
 	defer w.mu.Unlock()
 	_, err = w.w.Write(data)
 	return err
-}
-
-func ReadLoop(r io.Reader, onMessage func(Envelope)) error {
-	scanner := bufio.NewScanner(r)
-	buf := make([]byte, 0, 256*1024)
-	scanner.Buffer(buf, 4*1024*1024)
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-		var env Envelope
-		if err := json.Unmarshal(line, &env); err != nil {
-			continue
-		}
-		onMessage(env)
-	}
-	return scanner.Err()
 }

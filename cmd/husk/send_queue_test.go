@@ -2,11 +2,13 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -168,20 +170,25 @@ func TestSendQueueOverflowDisconnects(t *testing.T) {
 }
 
 func TestDisconnectReasonEOFAndReadError(t *testing.T) {
+	// An oversized line no longer ends the stream (it is answered with a
+	// protocol_error, see TestOversizedLineAnsweredAndSkipped), so the read
+	// error case uses a reader that fails after the hello.
 	cases := []struct {
 		name   string
-		stream string
+		stream func() io.Reader
 		reason string
 	}{
-		{"eof", slowHello, "connection closed (EOF)"},
-		{"oversized line", slowHello + strings.Repeat("x", 5*1024*1024) + "\n", "read error: bufio.Scanner: token too long"},
+		{"eof", func() io.Reader { return strings.NewReader(slowHello) }, "connection closed (EOF)"},
+		{"read error", func() io.Reader {
+			return io.MultiReader(strings.NewReader(slowHello), iotest.ErrReader(errors.New("connection reset")))
+		}, "read error: connection reset"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			m := newWorkbenchModel("", nil, t.TempDir())
 			var log bytes.Buffer
 			m.logOut = &log
-			m.handleStream(strings.NewReader(tc.stream), io.Discard, io.NopCloser(nil))
+			m.handleStream(tc.stream(), io.Discard, io.NopCloser(nil))
 			if len(m.subChan) != 2 {
 				t.Fatalf("queued %d messages, want register + disconnect", len(m.subChan))
 			}

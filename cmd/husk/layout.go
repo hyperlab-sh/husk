@@ -153,7 +153,7 @@ func (m *WorkbenchModel) frameRect(slotID huskipc.SlotID, x, y, w, h int) SlotRe
 func (m *WorkbenchModel) frameFor(slotID huskipc.SlotID) frame.Spec {
 	if m.demoFrame {
 		if s, ok := demoFrameSpecs[slotID]; ok {
-			return s
+			return frame.Spec(s)
 		}
 	}
 	owner := ""
@@ -176,13 +176,13 @@ func (m *WorkbenchModel) frameFor(slotID huskipc.SlotID) frame.Spec {
 	if owner != "" {
 		if cp, ok := m.plugins[owner]; ok {
 			if s, ok := cp.Info.Frames[slotID]; ok {
-				return s
+				return frame.Spec(s)
 			}
 		}
 	}
 	if railID != "" {
 		if ri, ok := m.railItemByID(railID); ok && ri.Frame != nil {
-			return *ri.Frame
+			return frame.Spec(*ri.Frame)
 		}
 	}
 	return frame.Spec{}

@@ -45,6 +45,49 @@ type pluginRegisteredMsg struct {
 	plugin *ConnectedPlugin
 }
 
+// lineRejectedMsg reports an input line the read loop rejected (malformed or
+// oversized). The protocol_error has already been sent; Update logs it.
+// plugin is nil when the line arrived before a hello.
+type lineRejectedMsg struct {
+	plugin *ConnectedPlugin
+	err    *huskipc.LineError
+}
+
+// connectionClosedMsg reports the end of a connection that never registered
+// (it closed or failed before a hello), so its reason is still logged.
+type connectionClosedMsg struct {
+	reason error
+}
+
+// checkPluginMessage validates a plugin-to-host message that is not a
+// published-slot, hook or event operation (those are checked by
+// routePublication). Every other type, including host-to-plugin types sent
+// the wrong way, is unknown.
+func checkPluginMessage(env huskipc.Envelope) error {
+	missing := false
+	switch env.Type {
+	case "close_modal":
+	case "slot_update":
+		missing = env.SlotUpdate == nil
+	case "workspace_context":
+		missing = env.WorkspaceContext == nil
+	case "toast":
+		missing = env.Toast == nil
+	case "":
+		return fmt.Errorf("message has no type")
+	default:
+		return fmt.Errorf("unknown message type %q", env.Type)
+	}
+	if missing {
+		return fmt.Errorf("%s payload required", env.Type)
+	}
+	return nil
+}
+
+// hostVersion is the host build's version, sent as welcome.host_version. It is
+// informational; compatibility is decided by huskipc.ProtocolVersion.
+var hostVersion = "0.1.0"
+
 type toastExpireMsg struct {
 	id int
 }
@@ -318,7 +361,9 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case pluginDisconnectedMsg:
 		if m.plugins[msg.plugin.Info.PluginID] != msg.plugin {
-			// Rejected at hello, or a stale connection already replaced.
+			// Rejected at hello, or a stale connection already replaced:
+			// nothing to tear down, but the reason is still logged.
+			m.logf("connection from plugin %q (not registered) closed: %s", msg.plugin.Info.PluginID, disconnectReason(msg.reason))
 			return m, waitForIPC(m.subChan)
 		}
 		reason := disconnectReason(msg.reason)
@@ -329,9 +374,25 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showLocalToast("warn", "Plugin disconnected", msg.plugin.Info.PluginID+": "+reason),
 		)
 
+	case connectionClosedMsg:
+		m.logf("connection closed before hello: %s", disconnectReason(msg.reason))
+		return m, waitForIPC(m.subChan)
+
+	case lineRejectedMsg:
+		who := "unregistered connection"
+		if msg.plugin != nil {
+			who = "plugin " + msg.plugin.Info.PluginID
+		}
+		m.logf("protocol error from %s: %s", who, msg.err.Payload().Message)
+		return m, waitForIPC(m.subChan)
+
 	case pluginRegisteredMsg:
 		cp := msg.plugin
-		if err := m.registerPublications(cp.Info); err != nil {
+		err := huskipc.CheckProtocolVersion(cp.Info.ProtocolVersion)
+		if err == nil {
+			err = m.registerPublications(cp.Info)
+		}
+		if err != nil {
 			m.rejectPublication(cp, "hello", err)
 			m.logf("rejected hello from plugin %q: %v", cp.Info.PluginID, err)
 			// Flush the protocol_error before closing.
@@ -361,12 +422,13 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		_ = cp.Writer.Send(huskipc.Envelope{
 			Type: "welcome",
 			Welcome: &huskipc.WelcomePayload{
-				HostVersion: "0.1.0",
-				Palette:     m.palette,
-				SlotSizes:   m.currentSlotSizes(),
-				FocusedSlot: m.focusedSlot,
-				Context:     m.wsContext,
-				Modifiers:   m.modifiers,
+				ProtocolVersion: huskipc.ProtocolVersion,
+				HostVersion:     hostVersion,
+				Palette:         huskipc.Palette(m.palette),
+				SlotSizes:       m.currentSlotSizes(),
+				FocusedSlot:     m.focusedSlot,
+				Context:         m.wsContext,
+				Modifiers:       m.modifiers,
 			},
 		})
 		for _, slot := range cp.Info.PublishedSlots {
@@ -417,6 +479,21 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.totalIPCEvents++
 		cp.FramesRecv++
 		if m.routePublication(msg.pluginID, msg.env) {
+			return m, waitForIPC(m.subChan)
+		}
+		if msg.env.Type == "protocol_error" {
+			// The plugin rejected a host message. Log it and never answer
+			// with another protocol_error: two strict peers would loop.
+			if pe := msg.env.ProtocolError; pe != nil {
+				m.logf("plugin %s rejected a %q message: %s", msg.pluginID, pe.MessageType, pe.Message)
+			} else {
+				m.logf("plugin %s sent a protocol_error without a payload", msg.pluginID)
+			}
+			return m, waitForIPC(m.subChan)
+		}
+		if err := checkPluginMessage(msg.env); err != nil {
+			m.rejectPublication(cp, msg.env.Type, err)
+			m.logf("protocol error from plugin %s: %v", msg.pluginID, err)
 			return m, waitForIPC(m.subChan)
 		}
 		if msg.env.CloseModal {

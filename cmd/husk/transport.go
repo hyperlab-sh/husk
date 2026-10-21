@@ -43,6 +43,8 @@ func (m *WorkbenchModel) handleStream(r io.Reader, w io.Writer, closer io.Closer
 		once.Do(func() {
 			if cp := registered.Load(); cp != nil {
 				m.subChan <- pluginDisconnectedMsg{plugin: cp, reason: reason}
+			} else {
+				m.subChan <- connectionClosedMsg{reason: reason}
 			}
 		})
 	}
@@ -53,7 +55,13 @@ func (m *WorkbenchModel) handleStream(r io.Reader, w io.Writer, closer io.Closer
 		OnFail:       disconnect,
 	})
 
-	readErr := huskipc.ReadLoop(r, func(env huskipc.Envelope) {
+	// A malformed or oversized line is answered with a protocol_error and
+	// skipped; the connection stays open. Send is safe from this goroutine.
+	onLineError := func(lerr *huskipc.LineError) {
+		_ = writer.Send(huskipc.Envelope{Type: "protocol_error", ProtocolError: lerr.Payload()})
+		m.subChan <- lineRejectedMsg{plugin: registered.Load(), err: lerr}
+	}
+	readErr := huskipc.ReadLoopReporting(r, func(env huskipc.Envelope) {
 		cp := registered.Load()
 		if env.Type == "hello" && env.Hello != nil && cp == nil {
 			cp = &ConnectedPlugin{
@@ -69,7 +77,7 @@ func (m *WorkbenchModel) handleStream(r io.Reader, w io.Writer, closer io.Closer
 		if cp != nil && env.Type != "hello" {
 			m.subChan <- ipcEventMsg{pluginID: cp.Info.PluginID, env: env, connection: cp}
 		}
-	})
+	}, onLineError)
 	// A writer failure closes the connection, which ends the read loop with
 	// a "closed" error; report the writer's reason instead.
 	reason := writer.Err()

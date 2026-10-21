@@ -5,13 +5,12 @@ import (
 	"os"
 	"time"
 
-	"github.com/hyperlab-sh/husk/pkg/frame"
 	"github.com/hyperlab-sh/husk/pkg/huskipc"
 )
 
 // demoFrameSpecs is the frame declaration used by --demo-frame: a built-in
 // demo plugin asking for border + label + close on every renderable surface.
-var demoFrameSpecs = map[huskipc.SlotID]frame.Spec{
+var demoFrameSpecs = map[huskipc.SlotID]huskipc.FrameSpec{
 	huskipc.SlotMainStage:      {Border: true, Label: "Demo Frame", Close: true},
 	huskipc.SlotModalSurface:   {Border: true, Label: "Demo Frame", Close: true},
 	huskipc.SlotFullCanvas:     {Border: true, Label: "Demo Frame", Close: true},
