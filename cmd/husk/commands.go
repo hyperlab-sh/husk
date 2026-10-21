@@ -1,6 +1,7 @@
 package main
 
 import (
+	"image"
 	"sort"
 	"strconv"
 	"strings"
@@ -84,7 +85,7 @@ func (m *WorkbenchModel) detectRailHoverAt(x, y int) int {
 	if !ok {
 		return -1
 	}
-	if x < railRect.X || x >= railRect.X+railRect.Width || y < railRect.Y || y >= railRect.Y+railRect.Height {
+	if !image.Pt(x, y).In(railRect.Rect()) {
 		return -1
 	}
 	relY := y - railRect.Y
