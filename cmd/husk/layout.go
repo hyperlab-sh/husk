@@ -70,6 +70,19 @@ func (m *WorkbenchModel) renderTooSmall() string {
 	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, msg)
 }
 
+// A side column exists only when its dock is on and a plugin occupies one of
+// its slots: with no plugin there is nothing to show, so the stage gets the
+// space. recomputeLayout and the top bar label both read these.
+func (m *WorkbenchModel) leftSideShown() bool {
+	return m.showSidebar && (m.surfaceOwner(huskipc.SlotSidebarNavigation) != "" ||
+		m.surfaceOwner(huskipc.SlotSidebarList) != "" ||
+		m.surfaceOwner(huskipc.SlotSidebarFooter) != "")
+}
+
+func (m *WorkbenchModel) rightSideShown() bool {
+	return m.showSidePane && m.surfaceOwner(huskipc.SlotSidePanel) != ""
+}
+
 func (m *WorkbenchModel) recomputeLayout() {
 	if m.layoutFrozen() {
 		return
@@ -94,7 +107,7 @@ func (m *WorkbenchModel) recomputeLayout() {
 	}
 
 	leftW := 0
-	if m.showSidebar {
+	if m.leftSideShown() {
 		leftW = min(m.sidebarWidth, remW/2)
 		navH := max(3, m.sidebarNavH)
 		footH := max(3, m.sidebarFootH)
@@ -116,7 +129,7 @@ func (m *WorkbenchModel) recomputeLayout() {
 	}
 
 	rightW := 0
-	if m.showSidePane && remW-leftW >= 72 {
+	if m.rightSideShown() && remW-leftW >= 72 {
 		rightW = min(m.sidePaneW, (remW-leftW)/2)
 	}
 	centerW := max(30, remW-leftW-rightW)

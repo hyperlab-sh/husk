@@ -197,23 +197,12 @@ func (m *WorkbenchModel) drawModal(c *canvas) {
 	m.fillSlotBg(c, rect)
 }
 
-// sideSurfaceVisible reports whether any of the slots is laid out (its dock is
-// shown and it fits) and occupied by a plugin. An unoccupied slot is a blank
-// canvas, so it does not count as a visible surface.
-func (m *WorkbenchModel) sideSurfaceVisible(slots ...huskipc.SlotID) bool {
-	for _, s := range slots {
-		if _, laid := m.slotRects[s]; laid && m.surfaceOwner(s) != "" {
-			return true
-		}
-	}
-	return false
-}
-
-// defaultLayoutLabel names the default placement by the side surfaces that
-// are actually visible, not by the layout's nominal column count.
+// defaultLayoutLabel names the default placement by the side columns that are
+// actually laid out (see leftSideShown/rightSideShown: dock on, plugin
+// occupied, and it fits), not by a nominal column count.
 func (m *WorkbenchModel) defaultLayoutLabel() string {
-	left := m.sideSurfaceVisible(huskipc.SlotSidebarNavigation, huskipc.SlotSidebarList, huskipc.SlotSidebarFooter)
-	right := m.sideSurfaceVisible(huskipc.SlotSidePanel)
+	_, left := m.slotRects[huskipc.SlotSidebarList]
+	_, right := m.slotRects[huskipc.SlotSidePanel]
 	switch {
 	case left && right:
 		return " Workbench · Left + Right "
