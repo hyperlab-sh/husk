@@ -32,6 +32,30 @@ func TestRailShortcutLabel(t *testing.T) {
 	}
 }
 
+// A disconnected plugin's rail items leave the rail buttons and the top-bar
+// hint, and its shortcut stops matching.
+func TestDisconnectPrunesRailItems(t *testing.T) {
+	m := newWorkbenchModel("", nil, t.TempDir())
+	cp, _ := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "gone",
+		RailItems: []huskipc.RailItemSpec{{ID: "gone.open", Label: "Gone", Shortcut: "f7", Placement: huskipc.PlacementModal}}})
+	m.width = 200
+	if !strings.Contains(ansi.Strip(m.renderTopWorkbenchBar()), "F7 Gone") {
+		t.Fatal("rail hint missing before disconnect")
+	}
+	m.Update(pluginDisconnectedMsg{plugin: cp})
+	for _, b := range m.railButtons() {
+		if b.item.PluginID == "gone" {
+			t.Fatalf("rail button survived disconnect: %+v", b)
+		}
+	}
+	if strings.Contains(ansi.Strip(m.renderTopWorkbenchBar()), "Gone") {
+		t.Fatal("rail hint survived disconnect")
+	}
+	if _, ok := m.railShortcutItem("f7"); ok {
+		t.Fatal("shortcut of a disconnected plugin still matches")
+	}
+}
+
 // Many declared rail shortcuts must not push the theme pill off the top bar:
 // trailing hint entries are dropped and marked with an ellipsis.
 func TestTopBarRailHintFitsWidth(t *testing.T) {
