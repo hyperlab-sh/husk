@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/hyperlab-sh/husk/pkg/frame"
 	"github.com/hyperlab-sh/husk/pkg/huskipc"
 )
 
@@ -105,16 +106,27 @@ func dividerPoint(t *testing.T, m *WorkbenchModel) (int, int) {
 	return x, y
 }
 
+// borderedSidebarModel is a sized model whose sidebar list is occupied by a
+// plugin that declared a border, so its right edge is a real divider.
+func borderedSidebarModel(t *testing.T, w, h int) *WorkbenchModel {
+	t.Helper()
+	m := sizedModel(t, w, h)
+	addTestPlugin(m, "p", map[huskipc.SlotID]frame.Spec{huskipc.SlotSidebarList: {Border: true}})
+	m.registry.Occupants[huskipc.SlotSidebarList] = "p"
+	m.recomputeLayout()
+	return m
+}
+
 func TestTooSmallIgnoresMouse(t *testing.T) {
 	// Control: at a valid size a press on the divider starts a drag.
-	ok := sizedModel(t, 120, 40)
+	ok := borderedSidebarModel(t, 120, 40)
 	x, y := dividerPoint(t, ok)
 	ok.Update(tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
 	if ok.activeDrag == "" {
 		t.Fatal("control: divider press did not start a drag")
 	}
 
-	m := sizedModel(t, 120, 40)
+	m := borderedSidebarModel(t, 120, 40)
 	m.Update(tea.WindowSizeMsg{Width: 40, Height: 10})
 	m.Update(tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
 	if m.activeDrag != "" {

@@ -3,6 +3,7 @@ package main
 import (
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -101,12 +102,13 @@ func (m *WorkbenchModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "backspace":
 			if len(m.paletteQuery) > 0 {
-				m.paletteQuery = m.paletteQuery[:len(m.paletteQuery)-1]
+				_, size := utf8.DecodeLastRuneInString(m.paletteQuery)
+				m.paletteQuery = m.paletteQuery[:len(m.paletteQuery)-size]
 				m.paletteCursor = 0
 			}
 			return m, nil
 		default:
-			if len(key) == 1 && key >= " " && key <= "~" {
+			if isPaletteText(key) {
 				m.paletteQuery += key
 				m.paletteCursor = 0
 			}
@@ -266,7 +268,58 @@ func (m *WorkbenchModel) keyOwner(slot huskipc.SlotID) string {
 	return ""
 }
 
+// isPaletteText reports whether a legacy key spelling is typed text for the
+// palette query: one printable rune of any script, or a multi-rune composed
+// string containing non-ASCII text (IME output, emoji sequences). Named keys
+// and chords ("up", "f5", "alt+x", "ctrl+a") are ASCII and longer than one
+// rune, so they never match.
+func isPaletteText(key string) bool {
+	if key == "" {
+		return false
+	}
+	runes, nonASCII := 0, false
+	for _, r := range key {
+		if r != ' ' && !unicode.IsPrint(r) {
+			return false
+		}
+		if r > unicode.MaxASCII {
+			nonASCII = true
+		}
+		runes++
+	}
+	return runes == 1 || nonASCII
+}
+
+// onBorderRing reports whether (x, y) lies on the border ring of a surface
+// whose occupant declared a border frame. Only those cells are drawn as
+// dividers, so only they may start a drag.
+func (m *WorkbenchModel) onBorderRing(x, y int) bool {
+	for slot, r := range m.slotRects {
+		if x < r.X || x >= r.X+r.Width || y < r.Y || y >= r.Y+r.Height {
+			continue
+		}
+		if x != r.X && x != r.X+r.Width-1 && y != r.Y && y != r.Y+r.Height-1 {
+			continue
+		}
+		if m.frameFor(slot).Border {
+			return true
+		}
+	}
+	return false
+}
+
+// detectDividerAt names the resizable divider under (x, y), or "". A divider
+// is the shared edge between two surfaces, so the cell must also be a drawn
+// border cell: an unbordered neighbour's first row or column is content and
+// stays clickable.
 func (m *WorkbenchModel) detectDividerAt(x, y int) string {
+	if !m.onBorderRing(x, y) {
+		return ""
+	}
+	return m.dividerBandAt(x, y)
+}
+
+func (m *WorkbenchModel) dividerBandAt(x, y int) string {
 	if m.activePlacement == huskipc.PlacementFullCanvas || y < 1 || y >= m.height-1 {
 		return ""
 	}
