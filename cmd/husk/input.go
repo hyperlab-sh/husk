@@ -21,6 +21,11 @@ func legacyKeyString(msg tea.KeyMsg) string {
 	// Num/Scroll Lock do not affect text or legacy modifier names. Caps Lock
 	// affects printable fallback casing but not control-key matching.
 	key.Mod &^= tea.ModAlt | tea.ModNumLock | tea.ModScrollLock
+	// Associated text (kitty flag 16) belongs to text-producing keys. A chord
+	// keeps its keystroke name even if a terminal attached text to it.
+	if key.Mod&(tea.ModCtrl|tea.ModMeta|tea.ModSuper|tea.ModHyper) != 0 && key.Code != tea.KeyExtended {
+		key.Text = ""
+	}
 
 	if key.Code == tea.KeySpace && key.Mod&^tea.ModCapsLock == tea.ModCtrl {
 		// A terminal NUL was named ctrl+@ in v1, not ctrl+space.
@@ -50,13 +55,39 @@ func legacyKeyString(msg tea.KeyMsg) string {
 	return name
 }
 
+// normalizeTextEvent repairs a kitty "pure text event": CSI 0;mods;text u,
+// which the spec sends when the terminal got text with no key behind it (for
+// example macOS Option text in kitty). The pinned decoder maps key number 0 to
+// NUL, so the event arrives as ctrl+space carrying Text. A real ctrl+space
+// never carries Text: legacy NUL has none and kitty-protocol encoders send no
+// associated text under Ctrl. So Ctrl is removed and the text becomes the key.
+func normalizeTextEvent(msg tea.KeyPressMsg) tea.KeyPressMsg {
+	if msg.Code != tea.KeySpace || !msg.Mod.Contains(tea.ModCtrl) || msg.Text == "" || msg.Text == " " {
+		return msg
+	}
+	msg.Mod &^= tea.ModCtrl
+	msg.Code = tea.KeyExtended
+	if r, size := utf8.DecodeRuneInString(msg.Text); size == len(msg.Text) {
+		msg.Code = r
+	}
+	return msg
+}
+
 // trackModifierKey folds a bare modifier key event into the modifier state and
 // reports whether the key was one. Terminals send these only when View asks
 // for all keys as escape codes (kitty protocol), which gives platforms without
 // an OS modifier poll real Shift/Ctrl/Alt/Super state. Modifier keys are
 // state, not input: they never reach slot_key, shortcuts or held_keys. Hyper,
 // Meta and ISO level shifts have no ModifierState field and are dropped.
+//
+// The same mode makes terminals report Caps, Num and Scroll Lock presses,
+// which they withhold otherwise. Those are swallowed too, so plugins see the
+// same key set as before; the lock state still rides on other keys' Mod.
 func (m *WorkbenchModel) trackModifierKey(k tea.Key, down bool) bool {
+	switch k.Code {
+	case tea.KeyCapsLock, tea.KeyNumLock, tea.KeyScrollLock:
+		return true
+	}
 	if k.Code < tea.KeyLeftShift || k.Code > tea.KeyIsoLevel5Shift {
 		return false
 	}

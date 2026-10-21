@@ -637,10 +637,13 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		m.lastInput = time.Now()
+		// Bare modifiers are tracked (and key_state broadcast) even while the
+		// too-small frame freezes the layout, as the darwin poll does, so the
+		// state is right when the layout returns. Only handleKey is gated.
 		if m.trackModifierKey(msg.Key(), true) {
 			return m, nil
 		}
-		next, cmd := m.handleKey(msg)
+		next, cmd := m.handleKey(normalizeTextEvent(msg))
 		if len(m.heldKeys) > 0 {
 			// A lapsed chain (no OS modifier source) restarts to expire the held key.
 			cmd = tea.Batch(cmd, m.startModifierTick())
