@@ -115,13 +115,6 @@ func (c *canvas) blitLines(x, y, w, h int, lines []string) {
 	}
 }
 
-// set writes one grapheme with style st at (x, y).
-func (c *canvas) set(x, y int, glyph string, st uv.Style) {
-	cell := uv.NewCell(c.method, glyph)
-	cell.Style = st
-	c.buf.SetCell(x, y, cell)
-}
-
 // render serializes every cell: each line is exactly the canvas width and
 // the frame is exactly its height. Unlike lipgloss.Canvas it does not trim
 // trailing blanks.
