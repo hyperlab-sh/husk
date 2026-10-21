@@ -221,7 +221,7 @@ func (m *WorkbenchModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		default:
 			if paletteTextFor(msg, key) {
-				m.paletteQuery += key
+				m.paletteQuery += paletteQueryText(msg, key)
 				m.paletteCursor = 0
 			}
 			return m, nil
@@ -394,6 +394,17 @@ func paletteTextFor(msg tea.KeyPressMsg, key string) bool {
 		return false
 	}
 	return isPaletteText(key)
+}
+
+// paletteQueryText is the text a palette key press adds to the query. A paste
+// reaches handleKey as an extended key whose text is the paste wrapped in
+// brackets (see the tea.PasteMsg case in Update); the wrapper only guards host
+// shortcuts, so the query gets the pasted content without it.
+func paletteQueryText(msg tea.KeyPressMsg, key string) string {
+	if msg.Key().Code == tea.KeyExtended && len(key) > 2 && key[0] == '[' && key[len(key)-1] == ']' {
+		return key[1 : len(key)-1]
+	}
+	return key
 }
 
 // chordPrefixes are the legacy modifier prefixes of a chord spelling.

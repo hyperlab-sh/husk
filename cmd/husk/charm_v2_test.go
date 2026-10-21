@@ -320,3 +320,24 @@ func TestCharmV2MouseResizeLifecycle(t *testing.T) {
 		t.Fatal("hover continued resizing after release")
 	}
 }
+
+func TestPalettePasteNonASCIIInsertsTextWithoutBrackets(t *testing.T) {
+	for _, tc := range []struct {
+		name, paste, want string
+	}{
+		{"accented", "café", "café"},
+		{"cjk", "日本語", "日本語"},
+		{"emoji", "👍🏽", "👍🏽"},
+		{"ascii stays ignored", "abc", ""},
+		{"multiline stays ignored", "café\nx", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newWorkbenchModel("", nil, t.TempDir())
+			m.showPalette = true
+			m.Update(tea.PasteMsg{Content: tc.paste})
+			if m.paletteQuery != tc.want {
+				t.Fatalf("palette query after paste %q = %q, want %q", tc.paste, m.paletteQuery, tc.want)
+			}
+		})
+	}
+}
