@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
+	"maps"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/hyperlab-sh/husk/pkg/huskipc"
 )
 
 func sizedModel(t *testing.T, w, h int) *WorkbenchModel {
@@ -62,7 +65,11 @@ func TestMinimumBoundaryRendersNormalFrame(t *testing.T) {
 	if strings.Contains(out, "too small") {
 		t.Fatal("boundary size showed too-small screen")
 	}
-	for i, l := range strings.Split(out, "\n") {
+	lines := strings.Split(out, "\n")
+	if len(lines) != 24 {
+		t.Fatalf("got %d lines, want 24", len(lines))
+	}
+	for i, l := range lines {
 		if w := ansi.StringWidth(l); w > 84 {
 			t.Fatalf("line %d is %d wide, exceeds 84", i, w)
 		}
@@ -85,9 +92,91 @@ func TestResizeBelowMinimumKeepsLayoutAndRecovers(t *testing.T) {
 	}
 }
 
-func TestTooSmallIgnoresMouse(t *testing.T) {
-	m := sizedModel(t, 40, 10)
-	if _, cmd := m.Update(tea.MouseClickMsg{X: 1, Y: 1, Button: tea.MouseLeft}); cmd != nil {
-		t.Fatal("mouse click produced a command while too small")
+func dividerPoint(t *testing.T, m *WorkbenchModel) (int, int) {
+	t.Helper()
+	sb, ok := m.slotRects[huskipc.SlotSidebarList]
+	if !ok {
+		t.Fatal("no sidebar rect")
 	}
+	x, y := sb.X+sb.Width-1, 6
+	if m.detectDividerAt(x, y) == "" {
+		t.Fatalf("no divider at %d,%d", x, y)
+	}
+	return x, y
+}
+
+func TestTooSmallIgnoresMouse(t *testing.T) {
+	// Control: at a valid size a press on the divider starts a drag.
+	ok := sizedModel(t, 120, 40)
+	x, y := dividerPoint(t, ok)
+	ok.Update(tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
+	if ok.activeDrag == "" {
+		t.Fatal("control: divider press did not start a drag")
+	}
+
+	m := sizedModel(t, 120, 40)
+	m.Update(tea.WindowSizeMsg{Width: 40, Height: 10})
+	m.Update(tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
+	if m.activeDrag != "" {
+		t.Fatalf("mouse acted while too small: activeDrag=%q", m.activeDrag)
+	}
+}
+
+func TestTooSmallFreezesLayoutAndSlotResize(t *testing.T) {
+	m := sizedModel(t, 120, 40)
+	_, buf := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "a", Slots: []huskipc.SlotID{huskipc.SlotSidebarList}})
+	m.Update(tea.WindowSizeMsg{Width: 40, Height: 10})
+	rects := maps.Clone(m.slotRects)
+	sidebarW := m.sidebarWidth
+	buf.Reset()
+
+	for _, k := range []string{"=", "<", ">", "tab", "]", "ctrl+p", "?"} {
+		m.handleKey(keyFor(k))
+	}
+	m.Update(pluginRegisteredMsg{plugin: &ConnectedPlugin{
+		Info:   huskipc.HelloPayload{PluginID: "b", Slots: []huskipc.SlotID{huskipc.SlotMainStage}},
+		Writer: huskipc.NewConnWriter(&bytes.Buffer{}),
+	}})
+
+	for _, e := range envelopes(t, buf) {
+		if e.Type == "slot_resize" || e.Type == "key_state" {
+			t.Fatalf("plugin got %q while too small", e.Type)
+		}
+	}
+	if !maps.Equal(rects, m.slotRects) {
+		t.Fatal("slotRects changed while too small")
+	}
+	if m.sidebarWidth != sidebarW || m.showPalette {
+		t.Fatal("key input changed UI state while too small")
+	}
+
+	// Regrow: layout recomputes and slot_resize is broadcast again.
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	got := false
+	for _, e := range envelopes(t, buf) {
+		got = got || e.Type == "slot_resize"
+	}
+	if !got {
+		t.Fatal("no slot_resize after regrow")
+	}
+}
+
+func TestTooSmallStillQuits(t *testing.T) {
+	m := sizedModel(t, 40, 10)
+	if _, cmd := m.handleKey(keyFor("ctrl+c")); cmd == nil {
+		t.Fatal("ctrl+c must quit while too small")
+	}
+}
+
+func keyFor(k string) tea.KeyPressMsg {
+	switch k {
+	case "tab":
+		return tea.KeyPressMsg{Code: tea.KeyTab}
+	case "ctrl+c":
+		return tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}
+	case "ctrl+p":
+		return tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl}
+	}
+	r := []rune(k)[0]
+	return tea.KeyPressMsg{Code: r, Text: k}
 }
