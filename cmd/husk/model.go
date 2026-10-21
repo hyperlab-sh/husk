@@ -167,6 +167,9 @@ type WorkbenchModel struct {
 	// keyReleases is true once the terminal confirmed it reports key release
 	// events; held keys are then cleared by KeyReleaseMsg, not the timeout.
 	keyReleases bool
+	// termMods holds one bit per bare modifier key (offset from
+	// tea.KeyLeftShift) the terminal reported down and not yet released.
+	termMods uint16
 
 	activeRailID    string // "" (Home), or rail item ID
 	activePlacement huskipc.RailPlacement
@@ -323,6 +326,7 @@ func (m *WorkbenchModel) startModifierTick() tea.Cmd {
 // (the "?" toggle or --hold-alt) is a host setting and survives.
 func (m *WorkbenchModel) handleBlur() {
 	m.blurred = true
+	m.termMods = 0
 	m.syncModifierTransitions(huskipc.ModifierState{Alt: m.altLatched})
 	for k := range m.heldKeys {
 		delete(m.heldKeys, k)
@@ -633,6 +637,9 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		m.lastInput = time.Now()
+		if m.trackModifierKey(msg.Key(), true) {
+			return m, nil
+		}
 		next, cmd := m.handleKey(msg)
 		if len(m.heldKeys) > 0 {
 			// A lapsed chain (no OS modifier source) restarts to expire the held key.
@@ -653,6 +660,9 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyReleaseMsg:
+		if m.trackModifierKey(msg.Key(), false) {
+			return m, nil
+		}
 		key := legacyKeyString(msg)
 		if _, held := m.heldKeys[key]; held {
 			delete(m.heldKeys, key)
