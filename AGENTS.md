@@ -1,6 +1,6 @@
 # Husk — Agent Instructions
 
-Husk is a minimal, domain-agnostic TUI workbench in Go (bubbletea + lipgloss). It only provides **slots**, **hooks** and **events**; every plugin is an independent OS process speaking newline-delimited JSON over a Unix socket (`HUSK_SOCKET_PATH`) or stdio, in any language. The layout mirrors `bb`'s 9-slot model. Husk must stay application-agnostic: nothing application-specific belongs in this repo. The docs site (docmd) is in `docs/`.
+Husk is a minimal, domain-agnostic TUI workbench in Go (Bubble Tea v2 + Lip Gloss v2). It only provides **slots**, **hooks** and **events**; every plugin is an independent OS process speaking newline-delimited JSON over a Unix socket (`HUSK_SOCKET_PATH`) or stdio, in any language. The layout mirrors `bb`'s 9-slot model. Husk must stay application-agnostic: nothing application-specific belongs in this repo. The docs site (docmd) is in `docs/`.
 
 ## Build & Test
 
@@ -18,6 +18,15 @@ go test ./pkg/...
 Tests live in `pkg/manifest` (manifest parsing) and `pkg/frame` (frame geometry), plus `cmd/husk` host regression tests for frame resolution, sizing and rendering; run them all with `go test ./...`. Use `--dump-frame` to check rendering changes and `--demo-frame` (optionally with `--rail modal|full-canvas|stage`) to render the built-in demo plugin that declares a border+label+close frame. Surfaces are a blank canvas; all plugin-surface chrome (border/label/close) is declared by the plugin (`hello.frames` or rail-item `frame`) and drawn by `cmd/husk` `renderFrame`. Manifests reference binaries as `./bin/<name>`.
 
 Registry, published-slot rendering/routing and protocol compatibility tests live beside their code. Run affected tests with `go test ./cmd/husk ./pkg/huskipc`; use `--dump-frame --demo pubslots` for a self-contained two-plugin frame and `--dump-frame --plugin-dir ./plugins` for rendering with external plugins. Manifests reference binaries as `./bin/<name>`.
+
+## Charm v2
+
+- Import `charm.land/bubbletea/v2` and `charm.land/lipgloss/v2`; stable v2 uses these canonical vanity paths, not the old GitHub module paths. Bubbles is not currently used.
+- `View()` returns `tea.View`: use `.Content` for headless frame output/assertions, and set `AltScreen` / `MouseMode` on the view rather than program options.
+- Handle `tea.KeyPressMsg` separately from `tea.KeyReleaseMsg`; mouse click, release, motion and wheel events are distinct types implementing `tea.MouseMsg` (`.Mouse()` exposes coordinates).
+- Keep the existing IPC key spellings: v2 calls the space key `"space"`, but plugins still receive `" "` (and `"alt+ "`). `tea.PasteMsg` retains v1's bracket-wrapped key spelling so pasted text cannot run host shortcuts.
+- `lipgloss.Color` is a function returning `image/color.Color`; styles are values and there is no global renderer or `SetColorProfile`. Bubble Tea handles interactive color downsampling; headless frame dumps retain full ANSI styling.
+- Use `go build -buildvcs=false` for exported-source builds and the toolchain's `gofmt` binary if a PATH wrapper does not support `-l`.
 
 ## Layout
 
