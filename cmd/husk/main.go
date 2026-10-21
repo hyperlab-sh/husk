@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -590,14 +591,42 @@ func (m *WorkbenchModel) activateRailItem(ri huskipc.RailItemSpec) {
 	}
 }
 
-// legacyKeyString keeps the plugin protocol's v1 space spelling even though
-// Bubble Tea v2 names that key "space". Shortcuts retain their other spellings.
+// legacyKeyString preserves v1 wire names for keys decoded by Bubble Tea v2.
+// v1 prefixed Alt before all other modifiers and used printable shifted text,
+// even when v2 omits Text (Alt-prefixed input and native release events).
 func legacyKeyString(msg tea.KeyMsg) string {
-	key := msg.String()
-	if key == "space" || key == "alt+space" {
-		return strings.TrimSuffix(key, "space") + " "
+	key := msg.Key()
+	alt := key.Mod.Contains(tea.ModAlt)
+	// Num/Scroll Lock do not affect text or legacy modifier names. Caps Lock
+	// affects printable fallback casing but not control-key matching.
+	key.Mod &^= tea.ModAlt | tea.ModNumLock | tea.ModScrollLock
+
+	if key.Code == tea.KeySpace && key.Mod&^tea.ModCapsLock == tea.ModCtrl {
+		// A terminal NUL was named ctrl+@ in v1, not ctrl+space.
+		key.Code = '@'
 	}
-	return key
+	if unicode.IsPrint(key.Code) && key.Mod&^(tea.ModShift|tea.ModCapsLock) == 0 {
+		if key.Text == "" {
+			code := key.ShiftedCode
+			if code == 0 {
+				code = key.Code
+				if key.Mod.Contains(tea.ModShift) || key.Mod.Contains(tea.ModCapsLock) {
+					code = unicode.ToUpper(code)
+				}
+			}
+			key.Text = string(code)
+		}
+		key.Mod &^= tea.ModShift | tea.ModCapsLock
+	}
+
+	name := key.String()
+	if name == "space" {
+		name = " "
+	}
+	if alt {
+		name = "alt+" + name
+	}
+	return name
 }
 
 func (m *WorkbenchModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
