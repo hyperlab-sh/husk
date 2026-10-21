@@ -13,7 +13,7 @@ Husk is the host. Plugins are separate processes that Husk spawns and supervises
 
 ### Socket security
 
-The host socket is local-user only. Husk creates a fresh `0700` directory (`husk-*`) under `$XDG_RUNTIME_DIR`, or under a `mkdtemp` directory in the system temp dir when that variable is unset or unusable, and binds `husk.sock` inside it with mode `0600`. The path is exported to plugins as `HUSK_SOCKET_PATH`. On every accepted connection the host reads the peer uid from the kernel (`SO_PEERCRED` on Linux, `LOCAL_PEERCRED` on macOS) and closes the connection unless it equals the host uid; if the credentials cannot be read, the connection is refused. The socket and its directory are removed on shutdown. Platforms without a supported credential API refuse all socket connections; use stdio transport there.
+The host socket is local-user only. Husk creates a fresh `0700` directory (`husk-*`) under `$XDG_RUNTIME_DIR`, or under a `mkdtemp` directory in the system temp dir when that variable is unset or unusable, and binds `husk.sock` inside it with mode `0600`. The path is exported to plugins as `HUSK_SOCKET_PATH`. On every accepted connection the host reads the peer uid from the kernel (`SO_PEERCRED` on Linux, `LOCAL_PEERCRED` on macOS) and closes the connection unless it equals the host uid; if the credentials cannot be read, the connection is refused. The socket and its directory are removed on shutdown (the directory stays only while it holds a non-empty plugin stderr log; see [Plugin processes](#plugin-processes)). Platforms without a supported credential API refuse all socket connections; use stdio transport there.
 
 ### Outbound queue and disconnect policy
 
@@ -28,6 +28,25 @@ The host never writes to a plugin from its event loop. Each connection has a bou
 | Reading from the connection fails | `read error: …` |
 
 The host drops the connection rather than individual messages, so a plugin never sees a stream with holes in it. Every disconnect is logged as `husk: plugin <id> disconnected: <reason>` on stderr (held until exit while the TUI owns the terminal) and shown as a warning toast. Disconnecting removes the plugin's surfaces, rail items and publications as described under [Events and lifetime](#events-and-lifetime). A plugin whose `hello` is rejected receives its `protocol_error` before the connection is closed. A connection that ends without a registered `hello` is logged too (`husk: connection closed before hello: <reason>`, or `connection from plugin "<id>" (not registered) closed: <reason>` after a rejected `hello`), so every end of a read loop leaves a reason. A bad input line does not disconnect; see [Errors](#errors).
+
+### Plugin processes
+
+Husk launches each manifest plugin with its declared transport:
+
+- **socket** (the default): `HUSK_SOCKET_PATH` is set and the plugin connects to it.
+- **stdio**: the protocol runs over the plugin's stdin and stdout. `HUSK_SOCKET_PATH` is removed from the plugin's environment, including any value Husk itself inherited, so a client library that prefers the socket when the variable is present really uses stdio.
+
+A plugin's stderr is never discarded: it goes to its own log file, `logs/<id>.log` (mode `0600`) in the socket's private directory. Write diagnostics there freely; they do not touch the terminal.
+
+| Event | What Husk does |
+| :--- | :--- |
+| The plugin cannot be started (missing binary, bad command) | Logs `husk: failed to launch plugin <id>: <error>` and shows an error toast |
+| The plugin exits while Husk is running | Logs `husk: plugin <id> exited (<status>); stderr log: <path>` plus its last three stderr lines, and shows a warning toast with the status and the last stderr line. For stdio plugins that never sent `hello`, the line reads `exited before hello` |
+| A message arrives on a connection before its `hello` | Replies with `protocol_error` (`message_type` is the message's type, `message` is `hello required before <type>`, or `hello payload required` for a `hello` without a payload) and ignores the message |
+| The socket listener fails | Logs and toasts `accept failed: <error>; socket plugins can no longer connect` |
+| A connection fails the peer uid check | Logs and toasts `rejected IPC connection: <reason>` |
+
+Log lines go to stderr; while the TUI owns the terminal they are held and printed when Husk exits. On shutdown Husk restores the terminal, sends `SIGTERM` to every plugin, waits up to two seconds for them (one deadline for all), then sends `SIGKILL` to the rest and waits for those as well. Exits during shutdown are not reported. Empty stderr logs are deleted; a non-empty one is kept, its path is logged (`husk: plugin <id> stderr kept at <path>`), and the socket directory stays in place to hold it.
 
 ## Slots
 
