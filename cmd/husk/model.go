@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -106,12 +107,17 @@ type hookSweepMsg struct{}
 const hookSweepInterval = time.Second
 
 type WorkbenchModel struct {
-	socketPath  string
-	listener    net.Listener
-	subChan     chan tea.Msg
-	procs       []*pluginProcess // launched plugin processes (see lifecycle.go)
-	quit        chan struct{}    // closed when cleanup starts
-	stopGrace   time.Duration    // SIGTERM-to-SIGKILL grace on shutdown
+	socketPath string
+	listener   net.Listener
+	subChan    chan tea.Msg
+	procs      []*pluginProcess // launched plugin processes (see lifecycle.go)
+	quit       chan struct{}    // closed when cleanup starts
+	stopGrace  time.Duration    // SIGTERM-to-SIGKILL grace on shutdown
+
+	// pluginCtx parents every plugin process; stopPlugins cancels it.
+	pluginCtx    context.Context
+	pluginCancel context.CancelFunc
+
 	plugins     map[string]*ConnectedPlugin
 	manifests   map[string]*manifest.Plugin // launched manifest plugins by id; hellos are checked against them
 	railItems   []huskipc.RailItemSpec
@@ -201,7 +207,10 @@ const activityRailWidth = 5
 
 func newWorkbenchModel(socketPath string, listener net.Listener, cwd string) *WorkbenchModel {
 	registry := newPublicationRegistry()
+	pluginCtx, pluginCancel := context.WithCancel(context.Background())
 	return &WorkbenchModel{
+		pluginCtx:    pluginCtx,
+		pluginCancel: pluginCancel,
 		registry:     registry,
 		socketPath:   socketPath,
 		listener:     listener,

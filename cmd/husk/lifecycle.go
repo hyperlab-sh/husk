@@ -24,7 +24,8 @@ import (
 // socket directory (logs/<id>.log). When a plugin exits while the host is
 // running, the exit status and the last stderr lines are logged and toasted.
 // On shutdown the host sends SIGTERM to every child, waits up to stopGrace for
-// them to exit, then kills the rest and waits for those too.
+// them to exit, then kills the rest (os/exec does both through the plugin
+// context's Cancel and WaitDelay) and waits for those too.
 
 const (
 	pluginStopGrace = 2 * time.Second
@@ -134,7 +135,13 @@ func (m *WorkbenchModel) spawnPlugin(id, transport, dir string, argv []string) e
 		_ = os.Remove(logPath)
 		return err
 	}
-	cmd := exec.Command(argv[0], argv[1:]...)
+	// The shared pluginCtx is cancelled once, by stopPlugins. Cancel then
+	// sends SIGTERM and, WaitDelay later, os/exec kills the process itself;
+	// the watcher starts in Start, so this holds even while the stdio stream
+	// is still being served and Wait has not been called yet.
+	cmd := exec.CommandContext(m.pluginCtx, argv[0], argv[1:]...)
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	cmd.WaitDelay = m.stopGrace
 	if dir != "" {
 		cmd.Dir = dir
 	}
@@ -316,33 +323,25 @@ func (m *WorkbenchModel) cleanup() {
 	m.removeRuntimeFiles()
 }
 
-// stopPlugins sends SIGTERM to every running plugin, waits up to stopGrace
-// for all of them (one shared deadline), then SIGKILLs the rest and waits
-// for those.
+// stopPlugins cancels the shared plugin context, which makes os/exec send
+// SIGTERM to every running plugin and kill any still alive stopGrace later.
+// It returns once every process has been waited for, or pluginKillWait after
+// the kill deadline for processes that cannot be reaped.
 func (m *WorkbenchModel) stopPlugins() {
-	for _, p := range m.procs {
-		if p.cmd.Process != nil && !closed(p.done) {
-			_ = p.cmd.Process.Signal(syscall.SIGTERM)
-		}
-	}
+	m.pluginCancel()
 	grace := time.NewTimer(m.stopGrace)
 	defer grace.Stop()
-	expired := false
 	for _, p := range m.procs {
-		if !expired {
-			select {
-			case <-p.done:
-				continue
-			case <-grace.C:
-				expired = true
-			}
-		}
-		if closed(p.done) {
+		select {
+		case <-p.done:
 			continue
+		case <-grace.C:
 		}
-		m.logf("plugin %s did not exit within %s of SIGTERM; killing it", p.id, m.stopGrace)
-		if p.cmd.Process != nil {
-			_ = p.cmd.Process.Kill()
+		break
+	}
+	for _, p := range m.procs {
+		if !closed(p.done) {
+			m.logf("plugin %s did not exit within %s of SIGTERM; killing it", p.id, m.stopGrace)
 		}
 	}
 	kill := time.NewTimer(pluginKillWait)
