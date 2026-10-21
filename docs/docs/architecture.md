@@ -273,8 +273,13 @@ subscribers and routes each `hook_result` to the original caller, setting
 `hook_result.plugin_id` to the authenticated responder. Only a pending subscriber
 may respond, once. `hook_result.error` carries an optional error string. No
 subscribers means no results; v1 has no all-results completion message or veto.
-There is a maximum of 1,024 pending calls; callers should not assume all plugins
-will respond. Disconnecting a subscriber or hook publisher cancels affected
+A subscriber that does not answer within 10 seconds is answered for: the caller
+receives a `hook_result` with `plugin_id` set to that subscriber and
+`error: "timeout"`, the call is forgotten, and a late real result is refused as
+an unknown request. There is a maximum of 1,024 pending calls overall and 64
+waiting on any one subscriber; a `hook_call` over either cap is refused with
+`protocol_error`. Declared `title` and `description` of hooks and events are
+kept by the host for introspection. Disconnecting a subscriber or hook publisher cancels affected
 pending results with `error: "plugin disconnected"`.
 
 ### Events and lifetime
