@@ -1,0 +1,35 @@
+{
+  "title": "Husk",
+  "url": "https://hyperlab-sh.github.io/husk",
+  "src": "docs",
+  "out": "site",
+  "engine": "js",
+  "layout": {
+    "spa": true,
+    "header": { "enabled": true },
+    "sidebar": { "collapsible": true, "defaultCollapsed": false },
+    "optionsMenu": {
+      "position": "sidebar-top",
+      "components": { "search": true, "themeSwitch": true }
+    },
+    "footer": {
+      "style": "minimal",
+      "content": "Husk, a pluggable TUI workbench.",
+      "branding": true
+    }
+  },
+  "theme": { "name": "default", "appearance": "system", "codeHighlight": true },
+  "minify": true,
+  "autoTitleFromH1": true,
+  "copyCode": true,
+  "pageNavigation": true,
+  "navigation": [
+    { "title": "Overview", "path": "/", "icon": "home" },
+    { "title": "Getting Started", "path": "/getting-started/", "icon": "zap" },
+    { "title": "Architecture", "path": "/architecture/", "icon": "layers" },
+    { "title": "GitHub", "path": "https://github.com/hyperlab-sh/husk", "icon": "github", "external": true }
+  ],
+  "plugins": {
+    "seo": { "defaultDescription": "Husk: a minimal, language-agnostic TUI workbench with out-of-process plugins." }
+  }
+}
