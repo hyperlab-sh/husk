@@ -34,7 +34,7 @@ IPC messages: `hello`/`welcome`, `slot_update`, `slot_resize`, `slot_key`, `slot
 - Plugins must never assume a language; the JSON-lines protocol is the only contract. Changing it means updating `pkg/huskipc/protocol.go` and every plugin.
 - Use Charm's default palette (ANSI / lipgloss presets). Do not add custom hex themes.
 - Conventional commits with detailed messages. No attribution trailers.
-- `STATUS.md` tracks known issues; `SUMMARY.md` is the design history; `README.md` is user-facing.
+- Project status lives in `STATUS.md` at the space root (local-only, not in the repo); update it when state changes. `SUMMARY.md` is the design history; `README.md` is user-facing.
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:1105d646 -->
 ## Beads Issue Tracker
