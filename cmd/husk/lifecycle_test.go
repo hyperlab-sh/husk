@@ -249,7 +249,11 @@ func TestPluginExitIsReportedWithStatusAndStderr(t *testing.T) {
 			want := tc.logLine + "; stderr log: " + msg.logPath + "\n" +
 				"husk: plugin fake stderr: fake: starting\n" +
 				"husk: plugin fake stderr: fatal: missing config\n"
-			if log.String() != want {
+			// An exit before hello also closes an unregistered stream, which the
+			// host logs on its own; its position relative to the exit report
+			// depends on goroutine scheduling, so it is not compared.
+			got := strings.Replace(log.String(), "husk: connection closed before hello: connection closed (EOF)\n", "", 1)
+			if got != want {
 				t.Fatalf("log = %q, want %q", log.String(), want)
 			}
 		})
