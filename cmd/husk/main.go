@@ -6,11 +6,9 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/hyperlab-sh/husk/pkg/huskipc"
 	"github.com/hyperlab-sh/husk/pkg/manifest"
 )
 
@@ -114,46 +112,15 @@ func main() {
 	}
 
 	if *dumpFrame {
-		deadline := time.Now().Add(3000 * time.Millisecond)
-		mode := *railMode
-		railTriggered := mode == ""
-		for time.Now().Before(deadline) {
-			select {
-			case msg := <-model.subChan:
-				model.Update(msg)
-				if !railTriggered && launched > 0 && len(model.plugins) >= launched {
-					railTriggered = true
-					// Open the first registered rail item with the requested
-					// placement; Husk knows no specific plugin.
-					if ri, ok := model.firstRailItemWithPlacement(huskipc.RailPlacement(mode)); ok {
-						model.activateRailItem(ri)
-					} else {
-						fmt.Fprintf(os.Stderr, "husk: --rail %s: no loaded plugin declares a %s rail item\n", mode, mode)
-						mode = "" // nothing to wait for
-					}
-				}
-				ready := len(model.plugins) >= launched && len(model.slotUpdates) >= min(launched, 1)
-				if mode == "modal" && model.slotUpdates[huskipc.SlotModalSurface] == nil {
-					ready = false
-				}
-				if mode == "full-canvas" && model.slotUpdates[huskipc.SlotFullCanvas] == nil {
-					ready = false
-				}
-				if mode == "stage" && model.slotUpdates[huskipc.SlotWorkspaceStage] == nil {
-					ready = false
-				}
-				if ready {
-					time.Sleep(150 * time.Millisecond)
-					for len(model.subChan) > 0 {
-						model.Update(<-model.subChan)
-					}
-					fmt.Println(model.View().Content)
-					return
-				}
-			case <-time.After(50 * time.Millisecond):
-			}
+		frame, err := runDumpFrame(model, dumpFrameOptions{
+			Launched: launched,
+			RailMode: *railMode,
+			Stderr:   os.Stderr,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "husk: --dump-frame: %v\n", err)
 		}
-		fmt.Println(model.View().Content)
+		fmt.Println(frame)
 		return
 	}
 
