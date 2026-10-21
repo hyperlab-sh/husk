@@ -37,6 +37,8 @@ func TestMain(mm *testing.M) {
 //	               whose message is the HUSK_SOCKET_PATH the plugin saw; exit 0
 //	               on SIGTERM after logging it to stderr
 //	crash          write a styled line to stderr and exit 7 before any hello
+//	launcher       exit 0 before any hello, like a wrapper script that started
+//	               the real plugin in the background and returned
 //	ignore-term    ignore SIGTERM and sleep
 func runFakePlugin(mode string) int {
 	sigs := make(chan os.Signal, 1)
@@ -45,6 +47,9 @@ func runFakePlugin(mode string) int {
 	case "crash":
 		fmt.Fprint(os.Stderr, "fake: starting\n\x1b[31mfatal:\x1b[0m missing config\n")
 		return 7
+	case "launcher":
+		fmt.Fprintln(os.Stderr, "fake: started the real plugin")
+		return 0
 	case "ignore-term":
 		signal.Ignore(syscall.SIGTERM)
 		fmt.Fprintln(os.Stderr, "fake: ignoring SIGTERM")

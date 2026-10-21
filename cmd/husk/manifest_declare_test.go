@@ -334,3 +334,67 @@ func TestLaunchPluginRegistersDeclarationsBeforeHelloAndDropsThemOnEarlyExit(t *
 		t.Fatal("manifest was dropped; a late hello would no longer be checked")
 	}
 }
+
+// launchEarlyExit launches declaringManifest over transport with a fake plugin
+// that exits before hello in the given mode, after a contributor reached one of
+// its manifest slots, and applies the exit message.
+func launchEarlyExit(t *testing.T, mode, transport string) (*WorkbenchModel, pluginExitedMsg) {
+	t.Helper()
+	t.Setenv("HUSK_FAKE_PLUGIN", mode)
+	l, path, _, err := listenPrivate(shortTempDir(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, _ := lifecycleModel(t, path, l)
+	mf := declaringManifest()
+	mf.Command = fakeArgv
+	mf.Transport = transport
+	if err := m.launchPlugin(mf); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.registry.contribute("other.c", huskipc.SlotContributePayload{SlotID: "acme.p.rows", ID: "other.c.row"}); err != nil {
+		t.Fatal(err)
+	}
+	msg := awaitMsg[pluginExitedMsg](t, m)
+	m.Update(msg)
+	return m, msg
+}
+
+func TestCleanLauncherExitKeepsManifestDeclarationsForTheRealPlugin(t *testing.T) {
+	m, msg := launchEarlyExit(t, "launcher", manifest.TransportSocket)
+	if msg.status != "exit status 0" {
+		t.Fatalf("status = %q", msg.status)
+	}
+	// The launcher returned cleanly; the plugin it started may still connect,
+	// so its manifest declarations and the contribution already made stay.
+	for _, ok := range []bool{m.registry.Slots["acme.p.rows"] != nil, m.registry.Slots["acme.p.bar"] != nil, m.registry.Hooks["acme.p.before"] != nil, m.registry.Events["acme.p.changed"] != nil} {
+		if !ok {
+			t.Fatal("manifest declarations were dropped when the launcher exited cleanly")
+		}
+	}
+	if got := m.registry.Slots["acme.p.rows"].Contributions; len(got) != 1 {
+		t.Fatalf("contributions = %+v", got)
+	}
+	// The real plugin connects later with a hello that omits the declarations.
+	hello := `{"type":"hello","hello":{"plugin_id":"acme.p","slots":["main-stage"]}}` + "\n"
+	peer, cp := connectDeclaring(t, m, hello)
+	defer peer.Close()
+	if cp == nil {
+		t.Fatal("the real plugin's hello was not registered")
+	}
+	if s := m.registry.Slots["acme.p.rows"]; s == nil || s.Owner != "acme.p" || len(s.Contributions) != 1 {
+		t.Fatalf("rows slot after hello = %+v", s)
+	}
+	if m.registry.Hooks["acme.p.before"] == nil || m.registry.Events["acme.p.changed"] == nil {
+		t.Fatal("manifest hook or event missing after the real plugin's hello")
+	}
+}
+
+func TestCleanStdioExitBeforeHelloDropsManifestDeclarations(t *testing.T) {
+	// A stdio stream ends with its process, so nothing can connect later.
+	m, msg := launchEarlyExit(t, "launcher", manifest.TransportStdio)
+	if !msg.beforeHello {
+		t.Fatal("stdio exit not reported as before hello")
+	}
+	assertNoDeclarations(t, m)
+}
