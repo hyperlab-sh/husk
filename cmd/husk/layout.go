@@ -21,6 +21,13 @@ func (m *WorkbenchModel) tooSmall() bool {
 	return m.width < minTermWidth || m.height < minTermHeight
 }
 
+// layoutFrozen reports whether layout and slot_resize traffic must stay
+// untouched: the terminal size is known and below the minimum. An unknown
+// (zero) size is not frozen so startup and headless paths still lay out.
+func (m *WorkbenchModel) layoutFrozen() bool {
+	return m.width > 0 && m.height > 0 && m.tooSmall()
+}
+
 // renderTooSmall returns a frame of exactly m.height lines, each exactly
 // m.width cells wide, telling the user the terminal is too small. Message
 // variants shrink with the available width and are truncated as a last resort,
@@ -60,6 +67,9 @@ func (m *WorkbenchModel) renderTooSmall() string {
 }
 
 func (m *WorkbenchModel) recomputeLayout() {
+	if m.layoutFrozen() {
+		return
+	}
 	totalW := max(minTermWidth, m.width)
 	bodyH := max(20, m.height-2)
 
@@ -219,6 +229,9 @@ func (m *WorkbenchModel) currentSlotSizes() map[huskipc.SlotID]huskipc.SlotSize 
 }
 
 func (m *WorkbenchModel) broadcastSlotResize() {
+	if m.layoutFrozen() {
+		return
+	}
 	sizes := m.currentSlotSizes()
 	for _, cp := range m.plugins {
 		_ = cp.Writer.Send(huskipc.Envelope{

@@ -50,6 +50,16 @@ func legacyKeyString(msg tea.KeyMsg) string {
 func (m *WorkbenchModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := legacyKeyString(msg)
 
+	// While the terminal is too small the UI is hidden: only quit is honoured
+	// and nothing is forwarded to plugins.
+	if m.layoutFrozen() {
+		if key == "q" || key == "ctrl+c" {
+			m.cleanup()
+			return m, tea.Quit
+		}
+		return m, nil
+	}
+
 	if msg.Mod.Contains(tea.ModAlt) && !m.modifiers.Alt {
 		next := m.modifiers
 		next.Alt = true
