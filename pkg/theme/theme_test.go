@@ -27,7 +27,7 @@ func TestDefaultPaletteWireKeysAreGenericRoles(t *testing.T) {
 	want := []string{
 		"accent", "accent_secondary", "accent_soft", "border", "border_focused",
 		"border_subtle", "canvas", "danger", "info", "ink", "ink_muted",
-		"ink_subtle", "name", "success", "surface", "surface_elevated",
+		"ink_subtle", "name", "slot_background", "success", "surface", "surface_elevated",
 		"surface_hover", "surface_selected", "warning",
 	}
 	if !reflect.DeepEqual(keys, want) {

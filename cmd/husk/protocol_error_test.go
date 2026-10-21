@@ -213,8 +213,8 @@ func TestHelloProtocolVersionNegotiation(t *testing.T) {
 		{"legacy (absent)", "", true, ""},
 		{"same major, newer minor", "1.4", true, ""},
 		{"bare major", "1", true, ""},
-		{"newer major", "2.0", false, `unsupported protocol_version "2.0": host speaks 1.1 (major 1)`},
-		{"older major", "0.3", false, `unsupported protocol_version "0.3": host speaks 1.1 (major 1)`},
+		{"newer major", "2.0", false, `unsupported protocol_version "2.0": host speaks 1.2 (major 1)`},
+		{"older major", "0.3", false, `unsupported protocol_version "0.3": host speaks 1.2 (major 1)`},
 		{"garbage", "latest", false, `invalid protocol_version "latest": want MAJOR.MINOR`},
 	}
 	for _, tc := range cases {

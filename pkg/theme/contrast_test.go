@@ -67,7 +67,7 @@ func TestDefaultPaletteContrast(t *testing.T) {
 		"Canvas": p.Canvas, "Border": p.Border, "BorderFocused": p.BorderFocused,
 	}
 	bg := map[string]string{
-		"Canvas": p.Canvas, "Surface": p.Surface, "SurfaceElevated": p.SurfaceElevated,
+		"Canvas": p.Canvas, "Slot": p.Slot, "Surface": p.Surface, "SurfaceElevated": p.SurfaceElevated,
 		"SurfaceSelected": p.SurfaceSelected, "SurfaceHover": p.SurfaceHover,
 		"Accent": p.Accent, "Success": p.Success, "Warning": p.Warning,
 	}
@@ -87,19 +87,19 @@ func TestDefaultPaletteContrast(t *testing.T) {
 	// and the active rail pill sit on SurfaceSelected, the lightest surface,
 	// so every role the chrome draws there is held to 4.5:1 on it too.
 	add(textMin, []string{"Ink", "InkMuted", "Accent", "AccentSecondary", "Success", "Warning"},
-		[]string{"Canvas", "Surface", "SurfaceElevated", "SurfaceSelected", "SurfaceHover"})
+		[]string{"Canvas", "Slot", "Surface", "SurfaceElevated", "SurfaceSelected", "SurfaceHover"})
 	// InkSubtle, Danger and Info are never drawn on SurfaceSelected: the
 	// selected explorer row uses InkMuted, and Danger/Info only appear as toast
 	// edges and the footer hint on the base surfaces and Elevated. Hover is not
 	// drawn by the host, and equals Elevated (BBQ).
 	add(textMin, []string{"InkSubtle", "Danger", "Info"},
-		[]string{"Canvas", "Surface", "SurfaceElevated"})
+		[]string{"Canvas", "Slot", "Surface", "SurfaceElevated"})
 	// Dark text on the filled badges and the active rail pill.
 	add(textMin, []string{"Canvas"}, []string{"Accent", "Success", "Warning"})
 	// Borders, focus ring and the toast edge colours need 3:1 on the panels
 	// they enclose; the chrome draws them over Canvas, Surface and Elevated.
 	add(uiMin, []string{"Border", "BorderFocused", "Danger", "Info", "Success", "Warning"},
-		[]string{"Canvas", "Surface", "SurfaceElevated"})
+		[]string{"Canvas", "Slot", "Surface", "SurfaceElevated"})
 
 	for _, c := range pairs {
 		c := c
@@ -116,7 +116,7 @@ func TestDefaultPaletteContrast(t *testing.T) {
 func TestDefaultPaletteIsHex(t *testing.T) {
 	p := Default()
 	vals := map[string]string{
-		"Canvas": p.Canvas, "Surface": p.Surface, "SurfaceElevated": p.SurfaceElevated,
+		"Canvas": p.Canvas, "Slot": p.Slot, "Surface": p.Surface, "SurfaceElevated": p.SurfaceElevated,
 		"SurfaceSelected": p.SurfaceSelected, "SurfaceHover": p.SurfaceHover,
 		"Border": p.Border, "BorderSubtle": p.BorderSubtle, "BorderFocused": p.BorderFocused,
 		"Ink": p.Ink, "InkMuted": p.InkMuted, "InkSubtle": p.InkSubtle,

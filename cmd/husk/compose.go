@@ -1,6 +1,7 @@
 package main
 
 import (
+	"image/color"
 	"strings"
 	"sync"
 
@@ -120,4 +121,27 @@ func (c *canvas) blitLines(x, y, w, h int, lines []string) {
 // trailing blanks.
 func (c *canvas) render() string {
 	return uv.Lines(c.buf.Lines).Render()
+}
+
+// fillDefaultBg gives every cell of area that has no background of its own the
+// background bg. A cell a plugin drew with an explicit background (any colour,
+// including one that happens to equal bg) is left exactly as it is, as is a
+// reverse-video cell (its background is the terminal's to swap). Only
+// the Bg field changes, so no other attribute of a cell moves and no
+// rendition can reach a neighbouring cell. Cells outside the canvas are
+// ignored.
+func (c *canvas) fillDefaultBg(area uv.Rectangle, bg color.Color) {
+	area = area.Intersect(c.buf.Bounds())
+	if area.Empty() || bg == nil {
+		return
+	}
+	for y := area.Min.Y; y < area.Max.Y; y++ {
+		for x := area.Min.X; x < area.Max.X; x++ {
+			cell := c.buf.CellAt(x, y)
+			if cell == nil || cell.Style.Bg != nil || cell.Style.Attrs&uv.AttrReverse != 0 {
+				continue
+			}
+			cell.Style.Bg = bg
+		}
+	}
 }
