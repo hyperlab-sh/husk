@@ -164,6 +164,11 @@ type WorkbenchModel struct {
 	lastInput   time.Time // last key or mouse event, for tick cadence
 	pollMods    func() (huskipc.ModifierState, bool)
 	heldKeys    map[string]time.Time
+	// heldAliases maps a held key's key-code name to the text name it was
+	// held under, for presses whose text came from the layout (AltGr+Q held
+	// as "@", a dead key as "é"). Releases carry no associated text, so they
+	// arrive under the code name ("q", "e") and are looked up here.
+	heldAliases map[string]string
 	// keyReleases is true once the terminal confirmed it reports key release
 	// events; held keys are then cleared by KeyReleaseMsg, not the timeout.
 	keyReleases bool
@@ -332,6 +337,7 @@ func (m *WorkbenchModel) handleBlur() {
 		delete(m.heldKeys, k)
 		m.broadcastKeyState(huskipc.KeyPhaseUp, k, false)
 	}
+	clear(m.heldAliases)
 }
 
 func (m *WorkbenchModel) Init() tea.Cmd {
@@ -541,6 +547,7 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for k, ts := range m.heldKeys {
 			if now.Sub(ts) > ttl {
 				delete(m.heldKeys, k)
+				m.dropHeldAliases(k)
 				m.broadcastKeyState(huskipc.KeyPhaseUp, k, false)
 			}
 		}
@@ -666,7 +673,7 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.trackModifierKey(msg.Key(), false) {
 			return m, nil
 		}
-		key := legacyKeyString(msg)
+		key := m.releasedHeldKey(legacyKeyString(msg))
 		if _, held := m.heldKeys[key]; held {
 			delete(m.heldKeys, key)
 			m.broadcastKeyState(huskipc.KeyPhaseUp, key, false)
