@@ -109,7 +109,7 @@ func TestPublishedClickRoutesToContributor(t *testing.T) {
 	}
 }
 
-func TestPublishedBlankFirstRowStartsDividerDrag(t *testing.T) {
+func TestPublishedBlankFirstRowDoesNotStartDividerDrag(t *testing.T) {
 	m := newWorkbenchModel("", nil, t.TempDir())
 	_, _ = addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "a", Slots: []huskipc.SlotID{huskipc.SlotMainStage}, PublishedSlots: []huskipc.SlotDeclarePayload{{ID: "a.action", Kind: "inline"}}})
 	_, b := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "b"})
@@ -118,8 +118,8 @@ func TestPublishedBlankFirstRowStartsDividerDrag(t *testing.T) {
 	r := m.slotRects[huskipc.SlotMainStage]
 	b.Reset()
 	m.Update(tea.MouseClickMsg{X: r.InnerX + 20, Y: r.InnerY, Button: tea.MouseLeft})
-	if m.activeDrag != "main-header-height" {
-		t.Fatalf("blank first-row cell did not start divider drag: %q", m.activeDrag)
+	if m.activeDrag != "" {
+		t.Fatalf("blank first-row cell of an unbordered surface started a drag: %q", m.activeDrag)
 	}
 	for _, msg := range envelopes(t, b) {
 		if msg.CommandInvoke != nil {
