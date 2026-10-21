@@ -3,9 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
-	"net"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -54,11 +52,9 @@ func main() {
 		return
 	}
 
-	sockPath := filepath.Join(os.TempDir(), fmt.Sprintf("husk-%d.sock", os.Getpid()))
-	_ = os.Remove(sockPath)
-	listener, err := net.Listen("unix", sockPath)
+	listener, sockPath, err := listenSocket()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to listen on %s: %v\n", sockPath, err)
+		fmt.Fprintf(os.Stderr, "failed to listen on IPC socket: %v\n", err)
 		os.Exit(1)
 	}
 

@@ -1,9 +1,11 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"time"
 
 	"github.com/hyperlab-sh/husk/pkg/huskipc"
@@ -15,6 +17,11 @@ func (m *WorkbenchModel) startAcceptLoop() {
 			conn, err := m.listener.Accept()
 			if err != nil {
 				return
+			}
+			if err := authorizePeer(conn); err != nil {
+				fmt.Fprintf(os.Stderr, "husk: rejected IPC connection: %v\n", err)
+				_ = conn.Close()
+				continue
 			}
 			go m.handleStream(conn, conn, conn)
 		}
@@ -98,5 +105,10 @@ func (m *WorkbenchModel) cleanup() {
 			_ = cmd.Process.Kill()
 		}
 	}
-	_ = os.Remove(m.socketPath)
+	if m.socketPath != "" {
+		_ = os.Remove(m.socketPath)
+		if filepath.Base(m.socketPath) == socketName {
+			_ = os.Remove(filepath.Dir(m.socketPath))
+		}
+	}
 }
