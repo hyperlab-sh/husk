@@ -1,9 +1,13 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"io"
 	"strings"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/hyperlab-sh/husk/pkg/huskipc"
@@ -162,5 +166,80 @@ func TestSideColumnAppearsAndGoesWithPlugin(t *testing.T) {
 	}
 	if got := topBarText(m); strings.Contains(got, "·") {
 		t.Errorf("label after exit still names a side: %q", got)
+	}
+}
+
+// lastStageWidth is the main-stage width in the newest slot_resize in buf.
+func lastStageWidth(t *testing.T, buf *bytes.Buffer) int {
+	t.Helper()
+	width := -1
+	for _, line := range strings.Split(buf.String(), "\n") {
+		if line == "" {
+			continue
+		}
+		var env huskipc.Envelope
+		if err := json.Unmarshal([]byte(line), &env); err != nil {
+			t.Fatalf("bad line %q: %v", line, err)
+		}
+		if env.Type == "slot_resize" {
+			width = env.SlotResize.SlotSizes[huskipc.SlotMainStage].Width
+		}
+	}
+	return width
+}
+
+func sidePlugin(w io.Writer) *ConnectedPlugin {
+	return &ConnectedPlugin{
+		Info: huskipc.HelloPayload{PluginID: "p.side", Name: "p.side", Version: "0.1.0", Language: "go",
+			Slots: []huskipc.SlotID{huskipc.SlotSidebarList, huskipc.SlotSidePanel}},
+		Writer: huskipc.NewConnWriter(w),
+	}
+}
+
+func TestStagePluginGetsSlotResizeWhenSideColumnsComeAndGo(t *testing.T) {
+	m := goldenModel()
+	var stageBuf bytes.Buffer
+	m.Update(pluginRegisteredMsg{&ConnectedPlugin{
+		Info: huskipc.HelloPayload{PluginID: "p.stage", Name: "p.stage", Version: "0.1.0", Language: "go",
+			Slots: []huskipc.SlotID{huskipc.SlotMainStage}},
+		Writer: huskipc.NewConnWriter(&stageBuf),
+	}})
+	wide := m.slotRects[huskipc.SlotMainStage].InnerW
+
+	side := sidePlugin(io.Discard)
+	m.Update(pluginRegisteredMsg{side})
+	narrow := m.slotRects[huskipc.SlotMainStage].InnerW
+	if narrow >= wide {
+		t.Fatalf("stage did not narrow: %d >= %d", narrow, wide)
+	}
+	if got := lastStageWidth(t, &stageBuf); got != narrow {
+		t.Errorf("after side connect the stage plugin was told %d, want %d", got, narrow)
+	}
+
+	m.Update(pluginDisconnectedMsg{plugin: side})
+	if got := lastStageWidth(t, &stageBuf); got != wide {
+		t.Errorf("after side exit the stage plugin was told %d, want %d", got, wide)
+	}
+}
+
+func TestVanishingSideCancelsDragMovesFocusAndDisablesResizeKeys(t *testing.T) {
+	m := goldenModel()
+	side := sidePlugin(io.Discard)
+	m.Update(pluginRegisteredMsg{side})
+	m.activeDrag, m.hoverDivider = "sidepanel-width", "sidepanel-width"
+	m.focusedSlot = huskipc.SlotSidePanel
+	m.Update(pluginDisconnectedMsg{plugin: side})
+	if m.activeDrag != "" || m.hoverDivider != "" {
+		t.Errorf("drag %q / hover %q survived its column", m.activeDrag, m.hoverDivider)
+	}
+	if m.focusedSlot != huskipc.SlotMainStage {
+		t.Errorf("focus stayed on vanished %q", m.focusedSlot)
+	}
+
+	w := m.sidebarWidth
+	m.Update(tea.KeyPressMsg{Code: '>', Text: ">"})
+	m.Update(tea.KeyPressMsg{Code: '<', Text: "<"})
+	if m.sidebarWidth != w {
+		t.Errorf("resize keys changed sidebar width %d -> %d with no sidebar", w, m.sidebarWidth)
 	}
 }

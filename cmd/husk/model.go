@@ -516,6 +516,10 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Modifiers:       m.modifiers,
 			},
 		})
+		// A side column can appear with this plugin: send the plugins that
+		// were already connected their new sizes; the newcomer's welcome
+		// already carries them.
+		m.broadcastSlotResizeExcept(cp.Info.PluginID)
 		// Every slot the plugin owns, not just those in its hello: manifest
 		// declarations may have gathered contributions before it connected.
 		m.deliverPublications(m.registry.ownedSlotDeliveries(cp.Info.PluginID))
