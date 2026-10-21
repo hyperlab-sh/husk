@@ -1,0 +1,10 @@
+{
+  "id": "bash.project-git",
+  "name": "Project Git Stage",
+  "version": "0.1.0",
+  "language": "Bash",
+  "description": "Lazygit-style git stage for the workspace context cwd",
+  "command": ["./plugin.sh"],
+  "transport": "stdio",
+  "slots": ["workspace-stage"]
+}

@@ -18,8 +18,26 @@ import (
 	"github.com/muesli/termenv"
 
 	"github.com/hyperlab-sh/husk/pkg/huskipc"
+	"github.com/hyperlab-sh/husk/pkg/manifest"
 	"github.com/hyperlab-sh/husk/pkg/theme"
 )
+
+// stringFlag is a repeatable string flag.
+type stringFlag []string
+
+func (m *stringFlag) String() string { return strings.Join(*m, ",") }
+
+func (m *stringFlag) Set(v string) error {
+	*m = append(*m, v)
+	return nil
+}
+
+// repeatable registers a repeatable string flag and returns its pointer.
+func repeatable(name, usage string) *stringFlag {
+	f := &stringFlag{}
+	flag.Var(f, name, usage)
+	return f
+}
 
 type ConnectedPlugin struct {
 	Info       huskipc.HelloPayload
@@ -107,7 +125,7 @@ type WorkbenchModel struct {
 
 const activityRailWidth = 5
 
-func newWorkbenchModel(socketPath string, listener net.Listener) *WorkbenchModel {
+func newWorkbenchModel(socketPath string, listener net.Listener, cwd string) *WorkbenchModel {
 	return &WorkbenchModel{
 		socketPath:   socketPath,
 		listener:     listener,
@@ -116,7 +134,7 @@ func newWorkbenchModel(socketPath string, listener net.Listener) *WorkbenchModel
 		slotUpdates:  make(map[huskipc.SlotID]*huskipc.SlotUpdatePayload),
 		slotOwners:   make(map[huskipc.SlotID]string),
 		slotRects:    make(map[huskipc.SlotID]SlotRect),
-		wsContext:    huskipc.WorkspaceContextPayload{WorkspaceID: "w1R", WorkspaceLabel: "Dolphin", Cwd: "/work/lab/herdr/herdr"},
+		wsContext:    huskipc.WorkspaceContextPayload{WorkspaceID: "demo", WorkspaceLabel: "Demo", Cwd: cwd},
 		width:        144,
 		height:       40,
 		palette:      theme.Default(),
@@ -167,8 +185,8 @@ func (m *WorkbenchModel) handleStream(r io.Reader, w io.Writer, closer io.Closer
 	})
 }
 
-func (m *WorkbenchModel) spawnSocketPlugin(binPath string) error {
-	cmd := exec.Command(binPath)
+func (m *WorkbenchModel) spawnSocketCommand(argv []string) error {
+	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Env = append(os.Environ(), "HUSK_SOCKET_PATH="+m.socketPath)
 	if err := cmd.Start(); err != nil {
 		return err
@@ -177,8 +195,8 @@ func (m *WorkbenchModel) spawnSocketPlugin(binPath string) error {
 	return nil
 }
 
-func (m *WorkbenchModel) spawnStdioPlugin(scriptPath string) error {
-	cmd := exec.Command(scriptPath)
+func (m *WorkbenchModel) spawnStdioCommand(argv []string) error {
+	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Env = append(os.Environ(), "HUSK_SOCKET_PATH="+m.socketPath)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -1527,7 +1545,7 @@ func (m *WorkbenchModel) renderTopWorkbenchBar() string {
 		Foreground(lipgloss.Color(m.palette.Success)).
 		Background(lipgloss.Color(m.palette.SurfaceElevated)).
 		Padding(0, 1).
-		Render(fmt.Sprintf("● %d plugins (1 Go · 3 Bash)", len(m.plugins)))
+		Render(fmt.Sprintf("● %d plugins", len(m.plugins)))
 
 	railHint := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(m.palette.Info)).
@@ -1605,7 +1623,7 @@ func (m *WorkbenchModel) renderBottomKeybindBar() string {
 		hint("F3/ctrl+g", " canvas"),
 		hint("F4/ctrl+e", " stage"),
 		hint("j/k", "nav"),
-		hint("⏎", "herdr focus"),
+		hint("⏎", "focus"),
 		hint("drag/= ", "resize"),
 		hint("[ ] /", "docks"),
 		hint("ctrl+p", "palette"),
@@ -1940,25 +1958,14 @@ func fitLineWidth(s string, width int) string {
 	return s
 }
 
-func resolveBaseDir() string {
-	exe, err := os.Executable()
-	if err == nil {
-		dir := filepath.Dir(exe)
-		if filepath.Base(dir) == "bin" {
-			return filepath.Dir(dir)
-		}
-	}
-	cwd, _ := os.Getwd()
-	return cwd
-}
-
 func main() {
 	lipgloss.SetColorProfile(termenv.TrueColor)
 
 	dumpFrame := flag.Bool("dump-frame", false, "Render one live frame after plugin sync and exit")
 	railMode := flag.String("rail", "", "Activate rail mode on startup: modal | full-canvas | stage")
 	holdAlt := flag.Bool("hold-alt", false, "Simulate holding Alt/Option key on startup")
-	pluginBin := flag.String("plugin", "", "Path to herdr-sidebar binary")
+	pluginPaths := repeatable("plugin", "Plugin: executable, plugin directory, or husk-plugin.json path (repeatable)")
+	pluginDirs := repeatable("plugin-dir", "Load every immediate subdirectory containing a husk-plugin.json (repeatable)")
 	flag.Parse()
 
 	sockPath := filepath.Join(os.TempDir(), fmt.Sprintf("husk-%d.sock", os.Getpid()))
@@ -1969,7 +1976,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	model := newWorkbenchModel(sockPath, listener)
+	cwd, _ := os.Getwd()
+	model := newWorkbenchModel(sockPath, listener, cwd)
 	if *holdAlt {
 		model.altLatched = true
 		model.modifiers.Alt = true
@@ -1977,30 +1985,43 @@ func main() {
 	model.startAcceptLoop()
 	defer model.cleanup()
 
-	baseDir := resolveBaseDir()
-	targetPlugin := *pluginBin
-	if targetPlugin == "" {
-		candidate := filepath.Join(baseDir, "bin", "herdr-sidebar")
-		if _, err := os.Stat(candidate); err == nil {
-			targetPlugin = candidate
+	var manifestPlugins []*manifest.Plugin
+	loadPlugin := func(p *manifest.Plugin) {
+		manifestPlugins = append(manifestPlugins, p)
+	}
+	for _, path := range *pluginPaths {
+		p, err := manifest.Load(path)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "husk: %v\n", err)
+			os.Exit(1)
+		}
+		loadPlugin(p)
+	}
+	for _, dir := range *pluginDirs {
+		ps, err := manifest.LoadDir(dir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "husk: --plugin-dir %s: %v\n", dir, err)
+			os.Exit(1)
+		}
+		for _, p := range ps {
+			loadPlugin(p)
+		}
+	}
+
+	for _, p := range manifestPlugins {
+		argv := p.ResolvedCommand()
+		var err error
+		if p.Transport == manifest.TransportStdio {
+			err = model.spawnStdioCommand(argv)
 		} else {
-			targetPlugin = "./bin/herdr-sidebar"
+			err = model.spawnSocketCommand(argv)
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "husk: failed to launch plugin %s: %v\n", p.ID, err)
 		}
 	}
 
-	_ = model.spawnSocketPlugin(targetPlugin)
-
-	bashPlugins := []string{
-		filepath.Join(baseDir, "plugins", "tv-search", "plugin.sh"),
-		filepath.Join(baseDir, "plugins", "fleet-dashboard", "plugin.sh"),
-		filepath.Join(baseDir, "plugins", "project-git", "plugin.sh"),
-	}
-	for _, script := range bashPlugins {
-		if _, err := os.Stat(script); err == nil {
-			_ = model.spawnStdioPlugin(script)
-		}
-	}
-
+	launched := len(manifestPlugins)
 	if *dumpFrame {
 		deadline := time.Now().Add(3000 * time.Millisecond)
 		railTriggered := *railMode == ""
@@ -2008,7 +2029,7 @@ func main() {
 			select {
 			case msg := <-model.subChan:
 				model.Update(msg)
-				if !railTriggered && len(model.plugins) >= 4 {
+				if !railTriggered && launched > 0 && len(model.plugins) >= launched {
 					railTriggered = true
 					switch *railMode {
 					case "modal":
@@ -2019,7 +2040,7 @@ func main() {
 						model.executeCommand("gitstage.open")
 					}
 				}
-				ready := len(model.slotUpdates) >= 5 && len(model.plugins) >= 4
+				ready := len(model.plugins) >= launched && len(model.slotUpdates) >= min(launched, 1)
 				if *railMode == "modal" && model.slotUpdates[huskipc.SlotModalSurface] == nil {
 					ready = false
 				}

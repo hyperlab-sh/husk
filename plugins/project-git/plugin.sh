@@ -4,10 +4,10 @@ set -u
 PID=$$
 WIDTH=92
 HEIGHT=34
-CURRENT_CWD="/work/lab/herdr/herdr"
-CURRENT_WS_ID="w1R"
-CURRENT_WS_LABEL="Dolphin"
-CURRENT_REPO="herdr"
+CURRENT_CWD="$PWD"
+CURRENT_WS_ID="demo"
+CURRENT_WS_LABEL="Demo"
+CURRENT_REPO=""
 SUBTAB="status" # "status", "log", "worktrees"
 
 C_RESET=$'\033[0m'
@@ -61,14 +61,11 @@ send_hello() {
 render_stage() {
   local target_dir="$CURRENT_CWD"
   if [[ ! -d "$target_dir" ]]; then
-    target_dir="/work/lab/herdr/herdr"
+    target_dir="$PWD"
   fi
 
   local git_root=""
   git_root=$(cd "$target_dir" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null || true)
-  if [[ -z "$git_root" && -d "/work/lab/herdr/herdr" ]]; then
-    git_root="/work/lab/herdr/herdr"
-  fi
 
   local branch="detached"
   local head_sha="n/a"
@@ -158,9 +155,9 @@ while IFS= read -r line; do
   msg_type=$(printf '%s' "$line" | jq -r '.type // empty' 2>/dev/null || true)
   case "$msg_type" in
     welcome)
-      CURRENT_CWD=$(printf '%s' "$line" | jq -r '.welcome.context.cwd // "/work/lab/herdr/herdr"')
-      CURRENT_WS_ID=$(printf '%s' "$line" | jq -r '.welcome.context.workspace_id // "w1R"')
-      CURRENT_WS_LABEL=$(printf '%s' "$line" | jq -r '.welcome.context.workspace_label // "Dolphin"')
+      CURRENT_CWD=$(printf '%s' "$line" | jq -r '.welcome.context.cwd // $PWD')
+      CURRENT_WS_ID=$(printf '%s' "$line" | jq -r '.welcome.context.workspace_id // "demo"')
+      CURRENT_WS_LABEL=$(printf '%s' "$line" | jq -r '.welcome.context.workspace_label // "Demo"')
       ALT_HELD=$(printf '%s' "$line" | jq -r '.welcome.modifiers.alt // false')
       ;;
     key_state)
@@ -168,9 +165,9 @@ while IFS= read -r line; do
       render_stage
       ;;
     workspace_context)
-      CURRENT_CWD=$(printf '%s' "$line" | jq -r '.workspace_context.cwd // "/work/lab/herdr/herdr"')
-      CURRENT_WS_ID=$(printf '%s' "$line" | jq -r '.workspace_context.workspace_id // "w1R"')
-      CURRENT_WS_LABEL=$(printf '%s' "$line" | jq -r '.workspace_context.workspace_label // "Dolphin"')
+      CURRENT_CWD=$(printf '%s' "$line" | jq -r '.workspace_context.cwd // $PWD')
+      CURRENT_WS_ID=$(printf '%s' "$line" | jq -r '.workspace_context.workspace_id // "demo"')
+      CURRENT_WS_LABEL=$(printf '%s' "$line" | jq -r '.workspace_context.workspace_label // "Demo"')
       CURRENT_REPO=$(printf '%s' "$line" | jq -r '.workspace_context.repo_name // ""')
       render_stage
       ;;
