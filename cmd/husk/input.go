@@ -67,9 +67,9 @@ func (m *WorkbenchModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.syncModifierTransitions(next)
 	}
 
-	phase := "down"
+	phase := huskipc.KeyPhaseDown
 	if _, already := m.heldKeys[key]; already || msg.IsRepeat {
-		phase = "repeat"
+		phase = huskipc.KeyPhaseRepeat
 	}
 	m.heldKeys[key] = time.Now()
 	m.broadcastKeyState(phase, key, true)
@@ -130,7 +130,7 @@ func (m *WorkbenchModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			_ = cp.Writer.Send(huskipc.Envelope{
 				Type: "slot_key",
 				SlotKey: &huskipc.SlotKeyPayload{
-					Slot: string(huskipc.SlotModalSurface),
+					Slot: huskipc.SlotModalSurface,
 					Key:  key,
 				},
 			})
@@ -245,7 +245,7 @@ func (m *WorkbenchModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		_ = cp.Writer.Send(huskipc.Envelope{
 			Type: "slot_key",
 			SlotKey: &huskipc.SlotKeyPayload{
-				Slot: string(targetSlot),
+				Slot: targetSlot,
 				Key:  key,
 			},
 		})

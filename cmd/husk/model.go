@@ -293,7 +293,7 @@ func (m *WorkbenchModel) handleBlur() {
 	m.syncModifierTransitions(huskipc.ModifierState{Alt: m.altLatched})
 	for k := range m.heldKeys {
 		delete(m.heldKeys, k)
-		m.broadcastKeyState("up", k, false)
+		m.broadcastKeyState(huskipc.KeyPhaseUp, k, false)
 	}
 }
 
@@ -322,7 +322,7 @@ func (m *WorkbenchModel) currentHeldKeys() []string {
 	return out
 }
 
-func (m *WorkbenchModel) broadcastKeyState(phase, key string, held bool) {
+func (m *WorkbenchModel) broadcastKeyState(phase huskipc.KeyPhase, key string, held bool) {
 	payload := &huskipc.KeyStatePayload{
 		Phase:     phase,
 		Key:       key,
@@ -344,30 +344,30 @@ func (m *WorkbenchModel) syncModifierTransitions(next huskipc.ModifierState) {
 	m.modifiers = next
 
 	if prev.Alt != next.Alt {
-		phase := "up"
+		phase := huskipc.KeyPhaseUp
 		if next.Alt {
-			phase = "down"
+			phase = huskipc.KeyPhaseDown
 		}
 		m.broadcastKeyState(phase, "alt", next.Alt)
 	}
 	if prev.Ctrl != next.Ctrl {
-		phase := "up"
+		phase := huskipc.KeyPhaseUp
 		if next.Ctrl {
-			phase = "down"
+			phase = huskipc.KeyPhaseDown
 		}
 		m.broadcastKeyState(phase, "ctrl", next.Ctrl)
 	}
 	if prev.Shift != next.Shift {
-		phase := "up"
+		phase := huskipc.KeyPhaseUp
 		if next.Shift {
-			phase = "down"
+			phase = huskipc.KeyPhaseDown
 		}
 		m.broadcastKeyState(phase, "shift", next.Shift)
 	}
 	if prev.Super != next.Super {
-		phase := "up"
+		phase := huskipc.KeyPhaseUp
 		if next.Super {
-			phase = "down"
+			phase = huskipc.KeyPhaseDown
 		}
 		m.broadcastKeyState(phase, "super", next.Super)
 	}
@@ -500,7 +500,7 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for k, ts := range m.heldKeys {
 			if now.Sub(ts) > 320*time.Millisecond {
 				delete(m.heldKeys, k)
-				m.broadcastKeyState("up", k, false)
+				m.broadcastKeyState(huskipc.KeyPhaseUp, k, false)
 			}
 		}
 		if !polled && len(m.heldKeys) == 0 {
@@ -612,7 +612,7 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		key := legacyKeyString(msg)
 		if _, held := m.heldKeys[key]; held {
 			delete(m.heldKeys, key)
-			m.broadcastKeyState("up", key, false)
+			m.broadcastKeyState(huskipc.KeyPhaseUp, key, false)
 		}
 		return m, nil
 	}

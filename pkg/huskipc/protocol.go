@@ -272,8 +272,18 @@ type ModifierState struct {
 	Super bool `json:"super"`
 }
 
+// KeyPhase is the transition a key_state message reports.
+type KeyPhase string
+
+const (
+	KeyPhaseDown   KeyPhase = "down"   // Key went down
+	KeyPhaseUp     KeyPhase = "up"     // Key was released (or its hold expired)
+	KeyPhaseRepeat KeyPhase = "repeat" // Key is held and auto-repeating
+	KeyPhaseSync   KeyPhase = "sync"   // Modifier snapshot resynchronised from the OS
+)
+
 type KeyStatePayload struct {
-	Phase     string        `json:"phase"`               // "down" | "up" | "repeat" | "sync"
+	Phase     KeyPhase      `json:"phase"`               // see KeyPhase
 	Key       string        `json:"key"`                 // "alt", "ctrl", "shift", "super", or key identifier
 	Held      bool          `json:"held"`                // Best effort for non-modifier keys: true until a release or the 320ms expiry
 	Modifiers ModifierState `json:"modifiers"`           // Authoritative snapshot of all currently held modifiers
@@ -311,7 +321,7 @@ type SlotResizePayload struct {
 }
 
 type SlotKeyPayload struct {
-	Slot      string        `json:"slot"`
+	Slot      SlotID        `json:"slot"`
 	Key       string        `json:"key"`
 	Modifiers ModifierState `json:"modifiers"`
 }

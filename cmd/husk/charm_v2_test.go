@@ -46,7 +46,7 @@ func TestCharmV2KeyWireSpellings(t *testing.T) {
 			var keys []string
 			for _, msg := range envelopes(t, out) {
 				if msg.SlotKey != nil {
-					if msg.SlotKey.Slot != string(huskipc.SlotSidebarList) {
+					if msg.SlotKey.Slot != huskipc.SlotSidebarList {
 						t.Fatal("key routed to the wrong surface")
 					}
 					keys = append(keys, msg.SlotKey.Key)
@@ -124,7 +124,7 @@ func TestCharmV2KeyRepeatState(t *testing.T) {
 	var phases []string
 	for _, msg := range envelopes(t, out) {
 		if msg.KeyState != nil {
-			phases = append(phases, msg.KeyState.Phase)
+			phases = append(phases, string(msg.KeyState.Phase))
 		}
 	}
 	if strings.Join(phases, ",") != "down,repeat" {
@@ -176,7 +176,7 @@ func TestCharmV2ModalKeyRouting(t *testing.T) {
 			keys = append(keys, msg.SlotKey)
 		}
 	}
-	if len(keys) != 1 || keys[0].Slot != string(huskipc.SlotModalSurface) || keys[0].Key != " " {
+	if len(keys) != 1 || keys[0].Slot != huskipc.SlotModalSurface || keys[0].Key != " " {
 		t.Fatalf("modal key routing = %+v", keys)
 	}
 	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
