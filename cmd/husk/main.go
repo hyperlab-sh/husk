@@ -12,10 +12,9 @@ import (
 	"sync"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/muesli/termenv"
 
 	"github.com/hyperlab-sh/husk/pkg/frame"
 	"github.com/hyperlab-sh/husk/pkg/huskipc"
@@ -478,8 +477,21 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		return m.handleMouse(msg)
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return m.handleKey(msg)
+
+	case tea.PasteMsg:
+		// v1 delivered bracketed paste as a key whose string was wrapped in
+		// brackets, preventing pasted text from triggering host shortcuts.
+		return m.handleKey(tea.KeyPressMsg{Code: tea.KeyExtended, Text: "[" + msg.Content + "]"})
+
+	case tea.KeyReleaseMsg:
+		key := legacyKeyString(msg)
+		if _, held := m.heldKeys[key]; held {
+			delete(m.heldKeys, key)
+			m.broadcastKeyState("up", key, false)
+		}
+		return m, nil
 	}
 
 	return m, nil
@@ -578,17 +590,27 @@ func (m *WorkbenchModel) activateRailItem(ri huskipc.RailItemSpec) {
 	}
 }
 
-func (m *WorkbenchModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+// legacyKeyString keeps the plugin protocol's v1 space spelling even though
+// Bubble Tea v2 names that key "space". Shortcuts retain their other spellings.
+func legacyKeyString(msg tea.KeyMsg) string {
 	key := msg.String()
+	if key == "space" || key == "alt+space" {
+		return strings.TrimSuffix(key, "space") + " "
+	}
+	return key
+}
 
-	if msg.Alt && !m.modifiers.Alt {
+func (m *WorkbenchModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	key := legacyKeyString(msg)
+
+	if msg.Mod.Contains(tea.ModAlt) && !m.modifiers.Alt {
 		next := m.modifiers
 		next.Alt = true
 		m.syncModifierTransitions(next)
 	}
 
 	phase := "down"
-	if _, already := m.heldKeys[key]; already {
+	if _, already := m.heldKeys[key]; already || msg.IsRepeat {
 		phase = "repeat"
 	}
 	m.heldKeys[key] = time.Now()
@@ -860,12 +882,13 @@ func (m *WorkbenchModel) applyDragAt(x, y int) bool {
 	return changed
 }
 
-func (m *WorkbenchModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+func (m *WorkbenchModel) handleMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.showPalette {
 		return m, nil
 	}
+	msg := event.Mouse()
 
-	if msg.Action == tea.MouseActionRelease {
+	if _, release := event.(tea.MouseReleaseMsg); release {
 		if m.activeDrag != "" {
 			m.activeDrag = ""
 			m.hoverDivider = m.detectDividerAt(msg.X, msg.Y)
@@ -873,7 +896,7 @@ func (m *WorkbenchModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	if msg.Action == tea.MouseActionMotion {
+	if _, motion := event.(tea.MouseMotionMsg); motion {
 		if m.activeDrag != "" {
 			if m.applyDragAt(msg.X, msg.Y) {
 				m.recomputeLayout()
@@ -886,9 +909,11 @@ func (m *WorkbenchModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	isWheelDown := msg.Button == tea.MouseButtonWheelDown
-	isWheelUp := msg.Button == tea.MouseButtonWheelUp
-	isLeftClick := msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft
+	_, wheel := event.(tea.MouseWheelMsg)
+	_, click := event.(tea.MouseClickMsg)
+	isWheelDown := wheel && msg.Button == tea.MouseWheelDown
+	isWheelUp := wheel && msg.Button == tea.MouseWheelUp
+	isLeftClick := click && msg.Button == tea.MouseLeft
 
 	if !isWheelDown && !isWheelUp && !isLeftClick {
 		return m, nil
@@ -1525,7 +1550,7 @@ func (m *WorkbenchModel) broadcastSlotResize() {
 	}
 }
 
-func (m *WorkbenchModel) View() string {
+func (m *WorkbenchModel) View() tea.View {
 	topBar := m.renderTopWorkbenchBar()
 	bottomBar := m.renderBottomKeybindBar()
 
@@ -1577,7 +1602,10 @@ func (m *WorkbenchModel) View() string {
 	if m.showPalette {
 		baseView = m.overlayCommandPalette(baseView)
 	}
-	return baseView
+	view := tea.NewView(baseView)
+	view.AltScreen = true
+	view.MouseMode = tea.MouseModeAllMotion
+	return view
 }
 
 func (m *WorkbenchModel) renderActivityRailBox() string {
@@ -2253,8 +2281,6 @@ func (m *WorkbenchModel) setupDemoFrame(railMode string) {
 }
 
 func main() {
-	lipgloss.SetColorProfile(termenv.TrueColor)
-
 	dumpFrame := flag.Bool("dump-frame", false, "Render one live frame after plugin sync and exit")
 	demoFrame := flag.Bool("demo-frame", false, "Render one frame from a built-in demo plugin that declares a border+label+close frame and exit")
 	railMode := flag.String("rail", "", "Activate rail mode on startup: modal | full-canvas | stage")
@@ -2272,7 +2298,7 @@ func main() {
 		model := newWorkbenchModel("", nil, cwd)
 		model.recomputeLayout()
 		model.seedPubslotsDemo()
-		fmt.Println(model.View())
+		fmt.Println(model.View().Content)
 		return
 	}
 
@@ -2295,7 +2321,7 @@ func main() {
 	if *demoFrame {
 		model.demoFrame = true
 		model.setupDemoFrame(*railMode)
-		fmt.Println(model.View())
+		fmt.Println(model.View().Content)
 		return
 	}
 
@@ -2369,17 +2395,17 @@ func main() {
 					for len(model.subChan) > 0 {
 						model.Update(<-model.subChan)
 					}
-					fmt.Println(model.View())
+					fmt.Println(model.View().Content)
 					return
 				}
 			case <-time.After(50 * time.Millisecond):
 			}
 		}
-		fmt.Println(model.View())
+		fmt.Println(model.View().Content)
 		return
 	}
 
-	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseAllMotion())
+	p := tea.NewProgram(model)
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "husk error: %v\n", err)
 		os.Exit(1)
