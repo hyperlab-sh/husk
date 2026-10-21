@@ -71,27 +71,70 @@ func TestSlotBackgroundClampsAtExtremes(t *testing.T) {
 }
 
 func TestSlotBackgroundInvalidInputPassesThrough(t *testing.T) {
-	for _, in := range []string{"", "63", "#12", "#GGGGGG", "red"} {
+	// alpha, palette indices, garbage and the empty string are rejected
+	// explicitly: the caller gets its input back, meaning "no panel"
+	for _, in := range []string{"", "63", "#12", "#GGGGGG", "red", "#201F26FF", "#201F2", "201F26"} {
 		if got := SlotBackground(in); got != in {
 			t.Errorf("SlotBackground(%q) = %q, want unchanged", in, got)
 		}
 	}
 }
 
-func TestSlotBackgroundIsDeterministicAndUpperHex(t *testing.T) {
-	a, b := SlotBackground("#201f26"), SlotBackground("#201F26")
-	if a != b {
-		t.Fatalf("case-sensitive: %s vs %s", a, b)
+func TestSlotBackgroundShortHexMatchesLongForm(t *testing.T) {
+	for short, long := range map[string]string{"#fff": "#ffffff", "#000": "#000000", "#1AB": "#11aabb"} {
+		if a, b := SlotBackground(short), SlotBackground(long); a != b || a == short {
+			t.Errorf("SlotBackground(%q) = %q, long form gives %q", short, a, b)
+		}
 	}
 }
 
-func TestIsDark(t *testing.T) {
-	for in, want := range map[string]bool{
-		"#000000": true, "#201F26": true, "#FFFFFF": false, "#EFF1F5": false, "": true, "nope": true,
+// Pinned values: a Lab-math change that stays within the bounds tests still
+// has to move these on purpose. Output is lower-case #rrggbb and case of the
+// input does not matter.
+func TestSlotBackgroundPinnedValues(t *testing.T) {
+	for in, want := range map[string]string{
+		"#201F26": "#27262d", "#201f26": "#27262d",
+		"#1A1B26": "#21222d",
+		"#FFFFFF": "#f5f5f5",
+		"#EFF1F5": "#e5e7eb",
 	} {
-		if got := IsDark(in); got != want {
-			t.Errorf("IsDark(%q) = %v, want %v", in, got, want)
+		if got := SlotBackground(in); got != want {
+			t.Errorf("SlotBackground(%s) = %s, want %s", in, got, want)
 		}
+	}
+}
+
+// The panel ladder the chrome relies on: pills (Elevated), hover rows and
+// selections must stay visibly distinct from the slot they sit on, and from
+// each other where they overlap.
+func TestSurfaceLadderSeparation(t *testing.T) {
+	p := Default()
+	const minStep = 1.08
+	for _, c := range []struct{ name, a, b string }{
+		{"Canvas/Slot", p.Canvas, p.Slot},
+		{"Slot/Elevated", p.Slot, p.SurfaceElevated},
+		{"Slot/Hover", p.Slot, p.SurfaceHover},
+		{"Elevated/Selected", p.SurfaceElevated, p.SurfaceSelected},
+		{"Slot/Selected", p.Slot, p.SurfaceSelected},
+	} {
+		if got := contrast(t, c.a, c.b); got < minStep {
+			t.Errorf("%s (%s vs %s) = %.3f:1, want at least %.2f:1", c.name, c.a, c.b, got, minStep)
+		}
+	}
+	if !(relLuminance(t, p.Slot) < relLuminance(t, p.SurfaceElevated)) {
+		t.Error("Elevated must be lighter than the slot on the dark palette")
+	}
+}
+
+// A dark canvas gets a lighter slot and a light canvas a darker one, whichever
+// way the palette goes.
+func TestSlotDirectionFollowsCanvas(t *testing.T) {
+	if d := Default(); relLuminance(t, d.Slot) <= relLuminance(t, d.Canvas) {
+		t.Errorf("dark canvas %s: slot %s is not lighter", d.Canvas, d.Slot)
+	}
+	light := "#F5F5F7"
+	if relLuminance(t, SlotBackground(light)) >= relLuminance(t, light) {
+		t.Errorf("light canvas %s: slot %s is not darker", light, SlotBackground(light))
 	}
 }
 
