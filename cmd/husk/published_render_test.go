@@ -137,7 +137,7 @@ func TestPublishedUnanchoredLinesKeepLegacyTruncation(t *testing.T) {
 }
 
 func TestPublishedDemoFrame(t *testing.T) {
-	m := newWorkbenchModel("", nil)
+	m := newWorkbenchModel("", nil, t.TempDir())
 	m.recomputeLayout()
 	m.seedPubslotsDemo()
 	frame := ansi.Strip(m.View())
