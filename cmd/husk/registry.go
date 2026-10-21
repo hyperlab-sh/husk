@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/hyperlab-sh/husk/pkg/huskipc"
+	"github.com/hyperlab-sh/husk/pkg/manifest"
 )
 
 // The registry is confined to Bubble Tea's update loop. Transport goroutines
@@ -15,6 +16,9 @@ type publishedSlot struct {
 	Owner         string
 	Spec          huskipc.SlotDeclarePayload
 	Contributions []huskipc.SlotContribution
+	// FromManifest marks a slot registered from the owner's husk-plugin.json
+	// before it connected. Its hello may repeat the declaration.
+	FromManifest bool
 }
 
 const (
@@ -42,6 +46,9 @@ type namedPublication struct {
 	Title       string
 	Description string
 	Subscribers []string // registration order, with duplicate subscriptions ignored
+	// FromManifest marks a hook or event registered from the owner's
+	// husk-plugin.json before it connected.
+	FromManifest bool
 }
 
 type pendingHook struct {
@@ -104,7 +111,10 @@ func ownID(plugin, id string) error {
 	return nil
 }
 
-func (r *publicationRegistry) validateSlot(plugin string, s huskipc.SlotDeclarePayload) error {
+// validateSlot checks a slot declaration. holds reports whether plugin holds a
+// host surface: the live occupancy for a runtime declaration, the manifest's
+// slots for a declaration made before the plugin connects.
+func (r *publicationRegistry) validateSlot(plugin string, s huskipc.SlotDeclarePayload, holds func(huskipc.SlotID) bool) error {
 	if err := ownID(plugin, s.ID); err != nil {
 		return err
 	}
@@ -121,7 +131,7 @@ func (r *publicationRegistry) validateSlot(plugin string, s huskipc.SlotDeclareP
 		if s.Rect == nil || s.Rect.X < 0 || s.Rect.Y < 0 || s.Rect.Width <= 0 || s.Rect.Height <= 0 {
 			return fmt.Errorf("region requires a positive rect with a surface")
 		}
-		if r.Occupants[s.Rect.Surface] != plugin {
+		if !holds(s.Rect.Surface) {
 			return fmt.Errorf("region surface %q is not held by %s", s.Rect.Surface, plugin)
 		}
 	}
@@ -129,14 +139,105 @@ func (r *publicationRegistry) validateSlot(plugin string, s huskipc.SlotDeclareP
 }
 
 func (r *publicationRegistry) declareSlot(plugin string, s huskipc.SlotDeclarePayload) error {
-	if err := r.validateSlot(plugin, s); err != nil {
+	holds := func(surface huskipc.SlotID) bool { return r.Occupants[surface] == plugin }
+	if err := r.validateSlot(plugin, s, holds); err != nil {
 		return err
 	}
+	r.insertSlot(plugin, s)
+	return nil
+}
+
+// insertSlot stores an already validated declaration, copying its rect.
+func (r *publicationRegistry) insertSlot(plugin string, s huskipc.SlotDeclarePayload) {
 	if s.Rect != nil {
 		rect := *s.Rect
 		s.Rect = &rect
 	}
 	r.Slots[s.ID] = &publishedSlot{Owner: plugin, Spec: s}
+}
+
+// declareFromManifest registers the declarations of a husk-plugin.json under
+// the plugin's id, before the plugin connects, with the validation a runtime
+// declaration gets. Region surfaces are checked against the manifest's slots,
+// since the plugin has not claimed them yet. It is atomic: on error nothing
+// from this manifest stays registered.
+func (r *publicationRegistry) declareFromManifest(p *manifest.Plugin) (err error) {
+	var slotIDs, hookIDs, eventIDs []string
+	defer func() {
+		if err == nil {
+			return
+		}
+		for _, id := range slotIDs {
+			delete(r.Slots, id)
+		}
+		for _, id := range hookIDs {
+			delete(r.Hooks, id)
+		}
+		for _, id := range eventIDs {
+			delete(r.Events, id)
+		}
+	}()
+	declared := make(map[huskipc.SlotID]bool, len(p.Slots))
+	for _, s := range p.Slots {
+		declared[huskipc.SlotID(s)] = true
+	}
+	holds := func(surface huskipc.SlotID) bool {
+		return declared[surface] && r.Slots["husk."+string(surface)] != nil
+	}
+	for _, s := range p.PublishedSlots {
+		if err = r.validateSlot(p.ID, s, holds); err != nil {
+			return fmt.Errorf("published_slots: %w", err)
+		}
+		r.insertSlot(p.ID, s)
+		slotIDs = append(slotIDs, s.ID)
+		r.Slots[s.ID].FromManifest = true
+	}
+	for _, h := range p.Hooks {
+		if err = declareNamedInfo(r.Hooks, p.ID, h.ID, h.Title, h.Description); err != nil {
+			return fmt.Errorf("hooks: %w", err)
+		}
+		hookIDs = append(hookIDs, h.ID)
+		r.Hooks[h.ID].FromManifest = true
+	}
+	for _, e := range p.Events {
+		if err = declareNamedInfo(r.Events, p.ID, e.ID, e.Title, e.Description); err != nil {
+			return fmt.Errorf("events: %w", err)
+		}
+		eventIDs = append(eventIDs, e.ID)
+		r.Events[e.ID].FromManifest = true
+	}
+	return nil
+}
+
+// declareSlotFromHello declares a slot from hello. A slot the plugin's
+// manifest already registered is accepted when the hello repeats it: fields the
+// hello leaves empty defer to the manifest, fields it sets must match. Any other
+// existing slot is an error, as for slot_declare.
+func (r *publicationRegistry) declareSlotFromHello(plugin string, s huskipc.SlotDeclarePayload) error {
+	existing := r.Slots[s.ID]
+	if existing == nil || !existing.FromManifest || existing.Owner != plugin {
+		return r.declareSlot(plugin, s)
+	}
+	m := existing.Spec
+	switch {
+	case s.Title != "" && s.Title != m.Title,
+		s.Description != "" && s.Description != m.Description,
+		s.Kind != "" && s.Kind != m.Kind,
+		s.Rect != nil && (m.Rect == nil || *s.Rect != *m.Rect):
+		return fmt.Errorf("slot %q conflicts with its manifest declaration", s.ID)
+	}
+	return nil
+}
+
+// declareNamedFromHello is declareSlotFromHello for hooks and events.
+func declareNamedFromHello(publications map[string]*namedPublication, plugin, id, title, description string) error {
+	existing := publications[id]
+	if existing == nil || !existing.FromManifest || existing.Owner != plugin {
+		return declareNamedInfo(publications, plugin, id, title, description)
+	}
+	if (title != "" && title != existing.Title) || (description != "" && description != existing.Description) {
+		return fmt.Errorf("id %q conflicts with its manifest declaration", id)
+	}
 	return nil
 }
 

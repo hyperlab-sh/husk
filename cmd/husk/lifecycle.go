@@ -75,11 +75,14 @@ func (m *WorkbenchModel) launchPlugin(p *manifest.Plugin) error {
 	var err error
 	if _, dup := m.manifests[p.ID]; dup {
 		err = fmt.Errorf("duplicate plugin id %q: another plugin with this id is already loaded", p.ID)
+	} else if err = m.registry.declareFromManifest(p); err != nil {
+		err = fmt.Errorf("invalid declaration in %s: %w", manifest.FileName, err)
 	} else {
 		m.manifests[p.ID] = p
 		err = m.spawnPlugin(p.ID, transport, p.WorkDir(), p.ResolvedCommand())
 		if err != nil {
 			delete(m.manifests, p.ID)
+			m.registry.removePlugin(p.ID)
 		}
 	}
 	if err != nil {

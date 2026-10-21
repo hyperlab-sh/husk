@@ -306,7 +306,44 @@ subscribers only. `hello.hooks` and `hello.events` contain the same objects as
 `hook_declare` and `event_declare`; `hello.published_slots` contains
 `slot_declare` objects. These optional fields do not change legacy messages.
 Declarations are immutable until disconnect; subscriptions require the publisher
-to be connected first. On stream EOF, Husk removes the plugin's declarations,
+to be connected first.
+
+### Declaring in the manifest
+
+A plugin can declare the same extension points in its `husk-plugin.json`, with
+`published_slots`, `hooks` and `events` arrays whose entries have the same shapes
+as the `hello` fields (and so as `slot_declare`, `hook_declare` and
+`event_declare`):
+
+```json
+{
+  "id": "a", "name": "A", "version": "1", "command": ["./a"], "slots": ["main-stage"],
+  "published_slots": [{"id":"a.agent-line-action","title":"Row actions","kind":"inline"}],
+  "hooks": [{"id":"a.before-refresh","title":"Before refresh"}],
+  "events": [{"id":"a.selection-changed"}]
+}
+```
+
+Husk registers them under the manifest `id` when it launches the plugin, before
+the plugin connects, so they are discoverable (and show in `describe`) from the
+start. They get the same validation as runtime declarations (the
+`<plugin-id>.<name>` namespace, slot `kind`, a positive `rect`); a region's
+`rect.surface` must be one of the manifest's own `slots`, since the plugin has
+not claimed it yet. A manifest with an invalid declaration is not launched: Husk
+logs `failed to launch plugin <id>: invalid declaration in husk-plugin.json: ...`
+and registers nothing from it.
+
+When the plugin's `hello` arrives it may repeat any manifest declaration. Fields
+the `hello` leaves empty defer to the manifest; a field it sets must equal the
+manifest's, otherwise the `hello` is rejected with `protocol_error`
+(`message_type` `hello`, `... conflicts with its manifest declaration`). A
+`hello` may also declare extra slots, hooks and events the manifest does not
+list, and a `hello` that omits them keeps the manifest's. A later `slot_declare`,
+`hook_declare` or `event_declare` for a manifest-declared id is a duplicate. The
+declarations are removed when the plugin disconnects, like any other. The
+manifest fields are optional and additive; older manifests are unchanged.
+
+On stream EOF, Husk removes the plugin's declarations,
 subscriptions, occupied surfaces and contributions, clears stale surface content,
 and sends updated contribution snapshots to affected publishers.
 
