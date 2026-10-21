@@ -1,9 +1,12 @@
 package theme
 
+import "github.com/charmbracelet/x/exp/charmtone"
+
 // Palette is a flat colour token set shared by the workbench and its plugins.
-// All values are ANSI (0-15) or xterm-256 (16-255) colour codes so terminals
-// render Husk with their own Charm default palette. It carries only generic
-// roles; a plugin that needs application-specific colours defines its own.
+// Values are "#RRGGBB" strings taken from the CharmTone palette, so Husk looks
+// the same in every terminal that supports truecolor (lipgloss downsamples on
+// terminals that do not). It carries only generic roles; a plugin that needs
+// application-specific colours defines its own.
 type Palette struct {
 	Name            string `json:"name"`
 	Canvas          string `json:"canvas"`
@@ -26,27 +29,29 @@ type Palette struct {
 	Info            string `json:"info"`
 }
 
-// Default is Husk's single palette, built only from ANSI/256 colour codes.
+// Default is Husk's single palette. Every text and border pairing the chrome
+// draws is contrast-checked by TestDefaultPaletteContrast (text 4.5:1,
+// borders and other non-text 3:1); change a role only with that test green.
 func Default() Palette {
 	return Palette{
 		Name:            "Charm Default",
-		Canvas:          "0",
-		Surface:         "0",
-		SurfaceElevated: "236",
-		SurfaceSelected: "238",
-		SurfaceHover:    "237",
-		Border:          "241",
-		BorderSubtle:    "238",
-		BorderFocused:   "63",
-		Ink:             "15",
-		InkMuted:        "7",
-		InkSubtle:       "245",
-		Accent:          "63",
-		AccentSecondary: "205",
-		AccentSoft:      "61",
-		Success:         "10",
-		Warning:         "11",
-		Danger:          "9",
-		Info:            "14",
+		Canvas:          charmtone.Pepper.Hex(),
+		Surface:         charmtone.Pepper.Hex(),
+		SurfaceElevated: charmtone.BBQ.Hex(),
+		SurfaceSelected: charmtone.Char.Hex(),
+		SurfaceHover:    charmtone.BBQ.Hex(),
+		Border:          charmtone.Squid.Hex(),
+		BorderSubtle:    charmtone.Iron.Hex(),
+		BorderFocused:   charmtone.Hazy.Hex(),
+		Ink:             charmtone.Sash.Hex(),
+		InkMuted:        charmtone.Smoke.Hex(),
+		InkSubtle:       charmtone.Steam.Hex(),
+		Accent:          charmtone.Lilac.Hex(),
+		AccentSecondary: charmtone.Sardine.Hex(),
+		AccentSoft:      charmtone.Hazy.Hex(),
+		Success:         charmtone.Julep.Hex(),
+		Warning:         charmtone.Mustard.Hex(),
+		Danger:          charmtone.Coral.Hex(),
+		Info:            charmtone.Malibu.Hex(),
 	}
 }
