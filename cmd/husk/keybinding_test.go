@@ -99,7 +99,7 @@ func TestFormerApplicationKeysReachFocusedPlugin(t *testing.T) {
 		t.Fatalf("routing = %+v", r)
 	}
 	for i, k := range keys {
-		if r.slotKeys[i].Key != k || r.slotKeys[i].Slot != string(huskipc.SlotSidebarList) {
+		if r.slotKeys[i].Key != k || r.slotKeys[i].Slot != huskipc.SlotSidebarList {
 			t.Fatalf("key %d = %+v, want %q on sidebar-list", i, r.slotKeys[i], k)
 		}
 	}
@@ -183,7 +183,7 @@ func TestModalClosesOnOwnShortcutOnly(t *testing.T) {
 		t.Fatal("f2/ctrl+f closed a modal that does not use them")
 	}
 	r := routed(t, out)
-	if len(r.slotKeys) != 2 || r.slotKeys[0].Key != "f2" || r.slotKeys[1].Key != "ctrl+f" || r.slotKeys[0].Slot != string(huskipc.SlotModalSurface) {
+	if len(r.slotKeys) != 2 || r.slotKeys[0].Key != "f2" || r.slotKeys[1].Key != "ctrl+f" || r.slotKeys[0].Slot != huskipc.SlotModalSurface {
 		t.Fatalf("modal routing = %+v", r)
 	}
 	press(m, "ctrl+t")
@@ -301,7 +301,7 @@ func TestOtherPluginsPlainGlobalsDoNotStealFocusedStageKeys(t *testing.T) {
 	rs, rside := routed(t, stage), routed(t, side)
 	var got []string
 	for _, k := range rs.slotKeys {
-		if k.Slot != string(huskipc.SlotWorkspaceStage) {
+		if k.Slot != huskipc.SlotWorkspaceStage {
 			t.Fatalf("stage key on wrong slot: %+v", k)
 		}
 		got = append(got, k.Key)
@@ -368,7 +368,7 @@ func TestStageRoutesKeysToFocusedSurfaceOnly(t *testing.T) {
 		t.Fatalf("stage got %d keys, want %d", len(rs.slotKeys), len(keys))
 	}
 	for i, k := range keys {
-		if rs.slotKeys[i].Key != k || rs.slotKeys[i].Slot != string(huskipc.SlotWorkspaceStage) {
+		if rs.slotKeys[i].Key != k || rs.slotKeys[i].Slot != huskipc.SlotWorkspaceStage {
 			t.Fatalf("stage key %d = %+v", i, rs.slotKeys[i])
 		}
 	}
@@ -377,7 +377,7 @@ func TestStageRoutesKeysToFocusedSurfaceOnly(t *testing.T) {
 	press(m, "tab")
 	press(m, "j")
 	rs, rside = routed(t, stage), routed(t, side)
-	if len(rside.slotKeys) != 1 || rside.slotKeys[0].Key != "j" || rside.slotKeys[0].Slot != string(huskipc.SlotSidebarList) || len(rs.slotKeys) != 0 {
+	if len(rside.slotKeys) != 1 || rside.slotKeys[0].Key != "j" || rside.slotKeys[0].Slot != huskipc.SlotSidebarList || len(rs.slotKeys) != 0 {
 		t.Fatalf("after tab: side=%+v stage=%+v", rside.slotKeys, rs.slotKeys)
 	}
 }
@@ -407,7 +407,7 @@ func TestFullCanvasKeysReachRailItemPlugin(t *testing.T) {
 	resetAll(side, dash)
 	press(m, "j")
 	rd, rside := routed(t, dash), routed(t, side)
-	if len(rd.slotKeys) != 1 || rd.slotKeys[0].Slot != string(huskipc.SlotFullCanvas) || len(rside.slotKeys) != 0 {
+	if len(rd.slotKeys) != 1 || rd.slotKeys[0].Slot != huskipc.SlotFullCanvas || len(rside.slotKeys) != 0 {
 		t.Fatalf("dash=%+v side=%+v", rd.slotKeys, rside.slotKeys)
 	}
 }
