@@ -72,8 +72,16 @@ func (m *WorkbenchModel) launchPlugin(p *manifest.Plugin) error {
 	if m.manifests == nil {
 		m.manifests = make(map[string]*manifest.Plugin)
 	}
-	m.manifests[p.ID] = p
-	err := m.spawnPlugin(p.ID, transport, p.WorkDir(), p.ResolvedCommand())
+	var err error
+	if _, dup := m.manifests[p.ID]; dup {
+		err = fmt.Errorf("duplicate plugin id %q: another plugin with this id is already loaded", p.ID)
+	} else {
+		m.manifests[p.ID] = p
+		err = m.spawnPlugin(p.ID, transport, p.WorkDir(), p.ResolvedCommand())
+		if err != nil {
+			delete(m.manifests, p.ID)
+		}
+	}
 	if err != nil {
 		msg := pluginLaunchFailedMsg{id: p.ID, err: err}
 		select {

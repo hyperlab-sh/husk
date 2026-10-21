@@ -25,6 +25,9 @@ type ConnectedPlugin struct {
 	// ExpectedID is the manifest id of the process this stream belongs to,
 	// known only for stdio plugins; empty otherwise.
 	ExpectedID string
+	// PeerPID is the kernel-reported pid of a socket peer, or 0 when unknown.
+	// checkManifest maps it to the launched process the connection came from.
+	PeerPID int
 }
 
 type SlotRect struct {

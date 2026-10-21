@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"io"
 	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -24,10 +27,15 @@ func rejectedWith(t *testing.T, mf *manifest.Plugin, hello string, stdioID strin
 	var log bytes.Buffer
 	m.logOut = &log
 	m.manifests[mf.ID] = mf
+	return rejectedFrom(t, m, streamOrigin{expectID: stdioID}, hello, &log)
+}
+
+func rejectedFrom(t *testing.T, m *WorkbenchModel, origin streamOrigin, hello string, log *bytes.Buffer) (huskipc.Envelope, string, *WorkbenchModel) {
+	t.Helper()
 	host, peer := net.Pipe()
 	done := make(chan struct{})
 	go func() {
-		m.serveStreamFor(stdioID, host, host, host, nil)
+		m.serveStreamOrigin(origin, host, host, host, nil)
 		close(done)
 	}()
 	go func() { _, _ = io.WriteString(peer, hello) }()
@@ -107,5 +115,88 @@ func TestPluginWithoutManifestFileIsNotChecked(t *testing.T) {
 	go func() { _, _ = io.Copy(io.Discard, peer) }()
 	if m.plugins["slow"] == nil {
 		t.Fatal("implicit plugin was rejected")
+	}
+}
+
+// launchedAs makes m believe a live process launched from manifest mf has the
+// given pid.
+func launchedAs(t *testing.T, m *WorkbenchModel, mf *manifest.Plugin, pid int) {
+	t.Helper()
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.manifests[mf.ID] = mf
+	m.procs = append(m.procs, &pluginProcess{id: mf.ID, cmd: &exec.Cmd{Process: proc}, done: make(chan struct{})})
+}
+
+func TestSocketPeerLaunchedFromManifestCannotClaimForeignID(t *testing.T) {
+	m := newWorkbenchModel("", nil, t.TempDir())
+	var log bytes.Buffer
+	m.logOut = &log
+	launchedAs(t, m, fileManifest("acme.p", "main-stage"), os.Getpid())
+	hello := `{"type":"hello","hello":{"plugin_id":"evil","slots":["main-stage"]}}` + "\n"
+	env, _, m := rejectedFrom(t, m, streamOrigin{peerPID: os.Getpid()}, hello, &log)
+	want := `hello plugin_id "evil" does not match manifest id "acme.p"`
+	if env.ProtocolError.Message != want {
+		t.Fatalf("message = %q, want %q", env.ProtocolError.Message, want)
+	}
+	if m.plugins["evil"] != nil {
+		t.Fatal("foreign id was registered")
+	}
+}
+
+func TestSocketPeerWithUnknownPIDIsMatchedByClaimedID(t *testing.T) {
+	m := newWorkbenchModel("", nil, t.TempDir())
+	var log bytes.Buffer
+	m.logOut = &log
+	launchedAs(t, m, fileManifest("acme.p", "main-stage"), os.Getpid())
+	// A peer that is not the launched process (pid 1) and claims an id with no
+	// manifest is not bound to anything.
+	if got := m.launchedID(1); got != "" {
+		t.Fatalf("launchedID(1) = %q", got)
+	}
+	if got := m.launchedID(0); got != "" {
+		t.Fatalf("launchedID(0) = %q", got)
+	}
+	// Claiming the launched id still gets the slot check.
+	hello := `{"type":"hello","hello":{"plugin_id":"acme.p","slots":["side-panel"]}}` + "\n"
+	env, _, _ := rejectedFrom(t, m, streamOrigin{peerPID: 1}, hello, &log)
+	if !strings.Contains(env.ProtocolError.Message, "claims undeclared slots [side-panel]") {
+		t.Fatalf("message = %q", env.ProtocolError.Message)
+	}
+}
+
+func TestExitedProcessPIDDoesNotBind(t *testing.T) {
+	m := newWorkbenchModel("", nil, t.TempDir())
+	launchedAs(t, m, fileManifest("acme.p", "main-stage"), os.Getpid())
+	close(m.procs[0].done)
+	if got := m.launchedID(os.Getpid()); got != "" {
+		t.Fatalf("exited process still binds: %q", got)
+	}
+}
+
+func TestManifestWithoutSlotsRejectionHintsAtFix(t *testing.T) {
+	hello := `{"type":"hello","hello":{"plugin_id":"acme.p","slots":["main-stage"]}}` + "\n"
+	env, _, _ := rejectedWith(t, fileManifest("acme.p"), hello, "")
+	if !strings.Contains(env.ProtocolError.Message, "add them to husk-plugin.json") {
+		t.Fatalf("message = %q", env.ProtocolError.Message)
+	}
+}
+
+func TestLaunchRejectsDuplicatePluginID(t *testing.T) {
+	m, _ := lifecycleModel(t, filepath.Join(t.TempDir(), socketName), nil)
+	first := fileManifest("dup", "main-stage")
+	m.manifests["dup"] = first
+	implicit := &manifest.Plugin{ID: "dup", Name: "dup", Version: "0.0.0", Command: fakeArgv}
+	err := m.launchPlugin(implicit)
+	if err == nil || !strings.Contains(err.Error(), "duplicate plugin id") {
+		t.Fatalf("err = %v", err)
+	}
+	if m.manifests["dup"] != first {
+		t.Fatal("duplicate replaced the file manifest")
+	}
+	if len(m.procs) != 0 {
+		t.Fatal("duplicate was spawned")
 	}
 }

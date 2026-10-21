@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"net"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -65,7 +66,11 @@ func (m *WorkbenchModel) startAcceptLoop() {
 				m.post(hostNoticeMsg{title: "IPC connection rejected", message: fmt.Sprintf("rejected IPC connection: %v", err)})
 				continue
 			}
-			go m.handleStream(conn, conn, conn)
+			pid := 0
+			if uc, ok := conn.(*net.UnixConn); ok {
+				pid, _ = peerPID(uc) // unknown pid: the connection is matched by claimed id only
+			}
+			go m.serveStreamOrigin(streamOrigin{peerPID: pid}, conn, conn, conn, nil)
 		}
 	}()
 }
@@ -93,6 +98,17 @@ func (m *WorkbenchModel) serveStream(r io.Reader, w io.Writer, closer io.Closer,
 // manifest plugin expectID (empty when the stream is anonymous). A hello on
 // such a stream must carry that plugin_id.
 func (m *WorkbenchModel) serveStreamFor(expectID string, r io.Reader, w io.Writer, closer io.Closer, onHello func()) {
+	m.serveStreamOrigin(streamOrigin{expectID: expectID}, r, w, closer, onHello)
+}
+
+// streamOrigin says what the host knows about who is on the other end of a
+// stream: the manifest id for a stdio pipe, the peer pid for a socket.
+type streamOrigin struct {
+	expectID string
+	peerPID  int
+}
+
+func (m *WorkbenchModel) serveStreamOrigin(origin streamOrigin, r io.Reader, w io.Writer, closer io.Closer, onHello func()) {
 	var (
 		registered atomic.Pointer[ConnectedPlugin]
 		once       sync.Once
@@ -128,7 +144,8 @@ func (m *WorkbenchModel) serveStreamFor(expectID string, r io.Reader, w io.Write
 					Writer:     writer,
 					Closer:     closer,
 					Connected:  time.Now(),
-					ExpectedID: expectID,
+					ExpectedID: origin.expectID,
+					PeerPID:    origin.peerPID,
 				}
 				registered.Store(cp)
 				if onHello != nil {
