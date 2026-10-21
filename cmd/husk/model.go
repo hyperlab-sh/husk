@@ -614,14 +614,10 @@ func (m *WorkbenchModel) openModal(pluginID, railID string) {
 // closeModal dismisses the open modal, if any.
 func (m *WorkbenchModel) closeModal() { m.modal = modalState{} }
 
-// surfaceOwner is the plugin that owns slot right now. The modal surface is
-// owned by the open modal's plugin; every other surface by its registry
-// occupant ("" when the host draws it).
+// surfaceOwner is the plugin that holds slot's claim: the registry occupant
+// ("" when the host draws it). Write authorisation, published-content cleanup
+// and rendering all resolve through the claim, including for the modal surface;
+// modalOwner only says which modal is open and which rail item opened it.
 func (m *WorkbenchModel) surfaceOwner(slot huskipc.SlotID) string {
-	if slot == huskipc.SlotModalSurface {
-		if mo := m.modalOwner(); mo.Open() {
-			return mo.PluginID
-		}
-	}
 	return m.registry.Occupants[slot]
 }

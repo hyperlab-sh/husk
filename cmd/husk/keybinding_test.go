@@ -187,7 +187,7 @@ func TestModalClosesOnOwnShortcutOnly(t *testing.T) {
 		t.Fatalf("modal routing = %+v", r)
 	}
 	press(m, "ctrl+t")
-	if m.modalOwner().Open() || m.modalOwner().Open() {
+	if m.modalOwner().Open() {
 		t.Fatal("modal shortcut did not close the modal")
 	}
 }
