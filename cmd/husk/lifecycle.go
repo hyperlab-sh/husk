@@ -51,10 +51,13 @@ type pluginProcess struct {
 // running.
 type pluginExitedMsg struct {
 	id          string
-	status      string   // "exit status 7", "signal: killed", or a Wait error
-	beforeHello bool     // known only for stdio, where stream and process match
-	logPath     string   // stderr log file
-	stderrTail  []string // last non-empty stderr lines, ANSI stripped
+	status      string // "exit status 7", "signal: killed", or a Wait error
+	beforeHello bool   // known only for stdio, where stream and process match
+	// handedOff is set for a socket plugin that exited successfully: it may
+	// be a launcher that started the real plugin, which can still connect.
+	handedOff  bool
+	logPath    string   // stderr log file
+	stderrTail []string // last non-empty stderr lines, ANSI stripped
 }
 
 // pluginLaunchFailedMsg reports a plugin whose process could not be started.
@@ -182,6 +185,7 @@ func (m *WorkbenchModel) spawnPlugin(id, transport, dir string, argv []string) e
 			id:          id,
 			status:      exitStatus(cmd, werr),
 			beforeHello: transport == manifest.TransportStdio && !proc.helloSeen.Load(),
+			handedOff:   transport == manifest.TransportSocket && cmd.ProcessState != nil && cmd.ProcessState.Success(),
 			logPath:     logPath,
 			stderrTail:  tailLines(logPath, stderrTailLines),
 		})
@@ -285,10 +289,17 @@ func (m *WorkbenchModel) handleLifecycleMsg(msg tea.Msg) tea.Cmd {
 		m.logf("plugin %s exited%s (%s); stderr log: %s", msg.id, when, msg.status, msg.logPath)
 		if m.plugins[msg.id] == nil {
 			// Exited without a registered connection (before hello, or
-			// never connected): drop the declarations its manifest
-			// registered at launch. The manifest itself stays, so a late
+			// never connected). A socket launcher that exited 0 may have
+			// started the real plugin, which connects later: keep the
+			// declarations its manifest registered at launch. A failed
+			// exit, or a stdio stream (which ended with its process),
+			// drops them. The manifest itself stays either way, so a late
 			// hello is still checked against it.
-			m.deliverPublications(m.registry.removePlugin(msg.id))
+			if msg.handedOff {
+				m.logf("plugin %s exited cleanly before connecting; keeping its manifest declarations for a plugin it started", msg.id)
+			} else {
+				m.deliverPublications(m.registry.removePlugin(msg.id))
+			}
 		}
 		for _, line := range msg.stderrTail {
 			m.logf("plugin %s stderr: %s", msg.id, line)
