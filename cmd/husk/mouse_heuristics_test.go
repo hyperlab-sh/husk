@@ -87,7 +87,7 @@ func TestPaletteAcceptsUnicodeQuery(t *testing.T) {
 }
 
 func TestPaletteIgnoresNamedKeysAndChords(t *testing.T) {
-	for _, key := range []string{"", "up", "f5", "alt+x", "ctrl+a", "home", "\x1b", "\t"} {
+	for _, key := range []string{"", "up", "f5", "alt+x", "ctrl+a", "home", "\x1b", "\t", "alt+é", "alt+ö", "ctrl+日", "meta+ß", "super+🙂", "shift+é"} {
 		if isPaletteText(key) {
 			t.Errorf("isPaletteText(%q) = true, want false", key)
 		}
@@ -99,10 +99,41 @@ func TestPaletteIgnoresNamedKeysAndChords(t *testing.T) {
 	}
 }
 
+func TestPaletteRejectsNonASCIIChords(t *testing.T) {
+	for _, msg := range []tea.KeyPressMsg{
+		{Code: 'ö', Text: "ö", Mod: tea.ModAlt},
+		{Code: 'é', Mod: tea.ModAlt},
+		{Code: '日', Mod: tea.ModCtrl},
+		{Code: 'ö', Text: "ö", Mod: tea.ModSuper},
+	} {
+		m := newWorkbenchModel("", nil, t.TempDir())
+		m.showPalette = true
+		m.paletteQuery = "x"
+		m.Update(msg)
+		if m.paletteQuery != "x" {
+			t.Errorf("%+v changed palette query to %q", msg, m.paletteQuery)
+		}
+	}
+	// Shift alone is still text.
+	m := newWorkbenchModel("", nil, t.TempDir())
+	m.showPalette = true
+	m.Update(tea.KeyPressMsg{Code: 'ö', ShiftedCode: 'Ö', Text: "Ö", Mod: tea.ModShift})
+	if m.paletteQuery != "Ö" {
+		t.Errorf("shifted unicode query = %q, want Ö", m.paletteQuery)
+	}
+}
+
 func TestPaletteUnicodeFilterMatches(t *testing.T) {
 	m := newWorkbenchModel("", nil, t.TempDir())
+	// Positive: a registered title contains non-ASCII text.
+	for _, q := range []string{"🏠", "⓪"} {
+		m.paletteQuery = q
+		if got := m.filteredCommands(); len(got) == 0 {
+			t.Errorf("unicode query %q matched no commands, want at least one", q)
+		}
+	}
 	m.paletteQuery = "ÉÉÉ-no-such-command"
 	if got := m.filteredCommands(); len(got) != 0 {
-		t.Fatalf("unicode query matched %d commands, want 0", len(got))
+		t.Fatalf("unmatched unicode query matched %d commands, want 0", len(got))
 	}
 }
