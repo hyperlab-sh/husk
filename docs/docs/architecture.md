@@ -7,6 +7,8 @@ description: "Slots, plugins and the IPC protocol."
 
 ## Process model
 
+The Go host uses Bubble Tea v2 (`charm.land/bubbletea/v2`) for its event loop and Lip Gloss v2 (`charm.land/lipgloss/v2`) for styling. Views declare alternate-screen and mouse tracking settings; typed key and mouse events are translated to the existing JSON input messages. This library migration does not change the plugin wire protocol or palette roles.
+
 Husk is the host. Plugins are separate processes that Husk spawns and supervises. Husk and a plugin exchange newline-delimited JSON over a Unix socket or stdio. The protocol is the only contract between them, so a plugin can be written in any language.
 
 ## Slots

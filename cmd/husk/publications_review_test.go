@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/hyperlab-sh/husk/pkg/frame"
 	"github.com/hyperlab-sh/husk/pkg/huskipc"
@@ -72,7 +72,7 @@ func TestReviewParentChildContributionOwnership(t *testing.T) {
 	child.Reset()
 	parent.Reset()
 	r := m.slotRects[huskipc.SlotMainStage]
-	m.Update(tea.MouseMsg{X: r.InnerX + 1, Y: r.InnerY + 1, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	m.Update(tea.MouseClickMsg{X: r.InnerX + 1, Y: r.InnerY + 1, Button: tea.MouseLeft})
 	found := false
 	for _, msg := range envelopes(t, child) {
 		if msg.CommandInvoke != nil && msg.CommandInvoke.CommandID == "x.y.click" {
@@ -182,7 +182,7 @@ func TestReviewPassiveContributionPreservesPublisherMouse(t *testing.T) {
 			}
 			a.Reset()
 			b.Reset()
-			m.Update(tea.MouseMsg{X: r.InnerX + 7, Y: r.InnerY + 1, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+			m.Update(tea.MouseClickMsg{X: r.InnerX + 7, Y: r.InnerY + 1, Button: tea.MouseLeft})
 			found := false
 			for _, msg := range envelopes(t, a) {
 				if mouse := msg.SlotMouse; mouse != nil {
@@ -209,7 +209,7 @@ func TestReviewModalOrdinaryRowsPreserveMouseMetadata(t *testing.T) {
 		name   string
 		button tea.MouseButton
 	}{
-		{"left", tea.MouseButtonLeft}, {"wheel_up", tea.MouseButtonWheelUp}, {"wheel_down", tea.MouseButtonWheelDown},
+		{"left", tea.MouseLeft}, {"wheel_up", tea.MouseWheelUp}, {"wheel_down", tea.MouseWheelDown},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := newWorkbenchModel("", nil, t.TempDir())
@@ -219,7 +219,12 @@ func TestReviewModalOrdinaryRowsPreserveMouseMetadata(t *testing.T) {
 			m.recomputeLayout()
 			r := m.modalRect
 			a.Reset()
-			m.Update(tea.MouseMsg{X: r.InnerX + 5, Y: r.InnerY + 2, Action: tea.MouseActionPress, Button: tc.button})
+			event := tea.Mouse{X: r.InnerX + 5, Y: r.InnerY + 2, Button: tc.button}
+			if tc.button == tea.MouseLeft {
+				m.Update(tea.MouseClickMsg(event))
+			} else {
+				m.Update(tea.MouseWheelMsg(event))
+			}
 			msgs := envelopes(t, a)
 			if len(msgs) != 1 || msgs[0].SlotMouse == nil {
 				t.Fatalf("missing ordinary modal mouse event: %+v", msgs)
@@ -251,7 +256,7 @@ func TestReviewRegionRendersBeforeSlotUpdate(t *testing.T) {
 				if m.slotUpdates[surface] != nil {
 					t.Fatal("fixture must not send slot_update")
 				}
-				if !strings.Contains(ansi.Strip(m.View()), "[Action]") {
+				if !strings.Contains(ansi.Strip(m.View().Content), "[Action]") {
 					t.Fatal("declared region invisible before first slot_update")
 				}
 				r := m.slotRects[surface]
@@ -259,7 +264,7 @@ func TestReviewRegionRendersBeforeSlotUpdate(t *testing.T) {
 					r = m.modalRect
 				}
 				b.Reset()
-				m.Update(tea.MouseMsg{X: r.InnerX + 3, Y: r.InnerY + 2, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+				m.Update(tea.MouseClickMsg{X: r.InnerX + 3, Y: r.InnerY + 2, Button: tea.MouseLeft})
 				count := 0
 				for _, msg := range envelopes(t, b) {
 					if msg.CommandInvoke != nil && msg.CommandInvoke.CommandID == "b.action" {

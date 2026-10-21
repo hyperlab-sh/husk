@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/hyperlab-sh/husk/pkg/frame"
 	"github.com/hyperlab-sh/husk/pkg/huskipc"
@@ -76,7 +76,7 @@ func TestPublishedClickRoutesToContributor(t *testing.T) {
 	a.Reset()
 	bOut.Reset()
 	rect := m.slotRects[huskipc.SlotMainStage]
-	m.Update(tea.MouseMsg{X: rect.InnerX + 7, Y: rect.InnerY, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	m.Update(tea.MouseClickMsg{X: rect.InnerX + 7, Y: rect.InnerY, Button: tea.MouseLeft})
 	msgs := envelopes(t, bOut)
 	var commands []huskipc.Envelope
 	for _, msg := range msgs {
@@ -117,7 +117,7 @@ func TestPublishedBlankFirstRowStartsDividerDrag(t *testing.T) {
 	m.Update(ipcEventMsg{pluginID: "a", env: huskipc.Envelope{Type: "slot_update", SlotUpdate: &huskipc.SlotUpdatePayload{Slot: huskipc.SlotMainStage, Lines: []string{"agent " + anchor("a.action", "one")}}}})
 	r := m.slotRects[huskipc.SlotMainStage]
 	b.Reset()
-	m.Update(tea.MouseMsg{X: r.InnerX + 20, Y: r.InnerY, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	m.Update(tea.MouseClickMsg{X: r.InnerX + 20, Y: r.InnerY, Button: tea.MouseLeft})
 	if m.activeDrag != "main-header-height" {
 		t.Fatalf("blank first-row cell did not start divider drag: %q", m.activeDrag)
 	}
@@ -164,14 +164,14 @@ func TestPublishedRegionAndModalClicks(t *testing.T) {
 				if surface == huskipc.SlotModalSurface {
 					rect = m.modalRect
 				}
-				view := ansi.Strip(m.View())
+				view := ansi.Strip(m.View().Content)
 				if !strings.Contains(view, "[Click") || !strings.Contains(view, "[Run]") {
 					t.Fatal("contributions not rendered inside frame")
 				}
 				a.Reset()
 				b.Reset()
 				for _, cell := range [][2]int{{3, 1}, {6, 3}} {
-					m.Update(tea.MouseMsg{X: rect.InnerX + cell[0], Y: rect.InnerY + cell[1], Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+					m.Update(tea.MouseClickMsg{X: rect.InnerX + cell[0], Y: rect.InnerY + cell[1], Button: tea.MouseLeft})
 				}
 				var commands []*huskipc.CommandInvokePayload
 				for _, msg := range envelopes(t, b) {
@@ -189,7 +189,7 @@ func TestPublishedRegionAndModalClicks(t *testing.T) {
 				}
 				b.Reset()
 				if tc.spec.Border {
-					m.Update(tea.MouseMsg{X: rect.X, Y: rect.Y + 2, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+					m.Update(tea.MouseClickMsg{X: rect.X, Y: rect.Y + 2, Button: tea.MouseLeft})
 					for _, msg := range envelopes(t, b) {
 						if msg.CommandInvoke != nil {
 							t.Fatal("frame border triggered a contribution")
@@ -201,7 +201,7 @@ func TestPublishedRegionAndModalClicks(t *testing.T) {
 					if tc.spec.Border {
 						x--
 					}
-					m.Update(tea.MouseMsg{X: x, Y: rect.Y, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+					m.Update(tea.MouseClickMsg{X: x, Y: rect.Y, Button: tea.MouseLeft})
 					if m.activeModalPlugin != "" || m.activeModalRailID != "" {
 						t.Fatal("contribution routing swallowed frame close")
 					}
