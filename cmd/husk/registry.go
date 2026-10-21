@@ -1,8 +1,10 @@
 package main
 
 import (
+	"cmp"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -374,7 +376,7 @@ func (r *publicationRegistry) expireHooks(now time.Time) []registryDelivery {
 			ids = append(ids, id)
 		}
 	}
-	sort.Strings(ids)
+	slices.Sort(ids)
 	var out []registryDelivery
 	for _, id := range ids {
 		p := r.Pending[id]
@@ -397,7 +399,7 @@ func describe(publications map[string]*namedPublication) []PublicationInfo {
 	for id, p := range publications {
 		out = append(out, PublicationInfo{id, p.Owner, p.Title, p.Description})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	slices.SortFunc(out, func(a, b PublicationInfo) int { return cmp.Compare(a.ID, b.ID) })
 	return out
 }
 
@@ -442,7 +444,7 @@ func (r *publicationRegistry) ownedSlotDeliveries(plugin string) []registryDeliv
 			ids = append(ids, id)
 		}
 	}
-	sort.Strings(ids)
+	slices.Sort(ids)
 	out := make([]registryDelivery, 0, len(ids))
 	for _, id := range ids {
 		out = append(out, r.slotDelivery(id))
@@ -483,12 +485,7 @@ func (r *publicationRegistry) removePlugin(plugin string) []registryDelivery {
 			delete(r.Occupants, slot)
 		}
 	}
-	ids := make([]string, 0, len(r.Slots))
-	for id := range r.Slots {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	for _, id := range ids {
+	for _, id := range slices.Sorted(maps.Keys(r.Slots)) {
 		s := r.Slots[id]
 		if s.Owner == plugin {
 			delete(r.Slots, id)
@@ -520,12 +517,7 @@ func (r *publicationRegistry) removePlugin(plugin string) []registryDelivery {
 			p.Subscribers = kept
 		}
 	}
-	ids = ids[:0]
-	for id := range r.Pending {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	for _, id := range ids {
+	for _, id := range slices.Sorted(maps.Keys(r.Pending)) {
 		p := r.Pending[id]
 		if p.Caller == plugin {
 			delete(r.Pending, id)

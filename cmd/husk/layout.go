@@ -1,8 +1,9 @@
 package main
 
 import (
+	"cmp"
 	"fmt"
-	"sort"
+	"slices"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -223,12 +224,8 @@ func (m *WorkbenchModel) hitOrder() []slotHit {
 	for id, r := range m.slotRects {
 		hits = append(hits, slotHit{ID: id, Rect: r})
 	}
-	sort.Slice(hits, func(i, j int) bool {
-		zi, zj := slotZ(hits[i].ID), slotZ(hits[j].ID)
-		if zi != zj {
-			return zi > zj
-		}
-		return hits[i].ID < hits[j].ID
+	slices.SortFunc(hits, func(a, b slotHit) int {
+		return cmp.Or(cmp.Compare(slotZ(b.ID), slotZ(a.ID)), cmp.Compare(a.ID, b.ID))
 	})
 	return hits
 }

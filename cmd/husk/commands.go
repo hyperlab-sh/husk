@@ -2,7 +2,8 @@ package main
 
 import (
 	"image"
-	"sort"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -101,7 +102,7 @@ func (m *WorkbenchModel) detectRailHoverAt(x, y int) int {
 // the order they connected, items in the order each plugin declared them. Husk
 // has no preferred application order.
 func (m *WorkbenchModel) orderedRailItems() []huskipc.RailItemSpec {
-	return append([]huskipc.RailItemSpec(nil), m.railItems...)
+	return slices.Clone(m.railItems)
 }
 
 // firstRailItemWithPlacement returns the first registered rail item that opens
@@ -300,12 +301,7 @@ func (m *WorkbenchModel) sendCommandInvoke(cp *ConnectedPlugin, cmdID string) {
 }
 
 func (m *WorkbenchModel) sortedPluginIDs() []string {
-	ids := make([]string, 0, len(m.plugins))
-	for id := range m.plugins {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	return ids
+	return slices.Sorted(maps.Keys(m.plugins))
 }
 
 // isHostCommand reports whether cmdID is handled by the host itself: a
