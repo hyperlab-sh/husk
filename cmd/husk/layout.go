@@ -3,8 +3,8 @@ package main
 import (
 	"fmt"
 	"sort"
-	"strings"
 
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/hyperlab-sh/husk/pkg/frame"
 	"github.com/hyperlab-sh/husk/pkg/huskipc"
@@ -66,16 +66,7 @@ func (m *WorkbenchModel) renderTooSmall() string {
 		}
 	}
 	msg = ansi.Truncate(msg, w, "")
-	pad := (w - ansi.StringWidth(msg)) / 2
-	line := strings.Repeat(" ", pad) + msg
-	line += strings.Repeat(" ", w-ansi.StringWidth(line))
-	blank := strings.Repeat(" ", w)
-	lines := make([]string, h)
-	for i := range lines {
-		lines[i] = blank
-	}
-	lines[(h-1)/2] = line
-	return strings.Join(lines, "\n")
+	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, msg)
 }
 
 func (m *WorkbenchModel) recomputeLayout() {
