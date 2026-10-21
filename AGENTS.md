@@ -38,6 +38,8 @@ Registry, published-slot rendering/routing and protocol compatibility tests live
 | `pkg/theme/` | Styling (being moved to Charm defaults) |
 | `plugins/` | Out-of-process plugins, each a directory with a `husk-plugin.json` and its code; currently `project-git` (stage, Bash `plugin.sh` mock UI). The module path is `github.com/hyperlab-sh/husk`; `pkg/huskipc` and `pkg/theme` are imported externally, so keep them stable |
 
+`View` is pure: it reads the model and never writes it (`TestViewIsPure` deep-compares a rendered model with an unrendered twin). Derived UI such as the architecture explorer is built locally in the render function, never stored in `slotUpdates`; state changes belong in `Update`. String splicing (`spliceOverlay`, the region compositor in `published_render.go`) closes open SGR state at every fragment boundary with `closeSGR` (`sgr.go`), because `ansi.Cut` keeps every escape of the line, including those past the cut. Slot content is clipped to the inner rect, never wrapped or scrolled (`surfaceContentLines`).
+
 Minimum terminal size is 84x24 (`minTermWidth`/`minTermHeight` in `layout.go`): below it `View` renders `renderTooSmall`, a frame that exactly fills the real terminal; `m.width`/`m.height` hold the real size and are never clamped.
 
 IPC messages: `hello`/`welcome`, `slot_update`, `slot_resize`, `slot_key`, `slot_mouse`, `key_state`, `workspace_context`, `command_invoke`, toasts. Plugin placements: `modal`, `full-canvas`, `stage`.
