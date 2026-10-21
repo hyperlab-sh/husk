@@ -86,6 +86,9 @@ func TestDumpFrameWaitsForEveryLaunchedPlugin(t *testing.T) {
 	if !strings.Contains(plain, "FROM-ALPHA") {
 		t.Fatalf("frame lacks FROM-ALPHA:\n%s", plain)
 	}
+	if !strings.Contains(plain, "FROM-BETA") {
+		t.Fatalf("frame lacks FROM-BETA:\n%s", plain)
+	}
 }
 
 func TestDumpFrameNoPluginsReturnsImmediately(t *testing.T) {
@@ -179,5 +182,56 @@ func TestDumpFrameLateUpdateInsideQuietWindowIsIncluded(t *testing.T) {
 	plain := ansi.Strip(frame)
 	if !strings.Contains(plain, "LIVE-DATA") || strings.Contains(plain, "FIRST-PAINT") {
 		t.Fatalf("frame must show the refined content only:\n%s", plain)
+	}
+}
+
+func TestDumpFrameStreamingPluginSettlesBeforeDeadline(t *testing.T) {
+	m := dumpModel()
+	feed(m,
+		registerMsg("alpha", []huskipc.SlotID{huskipc.SlotMainStage}),
+		slotMsg("alpha", huskipc.SlotMainStage, "STREAM-0"),
+	)
+	// A plugin that never goes quiet: an update every quiet/2, like the real
+	// Rust plugin's live data. The quiet window alone would never elapse.
+	quiet := 100 * time.Millisecond
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		tick := time.NewTicker(quiet / 2)
+		defer tick.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-tick.C:
+				select {
+				case m.subChan <- slotMsg("alpha", huskipc.SlotMainStage, "STREAM-N"):
+				case <-done:
+					return
+				}
+			}
+		}
+	}()
+	start := time.Now()
+	frame, err := runDumpFrame(m, dumpFrameOptions{
+		Launched: 1, Quiet: quiet, MaxSettle: 400 * time.Millisecond, Timeout: 10 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("runDumpFrame: %v", err)
+	}
+	if d := time.Since(start); d > 3*time.Second {
+		t.Fatalf("streaming run took %s; the settle cap must end it well before the deadline", d)
+	}
+	if !strings.Contains(ansi.Strip(frame), "STREAM-") {
+		t.Fatalf("frame lacks streamed content:\n%s", ansi.Strip(frame))
+	}
+}
+
+func TestDumpFramePanicIsNotReportedAsTimeout(t *testing.T) {
+	m := dumpModel()
+	feed(m, pluginRegisteredMsg{}) // nil plugin: Update dereferences it and panics
+	_, err := runDumpFrame(m, dumpFrameOptions{Launched: 1, Timeout: 10 * time.Second})
+	if err == nil || strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("err = %v, want a panic error, not a timeout", err)
 	}
 }
