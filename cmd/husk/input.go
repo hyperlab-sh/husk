@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -108,7 +109,7 @@ func (m *WorkbenchModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		default:
-			if isPaletteText(key) {
+			if paletteTextFor(msg, key) {
 				m.paletteQuery += key
 				m.paletteCursor = 0
 			}
@@ -268,14 +269,41 @@ func (m *WorkbenchModel) keyOwner(slot huskipc.SlotID) string {
 	return ""
 }
 
+// paletteChordMods are the modifiers that turn a key into a chord. Shift and
+// Caps Lock only change the produced text, so they stay allowed.
+const paletteChordMods = tea.ModAlt | tea.ModCtrl | tea.ModMeta | tea.ModSuper | tea.ModHyper
+
+// paletteTextFor reports whether a key press is typed text for the palette
+// query. The decision comes from the event, not from its spelling: a press
+// carrying a chord modifier is never text, whatever script its base key is in
+// (Alt+o on a German layout arrives as "alt+ö"). The legacy spelling is then
+// checked for printable content.
+func paletteTextFor(msg tea.KeyPressMsg, key string) bool {
+	if msg.Key().Mod&paletteChordMods != 0 {
+		return false
+	}
+	return isPaletteText(key)
+}
+
+// chordPrefixes are the legacy modifier prefixes of a chord spelling.
+var chordPrefixes = []string{"alt+", "ctrl+", "meta+", "super+", "hyper+", "shift+"}
+
 // isPaletteText reports whether a legacy key spelling is typed text for the
 // palette query: one printable rune of any script, or a multi-rune composed
 // string containing non-ASCII text (IME output, emoji sequences). Named keys
-// and chords ("up", "f5", "alt+x", "ctrl+a") are ASCII and longer than one
-// rune, so they never match.
+// ("up", "f5") are ASCII and longer than one rune, and any spelling with a
+// modifier prefix longer than one rune ("alt+x", "alt+ö", "ctrl+日") is a
+// chord, so none of them match.
 func isPaletteText(key string) bool {
 	if key == "" {
 		return false
+	}
+	if utf8.RuneCountInString(key) > 1 {
+		for _, p := range chordPrefixes {
+			if strings.HasPrefix(key, p) {
+				return false
+			}
+		}
 	}
 	runes, nonASCII := 0, false
 	for _, r := range key {
@@ -312,6 +340,12 @@ func (m *WorkbenchModel) onBorderRing(x, y int) bool {
 // is the shared edge between two surfaces, so the cell must also be a drawn
 // border cell: an unbordered neighbour's first row or column is content and
 // stays clickable.
+//
+// The two checks are independent by design: any bordered ring cell that falls
+// inside a divider's band counts, even when the ring belongs to a different
+// bordered surface than the divider's own neighbours. This is accepted because
+// every surface sharing a divider's column or row is drawn as part of the same
+// edge, so a bordered cell there is a drawn divider cell.
 func (m *WorkbenchModel) detectDividerAt(x, y int) string {
 	if !m.onBorderRing(x, y) {
 		return ""
