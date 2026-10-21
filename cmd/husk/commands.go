@@ -2,6 +2,7 @@ package main
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -344,10 +345,27 @@ func (m *WorkbenchModel) railShortcutItem(key string) (huskipc.RailItemSpec, boo
 	return huskipc.RailItemSpec{}, false
 }
 
+// isChordKey reports whether key is a modified (ctrl+/alt+) or function key:
+// a key a surface occupant does not receive as plain typing or navigation.
+func isChordKey(key string) bool {
+	if strings.HasPrefix(key, "ctrl+") || strings.HasPrefix(key, "alt+") {
+		return true
+	}
+	if len(key) >= 2 && key[0] == 'f' {
+		if _, err := strconv.Atoi(key[1:]); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
 // keyBinding finds the plugin key binding for key given the focused surface.
 // Precedence: bindings scoped to the focused surface (when_slot), then global
 // bindings of the focused surface's owner, then global bindings of other
-// plugins. Ties resolve by plugin ID, then declaration order.
+// plugins. Ties resolve by plugin ID, then declaration order. While the
+// focused surface is occupied, other plugins' global bindings apply only to
+// chord keys (isChordKey); every other key belongs to the occupant, so an
+// unscoped single-letter binding cannot steal typing from a focused plugin.
 func (m *WorkbenchModel) keyBinding(key string, focused huskipc.SlotID) (pluginID string, kb huskipc.KeybindSpec, ok bool) {
 	ids := m.sortedPluginIDs()
 	for _, pid := range ids {
@@ -358,11 +376,15 @@ func (m *WorkbenchModel) keyBinding(key string, focused huskipc.SlotID) (pluginI
 		}
 	}
 	owner := m.keyOwner(focused)
-	if cp, found := m.plugins[owner]; found {
+	cp, occupied := m.plugins[owner]
+	if occupied {
 		for _, b := range cp.Info.Keybindings {
 			if b.Key == key && b.WhenSlot == "" {
 				return owner, b, true
 			}
+		}
+		if !isChordKey(key) {
+			return "", huskipc.KeybindSpec{}, false
 		}
 	}
 	for _, pid := range ids {

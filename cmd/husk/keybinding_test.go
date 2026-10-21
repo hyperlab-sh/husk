@@ -211,8 +211,9 @@ func TestKeybindingInvokesDeclaringPlugin(t *testing.T) {
 	}
 }
 
-// when_slot limits a binding to its surface's focus; a global binding from
-// another plugin still fires regardless of focus.
+// when_slot limits a binding to its surface's focus. A global binding from a
+// plugin that does not own the focused surface fires only for chord keys
+// (ctrl+/alt+/function keys) while that surface is occupied.
 func TestKeybindingWhenSlotAndPrecedence(t *testing.T) {
 	m := newWorkbenchModel("", nil, t.TempDir())
 	_, a := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "a", Slots: []huskipc.SlotID{huskipc.SlotSidebarList},
@@ -222,20 +223,22 @@ func TestKeybindingWhenSlotAndPrecedence(t *testing.T) {
 			{Key: "r", CommandID: "b.refresh", WhenSlot: huskipc.SlotMainStage},
 			{Key: "g", CommandID: "b.global"},
 			{Key: "s", CommandID: "b.scoped-sidebar", WhenSlot: huskipc.SlotSidebarList},
-			{Key: "w", CommandID: "b.anywhere"},
+			{Key: "w", CommandID: "b.plain"},
+			{Key: "ctrl+w", CommandID: "b.anywhere"},
 		}})
 	_, c := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "c",
-		Keybindings: []huskipc.KeybindSpec{{Key: "s", CommandID: "c.global"}}})
+		Keybindings: []huskipc.KeybindSpec{{Key: "s", CommandID: "c.global"}, {Key: "ctrl+e", CommandID: "c.chord"}}})
 	m.recomputeLayout()
 	resetAll(a, b, c)
 
 	// Focus sidebar-list (owned by a).
-	press(m, "r") // b's binding is scoped to main-stage: plain key to a
-	press(m, "g") // a owns the focused surface: a's global wins over b's
-	press(m, "s") // b's binding scoped to sidebar-list beats c's global
-	press(m, "w") // b's global binding fires although a has focus
+	press(m, "r")      // b's binding is scoped to main-stage: plain key to a
+	press(m, "g")      // a owns the focused surface: a's global wins over b's
+	press(m, "s")      // b's binding scoped to sidebar-list beats c's global
+	press(m, "w")      // b's plain global does not steal a's typing
+	press(m, "ctrl+w") // b's chord global fires although a has focus
 	ra, rb, rc := routed(t, a), routed(t, b), routed(t, c)
-	if len(ra.slotKeys) != 1 || ra.slotKeys[0].Key != "r" || strings.Join(ra.invokes, ",") != "a.global" {
+	if len(ra.slotKeys) != 2 || ra.slotKeys[0].Key != "r" || ra.slotKeys[1].Key != "w" || strings.Join(ra.invokes, ",") != "a.global" {
 		t.Fatalf("a = %+v", ra)
 	}
 	if strings.Join(rb.invokes, ",") != "b.scoped-sidebar,b.anywhere" || len(rb.slotKeys) != 0 {
@@ -250,13 +253,64 @@ func TestKeybindingWhenSlotAndPrecedence(t *testing.T) {
 	m.focusedSlot = huskipc.SlotMainStage
 	press(m, "r")
 	press(m, "g")
-	press(m, "s") // b's binding is scoped to sidebar-list now: c's global
+	press(m, "s")      // b's binding is scoped to sidebar-list: plain key to b
+	press(m, "ctrl+e") // c's chord global still fires
 	ra, rb, rc = routed(t, a), routed(t, b), routed(t, c)
 	if strings.Join(rb.invokes, ",") != "b.refresh,b.global" || len(ra.invokes)+len(ra.slotKeys) != 0 {
 		t.Fatalf("main-stage focus: a=%+v b=%+v", ra, rb)
 	}
-	if strings.Join(rc.invokes, ",") != "c.global" {
+	if len(rb.slotKeys) != 1 || rb.slotKeys[0].Key != "s" {
+		t.Fatalf("main-stage focus: b slot keys = %+v, want s", rb.slotKeys)
+	}
+	if strings.Join(rc.invokes, ",") != "c.chord" {
 		t.Fatalf("c = %+v", rc)
+	}
+
+	// An unoccupied focused surface lets any plugin's global binding fire.
+	resetAll(a, b, c)
+	m.focusedSlot = huskipc.SlotSidePanel
+	press(m, "s")
+	if rc = routed(t, c); strings.Join(rc.invokes, ",") != "c.global" {
+		t.Fatalf("unoccupied focus: c = %+v", rc)
+	}
+}
+
+// A sidebar plugin's unscoped single-letter bindings must not steal keys from
+// a focused stage plugin: the stage plugin gets them as slot_key.
+func TestOtherPluginsPlainGlobalsDoNotStealFocusedStageKeys(t *testing.T) {
+	m := newWorkbenchModel("", nil, t.TempDir())
+	_, side := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "side", Slots: []huskipc.SlotID{huskipc.SlotSidebarList},
+		Keybindings: []huskipc.KeybindSpec{
+			{Key: "r", CommandID: "side.refresh"},
+			{Key: "n", CommandID: "side.new"},
+			{Key: "1", CommandID: "side.one"},
+			{Key: "f5", CommandID: "side.f5"},
+		}})
+	_, stage := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "st",
+		RailItems: []huskipc.RailItemSpec{{ID: "st.open", Label: "Stage", Placement: huskipc.PlacementStage}}})
+	m.recomputeLayout()
+	m.executeCommand("st.open")
+	if m.focusedSlot != huskipc.SlotWorkspaceStage {
+		t.Fatalf("focus = %s, want workspace-stage", m.focusedSlot)
+	}
+	resetAll(side, stage)
+	press(m, "r")
+	press(m, "n")
+	press(m, "1")
+	m.Update(tea.KeyPressMsg{Code: tea.KeyF5})
+	rs, rside := routed(t, stage), routed(t, side)
+	var got []string
+	for _, k := range rs.slotKeys {
+		if k.Slot != string(huskipc.SlotWorkspaceStage) {
+			t.Fatalf("stage key on wrong slot: %+v", k)
+		}
+		got = append(got, k.Key)
+	}
+	if strings.Join(got, ",") != "r,n,1" || len(rs.invokes) != 0 {
+		t.Fatalf("stage = %+v", rs)
+	}
+	if strings.Join(rside.invokes, ",") != "side.f5" || len(rside.slotKeys) != 0 {
+		t.Fatalf("side = %+v, want only the f5 chord binding", rside)
 	}
 }
 
