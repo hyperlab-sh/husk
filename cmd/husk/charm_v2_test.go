@@ -166,7 +166,7 @@ func TestCharmV2DockAndPaletteKeys(t *testing.T) {
 func TestCharmV2ModalKeyRouting(t *testing.T) {
 	m := newWorkbenchModel("", nil, t.TempDir())
 	_, out := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "p", Slots: []huskipc.SlotID{huskipc.SlotModalSurface}})
-	m.activeModalPlugin, m.activeModalRailID = "p", "modal"
+	m.openModal("p", "modal")
 	m.recomputeLayout()
 	out.Reset()
 	m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
@@ -180,7 +180,7 @@ func TestCharmV2ModalKeyRouting(t *testing.T) {
 		t.Fatalf("modal key routing = %+v", keys)
 	}
 	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-	if m.activeModalPlugin != "" || m.activeModalRailID != "" {
+	if m.modalOwner().Open() {
 		t.Fatal("escape did not close modal")
 	}
 }
@@ -188,7 +188,7 @@ func TestCharmV2ModalKeyRouting(t *testing.T) {
 func TestCharmV2MouseResizeLifecycle(t *testing.T) {
 	m := newWorkbenchModel("", nil, t.TempDir())
 	addTestPlugin(m, "p", map[huskipc.SlotID]frame.Spec{huskipc.SlotSidebarList: {Border: true}})
-	m.slotOwners[huskipc.SlotSidebarList] = "p"
+	m.registry.Occupants[huskipc.SlotSidebarList] = "p"
 	m.recomputeLayout()
 	r := m.slotRects[huskipc.SlotSidebarList]
 	x, y := r.X+r.Width-1, r.Y+2

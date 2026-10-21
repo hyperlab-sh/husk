@@ -31,8 +31,7 @@ func framedRailItem(id string, spec frame.Spec, placement huskipc.RailPlacement)
 func TestFrameForModalRailItemFrameOnly(t *testing.T) {
 	m := newWorkbenchModel("", nil, "")
 	addTestPlugin(m, "p.modal", nil, framedRailItem("r.modal", frame.Spec{Border: true, Label: "L", Close: true}, huskipc.PlacementModal))
-	m.activeModalPlugin = "p.modal"
-	m.activeModalRailID = "r.modal"
+	m.openModal("p.modal", "r.modal")
 	m.recomputeLayout()
 
 	got := m.frameFor(huskipc.SlotModalSurface)
@@ -49,8 +48,7 @@ func TestFrameForUnframedModalOverFramedCanvas(t *testing.T) {
 	addTestPlugin(m, "p.modal", nil, framedRailItem("r.modal2", frame.Spec{}, huskipc.PlacementModal))
 	m.activeRailID = "r.canvas"
 	m.activePlacement = huskipc.PlacementFullCanvas
-	m.activeModalPlugin = "p.modal"
-	m.activeModalRailID = "r.modal2"
+	m.openModal("p.modal", "r.modal2")
 	m.recomputeLayout()
 
 	if got := (m.frameFor(huskipc.SlotModalSurface)); got.Enabled() {
@@ -67,8 +65,7 @@ func TestFrameForHelloFramesPrecedence(t *testing.T) {
 	hello := frame.Spec{Border: true, Label: "from-hello"}
 	addTestPlugin(m, "p.modal", map[huskipc.SlotID]frame.Spec{huskipc.SlotModalSurface: hello},
 		framedRailItem("r.modal3", frame.Spec{Label: "from-rail"}, huskipc.PlacementModal))
-	m.activeModalPlugin = "p.modal"
-	m.activeModalRailID = "r.modal3"
+	m.openModal("p.modal", "r.modal3")
 	m.recomputeLayout()
 
 	got := m.frameFor(huskipc.SlotModalSurface)
@@ -82,8 +79,7 @@ func TestFrameForHelloFramesPrecedence(t *testing.T) {
 func TestCurrentSlotSizesModalLifecycle(t *testing.T) {
 	m := newWorkbenchModel("", nil, "")
 	addTestPlugin(m, "p.modal", nil, framedRailItem("r.framed", frame.Spec{Border: true, Close: true}, huskipc.PlacementModal))
-	m.activeModalPlugin = "p.modal"
-	m.activeModalRailID = "r.framed"
+	m.openModal("p.modal", "r.framed")
 	m.width, m.height = 120, 40
 	m.recomputeLayout()
 
@@ -109,17 +105,14 @@ func TestCurrentSlotSizesModalLifecycle(t *testing.T) {
 	}
 
 	// closed modal is absent
-	m.activeModalPlugin = ""
-	m.activeModalRailID = ""
+	m.closeModal()
 	if _, ok := m.currentSlotSizes()[huskipc.SlotModalSurface]; ok {
 		t.Fatal("closed modal still reported in slot sizes")
 	}
 
 	// an unframed modal reports the full rect
-	m.activeModalPlugin = "p.modal"
-	m.activeModalRailID = "r.plain"
 	addTestPlugin(m, "p.modal2", nil, framedRailItem("r.plain", frame.Spec{}, huskipc.PlacementModal))
-	m.activeModalPlugin = "p.modal2"
+	m.openModal("p.modal2", "r.plain")
 	m.recomputeLayout()
 	sz = m.currentSlotSizes()[huskipc.SlotModalSurface]
 	if sz.Width != m.modalRect.Width || sz.Height != m.modalRect.Height {
@@ -215,7 +208,7 @@ func TestExplorerFillsMainStageSlot(t *testing.T) {
 	t.Run("framed main stage", func(t *testing.T) {
 		m := newModel()
 		addTestPlugin(m, "p.stage", map[huskipc.SlotID]frame.Spec{huskipc.SlotMainStage: {Border: true}})
-		m.slotOwners[huskipc.SlotMainStage] = "p.stage"
+		m.registry.Occupants[huskipc.SlotMainStage] = "p.stage"
 		m.recomputeLayout()
 		check(t, m)
 	})
@@ -240,8 +233,7 @@ func TestCloseHitAtTopmostModalOnly(t *testing.T) {
 	}
 
 	// open a framed modal: its close is clickable, the canvas close is not
-	m.activeModalPlugin = "p.modal"
-	m.activeModalRailID = "r.modalx"
+	m.openModal("p.modal", "r.modalx")
 	m.recomputeLayout()
 	mrect := m.modalRect
 	mx := mrect.X + mrect.Width - 2
@@ -255,8 +247,7 @@ func TestCloseHitAtTopmostModalOnly(t *testing.T) {
 	// an unframed modal blocks fall-through entirely
 	m.railItems = m.railItems[:0]
 	addTestPlugin(m, "p.modal2", nil, framedRailItem("r.modaly", frame.Spec{}, huskipc.PlacementModal))
-	m.activeModalPlugin = "p.modal2"
-	m.activeModalRailID = "r.modaly"
+	m.openModal("p.modal2", "r.modaly")
 	m.recomputeLayout()
 	if _, ok := m.closeHitAt(cx, crect.Y); ok {
 		t.Fatal("unframed modal still lets canvas close clicks through")
