@@ -7,6 +7,8 @@ import (
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/lucasb-eyer/go-colorful"
+
+	"github.com/hyperlab-sh/husk/pkg/huskipc"
 )
 
 var (
@@ -202,27 +204,156 @@ func TestShadowNoSGRBleed(t *testing.T) {
 	}
 }
 
-func TestPopupsCastShadowInView(t *testing.T) {
-	m := goldenModel()
-	m.showPalette = true
-	rows := frameCells(m.View().Content)
-	// the palette box is drawn at x=(w-palW)/2, y=max(3,h/6); find its shadow by
-	// checking the row below the box is darker than the canvas.
-	r, g, b, _ := towardBlack(lipgloss.Color(m.palette.Canvas)).RGBA()
-	found := false
-	for _, row := range rows {
-		for _, cell := range row {
-			if cell.Style.Bg == nil {
+// shadowViewModel is a plugin-stage workbench at 144x40 with an optional modal
+// and an optional palette, and no toast.
+func shadowViewModel(modal, palette bool) *WorkbenchModel {
+	m := pureViewModel("plugin", false)
+	if modal {
+		m.plugins["p.modal"] = &ConnectedPlugin{Info: huskipc.HelloPayload{PluginID: "p.modal"}}
+		m.railItems = append(m.railItems, huskipc.RailItemSpec{ID: "r.modal", PluginID: "p.modal", Icon: "m", Label: "modal", Placement: huskipc.PlacementModal})
+		m.openModal("p.modal", "r.modal")
+		m.slotUpdates[huskipc.SlotModalSurface] = &huskipc.SlotUpdatePayload{PluginID: "p.modal", Slot: huskipc.SlotModalSurface, Lines: []string{"modal"}}
+	}
+	m.showPalette = palette
+	m.paletteQuery = "a"
+	m.recomputeLayout()
+	return m
+}
+
+func modalPopupRect(m *WorkbenchModel) uv.Rectangle {
+	r := m.modalRect
+	return uv.Rect(r.X, r.Y, r.Width, r.Height)
+}
+
+func palettePopupRect(m *WorkbenchModel) uv.Rectangle {
+	c := newCanvas(m.width, m.height)
+	defer c.release()
+	return m.drawCommandPalette(c)
+}
+
+func inShadow(popup uv.Rectangle, x, y int) bool {
+	shifted := uv.Rect(popup.Min.X+popupShadowDX, popup.Min.Y+popupShadowDY, popup.Dx(), popup.Dy())
+	return uv.Pos(x, y).In(shifted) && !uv.Pos(x, y).In(popup)
+}
+
+func bg8(cell uv.Cell) [3]int {
+	if cell.Style.Bg == nil {
+		return [3]int{-1, -1, -1}
+	}
+	r, g, b, _ := cell.Style.Bg.RGBA()
+	return [3]int{int(r >> 8), int(g >> 8), int(b >> 8)}
+}
+
+func near(got, want [3]int) bool {
+	for i := range got {
+		if d := got[i] - want[i]; d < -2 || d > 2 {
+			return false
+		}
+	}
+	return true
+}
+
+// requireShadowAt asserts, against base (the same frame without this popup's
+// shadow), that every cell of the shadow area of popup is darkened to the
+// popupShadowStrength blend, the cells of the one-cell ring just outside the
+// shadow (right of it and below it) are untouched, and probe, a cell inside
+// the popup, is not darkened.
+func requireShadowAt(t *testing.T, base, got uv.Lines, popup uv.Rectangle, probe [2]int, probeWant [3]int) {
+	t.Helper()
+	darkened := 0
+	for y := range got {
+		for x := range got[y] {
+			if y >= len(base) || x >= len(base[y]) {
 				continue
 			}
-			cr, cg, cb, _ := cell.Style.Bg.RGBA()
-			// the serialized frame is 8-bit per channel
-			if cr>>8 == r>>8 && cg>>8 == g>>8 && cb>>8 == b>>8 {
-				found = true
+			b, g := bg8(base[y][x]), bg8(got[y][x])
+			var want [3]int
+			for i := range b {
+				want[i] = int(float64(b[i])*(1-popupShadowStrength) + 0.5)
+			}
+			switch {
+			case inShadow(popup, x, y):
+				darkened++
+				if !near(g, want) {
+					t.Fatalf("shadow cell (%d,%d) bg = %v, want about %v (base %v)", x, y, g, want, b)
+				}
+				if got[y][x].Content != base[y][x].Content {
+					t.Fatalf("shadow cell (%d,%d) glyph changed: %q -> %q", x, y, base[y][x].Content, got[y][x].Content)
+				}
+			case y > popup.Min.Y && y <= popup.Max.Y+popupShadowDY && x == popup.Max.X+popupShadowDX,
+				y == popup.Max.Y+popupShadowDY && x >= popup.Min.X+popupShadowDX && x <= popup.Max.X+popupShadowDX:
+				if !near(g, b) {
+					t.Fatalf("cell (%d,%d) just outside the shadow was changed: %v -> %v", x, y, b, g)
+				}
 			}
 		}
 	}
-	if !found {
-		t.Error("no shadow cell found with the darkened canvas colour")
+	if darkened == 0 {
+		t.Fatal("no shadow cells on screen")
+	}
+	if g := bg8(got[probe[1]][probe[0]]); !near(g, probeWant) {
+		t.Fatalf("popup cell %v bg = %v, want undarkened %v", probe, g, probeWant)
+	}
+}
+
+func rgb8(m *WorkbenchModel, hex string) [3]int {
+	r, g, b, _ := lipgloss.Color(hex).RGBA()
+	return [3]int{int(r >> 8), int(g >> 8), int(b >> 8)}
+}
+
+func TestViewModalCastsShadow(t *testing.T) {
+	m := shadowViewModel(true, false)
+	base := frameCells(shadowViewModel(false, false).View().Content)
+	got := frameCells(m.View().Content)
+	popup := modalPopupRect(m)
+	r := m.modalRect
+	requireShadowAt(t, base, got, popup, [2]int{r.InnerX + 1, r.InnerY + r.InnerH - 1}, rgb8(m, m.palette.Slot))
+}
+
+func TestViewPaletteCastsShadow(t *testing.T) {
+	m := shadowViewModel(false, true)
+	base := frameCells(shadowViewModel(false, false).View().Content)
+	got := frameCells(m.View().Content)
+	popup := palettePopupRect(m)
+	requireShadowAt(t, base, got, popup, [2]int{popup.Min.X + 2, popup.Min.Y + 1}, rgb8(m, m.palette.Surface))
+}
+
+// A palette over a modal: the palette shadow darkens the modal (and the
+// modal's own shadow) beneath it, so the overlap is darkened twice.
+func TestViewPaletteOverModalStacksShadows(t *testing.T) {
+	m := shadowViewModel(true, true)
+	modalOnly := shadowViewModel(true, false)
+	base := frameCells(modalOnly.View().Content)
+	got := frameCells(m.View().Content)
+	pal := palettePopupRect(m)
+	mod := modalPopupRect(modalOnly)
+	overlap := 0
+	for y := range got {
+		for x := range got[y] {
+			if inShadow(pal, x, y) && (uv.Pos(x, y).In(mod) || inShadow(mod, x, y)) {
+				overlap++
+			}
+		}
+	}
+	if overlap == 0 {
+		t.Fatal("test setup: palette shadow does not overlap the modal shadow")
+	}
+	// the palette shadow darkens whatever the modal-only frame had there,
+	// including cells already inside the modal's own shadow
+	requireShadowAt(t, base, got, pal, [2]int{pal.Min.X + 2, pal.Min.Y + 1}, rgb8(m, m.palette.Surface))
+}
+
+func TestViewToastCastsNoShadow(t *testing.T) {
+	m := shadowViewModel(false, false)
+	base := frameCells(m.View().Content)
+	m.activeToast = &huskipc.ToastPayload{Title: "t", Message: "m", Level: "warn"}
+	got := frameCells(m.View().Content)
+	toastW := min(48, m.width-6)
+	x0, y0 := max(2, m.width-toastW-4), 2
+	// the row below the toast box and the strip right of it are unchanged
+	for _, p := range [][2]int{{x0 + toastW + 1, y0 + 2}, {x0 + 3, y0 + 4}, {x0 + toastW, y0 + 4}} {
+		if !near(bg8(got[p[1]][p[0]]), bg8(base[p[1]][p[0]])) {
+			t.Errorf("cell %v under a toast changed: %v -> %v", p, bg8(base[p[1]][p[0]]), bg8(got[p[1]][p[0]]))
+		}
 	}
 }
