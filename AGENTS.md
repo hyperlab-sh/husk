@@ -33,12 +33,14 @@ Registry, published-slot rendering/routing and protocol compatibility tests live
 | Path | Purpose |
 | :--- | :--- |
 | `cmd/husk/` | Host workbench: slots, dock/palette, mouse resize, activity rail. Files: `main.go` (flags, startup, `--dump-frame` driver), `model.go` (model type, `Init`/`Update`, key-state), `transport.go` (accept/spawn/stream/cleanup), `input.go` (keys, mouse, drag), `commands.go` (rail buttons, palette), `layout.go` (`recomputeLayout`, rects, frames), `render.go` (`View` and helpers), `demo.go` (`--demo-frame` / `--demo pubslots` fixtures only); `modifiers_darwin.go` polls Alt/Option via Quartz at 25Hz |
-| `pkg/huskipc/` | IPC envelope and legacy payloads (`protocol.go`), published extension payloads (`published.go`), JSON-lines reader/writer |
+| `pkg/huskipc/` | IPC envelope and legacy payloads (`protocol.go`), published extension payloads (`published.go`), JSON-lines reader/writer; `queue.go` is the non-blocking queued writer the host uses per connection (bounded queue, write deadline, disconnect on overflow/timeout). Never call a synchronous `NewConnWriter` from `Update` on a real connection |
 | `pkg/manifest/` | `husk-plugin.json` parsing (`manifest.go`): id, name, version, language, description, command (argv, relative to the manifest dir), transport (`socket` default \| `stdio`), slots |
 | `pkg/theme/` | Styling (being moved to Charm defaults) |
 | `plugins/` | Out-of-process plugins, each a directory with a `husk-plugin.json` and its code; currently `project-git` (stage, Bash `plugin.sh` mock UI). The module path is `github.com/hyperlab-sh/husk`; `pkg/huskipc` and `pkg/theme` are imported externally, so keep them stable |
 
 IPC messages: `hello`/`welcome`, `slot_update`, `slot_resize`, `slot_key`, `slot_mouse`, `key_state`, `workspace_context`, `command_invoke`, toasts. Plugin placements: `modal`, `full-canvas`, `stage`.
+
+A plugin that stops reading is disconnected (queue of 1,024 messages, 5s write deadline), never waited on; every disconnect reason (EOF, read error, write timeout, queue overflow) is logged and toasted. Policy: `docs/docs/architecture.md` "Outbound queue and disconnect policy".
 
 ## Conventions
 
