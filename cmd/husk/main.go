@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 
+	"github.com/hyperlab-sh/husk/pkg/frame"
 	"github.com/hyperlab-sh/husk/pkg/huskipc"
 	"github.com/hyperlab-sh/husk/pkg/manifest"
 	"github.com/hyperlab-sh/husk/pkg/theme"
@@ -84,6 +85,8 @@ type WorkbenchModel struct {
 	slotUpdates map[huskipc.SlotID]*huskipc.SlotUpdatePayload
 	slotOwners  map[huskipc.SlotID]string
 	slotRects   map[huskipc.SlotID]SlotRect
+	modalRect   SlotRect
+	demoFrame   bool
 
 	wsContext huskipc.WorkspaceContextPayload
 
@@ -148,7 +151,7 @@ func newWorkbenchModel(socketPath string, listener net.Listener, cwd string) *Wo
 		sidePaneW:    36,
 		hoverRailIdx: -1,
 		heldKeys:     make(map[string]time.Time),
-		showHotspots: true,
+		showHotspots: false,
 		stageMode:    "plugin",
 	}
 }
@@ -472,16 +475,16 @@ func (m *WorkbenchModel) activateRailItem(ri huskipc.RailItemSpec) {
 		}
 		m.activeModalRailID = ri.ID
 		m.activeModalPlugin = ri.PluginID
-		modalW := min(92, m.width-10)
-		modalH := min(24, m.height-6)
+		m.recomputeLayout()
+		rect := m.modalRect
 		_ = cp.Writer.Send(huskipc.Envelope{
 			Type: "rail_activated",
 			RailActivated: &huskipc.RailActivatedPayload{
 				RailID:    ri.ID,
 				Placement: huskipc.PlacementModal,
 				Active:    true,
-				Width:     modalW - 4,
-				Height:    modalH - 2,
+				Width:     rect.InnerW,
+				Height:    rect.InnerH,
 				Context:   m.wsContext,
 			},
 		})
@@ -856,6 +859,18 @@ func (m *WorkbenchModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if isLeftClick {
+		if slot, ok := m.closeHitAt(msg.X, msg.Y); ok {
+			if slot == huskipc.SlotModalSurface {
+				m.activeModalRailID = ""
+				m.activeModalPlugin = ""
+			} else {
+				m.activateHomeWorkbench()
+			}
+			return m, nil
+		}
+	}
+
+	if isLeftClick {
 		if div := m.detectDividerAt(msg.X, msg.Y); div != "" {
 			m.activeDrag = div
 			m.hoverDivider = div
@@ -944,6 +959,42 @@ func (m *WorkbenchModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// closeHitAt reports the framed surface (modal / full-canvas / stage) whose
+// close button covers (x, y), if that surface declared one.
+func (m *WorkbenchModel) closeHitAt(x, y int) (huskipc.SlotID, bool) {
+	for _, slot := range []huskipc.SlotID{huskipc.SlotModalSurface, huskipc.SlotFullCanvas, huskipc.SlotWorkspaceStage} {
+		var rect SlotRect
+		switch slot {
+		case huskipc.SlotModalSurface:
+			if m.activeModalPlugin == "" {
+				continue
+			}
+			rect = m.modalRect
+		default:
+			if m.activePlacement == "" {
+				continue
+			}
+			r, ok := m.slotRects[slot]
+			if !ok {
+				continue
+			}
+			rect = r
+		}
+		spec := m.frameFor(slot)
+		if !spec.Close {
+			continue
+		}
+		cx := rect.X + rect.Width - 1
+		if spec.Border {
+			cx = rect.X + rect.Width - 2
+		}
+		if y == rect.Y && (x == cx || (spec.Border && x == cx-1)) {
+			return slot, true
+		}
+	}
+	return "", false
 }
 
 type railButton struct {
@@ -1266,13 +1317,17 @@ func (m *WorkbenchModel) recomputeLayout() {
 
 	m.slotRects = make(map[huskipc.SlotID]SlotRect)
 
+	modalW := min(92, m.width-10)
+	modalH := min(24, m.height-6)
+	m.modalRect = m.frameRect(huskipc.SlotModalSurface, max(4, (m.width-modalW)/2), max(2, (m.height-modalH)/2), modalW, modalH)
+
 	railW := activityRailWidth
-	m.slotRects[huskipc.SlotActivityRail] = makeBoxRect(0, 1, railW, bodyH)
+	m.slotRects[huskipc.SlotActivityRail] = m.frameRect(huskipc.SlotActivityRail, 0, 1, railW, bodyH)
 
 	remW := max(40, totalW-railW)
 
 	if m.activePlacement == huskipc.PlacementFullCanvas {
-		m.slotRects[huskipc.SlotFullCanvas] = makeBoxRect(railW, 1, remW, bodyH)
+		m.slotRects[huskipc.SlotFullCanvas] = m.frameRect(huskipc.SlotFullCanvas, railW, 1, remW, bodyH)
 		return
 	}
 
@@ -1287,14 +1342,14 @@ func (m *WorkbenchModel) recomputeLayout() {
 		}
 		listH := max(6, bodyH-navH-footH)
 
-		m.slotRects[huskipc.SlotSidebarNavigation] = makeBoxRect(railW, 1, leftW, navH)
-		m.slotRects[huskipc.SlotSidebarList] = makeBoxRect(railW, 1+navH, leftW, listH)
-		m.slotRects[huskipc.SlotSidebarFooter] = makeBoxRect(railW, 1+navH+listH, leftW, footH)
+		m.slotRects[huskipc.SlotSidebarNavigation] = m.frameRect(huskipc.SlotSidebarNavigation, railW, 1, leftW, navH)
+		m.slotRects[huskipc.SlotSidebarList] = m.frameRect(huskipc.SlotSidebarList, railW, 1+navH, leftW, listH)
+		m.slotRects[huskipc.SlotSidebarFooter] = m.frameRect(huskipc.SlotSidebarFooter, railW, 1+navH+listH, leftW, footH)
 	}
 
 	if m.activePlacement == huskipc.PlacementStage {
 		stageW := max(30, remW-leftW)
-		m.slotRects[huskipc.SlotWorkspaceStage] = makeBoxRect(railW+leftW, 1, stageW, bodyH)
+		m.slotRects[huskipc.SlotWorkspaceStage] = m.frameRect(huskipc.SlotWorkspaceStage, railW+leftW, 1, stageW, bodyH)
 		return
 	}
 
@@ -1309,25 +1364,79 @@ func (m *WorkbenchModel) recomputeLayout() {
 		hdrH = 4
 	}
 	stageH := max(8, bodyH-hdrH)
-	m.slotRects[huskipc.SlotMainHeader] = makeBoxRect(railW+leftW, 1, centerW, hdrH)
-	m.slotRects[huskipc.SlotMainStage] = makeBoxRect(railW+leftW, 1+hdrH, centerW, stageH)
+	m.slotRects[huskipc.SlotMainHeader] = m.frameRect(huskipc.SlotMainHeader, railW+leftW, 1, centerW, hdrH)
+	m.slotRects[huskipc.SlotMainStage] = m.frameRect(huskipc.SlotMainStage, railW+leftW, 1+hdrH, centerW, stageH)
 
 	if rightW > 0 {
-		m.slotRects[huskipc.SlotSidePanel] = makeBoxRect(railW+leftW+centerW, 1, rightW, bodyH)
+		m.slotRects[huskipc.SlotSidePanel] = m.frameRect(huskipc.SlotSidePanel, railW+leftW+centerW, 1, rightW, bodyH)
 	}
 }
 
-func makeBoxRect(x, y, w, h int) SlotRect {
-	return SlotRect{
-		X:      x,
-		Y:      y,
-		Width:  w,
-		Height: h,
-		InnerX: x + 1,
-		InnerY: y + 1,
-		InnerW: max(1, w-2),
-		InnerH: max(1, h-2),
+// frameRect builds a SlotRect whose inner (content) area is inset by one cell
+// per axis only when the surface's declared frame has a border.
+func (m *WorkbenchModel) frameRect(slotID huskipc.SlotID, x, y, w, h int) SlotRect {
+	r := SlotRect{
+		X: x, Y: y, Width: w, Height: h,
+		InnerX: x, InnerY: y, InnerW: max(1, w), InnerH: max(1, h),
 	}
+	if m.frameFor(slotID).Border {
+		r.InnerX, r.InnerY = x+1, y+1
+		r.InnerW, r.InnerH = max(1, w-2), max(1, h-2)
+	}
+	return r
+}
+
+// frameFor resolves the frame spec for a surface: the demo override first,
+// then the occupying plugin's hello "frames" declaration, then (for rail
+// surfaces) the rail item's "frame" field. Absent means a blank canvas.
+func (m *WorkbenchModel) frameFor(slotID huskipc.SlotID) frame.Spec {
+	if m.demoFrame {
+		if s, ok := demoFrameSpecs[slotID]; ok {
+			return s
+		}
+	}
+	owner := ""
+	switch slotID {
+	case huskipc.SlotModalSurface:
+		owner = m.activeModalPlugin
+	case huskipc.SlotFullCanvas, huskipc.SlotWorkspaceStage:
+		for _, ri := range m.railItems {
+			if ri.ID == m.activeRailID {
+				owner = ri.PluginID
+				break
+			}
+		}
+	}
+	if owner == "" {
+		owner = m.slotOwners[slotID]
+	}
+	if owner != "" {
+		if cp, ok := m.plugins[owner]; ok {
+			if s, ok := cp.Info.Frames[slotID]; ok {
+				return s
+			}
+		}
+	}
+	if slotID == huskipc.SlotModalSurface || slotID == huskipc.SlotFullCanvas || slotID == huskipc.SlotWorkspaceStage {
+		if ri, ok := m.activeRailItem(); ok && ri.Frame != nil {
+			return *ri.Frame
+		}
+	}
+	return frame.Spec{}
+}
+
+// activeRailItem returns the rail item currently driving full-canvas/stage
+// placement, if any.
+func (m *WorkbenchModel) activeRailItem() (huskipc.RailItemSpec, bool) {
+	if m.activeRailID == "" {
+		return huskipc.RailItemSpec{}, false
+	}
+	for _, ri := range m.railItems {
+		if ri.ID == m.activeRailID {
+			return ri, true
+		}
+	}
+	return huskipc.RailItemSpec{}, false
 }
 
 func (m *WorkbenchModel) currentSlotSizes() map[huskipc.SlotID]huskipc.SlotSize {
@@ -1364,33 +1473,33 @@ func (m *WorkbenchModel) View() string {
 	cols = append(cols, m.renderActivityRailBox())
 
 	if m.activePlacement == huskipc.PlacementFullCanvas {
-		fullBox := m.renderSlotBox(huskipc.SlotFullCanvas, "②-⑦", "full-canvas")
+		fullBox := m.renderSurface(huskipc.SlotFullCanvas, "②-⑦", "full-canvas")
 		cols = append(cols, fullBox)
 	} else {
 		if m.showSidebar {
-			navBox := m.renderSlotBox(huskipc.SlotSidebarNavigation, "①", "sidebar-navigation")
-			listBox := m.renderSlotBox(huskipc.SlotSidebarList, "②③", "sidebar-list")
-			footBox := m.renderSlotBox(huskipc.SlotSidebarFooter, "④", "sidebar-footer")
+			navBox := m.renderSurface(huskipc.SlotSidebarNavigation, "①", "sidebar-navigation")
+			listBox := m.renderSurface(huskipc.SlotSidebarList, "②③", "sidebar-list")
+			footBox := m.renderSurface(huskipc.SlotSidebarFooter, "④", "sidebar-footer")
 			leftCol := lipgloss.JoinVertical(lipgloss.Left, navBox, listBox, footBox)
 			cols = append(cols, leftCol)
 		}
 
 		if m.activePlacement == huskipc.PlacementStage {
-			stageBox := m.renderSlotBox(huskipc.SlotWorkspaceStage, "⑤-⑦", "workspace-stage")
+			stageBox := m.renderSurface(huskipc.SlotWorkspaceStage, "⑤-⑦", "workspace-stage")
 			cols = append(cols, stageBox)
 		} else {
-			hdrBox := m.renderSlotBox(huskipc.SlotMainHeader, "⑤", "main-header")
+			hdrBox := m.renderSurface(huskipc.SlotMainHeader, "⑤", "main-header")
 			var stageBox string
 			if m.stageMode == "hotspots" {
 				stageBox = m.renderHotspotArchitectureStage()
 			} else {
-				stageBox = m.renderSlotBox(huskipc.SlotMainStage, "⑥", "main-stage")
+				stageBox = m.renderSurface(huskipc.SlotMainStage, "⑥", "main-stage")
 			}
 			centerCol := lipgloss.JoinVertical(lipgloss.Left, hdrBox, stageBox)
 			cols = append(cols, centerCol)
 
 			if _, ok := m.slotRects[huskipc.SlotSidePanel]; ok {
-				rightCol := m.renderSlotBox(huskipc.SlotSidePanel, "⑦", "side-panel")
+				rightCol := m.renderSurface(huskipc.SlotSidePanel, "⑦", "side-panel")
 				cols = append(cols, rightCol)
 			}
 		}
@@ -1484,44 +1593,35 @@ func (m *WorkbenchModel) renderActivityRailBox() string {
 }
 
 func (m *WorkbenchModel) overlayModalPlugin(base string) string {
-	modalW := min(92, m.width-10)
-	modalH := min(24, m.height-6)
-	innerW := modalW - 4
-	innerH := modalH - 2
+	rect := m.modalRect
+	innerW, innerH := rect.InnerW, rect.InnerH
 
 	su := m.slotUpdates[huskipc.SlotModalSurface]
-	title := "Modal Plugin"
 	var lines []string
 	if su != nil {
-		if su.Title != "" {
-			title = su.Title
-		}
 		lines = su.Lines
 	} else {
 		lines = []string{"Loading modal plugin surface..."}
 	}
-
-	var rows []string
-	hdr := lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.Warning)).Bold(true).Render("⑧ " + title)
-	rows = append(rows, fitLineWidth(hdr, innerW))
-	for i := 0; i < innerH-1; i++ {
+	rows := make([]string, innerH)
+	for i := 0; i < innerH; i++ {
 		if i < len(lines) {
-			rows = append(rows, fitLineWidth(lines[i], innerW))
+			rows[i] = fitLineWidth(lines[i], innerW)
 		} else {
-			rows = append(rows, strings.Repeat(" ", innerW))
+			rows[i] = strings.Repeat(" ", innerW)
 		}
 	}
 
-	box := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(m.palette.BorderFocused)).
-		Background(lipgloss.Color(m.palette.Surface)).
-		Padding(0, 1).
-		Render(strings.Join(rows, "\n"))
-
-	x := max(4, (m.width-modalW)/2)
-	y := max(2, (m.height-modalH)/2)
-	return spliceOverlay(base, box, x, y)
+	spec := m.frameFor(huskipc.SlotModalSurface)
+	label := ""
+	if spec.Label != "" {
+		label = spec.Label
+		if su != nil && su.Title != "" {
+			label = su.Title
+		}
+	}
+	box := m.renderFrame(huskipc.SlotModalSurface, rect, spec, label, rows)
+	return spliceOverlay(base, box, rect.X, rect.Y)
 }
 
 func (m *WorkbenchModel) renderTopWorkbenchBar() string {
@@ -1647,59 +1747,131 @@ func (m *WorkbenchModel) renderBottomKeybindBar() string {
 		Render(fitLineWidth(line, m.width))
 }
 
-func (m *WorkbenchModel) renderSlotBox(slotID huskipc.SlotID, calloutNum string, slotName string) string {
+// renderSurface renders a slot's region: plugin content (or blank canvas)
+// wrapped in the frame the occupying plugin declared. Husk adds no chrome of
+// its own; calloutNum/slotName only appear as a label overlay when hotspot
+// badges are toggled on ('h').
+func (m *WorkbenchModel) renderSurface(slotID huskipc.SlotID, calloutNum, slotName string) string {
 	rect, ok := m.slotRects[slotID]
 	if !ok {
 		return ""
 	}
-	innerW := rect.InnerW
-	innerH := rect.InnerH
-	focused := m.focusedSlot == slotID
-
 	su := m.slotUpdates[slotID]
-	title := slotName
-	badge := ""
-	var contentLines []string
-
-	if su != nil {
-		if su.Title != "" {
-			title = su.Title
-		}
-		badge = su.Badge
-		contentLines = su.Lines
-	} else {
-		muted := lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.InkSubtle))
-		contentLines = []string{
-			muted.Render("Waiting for plugin surface on slot [" + string(slotID) + "]..."),
+	spec := m.frameFor(slotID)
+	label := ""
+	if spec.Label != "" {
+		label = spec.Label
+		if su != nil && su.Title != "" {
+			label = su.Title
 		}
 	}
+	lines := m.surfaceContentLines(su, rect.InnerW, rect.InnerH)
+	if m.showHotspots && len(lines) > 0 {
+		hot := lipgloss.NewStyle().
+			Foreground(lipgloss.Color(m.palette.Warning)).
+			Bold(true).
+			Render(calloutNum + " " + slotName)
+		lines[0] = overlayLabel(lines[0], hot)
+	}
+	return m.renderFrame(slotID, rect, spec, label, lines)
+}
 
-	rows := make([]string, 0, innerH)
-	for i := 0; i < innerH; i++ {
-		if i < len(contentLines) {
-			rows = append(rows, fitLineWidth(contentLines[i], innerW))
+// surfaceContentLines pads/truncates a plugin's slot_update lines to the
+// surface's inner area; absent content is a blank canvas.
+func (m *WorkbenchModel) surfaceContentLines(su *huskipc.SlotUpdatePayload, w, h int) []string {
+	lines := make([]string, h)
+	for i := 0; i < h; i++ {
+		if su != nil && i < len(su.Lines) {
+			lines[i] = fitLineWidth(su.Lines[i], w)
 		} else {
-			rows = append(rows, strings.Repeat(" ", innerW))
+			lines[i] = strings.Repeat(" ", w)
 		}
 	}
+	return lines
+}
 
-	borderCol := lipgloss.Color(m.palette.Border)
-	titleCol := lipgloss.Color(m.palette.InkMuted)
-	if focused {
-		borderCol = lipgloss.Color(m.palette.BorderFocused)
-		titleCol = lipgloss.Color(m.palette.Accent)
+// overlayLabel replaces the start of a rendered line with label.
+func overlayLabel(line, label string) string {
+	rest := ansi.Cut(line, ansi.StringWidth(label), ansi.StringWidth(line))
+	return label + rest
+}
+
+func (m *WorkbenchModel) frameLabelStyle() lipgloss.Style {
+	col := lipgloss.Color(m.palette.InkMuted)
+	// the focused slot's label uses the accent colour when it has a border
+	return lipgloss.NewStyle().Foreground(col).Bold(true)
+}
+
+func (m *WorkbenchModel) closeStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.InkMuted)).Bold(true)
+}
+
+// renderFrame draws plugin content wrapped in the declared frame chrome.
+// All Husk-drawn surface chrome lives here. Without a border, label and close
+// glyph are overlaid on the first content row (no geometry change).
+func (m *WorkbenchModel) renderFrame(slotID huskipc.SlotID, rect SlotRect, spec frame.Spec, label string, lines []string) string {
+	if !spec.Enabled() {
+		return strings.Join(lines, "\n")
+	}
+	if !spec.Border {
+		if label != "" && len(lines) > 0 {
+			styled := lipgloss.NewStyle().
+				Foreground(lipgloss.Color(m.palette.Accent)).
+				Bold(true).
+				Render(label)
+			lines[0] = overlayLabel(lines[0], styled)
+		}
+		if spec.Close && len(lines) > 0 {
+			w := ansi.StringWidth(lines[0])
+			body := ansi.Cut(lines[0], 0, max(0, w-1))
+			lines[0] = body + m.closeStyle().Render("✕")
+		}
+		return strings.Join(lines, "\n")
 	}
 
+	innerW := rect.InnerW
+	labelText := ""
+	if label != "" {
+		labelText = " " + m.frameLabelStyle().Render(label) + " "
+	}
+	closeText := ""
+	if spec.Close {
+		closeText = m.closeStyle().Render(" ✕")
+	}
+	if w := ansi.StringWidth(labelText) + ansi.StringWidth(closeText); w > innerW {
+		labelText = ansi.Truncate(labelText, max(0, innerW-ansi.StringWidth(closeText)), "…")
+	}
+	dashes := max(0, innerW-ansi.StringWidth(labelText)-ansi.StringWidth(closeText))
+
+	leftEdge, rightEdge, topEdge, botEdge, leftGlyph, rightGlyph, topGlyph, botGlyph := m.dividerEdgeStyles(slotID)
+	top := leftEdge.Render("╭") +
+		topEdge.Render(strings.Repeat(topGlyph, dashes)) +
+		labelText +
+		closeText +
+		rightEdge.Render("╮")
+
+	var out []string
+	out = append(out, top)
+	lp := leftEdge.Render(leftGlyph)
+	rp := rightEdge.Render(rightGlyph)
+	for _, l := range lines {
+		out = append(out, lp+l+rp)
+	}
+	out = append(out, leftEdge.Render("╰")+botEdge.Render(strings.Repeat(botGlyph, innerW))+rightEdge.Render("╯"))
+	return strings.Join(out, "\n")
+}
+
+// dividerEdgeStyles returns the edge styles/glyphs for a bordered surface,
+// highlighting the divider being dragged or hovered (only visible when the
+// occupying plugin declared a border frame).
+func (m *WorkbenchModel) dividerEdgeStyles(slotID huskipc.SlotID) (left, right, top, bot lipgloss.Style, lG, rG, tG, bG string) {
+	borderCol := lipgloss.Color(m.palette.Border)
+	if m.focusedSlot == slotID {
+		borderCol = lipgloss.Color(m.palette.BorderFocused)
+	}
 	bStyle := lipgloss.NewStyle().Foreground(borderCol)
-	activeEdgeStyle := bStyle
-	rightEdgeStyle := bStyle
-	leftEdgeStyle := bStyle
-	topEdgeStyle := bStyle
-	botEdgeStyle := bStyle
-	rightGlyph := "│"
-	leftGlyph := "│"
-	topGlyph := "─"
-	botGlyph := "─"
+	left, right, top, bot = bStyle, bStyle, bStyle, bStyle
+	lG, rG, tG, bG = "│", "│", "─", "─"
 
 	activeDiv := m.hoverDivider
 	edgeCol := lipgloss.Color(m.palette.Warning)
@@ -1707,90 +1879,56 @@ func (m *WorkbenchModel) renderSlotBox(slotID huskipc.SlotID, calloutNum string,
 		activeDiv = m.activeDrag
 		edgeCol = lipgloss.Color(m.palette.Success)
 	}
-	_ = activeEdgeStyle
 	hlStyle := lipgloss.NewStyle().Foreground(edgeCol).Bold(true)
 
 	switch activeDiv {
 	case "sidebar-width":
 		if slotID == huskipc.SlotSidebarNavigation || slotID == huskipc.SlotSidebarList || slotID == huskipc.SlotSidebarFooter {
-			rightEdgeStyle = hlStyle
-			rightGlyph = "┃"
+			right = hlStyle
+			rG = "┃"
 		}
 		if slotID == huskipc.SlotMainHeader || slotID == huskipc.SlotMainStage || slotID == huskipc.SlotWorkspaceStage {
-			leftEdgeStyle = hlStyle
-			leftGlyph = "┃"
+			left = hlStyle
+			lG = "┃"
 		}
 	case "sidepanel-width":
 		if slotID == huskipc.SlotMainHeader || slotID == huskipc.SlotMainStage {
-			rightEdgeStyle = hlStyle
-			rightGlyph = "┃"
+			right = hlStyle
+			rG = "┃"
 		}
 		if slotID == huskipc.SlotSidePanel {
-			leftEdgeStyle = hlStyle
-			leftGlyph = "┃"
+			left = hlStyle
+			lG = "┃"
 		}
 	case "sidebar-nav-height":
 		if slotID == huskipc.SlotSidebarNavigation {
-			botEdgeStyle = hlStyle
-			botGlyph = "━"
+			bot = hlStyle
+			bG = "━"
 		}
 		if slotID == huskipc.SlotSidebarList {
-			topEdgeStyle = hlStyle
-			topGlyph = "━"
+			top = hlStyle
+			tG = "━"
 		}
 	case "sidebar-foot-height":
 		if slotID == huskipc.SlotSidebarList {
-			botEdgeStyle = hlStyle
-			botGlyph = "━"
+			bot = hlStyle
+			bG = "━"
 		}
 		if slotID == huskipc.SlotSidebarFooter {
-			topEdgeStyle = hlStyle
-			topGlyph = "━"
+			top = hlStyle
+			tG = "━"
 		}
 	case "main-header-height":
 		if slotID == huskipc.SlotMainHeader {
-			botEdgeStyle = hlStyle
-			botGlyph = "━"
+			bot = hlStyle
+			bG = "━"
 		}
 		if slotID == huskipc.SlotMainStage {
-			topEdgeStyle = hlStyle
-			topGlyph = "━"
+			top = hlStyle
+			tG = "━"
 		}
 	}
-
-	var hdrParts []string
-	if m.showHotspots {
-		callout := lipgloss.NewStyle().
-			Foreground(lipgloss.Color(m.palette.Warning)).
-			Bold(true).
-			Render(calloutNum + " " + title)
-		hdrParts = append(hdrParts, callout)
-	} else {
-		hdrParts = append(hdrParts, lipgloss.NewStyle().Foreground(titleCol).Bold(true).Render(title))
-	}
-	if badge != "" {
-		hdrParts = append(hdrParts, lipgloss.NewStyle().
-			Foreground(lipgloss.Color(m.palette.AccentSecondary)).
-			Render("["+badge+"]"))
-	}
-	hdrText := " " + strings.Join(hdrParts, " · ") + " "
-	if ansi.StringWidth(hdrText) > innerW-2 {
-		hdrText = ansi.Truncate(hdrText, max(4, innerW-2), "…")
-	}
-	dashes := max(0, innerW-ansi.StringWidth(hdrText))
-	topBorder := leftEdgeStyle.Render("╭") + topEdgeStyle.Render(topGlyph) + hdrText + topEdgeStyle.Render(strings.Repeat(topGlyph, max(0, dashes-1))) + rightEdgeStyle.Render("╮")
-
-	var fullLines []string
-	fullLines = append(fullLines, topBorder)
-	leftPipe := leftEdgeStyle.Render(leftGlyph)
-	rightPipe := rightEdgeStyle.Render(rightGlyph)
-	for _, r := range rows {
-		fullLines = append(fullLines, leftPipe+r+rightPipe)
-	}
-	bottomBorder := leftEdgeStyle.Render("╰") + botEdgeStyle.Render(strings.Repeat(botGlyph, innerW)) + rightEdgeStyle.Render("╯")
-	fullLines = append(fullLines, bottomBorder)
-
-	return strings.Join(fullLines, "\n")
+	return
 }
 
 func (m *WorkbenchModel) renderHotspotArchitectureStage() string {
@@ -1850,7 +1988,14 @@ func (m *WorkbenchModel) renderHotspotArchitectureStage() string {
 		Badge:    "9 HOTSPOTS",
 		Lines:    lines,
 	}
-	return m.renderSlotBox(huskipc.SlotMainStage, "⑥", "main-stage")
+	// The architecture explorer is Husk's own UI, so it draws its own frame.
+	coreFrame := frame.Spec{Border: true, Label: "Slot Architecture Explorer"}
+	iw := rect.InnerW
+	if m.frameFor(huskipc.SlotMainStage).Border {
+		iw = max(1, iw-2)
+	}
+	rows := m.surfaceContentLines(m.slotUpdates[huskipc.SlotMainStage], iw, max(1, rect.InnerH-2))
+	return m.renderFrame(huskipc.SlotMainStage, rect, coreFrame, coreFrame.Label, rows)
 }
 
 func (m *WorkbenchModel) overlayToast(base string) string {
@@ -1964,10 +2109,75 @@ func fitLineWidth(s string, width int) string {
 	return s
 }
 
+// demoFrameSpecs is the frame declaration used by --demo-frame: a built-in
+// demo plugin asking for border + label + close on every renderable surface.
+var demoFrameSpecs = map[huskipc.SlotID]frame.Spec{
+	huskipc.SlotMainStage:      {Border: true, Label: "Demo Frame", Close: true},
+	huskipc.SlotModalSurface:   {Border: true, Label: "Demo Frame", Close: true},
+	huskipc.SlotFullCanvas:     {Border: true, Label: "Demo Frame", Close: true},
+	huskipc.SlotWorkspaceStage: {Border: true, Label: "Demo Frame", Close: true},
+}
+
+// setupDemoFrame registers the built-in demo plugin (no external process) and
+// activates the requested rail placement, if any.
+func (m *WorkbenchModel) setupDemoFrame(railMode string) {
+	demoLines := []string{
+		"This surface is a blank canvas; all chrome you see is a frame.",
+		"",
+		"The plugin declared: \"frame\": {\"border\": true, \"label\": \"Demo Frame\"}",
+		"Husk draws the border, the label, and the ✕ close button.",
+		"Clicking ✕ closes the surface exactly like esc.",
+	}
+	newDemoUpdate := func(slot huskipc.SlotID) *huskipc.SlotUpdatePayload {
+		return &huskipc.SlotUpdatePayload{
+			PluginID: "husk.demo-frame",
+			Slot:     slot,
+			Title:    "Demo Frame",
+			Lines:    demoLines,
+		}
+	}
+
+	m.plugins["husk.demo-frame"] = &ConnectedPlugin{
+		Info: huskipc.HelloPayload{
+			PluginID:    "husk.demo-frame",
+			Name:        "Demo Frame",
+			Version:     "0.1.0",
+			Language:    "go",
+			PID:         os.Getpid(),
+			Description: "Built-in demo declaring a border+label+close frame",
+			Slots:       []huskipc.SlotID{huskipc.SlotMainStage},
+			Frames:      demoFrameSpecs,
+		},
+		Writer:    huskipc.NewConnWriter(io.Discard),
+		Connected: time.Now(),
+	}
+	m.slotOwners[huskipc.SlotMainStage] = "husk.demo-frame"
+	m.slotUpdates[huskipc.SlotMainStage] = newDemoUpdate(huskipc.SlotMainStage)
+
+	switch railMode {
+	case "modal":
+		m.activeModalRailID = "rail.demo-frame"
+		m.activeModalPlugin = "husk.demo-frame"
+		m.slotUpdates[huskipc.SlotModalSurface] = newDemoUpdate(huskipc.SlotModalSurface)
+	case "full-canvas":
+		m.activeRailID = "rail.demo-frame"
+		m.activePlacement = huskipc.PlacementFullCanvas
+		m.focusedSlot = huskipc.SlotFullCanvas
+		m.slotUpdates[huskipc.SlotFullCanvas] = newDemoUpdate(huskipc.SlotFullCanvas)
+	case "stage":
+		m.activeRailID = "rail.demo-frame"
+		m.activePlacement = huskipc.PlacementStage
+		m.focusedSlot = huskipc.SlotWorkspaceStage
+		m.slotUpdates[huskipc.SlotWorkspaceStage] = newDemoUpdate(huskipc.SlotWorkspaceStage)
+	}
+	m.recomputeLayout()
+}
+
 func main() {
 	lipgloss.SetColorProfile(termenv.TrueColor)
 
 	dumpFrame := flag.Bool("dump-frame", false, "Render one live frame after plugin sync and exit")
+	demoFrame := flag.Bool("demo-frame", false, "Render one frame from a built-in demo plugin that declares a border+label+close frame and exit")
 	railMode := flag.String("rail", "", "Activate rail mode on startup: modal | full-canvas | stage")
 	holdAlt := flag.Bool("hold-alt", false, "Simulate holding Alt/Option key on startup")
 	pluginPaths := repeatable("plugin", "Plugin: executable, plugin directory, or husk-plugin.json path (repeatable)")
@@ -1990,6 +2200,13 @@ func main() {
 	}
 	model.startAcceptLoop()
 	defer model.cleanup()
+
+	if *demoFrame {
+		model.demoFrame = true
+		model.setupDemoFrame(*railMode)
+		fmt.Println(model.View())
+		return
+	}
 
 	var manifestPlugins []*manifest.Plugin
 	loadPlugin := func(p *manifest.Plugin) {
