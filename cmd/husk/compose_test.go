@@ -62,9 +62,11 @@ func requireSameCells(t *testing.T, want, got string) {
 	}
 }
 
-// The cell serializer changes how SGR is grouped, not what any cell shows:
-// every golden scenario decodes to exactly the cells its committed golden
-// decodes to.
+// Each golden scenario's current frame decodes to the same cells as its
+// committed golden. The goldens were regenerated when the cell serializer
+// landed, so this compares today's output with today's goldens (a decode-level
+// check next to the byte-exact golden tests), not with the pre-canvas
+// string compositor's output.
 func TestGoldenFramesCellEquivalent(t *testing.T) {
 	for name, build := range goldenFrames {
 		t.Run(name, func(t *testing.T) {
