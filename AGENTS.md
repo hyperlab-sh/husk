@@ -1,19 +1,21 @@
 # Husk — Agent Instructions
 
-Husk is a minimal, domain-agnostic TUI workbench in Go (bubbletea + lipgloss). It only provides **slots**, **hooks** and **events**; every plugin is an independent OS process speaking newline-delimited JSON over a Unix socket (`HUSK_SOCKET_PATH`) or stdio, in any language. The layout mirrors `bb`'s 9-slot model. Husk is the host for Dolphin (repo `hyperlab-sh/dolphin`, an agentic development environment TUI backed by Herdr) but must stay application-agnostic: nothing Herdr- or Dolphin-specific belongs in this repo. The docs site (docmd) is in `docs/`.
+Husk is a minimal, domain-agnostic TUI workbench in Go (bubbletea + lipgloss). It only provides **slots**, **hooks** and **events**; every plugin is an independent OS process speaking newline-delimited JSON over a Unix socket (`HUSK_SOCKET_PATH`) or stdio, in any language. The layout mirrors `bb`'s 9-slot model. Husk must stay application-agnostic: nothing application-specific belongs in this repo. The docs site (docmd) is in `docs/`.
 
 ## Build & Test
 
 ```bash
 go build -o bin/husk ./cmd/husk
 go vet ./...
+go test ./pkg/...
 
-./bin/husk                              # run the workbench
+./bin/husk                              # run the workbench (no plugins by default)
+./bin/husk --plugin-dir ./plugins       # load bundled plugins via manifests
 ./bin/husk --dump-frame                 # non-interactive frame dump
 ./bin/husk --dump-frame --rail modal    # also: full-canvas, stage; --hold-alt
 ```
 
-There are no Go tests yet. Use `--dump-frame` to check rendering changes. Manifests reference binaries as `./bin/<name>`.
+Unit tests live in `pkg/manifest/manifest_test.go`; run them with `go test ./pkg/manifest`.
 
 ## Layout
 
@@ -21,14 +23,16 @@ There are no Go tests yet. Use `--dump-frame` to check rendering changes. Manife
 | :--- | :--- |
 | `cmd/husk/` | Host workbench: slots, dock/palette, mouse resize, activity rail; `modifiers_darwin.go` polls Alt/Option via Quartz at 25Hz |
 | `pkg/huskipc/` | IPC protocol (`protocol.go`) and client (`client.go`) |
+| `pkg/manifest/` | `husk-plugin.json` parsing (`manifest.go`): id, name, version, language, description, command (argv, relative to the manifest dir), transport (`socket` default \| `stdio`), slots |
 | `pkg/theme/` | Styling (being moved to Charm defaults) |
-| `plugins/` | Out-of-process plugins: `tv-search` (modal), `fleet-dashboard` (full-canvas), `project-git` (stage), all Bash `plugin.sh` mock UIs. The module path is `github.com/hyperlab-sh/husk`; `pkg/huskipc` and `pkg/theme` are imported by Dolphin, so keep them stable |
+| `plugins/` | Out-of-process plugins, each a directory with a `husk-plugin.json` and its code; currently `project-git` (stage, Bash `plugin.sh` mock UI). The module path is `github.com/hyperlab-sh/husk`; `pkg/huskipc` and `pkg/theme` are imported externally, so keep them stable |
 
 IPC messages: `hello`/`welcome`, `slot_update`, `slot_resize`, `slot_key`, `slot_mouse`, `key_state`, `workspace_context`, `command_invoke`, toasts. Plugin placements: `modal`, `full-canvas`, `stage`.
 
 ## Conventions
 
-- Husk core stays domain-agnostic: Herdr-specific logic belongs in a plugin, not `cmd/husk`.
+- Husk core stays domain-agnostic: application-specific logic belongs in a plugin, not in `cmd/husk`.
+- Plugins are launched only via `--plugin` (executable, plugin dir, or `husk-plugin.json`) or `--plugin-dir` (scans immediate subdirectories). There is no default plugin.
 - Plugins must never assume a language; the JSON-lines protocol is the only contract. Changing it means updating `pkg/huskipc/protocol.go` and every plugin.
 - Use Charm's default palette (ANSI / lipgloss presets). Do not add custom hex themes.
 - Conventional commits with detailed messages. No attribution trailers.
@@ -37,7 +41,7 @@ IPC messages: `hello`/`welcome`, `slot_update`, `slot_resize`, `slot_key`, `slot
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:1105d646 -->
 ## Beads Issue Tracker
 
-This project uses **bd (beads)** for issue tracking. The database is shared with Dolphin (Husk issues use the `husk-` prefix, Dolphin issues `dolphin-`). Run `bd prime` to see full workflow context and commands.
+This project uses **bd (beads)** for issue tracking. The database is shared with a sibling project (Husk issues use the `husk-` prefix). Run `bd prime` to see full workflow context and commands.
 
 ### Quick Reference
 
