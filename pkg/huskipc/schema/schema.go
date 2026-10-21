@@ -15,7 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/hyperlab-sh/husk/pkg/huskipc"
@@ -122,7 +122,7 @@ func (g *generator) envelope(obj map[string]any, t reflect.Type) {
 			types = append(types, f.name)
 		}
 	}
-	sort.Strings(types)
+	slices.Sort(types)
 	obj["properties"].(map[string]any)["type"] = map[string]any{
 		"type":        "string",
 		"description": "Message type. Each type is carried by the property of the same name.",

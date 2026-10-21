@@ -348,7 +348,7 @@ func (r *publicationRegistry) callHook(plugin string, call huskipc.HookCallPaylo
 		out = append(out, registryDelivery{target, huskipc.Envelope{Type: "hook_call", HookCall: &call}})
 	}
 	if len(out) != 0 {
-		r.Pending[call.RequestID] = &pendingHook{HookID: call.ID, Caller: plugin, Waiting: append([]string(nil), p.Subscribers...), Expires: r.Clock.Now().Add(r.HookTimeout)}
+		r.Pending[call.RequestID] = &pendingHook{HookID: call.ID, Caller: plugin, Waiting: slices.Clone(p.Subscribers), Expires: r.Clock.Now().Add(r.HookTimeout)}
 	}
 	return out, nil
 }
@@ -523,7 +523,7 @@ func (r *publicationRegistry) removePlugin(plugin string) []registryDelivery {
 			delete(r.Pending, id)
 			continue
 		}
-		waiting := append([]string(nil), p.Waiting...)
+		waiting := slices.Clone(p.Waiting)
 		for _, target := range waiting {
 			if target == plugin || r.Hooks[p.HookID] == nil {
 				deliveries, _ := r.hookResult(target, huskipc.HookResultPayload{ID: p.HookID, RequestID: id, Error: "plugin disconnected"})
