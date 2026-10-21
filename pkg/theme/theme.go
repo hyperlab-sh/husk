@@ -1,6 +1,10 @@
 package theme
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"image/color"
+
+	"charm.land/lipgloss/v2"
+)
 
 // Palette is a flat colour token set shared by the workbench and its plugins.
 // All values are ANSI (0-15) or xterm-256 (16-255) colour codes so terminals
@@ -70,7 +74,7 @@ func Default() Palette {
 	}
 }
 
-func (p Palette) SpaceColor(tokenKey string) lipgloss.Color {
+func (p Palette) SpaceColor(tokenKey string) color.Color {
 	switch tokenKey {
 	case "space_green":
 		return lipgloss.Color(p.SpaceGreen)
