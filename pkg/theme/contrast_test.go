@@ -88,8 +88,10 @@ func TestDefaultPaletteContrast(t *testing.T) {
 	// so every role the chrome draws there is held to 4.5:1 on it too.
 	add(textMin, []string{"Ink", "InkMuted", "Accent", "AccentSecondary", "Success", "Warning"},
 		[]string{"Canvas", "Surface", "SurfaceElevated", "SurfaceSelected", "SurfaceHover"})
-	// InkSubtle, Danger and Info are only drawn on the base surfaces and the
-	// toast (Elevated); they are deliberately not promised on Selected.
+	// InkSubtle, Danger and Info are never drawn on SurfaceSelected: the
+	// selected explorer row uses InkMuted, and Danger/Info only appear as toast
+	// edges and the footer hint on the base surfaces and Elevated. Hover is not
+	// drawn by the host, and equals Elevated (BBQ).
 	add(textMin, []string{"InkSubtle", "Danger", "Info"},
 		[]string{"Canvas", "Surface", "SurfaceElevated"})
 	// Dark text on the filled badges and the active rail pill.

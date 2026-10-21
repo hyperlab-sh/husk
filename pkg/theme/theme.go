@@ -34,7 +34,7 @@ type Palette struct {
 // borders and other non-text 3:1); change a role only with that test green.
 func Default() Palette {
 	return Palette{
-		Name:            "Charm Default",
+		Name:            "CharmTone",
 		Canvas:          charmtone.Pepper.Hex(),
 		Surface:         charmtone.Pepper.Hex(),
 		SurfaceElevated: charmtone.BBQ.Hex(),
