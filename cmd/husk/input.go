@@ -106,7 +106,11 @@ func (m *WorkbenchModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.activeModalPlugin != "" {
-		if key == "esc" || key == "f2" || key == "ctrl+f" {
+		closeKey := key == "esc"
+		if ri, ok := m.railItemByID(m.activeModalRailID); ok && ri.Shortcut != "" && ri.Shortcut == key {
+			closeKey = true // the item's own shortcut toggles it closed
+		}
+		if closeKey {
 			m.activeModalRailID = ""
 			m.activeModalPlugin = ""
 			return m, nil
@@ -133,23 +137,17 @@ func (m *WorkbenchModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		next.Alt = m.altLatched
 		m.syncModifierTransitions(next)
 		return m, nil
-	case "esc", "f1", "alt+1", "¡":
+	case "esc", "f1", "alt+1":
 		if m.activeRailID != "" || m.stageMode == "hotspots" {
 			m.activateHomeWorkbench()
 			return m, nil
 		}
-	case "f2", "ctrl+f", "alt+2", "™":
-		return m.executeCommand("tv.open")
-	case "f3", "ctrl+g", "alt+3", "£":
-		return m.executeCommand("fleet.open")
-	case "f4", "ctrl+e", "alt+4", "¢":
-		return m.executeCommand("gitstage.open")
-	case "ctrl+p", ":", "alt+p", "π":
+	case "ctrl+p", ":", "alt+p":
 		m.showPalette = true
 		m.paletteQuery = ""
 		m.paletteCursor = 0
 		return m, nil
-	case "ctrl+i", "v", "alt+v", "√":
+	case "ctrl+i", "v", "alt+v":
 		return m.executeCommand("husk.hotspots.toggle_stage")
 	case "h":
 		return m.executeCommand("husk.hotspots.badges")
@@ -218,20 +216,20 @@ func (m *WorkbenchModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// Rail item shortcuts and plugin key bindings come from what plugins
+	// declared in hello; the host binds no application keys of its own.
+	if ri, ok := m.railShortcutItem(key); ok {
+		m.activateRailItem(ri)
+		return m, nil
+	}
 	targetSlot := m.focusedSlot
-	if m.activePlacement == huskipc.PlacementStage {
-		switch key {
-		case "j", "k", "up", "down", "enter", "1", "2", "3", "o", "n":
-			targetSlot = huskipc.SlotSidebarList
-		default:
-			targetSlot = huskipc.SlotWorkspaceStage
-		}
+	if pid, kb, ok := m.keyBinding(key, targetSlot); ok {
+		return m.runPluginBinding(pid, kb.CommandID)
 	}
 
-	ownerID := m.slotOwners[targetSlot]
-	if ownerID == "" {
-		ownerID = m.slotOwners[huskipc.SlotSidebarList]
-	}
+	// Everything else goes to the focused surface's occupant only. An
+	// unoccupied focused surface drops the key.
+	ownerID := m.keyOwner(targetSlot)
 	if cp, ok := m.plugins[ownerID]; ok {
 		_ = cp.Writer.Send(huskipc.Envelope{
 			Type: "slot_key",
@@ -242,6 +240,22 @@ func (m *WorkbenchModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		})
 	}
 	return m, nil
+}
+
+// keyOwner is the plugin that receives keys for slot: the surface's occupant,
+// or, for the surface opened by the active full-canvas/stage rail item, the
+// plugin that declared that rail item.
+func (m *WorkbenchModel) keyOwner(slot huskipc.SlotID) string {
+	if owner := m.slotOwners[slot]; owner != "" {
+		return owner
+	}
+	if ri, ok := m.activeRailItem(); ok {
+		if (ri.Placement == huskipc.PlacementFullCanvas && slot == huskipc.SlotFullCanvas) ||
+			(ri.Placement == huskipc.PlacementStage && slot == huskipc.SlotWorkspaceStage) {
+			return ri.PluginID
+		}
+	}
+	return ""
 }
 
 func (m *WorkbenchModel) detectDividerAt(x, y int) string {

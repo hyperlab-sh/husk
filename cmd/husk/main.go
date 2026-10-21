@@ -113,30 +113,31 @@ func main() {
 	launched := len(manifestPlugins)
 	if *dumpFrame {
 		deadline := time.Now().Add(3000 * time.Millisecond)
-		railTriggered := *railMode == ""
+		mode := *railMode
+		railTriggered := mode == ""
 		for time.Now().Before(deadline) {
 			select {
 			case msg := <-model.subChan:
 				model.Update(msg)
 				if !railTriggered && launched > 0 && len(model.plugins) >= launched {
 					railTriggered = true
-					switch *railMode {
-					case "modal":
-						model.executeCommand("tv.open")
-					case "full-canvas":
-						model.executeCommand("fleet.open")
-					case "stage":
-						model.executeCommand("gitstage.open")
+					// Open the first registered rail item with the requested
+					// placement; Husk knows no specific plugin.
+					if ri, ok := model.firstRailItemWithPlacement(huskipc.RailPlacement(mode)); ok {
+						model.activateRailItem(ri)
+					} else {
+						fmt.Fprintf(os.Stderr, "husk: --rail %s: no loaded plugin declares a %s rail item\n", mode, mode)
+						mode = "" // nothing to wait for
 					}
 				}
 				ready := len(model.plugins) >= launched && len(model.slotUpdates) >= min(launched, 1)
-				if *railMode == "modal" && model.slotUpdates[huskipc.SlotModalSurface] == nil {
+				if mode == "modal" && model.slotUpdates[huskipc.SlotModalSurface] == nil {
 					ready = false
 				}
-				if *railMode == "full-canvas" && model.slotUpdates[huskipc.SlotFullCanvas] == nil {
+				if mode == "full-canvas" && model.slotUpdates[huskipc.SlotFullCanvas] == nil {
 					ready = false
 				}
-				if *railMode == "stage" && model.slotUpdates[huskipc.SlotWorkspaceStage] == nil {
+				if mode == "stage" && model.slotUpdates[huskipc.SlotWorkspaceStage] == nil {
 					ready = false
 				}
 				if ready {

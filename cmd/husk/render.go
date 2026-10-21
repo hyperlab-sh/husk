@@ -191,11 +191,18 @@ func (m *WorkbenchModel) renderTopWorkbenchBar() string {
 		Padding(0, 1).
 		Render(fmt.Sprintf("● %d plugins", len(m.plugins)))
 
+	// Rail shortcuts come from the rail items plugins declared.
+	railKeys := []string{"F1 home"}
+	for _, ri := range m.orderedRailItems() {
+		if ri.Shortcut != "" {
+			railKeys = append(railKeys, strings.ToUpper(ri.Shortcut)+" "+ri.Label)
+		}
+	}
 	railHint := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(m.palette.Info)).
 		Background(lipgloss.Color(m.palette.SurfaceElevated)).
 		Padding(0, 1).
-		Render("Rail: F1   F2  Modal  F3  Canvas  F4  Stage")
+		Render("Rail: " + strings.Join(railKeys, "  "))
 
 	themePill := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(m.palette.AccentSecondary)).
@@ -263,9 +270,6 @@ func (m *WorkbenchModel) renderBottomKeybindBar() string {
 
 	left := strings.Join([]string{
 		hint("F1", " home"),
-		hint("F2/ctrl+f", " modal"),
-		hint("F3/ctrl+g", " canvas"),
-		hint("F4/ctrl+e", " stage"),
 		hint("j/k", "nav"),
 		hint("⏎", "focus"),
 		hint("drag/= ", "resize"),
