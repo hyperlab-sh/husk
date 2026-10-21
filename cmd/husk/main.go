@@ -912,6 +912,9 @@ func (m *WorkbenchModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 	if isLeftClick {
 		if div := m.detectDividerAt(msg.X, msg.Y); div != "" {
+			if m.clickContributionAt(msg.X, msg.Y) {
+				return m, nil
+			}
 			m.activeDrag = div
 			m.hoverDivider = div
 			return m, nil

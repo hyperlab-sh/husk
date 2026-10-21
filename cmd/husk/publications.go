@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/hyperlab-sh/husk/pkg/huskipc"
 )
 
@@ -189,6 +190,30 @@ func (m *WorkbenchModel) seedPubslotsDemo() {
 	}}})
 }
 
+// clickContributionAt lets visible content win over overlapping resize hit
+// zones on borderless surfaces. Borders and blank cells remain draggable.
+func (m *WorkbenchModel) clickContributionAt(x, y int) bool {
+	for slot, rect := range m.slotRects {
+		if slot == huskipc.SlotActivityRail {
+			continue
+		}
+		relX, relY := x-rect.InnerX, y-rect.InnerY
+		if relX < 0 || relY < 0 || relX >= rect.InnerW || relY >= rect.InnerH {
+			continue
+		}
+		if !m.clickContribution(slot, relX, relY, rect.InnerW, rect.InnerH) {
+			continue
+		}
+		switch slot {
+		case huskipc.SlotSidebarList, huskipc.SlotMainStage, huskipc.SlotSidePanel, huskipc.SlotWorkspaceStage, huskipc.SlotFullCanvas:
+			m.focusedSlot = slot
+			m.broadcastSlotResize()
+		}
+		return true
+	}
+	return false
+}
+
 // clickContribution re-renders from current state rather than trusting a stale
 // frame hit map after a resize, registry mutation or plugin disconnect.
 func (m *WorkbenchModel) clickContribution(surface huskipc.SlotID, x, y, width, height int) bool {
@@ -198,6 +223,24 @@ func (m *WorkbenchModel) clickContribution(surface huskipc.SlotID, x, y, width, 
 	su := m.slotUpdates[surface]
 	if su == nil {
 		return false
+	}
+	// Borderless frames overlay chrome on content row zero. Do not dispatch
+	// commands for contribution cells hidden by a label or close glyph.
+	if spec := m.frameFor(surface); y == 0 && !spec.Border {
+		available := width
+		if spec.Close {
+			available--
+			if x >= available {
+				return false
+			}
+		}
+		label := spec.Label
+		if label != "" && su.Title != "" {
+			label = su.Title
+		}
+		if x < ansi.StringWidth(ansi.Truncate(label, max(0, available), "…")) {
+			return false
+		}
 	}
 	_, hits := m.registry.renderPublished(surface, m.slotOwners[surface], su.Lines, width, height)
 	for i := len(hits) - 1; i >= 0; i-- {
@@ -212,16 +255,15 @@ func (m *WorkbenchModel) clickContribution(surface huskipc.SlotID, x, y, width, 
 	return false
 }
 
-// Modal content starts after its title row and must not click through to a
-// surface behind the overlay. Geometry matches overlayModalPlugin.
+// Modal content uses the same frame-aware inner rect as rendering. Borders
+// consume one cell per edge; labels/close glyphs never add a content title row.
 func (m *WorkbenchModel) handlePublishedModalMouse(x, y int, left, wheelDown, wheelUp bool) bool {
-	w, h := min(92, m.width-10), min(24, m.height-6)
-	startX, startY := max(4, (m.width-w)/2), max(2, (m.height-h)/2)
-	if x < startX || x >= startX+w || y < startY || y >= startY+h {
+	rect := m.modalRect
+	if x < rect.X || x >= rect.X+rect.Width || y < rect.Y || y >= rect.Y+rect.Height {
 		return false
 	}
-	x, y = x-startX-2, y-startY-2
-	innerW, innerH := w-4, h-3
+	x, y = x-rect.InnerX, y-rect.InnerY
+	innerW, innerH := rect.InnerW, rect.InnerH
 	if x < 0 || y < 0 || x >= innerW || y >= innerH {
 		return true
 	}
