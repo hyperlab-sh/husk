@@ -31,7 +31,7 @@ Frame dumps render without a terminal:
 
 ## Concepts
 
-The layout has nine slots (`activity-rail`, `sidebar-navigation`, `sidebar-list`, `thread-row-status`, `sidebar-footer`, `main-header`, `main-stage`, `side-panel`, `app-overlay`), modeled on `bb`. Plugins mount in one of three placements from the activity rail:
+The layout has nine fixed slots (`activity-rail`, `sidebar-navigation`, `sidebar-list`, `thread-row-status`, `sidebar-footer`, `main-header`, `main-stage`, `side-panel`, `app-overlay`), modeled on `bb`, plus three placement surfaces (`modal-surface`, `full-canvas`, `workspace-stage`): twelve in all. Plugins mount in one of three placements from the activity rail:
 
 | Placement | Example plugin | Behavior |
 | :--- | :--- | :--- |
