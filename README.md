@@ -32,11 +32,13 @@ Frame dumps render without a terminal:
 
 The layout has nine slots (`activity-rail`, `sidebar-navigation`, `sidebar-list`, `thread-row-status`, `sidebar-footer`, `main-header`, `main-stage`, `side-panel`, `app-overlay`), modeled on `bb`. Plugins mount in one of three placements from the activity rail:
 
-| Placement | Example plugin | Trigger | Behavior |
-| :--- | :--- | :--- | :--- |
-| `modal` | — | `F2`, `ctrl+f` | Floating fuzzy finder |
-| `full-canvas` | — | `F3`, `ctrl+g` | Replaces the whole canvas right of the rail |
-| `stage` | `project-git` | `F4`, `ctrl+e` | Fills the canvas but keeps the sidebar |
+| Placement | Example plugin | Behavior |
+| :--- | :--- | :--- |
+| `modal` | — | Floating overlay |
+| `full-canvas` | — | Replaces the whole canvas right of the rail |
+| `stage` | `project-git` (`F4`) | Fills the canvas but keeps the sidebar |
+
+Husk binds no application keys. A rail item opens from a rail click or the `shortcut` its plugin declares, and plugins declare further `keybindings` in `hello`; see [Architecture](docs/docs/architecture.md#input-routing).
 
 Plugins can publish namespaced slots, hooks and events for other plugins to attach to. Inline slots expand at row anchors; region slots reserve a rectangle. Husk clips contributions and routes their clicks to the contributor, fans out asynchronous hooks, and delivers events only to subscribers. Try `husk --dump-frame --demo pubslots` for a self-contained two-plugin frame. See [Architecture](docs/docs/architecture.md#published-slots-hooks-and-events) for message shapes and lifecycle.
 
@@ -70,7 +72,8 @@ A plugin directory contains a `husk-plugin.json` manifest:
 | Input | Action |
 | :--- | :--- |
 | `ctrl+p`, `:` | Command palette |
-| `F1`–`F4`, rail click | Switch rail mode |
+| `F1`, `alt+1` | Home workbench |
+| Rail click, a rail item's declared shortcut | Open or close that rail item |
 | `[`, `]`, `/` | Toggle sidebar, toggle inspector, cycle dock layouts |
 | Drag a slot border, `=` | Resize slots, reset sizes |
 | Hold `Alt`/`Option` | Show shortcuts on the rail |

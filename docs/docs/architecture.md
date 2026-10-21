@@ -36,14 +36,16 @@ Husk uses a nine-slot layout modeled on `bb`.
 | Slot | Purpose |
 | :--- | :--- |
 | `activity-rail` | Far-left icon bar |
-| `sidebar-navigation` | Mode and view switcher |
-| `sidebar-list` | Spaces, trees and agents |
-| `thread-row-status` | Telemetry, spinners and gauges |
-| `sidebar-footer` | Daemon health, metrics and shortcuts |
-| `main-header` | Stage title and breadcrumbs |
+| `sidebar-navigation` | Top sidebar band |
+| `sidebar-list` | Primary sidebar surface |
+| `thread-row-status` | Narrow status surface beside the sidebar list |
+| `sidebar-footer` | Bottom sidebar band |
+| `main-header` | Header band above the main stage |
 | `main-stage` | Main canvas, or the active stage plugin |
-| `side-panel` | Inspection drawer |
-| `app-overlay` | Command palette and modal plugins |
+| `side-panel` | Collapsible right-hand drawer |
+| `app-overlay` | Command palette, modal plugins and toasts |
+
+Husk assigns no application meaning to a surface; the occupying plugin decides what it shows.
 
 Two dynamic placements sit on top of these: `full-canvas` (everything right of the rail) and `workspace-stage` (the canvas minus the sidebar).
 
@@ -74,6 +76,22 @@ Messages in `pkg/huskipc/protocol.go`:
 | `command_invoke` | host to plugin | A palette command was chosen |
 
 Frame declarations ride on existing messages: `hello.frames` (per-slot) and the `frame` field on rail items. Both are optional and additive — an older plugin that omits them simply renders as a blank canvas.
+
+`welcome.palette` and `theme_changed.palette` carry generic colour roles only (`canvas`, `surface*`, `border*`, `ink*`, `accent*`, `success`, `warning`, `danger`, `info`). A plugin that needs its own colour set, such as one colour per entity, defines it itself.
+
+## Input routing
+
+Husk binds no keys to any application. A key press is resolved in this order:
+
+1. **Palette and modal.** While the palette is open it takes every key. While a modal rail item is open, `esc` or that item's own `shortcut` closes it and every other key goes to the modal plugin as `slot_key` on `modal-surface`.
+2. **Host shortcuts.** Quit, home (`esc`, `f1`, `alt+1`), palette, dock toggles, resize, the slot explorer and `tab` focus cycling. Plugins cannot override these.
+3. **Rail item shortcuts.** A rail item's `shortcut` opens it; pressing it again while it is active returns home.
+4. **Plugin key bindings** from `hello.keybindings` (`{"key":"n","command_id":"a.new","when_slot":"sidebar-list"}`). Bindings whose `when_slot` is the focused surface win, then global bindings (no `when_slot`) of the focused surface's owner, then global bindings of other plugins; ties resolve by plugin ID, then declaration order. When a binding fires, a built-in `husk.*` command or a registered rail item ID runs in the host; any other ID is sent as `command_invoke` to the plugin that declared the binding.
+5. **Focused surface.** Anything left goes as `slot_key` to the plugin occupying the focused surface. For the `full-canvas` or `workspace-stage` surface opened by an active rail item, that is the rail item's plugin when no plugin claimed the surface in `hello.slots`. A key for an unoccupied surface is dropped.
+
+Keys use the `slot_key` spelling (`"f4"`, `"ctrl+g"`, `"alt+2"`, `"n"`, `" "`) and match exactly. `alt+` bindings need a terminal that sends Alt as Meta; layout-specific characters a terminal produces for Option combinations are passed through unchanged.
+
+A palette command whose ID equals a rail item's ID activates that rail item, so a plugin can list its rail items as commands. The activity rail lists rail items in registration order.
 
 ## Published slots, hooks and events
 
