@@ -1,0 +1,1483 @@
+{
+  "$defs": {
+    "CommandInvokePayload": {
+      "properties": {
+        "args": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "command_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "command_id"
+      ],
+      "type": "object"
+    },
+    "CommandSpec": {
+      "properties": {
+        "category": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "shortcut": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "category"
+      ],
+      "type": "object"
+    },
+    "Envelope": {
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "close_modal"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "close_modal"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "command_invoke"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "command_invoke"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "event"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "event"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "event_declare"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "event_declare"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "event_subscribe"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "event_subscribe"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "hello"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "hello"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "hook_call"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "hook_call"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "hook_declare"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "hook_declare"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "hook_result"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "hook_result"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "hook_subscribe"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "hook_subscribe"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "key_state"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "key_state"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "protocol_error"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "protocol_error"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "rail_activated"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "rail_activated"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "slot_contribute"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "slot_contribute"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "slot_contributions"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "slot_contributions"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "slot_declare"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "slot_declare"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "slot_key"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "slot_key"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "slot_mouse"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "slot_mouse"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "slot_resize"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "slot_resize"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "slot_update"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "slot_update"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "theme_changed"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "theme_changed"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "toast"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "toast"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "welcome"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "welcome"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "workspace_context"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "workspace_context"
+            ]
+          }
+        }
+      ],
+      "properties": {
+        "close_modal": {
+          "type": "boolean"
+        },
+        "command_invoke": {
+          "$ref": "#/$defs/CommandInvokePayload"
+        },
+        "event": {
+          "$ref": "#/$defs/EventPayload"
+        },
+        "event_declare": {
+          "$ref": "#/$defs/EventDeclarePayload"
+        },
+        "event_subscribe": {
+          "$ref": "#/$defs/EventSubscribePayload"
+        },
+        "hello": {
+          "$ref": "#/$defs/HelloPayload"
+        },
+        "hook_call": {
+          "$ref": "#/$defs/HookCallPayload"
+        },
+        "hook_declare": {
+          "$ref": "#/$defs/HookDeclarePayload"
+        },
+        "hook_result": {
+          "$ref": "#/$defs/HookResultPayload"
+        },
+        "hook_subscribe": {
+          "$ref": "#/$defs/HookSubscribePayload"
+        },
+        "key_state": {
+          "$ref": "#/$defs/KeyStatePayload"
+        },
+        "protocol_error": {
+          "$ref": "#/$defs/ProtocolErrorPayload"
+        },
+        "rail_activated": {
+          "$ref": "#/$defs/RailActivatedPayload"
+        },
+        "slot_contribute": {
+          "$ref": "#/$defs/SlotContributePayload"
+        },
+        "slot_contributions": {
+          "$ref": "#/$defs/SlotContributionsPayload"
+        },
+        "slot_declare": {
+          "$ref": "#/$defs/SlotDeclarePayload"
+        },
+        "slot_key": {
+          "$ref": "#/$defs/SlotKeyPayload"
+        },
+        "slot_mouse": {
+          "$ref": "#/$defs/SlotMousePayload"
+        },
+        "slot_resize": {
+          "$ref": "#/$defs/SlotResizePayload"
+        },
+        "slot_update": {
+          "$ref": "#/$defs/SlotUpdatePayload"
+        },
+        "theme_changed": {
+          "$ref": "#/$defs/ThemeChangedPayload"
+        },
+        "toast": {
+          "$ref": "#/$defs/ToastPayload"
+        },
+        "type": {
+          "description": "Message type. Each type is carried by the property of the same name.",
+          "enum": [
+            "close_modal",
+            "command_invoke",
+            "event",
+            "event_declare",
+            "event_subscribe",
+            "hello",
+            "hook_call",
+            "hook_declare",
+            "hook_result",
+            "hook_subscribe",
+            "key_state",
+            "protocol_error",
+            "rail_activated",
+            "slot_contribute",
+            "slot_contributions",
+            "slot_declare",
+            "slot_key",
+            "slot_mouse",
+            "slot_resize",
+            "slot_update",
+            "theme_changed",
+            "toast",
+            "welcome",
+            "workspace_context"
+          ],
+          "type": "string"
+        },
+        "welcome": {
+          "$ref": "#/$defs/WelcomePayload"
+        },
+        "workspace_context": {
+          "$ref": "#/$defs/WorkspaceContextPayload"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    "EventDeclarePayload": {
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "EventPayload": {
+      "properties": {
+        "data": {
+          "additionalProperties": {},
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "plugin_id": {
+          "type": "string"
+        },
+        "topic": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "plugin_id",
+        "topic"
+      ],
+      "type": "object"
+    },
+    "EventSubscribePayload": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "FrameSpec": {
+      "properties": {
+        "border": {
+          "type": "boolean"
+        },
+        "close": {
+          "type": "boolean"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "border"
+      ],
+      "type": "object"
+    },
+    "HelloPayload": {
+      "properties": {
+        "commands": {
+          "items": {
+            "$ref": "#/$defs/CommandSpec"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "description": {
+          "type": "string"
+        },
+        "events": {
+          "items": {
+            "$ref": "#/$defs/EventDeclarePayload"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "frames": {
+          "additionalProperties": {
+            "$ref": "#/$defs/FrameSpec"
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "hooks": {
+          "items": {
+            "$ref": "#/$defs/HookDeclarePayload"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "keybindings": {
+          "items": {
+            "$ref": "#/$defs/KeybindSpec"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "language": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "pid": {
+          "type": "integer"
+        },
+        "plugin_id": {
+          "type": "string"
+        },
+        "protocol_version": {
+          "type": "string"
+        },
+        "published_slots": {
+          "items": {
+            "$ref": "#/$defs/SlotDeclarePayload"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "rail_items": {
+          "items": {
+            "$ref": "#/$defs/RailItemSpec"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "slots": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "plugin_id",
+        "name",
+        "version",
+        "language",
+        "pid",
+        "description",
+        "slots"
+      ],
+      "type": "object"
+    },
+    "HookCallPayload": {
+      "properties": {
+        "data": {
+          "additionalProperties": {},
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "request_id"
+      ],
+      "type": "object"
+    },
+    "HookDeclarePayload": {
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "HookResultPayload": {
+      "properties": {
+        "data": {
+          "additionalProperties": {},
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "error": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "plugin_id": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "request_id"
+      ],
+      "type": "object"
+    },
+    "HookSubscribePayload": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "KeyStatePayload": {
+      "properties": {
+        "held": {
+          "type": "boolean"
+        },
+        "held_keys": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "key": {
+          "type": "string"
+        },
+        "modifiers": {
+          "$ref": "#/$defs/ModifierState"
+        },
+        "phase": {
+          "type": "string"
+        },
+        "slot": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "phase",
+        "key",
+        "held",
+        "modifiers"
+      ],
+      "type": "object"
+    },
+    "KeybindSpec": {
+      "properties": {
+        "command_id": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "when_slot": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "command_id",
+        "description"
+      ],
+      "type": "object"
+    },
+    "ModifierState": {
+      "properties": {
+        "alt": {
+          "type": "boolean"
+        },
+        "ctrl": {
+          "type": "boolean"
+        },
+        "shift": {
+          "type": "boolean"
+        },
+        "super": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "alt",
+        "ctrl",
+        "shift",
+        "super"
+      ],
+      "type": "object"
+    },
+    "Palette": {
+      "properties": {
+        "accent": {
+          "type": "string"
+        },
+        "accent_secondary": {
+          "type": "string"
+        },
+        "accent_soft": {
+          "type": "string"
+        },
+        "border": {
+          "type": "string"
+        },
+        "border_focused": {
+          "type": "string"
+        },
+        "border_subtle": {
+          "type": "string"
+        },
+        "canvas": {
+          "type": "string"
+        },
+        "danger": {
+          "type": "string"
+        },
+        "info": {
+          "type": "string"
+        },
+        "ink": {
+          "type": "string"
+        },
+        "ink_muted": {
+          "type": "string"
+        },
+        "ink_subtle": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "success": {
+          "type": "string"
+        },
+        "surface": {
+          "type": "string"
+        },
+        "surface_elevated": {
+          "type": "string"
+        },
+        "surface_hover": {
+          "type": "string"
+        },
+        "surface_selected": {
+          "type": "string"
+        },
+        "warning": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "canvas",
+        "surface",
+        "surface_elevated",
+        "surface_selected",
+        "surface_hover",
+        "border",
+        "border_subtle",
+        "border_focused",
+        "ink",
+        "ink_muted",
+        "ink_subtle",
+        "accent",
+        "accent_secondary",
+        "accent_soft",
+        "success",
+        "warning",
+        "danger",
+        "info"
+      ],
+      "type": "object"
+    },
+    "ProtocolErrorPayload": {
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "message_type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message_type",
+        "message"
+      ],
+      "type": "object"
+    },
+    "PublishedRect": {
+      "properties": {
+        "height": {
+          "type": "integer"
+        },
+        "surface": {
+          "type": "string"
+        },
+        "width": {
+          "type": "integer"
+        },
+        "x": {
+          "type": "integer"
+        },
+        "y": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "surface",
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
+      "type": "object"
+    },
+    "RailActivatedPayload": {
+      "properties": {
+        "active": {
+          "type": "boolean"
+        },
+        "context": {
+          "$ref": "#/$defs/WorkspaceContextPayload"
+        },
+        "height": {
+          "type": "integer"
+        },
+        "placement": {
+          "type": "string"
+        },
+        "rail_id": {
+          "type": "string"
+        },
+        "width": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "rail_id",
+        "placement",
+        "active",
+        "width",
+        "height",
+        "context"
+      ],
+      "type": "object"
+    },
+    "RailItemSpec": {
+      "properties": {
+        "badge": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "frame": {
+          "$ref": "#/$defs/FrameSpec"
+        },
+        "icon": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "placement": {
+          "type": "string"
+        },
+        "plugin_id": {
+          "type": "string"
+        },
+        "shortcut": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "icon",
+        "label",
+        "placement"
+      ],
+      "type": "object"
+    },
+    "RowHitTarget": {
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "line": {
+          "type": "integer"
+        },
+        "payload": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "line",
+        "id",
+        "kind",
+        "action"
+      ],
+      "type": "object"
+    },
+    "SlotContributePayload": {
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "on_click": {
+          "type": "string"
+        },
+        "slot_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "slot_id",
+        "id",
+        "content"
+      ],
+      "type": "object"
+    },
+    "SlotContribution": {
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "on_click": {
+          "type": "string"
+        },
+        "plugin_id": {
+          "type": "string"
+        },
+        "slot_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "slot_id",
+        "id",
+        "content",
+        "plugin_id"
+      ],
+      "type": "object"
+    },
+    "SlotContributionsPayload": {
+      "properties": {
+        "contributions": {
+          "items": {
+            "$ref": "#/$defs/SlotContribution"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "slot_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "slot_id",
+        "contributions"
+      ],
+      "type": "object"
+    },
+    "SlotDeclarePayload": {
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "rect": {
+          "$ref": "#/$defs/PublishedRect"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "description",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "SlotKeyPayload": {
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "modifiers": {
+          "$ref": "#/$defs/ModifierState"
+        },
+        "slot": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "slot",
+        "key",
+        "modifiers"
+      ],
+      "type": "object"
+    },
+    "SlotMousePayload": {
+      "properties": {
+        "button": {
+          "type": "string"
+        },
+        "hit_action": {
+          "type": "string"
+        },
+        "hit_id": {
+          "type": "string"
+        },
+        "hit_kind": {
+          "type": "string"
+        },
+        "hit_payload": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "slot": {
+          "type": "string"
+        },
+        "x": {
+          "type": "integer"
+        },
+        "y": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "slot",
+        "x",
+        "y",
+        "button"
+      ],
+      "type": "object"
+    },
+    "SlotResizePayload": {
+      "properties": {
+        "focused_slot": {
+          "type": "string"
+        },
+        "slot_sizes": {
+          "additionalProperties": {
+            "$ref": "#/$defs/SlotSize"
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "slot_sizes",
+        "focused_slot"
+      ],
+      "type": "object"
+    },
+    "SlotSize": {
+      "properties": {
+        "focused": {
+          "type": "boolean"
+        },
+        "height": {
+          "type": "integer"
+        },
+        "visible": {
+          "type": "boolean"
+        },
+        "width": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "width",
+        "height",
+        "focused",
+        "visible"
+      ],
+      "type": "object"
+    },
+    "SlotUpdatePayload": {
+      "properties": {
+        "badge": {
+          "type": "string"
+        },
+        "hit_targets": {
+          "items": {
+            "$ref": "#/$defs/RowHitTarget"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "lines": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "plugin_id": {
+          "type": "string"
+        },
+        "slot": {
+          "type": "string"
+        },
+        "status_meta": {
+          "additionalProperties": {},
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "subtitle": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "plugin_id",
+        "slot",
+        "lines"
+      ],
+      "type": "object"
+    },
+    "ThemeChangedPayload": {
+      "properties": {
+        "palette": {
+          "$ref": "#/$defs/Palette"
+        }
+      },
+      "required": [
+        "palette"
+      ],
+      "type": "object"
+    },
+    "ToastPayload": {
+      "properties": {
+        "level": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "plugin_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "plugin_id",
+        "level",
+        "title",
+        "message"
+      ],
+      "type": "object"
+    },
+    "WelcomePayload": {
+      "properties": {
+        "context": {
+          "$ref": "#/$defs/WorkspaceContextPayload"
+        },
+        "focused_slot": {
+          "type": "string"
+        },
+        "host_version": {
+          "type": "string"
+        },
+        "modifiers": {
+          "$ref": "#/$defs/ModifierState"
+        },
+        "palette": {
+          "$ref": "#/$defs/Palette"
+        },
+        "protocol_version": {
+          "type": "string"
+        },
+        "slot_sizes": {
+          "additionalProperties": {
+            "$ref": "#/$defs/SlotSize"
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "host_version",
+        "palette",
+        "slot_sizes",
+        "focused_slot",
+        "context",
+        "modifiers"
+      ],
+      "type": "object"
+    },
+    "WorkspaceContextPayload": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "pane_id": {
+          "type": "string"
+        },
+        "repo_name": {
+          "type": "string"
+        },
+        "tab_id": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        },
+        "workspace_label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspace_id",
+        "workspace_label",
+        "cwd"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/hyperlab-sh/husk/blob/main/docs/docs/wire-schema.json",
+  "$ref": "#/$defs/Envelope",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "One JSON line exchanged between Husk and a plugin. Protocol version 1.0. Generated from pkg/huskipc by go generate; do not edit.",
+  "title": "Husk wire protocol"
+}

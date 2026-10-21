@@ -6,6 +6,12 @@ import (
 	"sync"
 )
 
+// The wire JSON Schema is generated from the structs in this package. Run
+// `go generate ./pkg/huskipc` after changing any wire type;
+// TestCommittedSchemaIsCurrent fails while the committed file is stale.
+//
+//go:generate go run ../../cmd/genschema -o ../../docs/docs/wire-schema.json
+
 type SlotID string
 
 const (
