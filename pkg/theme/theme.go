@@ -2,6 +2,9 @@ package theme
 
 import "github.com/charmbracelet/lipgloss"
 
+// Palette is a flat colour token set shared by the workbench and its plugins.
+// All values are ANSI (0-15) or xterm-256 (16-255) colour codes so terminals
+// render Husk with their own Charm default palette.
 type Palette struct {
 	Name            string `json:"name"`
 	Canvas          string `json:"canvas"`
@@ -33,132 +36,38 @@ type Palette struct {
 	SpaceOrange string `json:"space_orange"`
 }
 
-var Themes = []Palette{
-	{
-		Name:            "Tokyo Night",
-		Canvas:          "#16161e",
-		Surface:         "#1a1b26",
-		SurfaceElevated: "#24283b",
-		SurfaceSelected: "#283457",
-		SurfaceHover:    "#1f2335",
-		Border:          "#3b4261",
-		BorderSubtle:    "#292e42",
-		BorderFocused:   "#7aa2f7",
-		Ink:             "#c0caf5",
-		InkMuted:        "#a9b1d6",
-		InkSubtle:       "#565f89",
-		Accent:          "#7aa2f7",
-		AccentSecondary: "#bb9af7",
-		AccentSoft:      "#3d59a1",
-		Success:         "#9ece6a",
-		Warning:         "#e0af68",
-		Danger:          "#f7768e",
-		Info:            "#7dcfff",
-		SpaceGreen:      "#9ece6a",
-		SpaceCyan:       "#7dcfff",
-		SpaceIndigo:     "#7aa2f7",
-		SpaceYellow:     "#e0af68",
-		SpaceLime:       "#73daca",
-		SpacePurple:     "#bb9af7",
-		SpacePink:       "#f7768e",
-		SpaceOrange:     "#ff9e64",
-	},
-	{
-		Name:            "Catppuccin Mocha",
-		Canvas:          "#181825",
-		Surface:         "#1e1e2e",
-		SurfaceElevated: "#313244",
-		SurfaceSelected: "#45475a",
-		SurfaceHover:    "#262637",
-		Border:          "#45475a",
-		BorderSubtle:    "#313244",
-		BorderFocused:   "#cba6f7",
-		Ink:             "#cdd6f4",
-		InkMuted:        "#bac2de",
-		InkSubtle:       "#6c7086",
-		Accent:          "#cba6f7",
-		AccentSecondary: "#89b4fa",
-		AccentSoft:      "#585b70",
-		Success:         "#a6e3a1",
-		Warning:         "#f9e2af",
-		Danger:          "#f38ba8",
-		Info:            "#89dceb",
-		SpaceGreen:      "#a6e3a1",
-		SpaceCyan:       "#89dceb",
-		SpaceIndigo:     "#89b4fa",
-		SpaceYellow:     "#f9e2af",
-		SpaceLime:       "#94e2d5",
-		SpacePurple:     "#cba6f7",
-		SpacePink:       "#f5c2e7",
-		SpaceOrange:     "#fab387",
-	},
-	{
-		Name:            "Rosé Pine",
-		Canvas:          "#191724",
-		Surface:         "#1f1d2e",
-		SurfaceElevated: "#26233a",
-		SurfaceSelected: "#403d52",
-		SurfaceHover:    "#2a273f",
-		Border:          "#403d52",
-		BorderSubtle:    "#26233a",
-		BorderFocused:   "#c4a7e7",
-		Ink:             "#e0def4",
-		InkMuted:        "#908caa",
-		InkSubtle:       "#6e6a86",
-		Accent:          "#c4a7e7",
-		AccentSecondary: "#ebbcba",
-		AccentSoft:      "#524f67",
-		Success:         "#9ccfd8",
-		Warning:         "#f6c177",
-		Danger:          "#eb6f92",
-		Info:            "#31748f",
-		SpaceGreen:      "#9ccfd8",
-		SpaceCyan:       "#9ccfd8",
-		SpaceIndigo:     "#31748f",
-		SpaceYellow:     "#f6c177",
-		SpaceLime:       "#9ccfd8",
-		SpacePurple:     "#c4a7e7",
-		SpacePink:       "#ebbcba",
-		SpaceOrange:     "#f6c177",
-	},
-	{
-		Name:            "Kanagawa Wave",
-		Canvas:          "#16161d",
-		Surface:         "#1f1f28",
-		SurfaceElevated: "#2a2a37",
-		SurfaceSelected: "#2d4f67",
-		SurfaceHover:    "#223249",
-		Border:          "#54546d",
-		BorderSubtle:    "#2a2a37",
-		BorderFocused:   "#7e9cd8",
-		Ink:             "#dcd7ba",
-		InkMuted:        "#c8c093",
-		InkSubtle:       "#727169",
-		Accent:          "#7e9cd8",
-		AccentSecondary: "#957fb8",
-		AccentSoft:      "#223249",
-		Success:         "#98bb6c",
-		Warning:         "#e6c384",
-		Danger:          "#e46876",
-		Info:            "#7fb4ca",
-		SpaceGreen:      "#98bb6c",
-		SpaceCyan:       "#7fb4ca",
-		SpaceIndigo:     "#7e9cd8",
-		SpaceYellow:     "#e6c384",
-		SpaceLime:       "#6a9589",
-		SpacePurple:     "#957fb8",
-		SpacePink:       "#d27e99",
-		SpaceOrange:     "#ffa066",
-	},
-}
+// Default is Husk's single palette, built only from ANSI/256 colour codes.
+func Default() Palette {
+	return Palette{
+		Name:            "Charm Default",
+		Canvas:          "0",
+		Surface:         "0",
+		SurfaceElevated: "236",
+		SurfaceSelected: "238",
+		SurfaceHover:    "237",
+		Border:          "241",
+		BorderSubtle:    "238",
+		BorderFocused:   "63",
+		Ink:             "15",
+		InkMuted:        "7",
+		InkSubtle:       "245",
+		Accent:          "63",
+		AccentSecondary: "205",
+		AccentSoft:      "61",
+		Success:         "10",
+		Warning:         "11",
+		Danger:          "9",
+		Info:            "14",
 
-func ByName(name string) Palette {
-	for _, t := range Themes {
-		if t.Name == name {
-			return t
-		}
+		SpaceGreen:  "10",
+		SpaceCyan:   "14",
+		SpaceIndigo: "63",
+		SpaceYellow: "11",
+		SpaceLime:   "120",
+		SpacePurple: "135",
+		SpacePink:   "205",
+		SpaceOrange: "208",
 	}
-	return Themes[0]
 }
 
 func (p Palette) SpaceColor(tokenKey string) lipgloss.Color {

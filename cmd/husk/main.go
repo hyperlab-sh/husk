@@ -71,7 +71,6 @@ type WorkbenchModel struct {
 
 	width        int
 	height       int
-	themeIdx     int
 	palette      theme.Palette
 	focusedSlot  huskipc.SlotID
 	showSidebar  bool
@@ -120,8 +119,7 @@ func newWorkbenchModel(socketPath string, listener net.Listener) *WorkbenchModel
 		wsContext:    huskipc.WorkspaceContextPayload{WorkspaceID: "w1R", WorkspaceLabel: "Dolphin", Cwd: "/work/lab/herdr/herdr"},
 		width:        144,
 		height:       40,
-		themeIdx:     0,
-		palette:      theme.Themes[0],
+		palette:      theme.Default(),
 		focusedSlot:  huskipc.SlotSidebarList,
 		showSidebar:  true,
 		sidebarWidth: 38,
@@ -619,8 +617,6 @@ func (m *WorkbenchModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.paletteQuery = ""
 		m.paletteCursor = 0
 		return m, nil
-	case "ctrl+t", "t":
-		return m.executeCommand("husk.theme.cycle")
 	case "ctrl+i", "v", "alt+v", "√":
 		return m.executeCommand("husk.hotspots.toggle_stage")
 	case "h":
@@ -1050,16 +1046,6 @@ func (m *WorkbenchModel) allCommands() []paletteCommand {
 		},
 		{
 			CommandSpec: huskipc.CommandSpec{
-				ID:          "husk.theme.cycle",
-				Title:       "Husk Workbench: Cycle Color Theme (" + m.palette.Name + ")",
-				Category:    "Workbench",
-				Shortcut:    "t / ctrl+t",
-				Description: "Switches palette and broadcasts theme_changed over husk.sock",
-			},
-			PluginID: "husk.core",
-		},
-		{
-			CommandSpec: huskipc.CommandSpec{
 				ID:          "husk.hotspots.toggle_stage",
 				Title:       "Husk Workbench: Toggle Stage between Live Plugin & bb Slot Architecture Map",
 				Category:    "Workbench",
@@ -1170,19 +1156,6 @@ func (m *WorkbenchModel) executeCommand(cmdID string) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
-
-	case "husk.theme.cycle":
-		m.themeIdx = (m.themeIdx + 1) % len(theme.Themes)
-		m.palette = theme.Themes[m.themeIdx]
-		for _, cp := range m.plugins {
-			_ = cp.Writer.Send(huskipc.Envelope{
-				Type: "theme_changed",
-				ThemeChanged: &huskipc.ThemeChangedPayload{
-					Palette: m.palette,
-				},
-			})
-		}
-		return m, m.showLocalToast("info", "Theme Updated", "Switched workbench + plugins to "+m.palette.Name)
 
 	case "husk.hotspots.toggle_stage":
 		m.activeRailID = ""
@@ -1575,14 +1548,14 @@ func (m *WorkbenchModel) renderTopWorkbenchBar() string {
 			Background(lipgloss.Color(m.palette.Success)).
 			Bold(true).
 			Padding(0, 1).
-			Render("⇄ Dragging " + m.activeDrag) + " "
+			Render("⇄ Dragging "+m.activeDrag) + " "
 	} else if m.hoverDivider != "" {
 		dragPill = lipgloss.NewStyle().
 			Foreground(lipgloss.Color(m.palette.Canvas)).
 			Background(lipgloss.Color(m.palette.Warning)).
 			Bold(true).
 			Padding(0, 1).
-			Render("⇄ Drag border: " + m.hoverDivider) + " "
+			Render("⇄ Drag border: "+m.hoverDivider) + " "
 	} else if m.hoverRailIdx >= 0 {
 		btns := m.railButtons()
 		if m.hoverRailIdx < len(btns) {
