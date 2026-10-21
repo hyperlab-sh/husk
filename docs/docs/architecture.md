@@ -304,6 +304,8 @@ to be connected first. On stream EOF, Husk removes the plugin's declarations,
 subscriptions, occupied surfaces and contributions, clears stale surface content,
 and sends updated contribution snapshots to affected publishers.
 
+`plugins/reference` is a runnable example of a publisher (frame, inline slot, hook and event) and `plugins/reference-actions` of a contributor; see [Getting Started](getting-started.md#reference-plugin). A contributor that starts before its publisher is refused with `protocol_error` and should retry.
+
 Run `husk --dump-frame --demo pubslots` to render two in-process fake plugins:
 A draws anchored rows and reserves a region; B supplies their actions. The demo
 uses the same registration, routing and rendering paths without external tools.
