@@ -2,7 +2,7 @@ package main
 
 import (
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 
 	uv "github.com/charmbracelet/ultraviolet"
@@ -137,7 +137,7 @@ func (r *publicationRegistry) layoutPublished(surface huskipc.SlotID, owner stri
 			ids = append(ids, id)
 		}
 	}
-	sort.Strings(ids) // deterministic stacking if the publisher reserves overlapping rects
+	slices.Sort(ids) // deterministic stacking if the publisher reserves overlapping rects
 	for _, id := range ids {
 		s := r.Slots[id]
 		rect := s.Spec.Rect

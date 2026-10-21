@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/hyperlab-sh/husk/pkg/huskipc"
@@ -82,8 +82,8 @@ func (p *Plugin) CheckHello(pluginID string, slots []string) error {
 	if len(extra) == 0 && len(missing) == 0 {
 		return nil
 	}
-	sort.Strings(extra)
-	sort.Strings(missing)
+	slices.Sort(extra)
+	slices.Sort(missing)
 	var parts []string
 	if len(extra) > 0 {
 		parts = append(parts, "claims undeclared slots ["+strings.Join(extra, " ")+"]")
