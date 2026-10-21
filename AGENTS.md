@@ -17,12 +17,14 @@ go test ./pkg/...
 
 Tests live in `pkg/manifest` (manifest parsing) and `pkg/frame` (frame geometry), plus `cmd/husk` host regression tests for frame resolution, sizing and rendering; run them all with `go test ./...`. Use `--dump-frame` to check rendering changes and `--demo-frame` (optionally with `--rail modal|full-canvas|stage`) to render the built-in demo plugin that declares a border+label+close frame. Surfaces are a blank canvas; all plugin-surface chrome (border/label/close) is declared by the plugin (`hello.frames` or rail-item `frame`) and drawn by `cmd/husk` `renderFrame`. Manifests reference binaries as `./bin/<name>`.
 
+Registry, published-slot rendering/routing and protocol compatibility tests live beside their code. Run affected tests with `go test ./cmd/husk ./pkg/huskipc`; use `--dump-frame --demo pubslots` for a self-contained two-plugin frame and `--dump-frame --plugin-dir ./plugins` for rendering with external plugins. Manifests reference binaries as `./bin/<name>`.
+
 ## Layout
 
 | Path | Purpose |
 | :--- | :--- |
 | `cmd/husk/` | Host workbench: slots, dock/palette, mouse resize, activity rail; `modifiers_darwin.go` polls Alt/Option via Quartz at 25Hz |
-| `pkg/huskipc/` | IPC protocol (`protocol.go`) and client (`client.go`) |
+| `pkg/huskipc/` | IPC envelope and legacy payloads (`protocol.go`), published extension payloads (`published.go`), JSON-lines reader/writer |
 | `pkg/manifest/` | `husk-plugin.json` parsing (`manifest.go`): id, name, version, language, description, command (argv, relative to the manifest dir), transport (`socket` default \| `stdio`), slots |
 | `pkg/theme/` | Styling (being moved to Charm defaults) |
 | `plugins/` | Out-of-process plugins, each a directory with a `husk-plugin.json` and its code; currently `project-git` (stage, Bash `plugin.sh` mock UI). The module path is `github.com/hyperlab-sh/husk`; `pkg/huskipc` and `pkg/theme` are imported externally, so keep them stable |
