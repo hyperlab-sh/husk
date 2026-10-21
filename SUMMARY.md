@@ -1,65 +1,51 @@
-# Husk & Dolphin Session Summary
+# Husk Design Summary
 
-## 1. Architectural Vision & Scope
+Design history and the shape of what exists today. `README.md` is the user-facing entry point and `docs/docs/architecture.md` is the specification.
 
-The session originated from an architectural pivot: instead of forking and modifying `herdr` directly, the project established **Husk** — an extensible, minimalist TUI workbench that acts strictly as a shell offering **Surfaces (Slots)**, **Hooks**, and **Events**. 
+## 1. Vision and scope
 
-- **Husk**: Host workbench written in **Go** using Charm libraries (`bubbletea`, `lipgloss`, `bubbles`, `x/ansi`).
-- **Dolphin**: The primary Herdr client, architected as an out-of-process Husk plugin (targeted for Rust).
-- **Process Plugin Model**: All plugins run as independent OS processes communicating via newline-delimited JSON IPC over Unix sockets (`HUSK_SOCKET_PATH`) or `stdio` pipes, making plugins completely language-agnostic.
-- **Slot Model Counterpart**: Adopts the 9-slot layout structure from `bb`:
-  - `⓪ activity-rail` (Far-left navigation icon bar)
-  - `① sidebar-navigation` (Mode & view switcher)
-  - `② sidebar-list` (Primary list of spaces, trees, agents)
-  - `③ thread-row-status` (Telemetry, status spinners, context gauges)
-  - `④ sidebar-footer` (Daemon health, IPC metrics, global shortcuts)
-  - `⑤ main-header` (Stage title, tab breadcrumbs)
-  - `⑥ main-stage` (Workspace topology canvas or primary stage plugin)
-  - `⑦ side-panel` (Deep inspection drawer for pane/agent metrics)
-  - `⑧ app-overlay / modal-surface` (Command palette & floating modal plugins)
-  - Dynamic surfaces: `full-canvas` (Canvas minus rail) and `workspace-stage` (Canvas minus sidebar).
+Husk is an extensible, minimalist TUI workbench that acts strictly as a shell. It offers **surfaces (slots)**, **hooks** and **events** and knows nothing about any application; everything application-specific is a plugin.
 
-Comprehensive research on frameworks, languages, and prior art was compiled alongside this project.
+- **Host**: written in Go with Charm v2 (`charm.land/bubbletea/v2`, `charm.land/lipgloss/v2`, `x/ansi`).
+- **Process plugin model**: every plugin is an independent OS process speaking newline-delimited JSON, over a Unix socket (`HUSK_SOCKET_PATH`) or over stdio, so plugins are language-agnostic and a crashing plugin never takes the host down.
+- **Surfaces**: nine fixed slots plus three placement surfaces, twelve in total (all declared in the publication registry as `husk.<id>`):
+  - `activity-rail`: far-left navigation icon bar
+  - `sidebar-navigation`: top sidebar band
+  - `sidebar-list`: primary sidebar surface
+  - `thread-row-status`: narrow status surface beside the list
+  - `sidebar-footer`: bottom sidebar band
+  - `main-header`: header band above the stage
+  - `main-stage`: main canvas
+  - `side-panel`: collapsible right-hand drawer
+  - `app-overlay`: command palette and toasts
+  - Placement surfaces opened from the rail: `modal-surface` (floating overlay), `full-canvas` (canvas minus the rail) and `workspace-stage` (canvas minus the sidebar).
 
----
+## 2. Implemented components
 
-## 2. Implemented Components
+### A. Host (`cmd/husk`)
+- Bubble Tea v2 event loop; `View` is pure and derives chrome from the model and the publication registry.
+- Dock toggles: `[` (sidebar), `]` (inspector), `/` (cycle dock presets), `=` (reset sizes).
+- Command palette (`ctrl+p` / `:`): fuzzy-searchable overlay aggregating core actions and commands registered by running plugins.
+- Plugin lifecycle (`lifecycle.go`): spawn from manifests, per-plugin stderr logs, exit and launch-failure reports, SIGTERM-then-kill shutdown.
+- Socket security: private `0700` directory, `0600` socket, peer uid check. Outbound writes go through a bounded per-connection queue with a write deadline.
 
-### A. Husk Workbench Core (`cmd/husk`)
-- Built with Charm's `bubbletea` and `lipgloss`.
-- **IPC Protocol Engine (`pkg/huskipc/protocol.go`)**: Full JSON-lines IPC supporting plugin registration (`hello`/`welcome`), slot rendering (`slot_update`), dynamic resizing (`slot_resize`), keystrokes (`slot_key`), mouse interaction (`slot_mouse`), modifier state synchronization (`key_state`), workspace context broadcast (`workspace_context`), command palette invocation (`command_invoke`), and toast notifications.
-- **Dock & Column Toggles**: Keybindings `[` (toggle sidebar), `]` (toggle inspector panel), and `/` (cycle dock presets).
-- **Command Palette (`ctrl+p` / `:`)**: Fuzzy-searchable action overlay aggregating core workbench actions and commands registered dynamically by running plugins.
+### B. IPC protocol (`pkg/huskipc`)
+- JSON lines: `hello`/`welcome`, `slot_update`, `slot_resize`, `slot_key`, `slot_mouse`, `key_state`, `workspace_context`, `command_invoke`, toasts and `protocol_error` (`protocol.go`), plus the published-slot, hook and event messages (`published.go`).
+- Protocol versioning (`MAJOR.MINOR`), a generated JSON Schema (`docs/docs/wire-schema.json`), and a wire package that imports the standard library only.
 
-### B. Out-of-Process Go Plugin: `herdr-sidebar` (`cmd/herdr-sidebar`)
-- Connects directly to the active Herdr daemon at `~/.config/herdr/herdr.sock`.
-- Renders live spaces, git worktree branches, session hierarchy, and active agent telemetry (context % gauges, status icons, braille spinners).
-- Fixed the visual hall-of-mirrors recursive loop by rendering a structured Workspace Topology Deck in `main-stage` instead of raw pane echoing.
-- Publishes `workspace_context` (`workspace_id`, `workspace_label`, `cwd`, `repo_name`) whenever space selection changes.
+### C. Activity rail and the three placements
+The rail opens a plugin's rail item in one of three placements: `modal` (floating overlay), `full-canvas` (everything right of the rail) and `stage` (the canvas with the sidebar kept visible). Husk binds no key to any plugin: an item opens from a rail click or from the `shortcut` its plugin declares.
 
-### C. Activity Rail & The 3 Placement Modes
-Implemented a dedicated Activity Rail (`⓪ activity-rail`) supporting the three core workbench integration paradigms:
-1. **Modal Overlay (`placement: "modal"`)**: `plugins/tv-search/plugin.sh` (``, `F2`/`ctrl+f`) — Floating search modal for sessions and files.
-2. **Full Canvas (`placement: "full-canvas"`)**: `plugins/fleet-dashboard/plugin.sh` (``, `F3`/`ctrl+g`) — Cross-project management surface occupying the entire canvas right of the rail.
-3. **Stage minus Sidebar (`placement: "stage"`)**: `plugins/project-git/plugin.sh` (``, `F4`/`ctrl+e`) — Project-level tools occupying the stage while keeping the sidebar active on the left.
+### D. Frames
+Surfaces are blank canvases. A plugin declares the chrome it wants (`border`, `label`, `close`) in `hello.frames` or on a rail item, and the host draws it.
 
-### D. Minimalist UI & Nerd Font Redesign
-- Redesigned the Activity Rail to match the user's `bb` reference screenshot:
-  - 5-column borderless vertical strip.
-  - Minimal monochrome Nerd Font glyphs (`` Home, `` Search, `` Plugins/Hub, `` Git Stage, `` Architecture Lab, `` Command Palette).
-  - 1:1 aspect-ratio rounded square active/hover pills using half-blocks (`▄▄▄` / `  ` / `▀▀▀`).
+### E. Interactive mouse slot resizing
+Drag-to-resize for the sidebar width, side-panel width, sidebar navigation height, sidebar footer height and main header height. Only a border the occupying plugin declared is a drag handle. Hover and drag are highlighted, affected plugins receive a `slot_resize` when a size changes, and `=` resets the proportions.
 
-### E. Interactive Mouse Slot Resizing
-- Added interactive drag-to-resize handlers for all 5 workbench slot borders:
-  - Sidebar width (`sidebar-width`)
-  - Side panel width (`sidepanel-width`)
-  - Sidebar navigation height (`sidebar-nav-height`)
-  - Sidebar footer height (`sidebar-foot-height`)
-  - Main header height (`main-header-height`)
-- Live hover highlighting (amber) and drag highlighting (green) with real-time `slot_resize` IPC broadcasts at 60fps.
-- Quick reset to default proportions with `=`.
+### F. Keyboard modifier and key-hold synchronization
+- On macOS, bare modifier keys are read through `CGEventSourceFlagsState` (`cmd/husk/modifiers_darwin.go`).
+- Holding `Alt`/`Option` swaps rail icons for the shortcut badges their plugins declared.
+- The `key_state` event carries the transition phase (`down`/`up`/`repeat`/`sync`) and the authoritative modifier and held state.
 
-### F. Keyboard Modifier & Key-Hold Synchronization
-- Solved terminal emulator limitation regarding bare modifier keys on macOS via `CGEventSourceFlagsState` in `cmd/husk/modifiers_darwin.go`.
-- Holding `Alt`/`Option` dynamically swaps rail icons with shortcut badges (`F1`, `F2`, `F3`, `F4`, `v`, `^P`).
-- Established the `key_state` IPC event sending both transition phase (`down`/`up`) and authoritative modifier/held state flags (`held: bool`, `modifiers: { alt, ctrl, shift, super }`).
+### G. Reference plugins (`plugins/reference`, `plugins/reference-actions`)
+One Go binary in two roles that exercises every extension point: a publisher (frame, inline published slot, hook, event) and a contributor that fills the slot. `plugins/reference/main_test.go` drives both over pipes.

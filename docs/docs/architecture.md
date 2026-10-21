@@ -51,7 +51,7 @@ Log lines go to stderr; while the TUI owns the terminal they are held and printe
 
 ## Slots
 
-Husk uses a nine-slot layout modeled on `bb`.
+Husk has nine fixed slots, modeled on `bb`, plus three placement surfaces (below). The publication registry declares all twelve as region slots (`husk.<id>`).
 
 | Slot | Purpose |
 | :--- | :--- |
@@ -67,7 +67,7 @@ Husk uses a nine-slot layout modeled on `bb`.
 
 Husk assigns no application meaning to a surface; the occupying plugin decides what it shows.
 
-Two dynamic placements sit on top of these: `full-canvas` (everything right of the rail) and `workspace-stage` (the canvas minus the sidebar).
+Three placement surfaces sit on top of these: `modal-surface` (floating overlay), `full-canvas` (everything right of the rail) and `workspace-stage` (the canvas minus the sidebar).
 
 ## Surfaces and frames
 
@@ -95,7 +95,7 @@ Plugin lines may carry ANSI SGR styling. Husk closes any style a line leaves ope
 
 ## Protocol
 
-Every message is one JSON object on one line (at most 4 MiB, `huskipc.MaxLineBytes`, excluding the newline), with a `type` and the payload under the key of the same name. Messages in `pkg/huskipc/protocol.go`, published-slot, hook and event messages in `pkg/huskipc/published.go`:
+Every message is one JSON object on one line (at most 4 MiB, `huskipc.MaxLineBytes`, excluding the newline), with a `type` and the payload under the key of the same name. Core messages (hello, slot updates, input, toasts) are defined in `pkg/huskipc/protocol.go`; published-slot, hook and event messages (and `protocol_error`) in `pkg/huskipc/published.go`:
 
 | Message | Direction | Purpose |
 | :--- | :--- | :--- |
@@ -179,7 +179,7 @@ publisher's `<plugin_id>.<name>` namespace; contribution IDs and `on_click` comm
 IDs use the contributor's namespace. Husk rejects foreign namespaces with
 `{"type":"protocol_error","protocol_error":{"message_type":"slot_declare","message":"..."}}`.
 A plugin ID contains letters, digits, hyphens, underscores or dot-separated
-components (existing IDs such as `bash.tv-search` remain valid); `husk` is reserved.
+components (existing IDs such as `bash.file-search` remain valid); `husk` is reserved.
 The **final dot** separates the plugin ID from one non-empty, dot-free resource
 name. This applies to publications, contribution IDs, request IDs and `on_click`
 commands: `x.y.button` belongs to plugin `x.y`, never parent plugin `x`.
