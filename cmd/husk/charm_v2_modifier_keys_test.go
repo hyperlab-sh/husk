@@ -2,6 +2,7 @@ package main
 
 import (
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -277,5 +278,68 @@ func TestAllKeysAsEscapeCodesKeepTextInput(t *testing.T) {
 
 	if _, ok := decodeCharmEvent(t, "\x1b[200~").(uv.PasteStartEvent); !ok {
 		t.Fatal("bracketed paste start no longer decodes")
+	}
+}
+
+// Layout text arrives on press and repeat only, so a release is named by its
+// key code. The release of AltGr+Q (held as "@") and of a dead key (held as
+// "é") must still clear the held key and send key_state up.
+func TestLayoutTextReleaseClearsHeldKey(t *testing.T) {
+	for _, tc := range []struct{ name, press, release, held string }{
+		{"altgr", "\x1b[113;1;64u", "\x1b[113;1:3u", "@"},
+		{"dead key", "\x1b[101;1;233u", "\x1b[101;1:3u", "é"},
+		{"plain", "\x1b[113;1;113u", "\x1b[113;1:3u", "q"},
+		{"shifted", "\x1b[97:65;2;65u", "\x1b[97:65;2:3u", "A"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newWorkbenchModel("", nil, t.TempDir())
+			m.pollMods = func() (huskipc.ModifierState, bool) { return huskipc.ModifierState{}, false }
+			m.keyReleases = true
+			_, out := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "p"})
+			m.Update(decodeCharmEvent(t, tc.press))
+			if _, held := m.heldKeys[tc.held]; !held || len(m.heldKeys) != 1 {
+				t.Fatalf("press held %v, want [%s]", m.heldKeys, tc.held)
+			}
+			out.Reset()
+			m.Update(decodeCharmEvent(t, tc.release))
+			if len(m.heldKeys) != 0 || len(m.heldAliases) != 0 {
+				t.Fatalf("release left held %v, aliases %v", m.heldKeys, m.heldAliases)
+			}
+			msgs := envelopes(t, out)
+			if len(msgs) != 1 || msgs[0].KeyState == nil || msgs[0].KeyState.Phase != huskipc.KeyPhaseUp || msgs[0].KeyState.Key != tc.held {
+				t.Fatalf("release sent %+v, want one key_state up for %q", msgs, tc.held)
+			}
+		})
+	}
+}
+
+// An alias whose key expired must not swallow a later plain release, and
+// expiry and blur drop aliases with their keys.
+func TestLayoutTextAliasDoesNotOutliveItsKey(t *testing.T) {
+	m := newWorkbenchModel("", nil, t.TempDir())
+	m.pollMods = func() (huskipc.ModifierState, bool) { return huskipc.ModifierState{}, false }
+	m.keyReleases = true
+	_, out := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "p"})
+	m.Update(decodeCharmEvent(t, "\x1b[113;1;64u"))
+	m.heldKeys["@"] = time.Now().Add(-2 * time.Second)
+	m.Update(modifierTickMsg{})
+	if len(m.heldKeys) != 0 || len(m.heldAliases) != 0 {
+		t.Fatalf("expiry left held %v, aliases %v", m.heldKeys, m.heldAliases)
+	}
+
+	m.Update(decodeCharmEvent(t, "\x1b[113;1;64u"))
+	delete(m.heldKeys, "@") // simulate a lost key whose alias is still recorded
+	m.Update(decodeCharmEvent(t, "\x1b[113;1;113u"))
+	out.Reset()
+	m.Update(decodeCharmEvent(t, "\x1b[113;1:3u"))
+	msgs := envelopes(t, out)
+	if len(m.heldKeys) != 0 || len(msgs) != 1 || msgs[0].KeyState == nil || msgs[0].KeyState.Key != "q" {
+		t.Fatalf("plain release after a stale alias: held %v, sent %+v", m.heldKeys, msgs)
+	}
+
+	m.Update(decodeCharmEvent(t, "\x1b[113;1;64u"))
+	m.Update(tea.BlurMsg{})
+	if len(m.heldKeys) != 0 || len(m.heldAliases) != 0 {
+		t.Fatalf("blur left held %v, aliases %v", m.heldKeys, m.heldAliases)
 	}
 }

@@ -115,6 +115,50 @@ func (m *WorkbenchModel) trackModifierKey(k tea.Key, down bool) bool {
 	return true
 }
 
+// recordHeldAlias remembers the key-code name of a press held under text the
+// layout produced. The kitty protocol sends associated text on press and
+// repeat only, so the release of AltGr+Q (held as "@") is named "q" and the
+// release of a dead-key "é" is named "e". Shifted text needs no alias: the
+// alternate-keys flag gives the release the same shifted name.
+func (m *WorkbenchModel) recordHeldAlias(msg tea.KeyPressMsg, key string) {
+	if msg.Text == "" || msg.Code == tea.KeyExtended {
+		return
+	}
+	k := msg.Key()
+	k.Text = ""
+	code := legacyKeyString(tea.KeyPressMsg(k))
+	if code == key {
+		return
+	}
+	if m.heldAliases == nil {
+		m.heldAliases = make(map[string]string)
+	}
+	m.heldAliases[code] = key
+}
+
+// releasedHeldKey maps a release's name to the name its press was held under.
+// A stale alias (its key already expired) falls back to the release's name.
+func (m *WorkbenchModel) releasedHeldKey(name string) string {
+	text, ok := m.heldAliases[name]
+	if !ok {
+		return name
+	}
+	delete(m.heldAliases, name)
+	if _, held := m.heldKeys[text]; held {
+		return text
+	}
+	return name
+}
+
+// dropHeldAliases forgets the aliases pointing at a held key that expired.
+func (m *WorkbenchModel) dropHeldAliases(key string) {
+	for code, text := range m.heldAliases {
+		if text == key {
+			delete(m.heldAliases, code)
+		}
+	}
+}
+
 func (m *WorkbenchModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := legacyKeyString(msg)
 
@@ -138,6 +182,7 @@ func (m *WorkbenchModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		phase = huskipc.KeyPhaseRepeat
 	}
 	m.heldKeys[key] = time.Now()
+	m.recordHeldAlias(msg, key)
 	m.broadcastKeyState(phase, key, true)
 
 	if m.showPalette {
