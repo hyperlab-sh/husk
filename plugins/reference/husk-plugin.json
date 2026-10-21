@@ -1,0 +1,10 @@
+{
+  "id": "go.reference",
+  "name": "Reference plugin",
+  "version": "0.1.0",
+  "language": "Go",
+  "description": "Declares a frame, a published slot, a hook and an event; build it first with go build -o plugins/reference/reference ./plugins/reference",
+  "command": ["./reference"],
+  "transport": "stdio",
+  "slots": ["main-stage"]
+}

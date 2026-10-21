@@ -13,3 +13,6 @@ docs/site/
 # build output
 /bin/
 .pi/
+
+# reference plugin binary
+/plugins/reference/reference
