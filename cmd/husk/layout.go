@@ -1,12 +1,66 @@
 package main
 
 import (
+	"fmt"
+	"strings"
+
+	"github.com/charmbracelet/x/ansi"
 	"github.com/hyperlab-sh/husk/pkg/frame"
 	"github.com/hyperlab-sh/husk/pkg/huskipc"
 )
 
+// Minimum terminal size the workbench layout is designed for. Below it the
+// host renders a too-small screen instead of a garbled, overflowing frame.
+const (
+	minTermWidth  = 84
+	minTermHeight = 24
+)
+
+// tooSmall reports whether the real terminal is below the supported minimum.
+func (m *WorkbenchModel) tooSmall() bool {
+	return m.width < minTermWidth || m.height < minTermHeight
+}
+
+// renderTooSmall returns a frame of exactly m.height lines, each exactly
+// m.width cells wide, telling the user the terminal is too small. Message
+// variants shrink with the available width and are truncated as a last resort,
+// so no line ever exceeds the real terminal.
+func (m *WorkbenchModel) renderTooSmall() string {
+	w, h := m.width, m.height
+	if w <= 0 || h <= 0 {
+		return ""
+	}
+	have := fmt.Sprintf("%dx%d", w, h)
+	need := fmt.Sprintf("%dx%d", minTermWidth, minTermHeight)
+	variants := []string{
+		fmt.Sprintf("terminal too small (need %s, have %s)", need, have),
+		fmt.Sprintf("too small (need %s, have %s)", need, have),
+		fmt.Sprintf("need %s, have %s", need, have),
+		fmt.Sprintf("%s < %s", have, need),
+		have,
+	}
+	msg := variants[len(variants)-1]
+	for _, v := range variants {
+		if ansi.StringWidth(v) <= w {
+			msg = v
+			break
+		}
+	}
+	msg = ansi.Truncate(msg, w, "")
+	pad := (w - ansi.StringWidth(msg)) / 2
+	line := strings.Repeat(" ", pad) + msg
+	line += strings.Repeat(" ", w-ansi.StringWidth(line))
+	blank := strings.Repeat(" ", w)
+	lines := make([]string, h)
+	for i := range lines {
+		lines[i] = blank
+	}
+	lines[(h-1)/2] = line
+	return strings.Join(lines, "\n")
+}
+
 func (m *WorkbenchModel) recomputeLayout() {
-	totalW := max(84, m.width)
+	totalW := max(minTermWidth, m.width)
 	bodyH := max(20, m.height-2)
 
 	m.slotRects = make(map[huskipc.SlotID]SlotRect)

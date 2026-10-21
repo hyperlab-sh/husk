@@ -261,8 +261,13 @@ func (m *WorkbenchModel) syncModifierTransitions(next huskipc.ModifierState) {
 func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = max(84, msg.Width)
-		m.height = max(24, msg.Height)
+		m.width = max(0, msg.Width)
+		m.height = max(0, msg.Height)
+		if m.tooSmall() {
+			// Keep the last valid layout (and plugin slot sizes); View
+			// renders the too-small screen until the terminal grows back.
+			return m, nil
+		}
 		m.recomputeLayout()
 		m.broadcastSlotResize()
 		return m, nil
