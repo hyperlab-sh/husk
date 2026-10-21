@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/hyperlab-sh/husk/pkg/huskipc"
@@ -28,19 +30,31 @@ func (m *WorkbenchModel) startAcceptLoop() {
 	}()
 }
 
+// handleStream serves one plugin connection. Outbound messages go through a
+// queued writer so Update never blocks on a slow or hung plugin; whichever of
+// the reader or the writer fails first reports the disconnect, exactly once,
+// with its reason.
 func (m *WorkbenchModel) handleStream(r io.Reader, w io.Writer, closer io.Closer) {
-	writer := huskipc.NewConnWriter(w)
-	var cp *ConnectedPlugin
-	defer func() {
-		if closer != nil {
-			_ = closer.Close()
-		}
-		if cp != nil {
-			m.subChan <- pluginDisconnectedMsg{plugin: cp}
-		}
-	}()
+	var (
+		registered atomic.Pointer[ConnectedPlugin]
+		once       sync.Once
+	)
+	disconnect := func(reason error) {
+		once.Do(func() {
+			if cp := registered.Load(); cp != nil {
+				m.subChan <- pluginDisconnectedMsg{plugin: cp, reason: reason}
+			}
+		})
+	}
+	writer := huskipc.NewQueuedConnWriter(w, huskipc.QueueOptions{
+		Capacity:     m.sendQueueCapacity,
+		WriteTimeout: m.writeTimeout,
+		Closer:       closer,
+		OnFail:       disconnect,
+	})
 
-	_ = huskipc.ReadLoop(r, func(env huskipc.Envelope) {
+	readErr := huskipc.ReadLoop(r, func(env huskipc.Envelope) {
+		cp := registered.Load()
 		if env.Type == "hello" && env.Hello != nil && cp == nil {
 			cp = &ConnectedPlugin{
 				Info:      *env.Hello,
@@ -48,6 +62,7 @@ func (m *WorkbenchModel) handleStream(r io.Reader, w io.Writer, closer io.Closer
 				Closer:    closer,
 				Connected: time.Now(),
 			}
+			registered.Store(cp)
 			m.subChan <- pluginRegisteredMsg{plugin: cp}
 			return
 		}
@@ -55,6 +70,20 @@ func (m *WorkbenchModel) handleStream(r io.Reader, w io.Writer, closer io.Closer
 			m.subChan <- ipcEventMsg{pluginID: cp.Info.PluginID, env: env, connection: cp}
 		}
 	})
+	// A writer failure closes the connection, which ends the read loop with
+	// a "closed" error; report the writer's reason instead.
+	reason := writer.Err()
+	if reason == nil {
+		reason = readErr
+	}
+	if reason == nil {
+		reason = io.EOF
+	}
+	writer.Abort()
+	if closer != nil {
+		_ = closer.Close()
+	}
+	disconnect(reason)
 }
 
 func (m *WorkbenchModel) spawnSocketCommand(dir string, argv []string) error {
