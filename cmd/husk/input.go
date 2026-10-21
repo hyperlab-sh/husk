@@ -54,7 +54,6 @@ func (m *WorkbenchModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// and nothing is forwarded to plugins.
 	if m.layoutFrozen() {
 		if key == "q" || key == "ctrl+c" {
-			m.cleanup()
 			return m, tea.Quit
 		}
 		return m, nil
@@ -138,7 +137,7 @@ func (m *WorkbenchModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	switch key {
 	case "q", "ctrl+c":
-		m.cleanup()
+		// main stops the plugins once the terminal is restored.
 		return m, tea.Quit
 	case "?":
 		m.altLatched = !m.altLatched

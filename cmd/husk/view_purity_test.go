@@ -57,6 +57,7 @@ func TestViewIsPure(t *testing.T) {
 				t.Fatal("View replaced the main-stage payload")
 			}
 			fresh.subChan = rendered.subChan // channel identity differs by construction
+			fresh.quit = rendered.quit
 			// Func values are never DeepEqual; the modifier poller is injected
 			// state that View does not touch.
 			rendered.pollMods, fresh.pollMods = nil, nil

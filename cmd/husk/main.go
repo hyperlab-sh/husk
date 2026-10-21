@@ -97,20 +97,22 @@ func main() {
 		}
 	}
 
+	// Writing to stderr while the TUI owns the terminal corrupts the screen
+	// (and the alternate screen hides it), so in TUI mode host log lines,
+	// including launch failures, are held and printed once the program
+	// exits. Failures also show as toasts.
+	var tuiLog bytes.Buffer
+	if !*dumpFrame {
+		model.logOut = &tuiLog
+	}
+
+	launched := 0
 	for _, p := range manifestPlugins {
-		argv := p.ResolvedCommand()
-		var err error
-		if p.Transport == manifest.TransportStdio {
-			err = model.spawnStdioCommand(p.WorkDir(), argv)
-		} else {
-			err = model.spawnSocketCommand(p.WorkDir(), argv)
-		}
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "husk: failed to launch plugin %s: %v\n", p.ID, err)
+		if model.launchPlugin(p) == nil {
+			launched++
 		}
 	}
 
-	launched := len(manifestPlugins)
 	if *dumpFrame {
 		deadline := time.Now().Add(3000 * time.Millisecond)
 		mode := *railMode
@@ -155,12 +157,9 @@ func main() {
 		return
 	}
 
-	// Writing to stderr while the TUI owns the terminal corrupts the screen,
-	// so host log lines are held and printed once the program exits.
-	var tuiLog bytes.Buffer
-	model.logOut = &tuiLog
 	p := tea.NewProgram(model)
 	_, err = p.Run()
+	model.cleanup() // stop plugins before printing, so their exit lines are included
 	_, _ = os.Stderr.Write(tuiLog.Bytes())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "husk error: %v\n", err)
