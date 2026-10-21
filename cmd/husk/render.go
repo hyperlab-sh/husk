@@ -337,13 +337,18 @@ func (m *WorkbenchModel) renderSurface(slotID huskipc.SlotID, calloutNum, slotNa
 	return m.renderFrame(slotID, rect, spec, label, lines)
 }
 
-// surfaceContentLines pads/truncates a plugin's slot_update lines to the
-// surface's inner area; absent content is a blank canvas.
+// surfaceContentLines pads/truncates slot_update lines to a surface's inner
+// area; absent content is a blank canvas. Content is clipped, never scrolled
+// or wrapped: a line wider than w is truncated with "…", and lines past
+// index h-1 are dropped. The host does not tell the plugin it clipped; the
+// plugin learns its inner size from slot_resize and must fit its own content
+// (see docs/docs/architecture.md, "Content clipping"). A style left open by a
+// line is closed before its padding so it cannot reach the frame edge.
 func (m *WorkbenchModel) surfaceContentLines(su *huskipc.SlotUpdatePayload, w, h int) []string {
 	lines := make([]string, h)
 	for i := 0; i < h; i++ {
 		if su != nil && i < len(su.Lines) {
-			lines[i] = fitLineWidth(su.Lines[i], w)
+			lines[i] = fitLineWidth(closeSGR(su.Lines[i]), w)
 		} else {
 			lines[i] = strings.Repeat(" ", w)
 		}
@@ -354,7 +359,7 @@ func (m *WorkbenchModel) surfaceContentLines(su *huskipc.SlotUpdatePayload, w, h
 // overlayLabel replaces the start of a rendered line with label.
 func overlayLabel(line, label string) string {
 	rest := ansi.Cut(line, ansi.StringWidth(label), ansi.StringWidth(line))
-	return label + rest
+	return closeSGR(label) + rest
 }
 
 func (m *WorkbenchModel) frameLabelStyle() lipgloss.Style {
@@ -398,7 +403,7 @@ func (m *WorkbenchModel) renderFrame(slotID huskipc.SlotID, rect SlotRect, spec 
 				row = ansi.Cut(row, 0, rowW)
 			}
 			if spec.Close {
-				body := ansi.Cut(row, 0, max(0, rowW-1))
+				body := closeSGR(ansi.Cut(row, 0, max(0, rowW-1)))
 				if pad := rowW - 1 - ansi.StringWidth(body); pad > 0 {
 					body += strings.Repeat(" ", pad)
 				}
@@ -669,6 +674,17 @@ func (m *WorkbenchModel) overlayCommandPalette(base string) string {
 	return spliceOverlay(base, box, x, y)
 }
 
+// spliceOverlay draws overlay over base with its top-left cell at
+// (startX, startY). No graphic rendition crosses a splice boundary:
+//
+//   - ansi.Cut keeps every escape sequence of the line, including those after
+//     the cut, so the left fragment ends in the state the whole base line ends
+//     in (often a background left open by plugin content). It is reset before
+//     the overlay so the overlay's cells carry only the overlay's own styles.
+//   - The overlay is reset before the right fragment, so an overlay line that
+//     ends with an open style does not paint the base cells after it.
+//   - The right fragment replays the base line's escapes from its start, so
+//     once the state is reset it resumes exactly the style its first cell had.
 func spliceOverlay(base, overlay string, startX, startY int) string {
 	baseLines := strings.Split(base, "\n")
 	ovLines := strings.Split(overlay, "\n")
@@ -680,9 +696,9 @@ func spliceOverlay(base, overlay string, startX, startY int) string {
 		}
 		bgLine := baseLines[rowIdx]
 		ovW := ansi.StringWidth(ovLine)
-		left := ansi.Cut(bgLine, 0, startX)
+		left := closeSGR(ansi.Cut(bgLine, 0, startX))
 		right := ansi.Cut(bgLine, startX+ovW, ansi.StringWidth(bgLine))
-		baseLines[rowIdx] = left + ovLine + right
+		baseLines[rowIdx] = left + closeSGR(ovLine) + right
 	}
 	return strings.Join(baseLines, "\n")
 }
