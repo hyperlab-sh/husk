@@ -163,7 +163,12 @@ func (m *WorkbenchModel) disconnectPublications(cp *ConnectedPlugin) {
 	}
 	if m.activeRailID != "" && !activeExists {
 		m.activateHomeWorkbench()
+		return
 	}
+	// Removing Hello frame declarations changes inner geometry even when the
+	// disconnected occupant never owned a rail item.
+	m.recomputeLayout()
+	m.broadcastSlotResize()
 }
 
 // These fake plugins use the same Hello, IPC routing and rendering paths as
@@ -188,6 +193,15 @@ func (m *WorkbenchModel) seedPubslotsDemo() {
 		PluginID: "a", Slot: huskipc.SlotMainStage, Title: "Published slots demo",
 		Lines: []string{"Plugin A rows; Plugin B actions", "agent one  \x1b]husk;slot=a.agent-line-action;key=one\x1b\\", "agent two  \x1b]husk;slot=a.agent-line-action;key=two\x1b\\"},
 	}}})
+}
+
+// publishedContent composes regions even before the publisher's first frame.
+func (m *WorkbenchModel) publishedContent(surface huskipc.SlotID, width, height int) ([]string, []contributionHit) {
+	var source []string
+	if su := m.slotUpdates[surface]; su != nil {
+		source = su.Lines
+	}
+	return m.registry.renderPublished(surface, m.slotOwners[surface], source, width, height)
 }
 
 // clickContributionAt lets visible content win over overlapping resize hit
@@ -221,9 +235,6 @@ func (m *WorkbenchModel) clickContribution(surface huskipc.SlotID, x, y, width, 
 		return false // architecture view hides the publisher's content
 	}
 	su := m.slotUpdates[surface]
-	if su == nil {
-		return false
-	}
 	// Borderless frames overlay chrome on content row zero. Do not dispatch
 	// commands for contribution cells hidden by a label or close glyph.
 	if spec := m.frameFor(surface); y == 0 && !spec.Border {
@@ -235,24 +246,41 @@ func (m *WorkbenchModel) clickContribution(surface huskipc.SlotID, x, y, width, 
 			}
 		}
 		label := spec.Label
-		if label != "" && su.Title != "" {
+		if label != "" && su != nil && su.Title != "" {
 			label = su.Title
 		}
 		if x < ansi.StringWidth(ansi.Truncate(label, max(0, available), "…")) {
 			return false
 		}
 	}
-	_, hits := m.registry.renderPublished(surface, m.slotOwners[surface], su.Lines, width, height)
+	_, hits := m.publishedContent(surface, width, height)
 	for i := len(hits) - 1; i >= 0; i-- {
 		h := hits[i]
 		if h.Y == y && x >= h.X && x < h.X+h.Width {
-			if cp := m.plugins[h.PluginID]; cp != nil && h.CommandID != "" {
-				_ = cp.Writer.Send(huskipc.Envelope{Type: "command_invoke", CommandInvoke: &huskipc.CommandInvokePayload{CommandID: h.CommandID, Args: map[string]string{"slot_id": h.SlotID, "contribution_id": h.ContributionID, "row_key": h.RowKey}}})
+			cp := m.plugins[h.PluginID]
+			if cp == nil || h.CommandID == "" {
+				return false
 			}
+			_ = cp.Writer.Send(huskipc.Envelope{Type: "command_invoke", CommandInvoke: &huskipc.CommandInvokePayload{CommandID: h.CommandID, Args: map[string]string{"slot_id": h.SlotID, "contribution_id": h.ContributionID, "row_key": h.RowKey}}})
 			return true
 		}
 	}
 	return false
+}
+
+// publisherMousePayload resolves row metadata in content-relative coordinates
+// for every publisher input path, including modal clicks and wheel events.
+func (m *WorkbenchModel) publisherMousePayload(surface huskipc.SlotID, x, y int, button string) *huskipc.SlotMousePayload {
+	payload := &huskipc.SlotMousePayload{Slot: surface, X: x, Y: y, Button: button}
+	if su := m.slotUpdates[surface]; su != nil {
+		for _, hit := range su.HitTargets {
+			if hit.Line == y {
+				payload.HitID, payload.HitKind, payload.HitAction, payload.HitPayload = hit.ID, hit.Kind, hit.Action, hit.Payload
+				break
+			}
+		}
+	}
+	return payload
 }
 
 // Modal content uses the same frame-aware inner rect as rendering. Borders
@@ -277,7 +305,7 @@ func (m *WorkbenchModel) handlePublishedModalMouse(x, y int, left, wheelDown, wh
 		button = "wheel_up"
 	}
 	if cp := m.plugins[m.slotOwners[huskipc.SlotModalSurface]]; cp != nil {
-		_ = cp.Writer.Send(huskipc.Envelope{Type: "slot_mouse", SlotMouse: &huskipc.SlotMousePayload{Slot: huskipc.SlotModalSurface, X: x, Y: y, Button: button}})
+		_ = cp.Writer.Send(huskipc.Envelope{Type: "slot_mouse", SlotMouse: m.publisherMousePayload(huskipc.SlotModalSurface, x, y, button)})
 	}
 	return true
 }
