@@ -269,6 +269,16 @@ func waitForModifierTick(d time.Duration) tea.Cmd {
 }
 
 // modifierTickInterval picks the next poll delay from current activity.
+const (
+	// heldKeyFallbackTTL expires a held key when the terminal reports no
+	// release events.
+	heldKeyFallbackTTL = 320 * time.Millisecond
+	// heldKeyReleaseTTL is a safety net when releases are reported: repeats
+	// refresh a held key, so only a release that never arrives (or does not
+	// match its press, e.g. Enter/Tab without all-keys-as-escape-codes) lapses.
+	heldKeyReleaseTTL = time.Second
+)
+
 func (m *WorkbenchModel) modifierTickInterval(now time.Time) time.Duration {
 	mods := m.modifiers
 	if mods.Alt || mods.Ctrl || mods.Shift || mods.Super || len(m.heldKeys) > 0 ||
@@ -500,15 +510,17 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.syncModifierTransitions(osMods)
 		}
 		now := time.Now()
-		if !m.keyReleases {
-			for k, ts := range m.heldKeys {
-				if now.Sub(ts) > 320*time.Millisecond {
-					delete(m.heldKeys, k)
-					m.broadcastKeyState(huskipc.KeyPhaseUp, k, false)
-				}
+		ttl := heldKeyFallbackTTL
+		if m.keyReleases {
+			ttl = heldKeyReleaseTTL
+		}
+		for k, ts := range m.heldKeys {
+			if now.Sub(ts) > ttl {
+				delete(m.heldKeys, k)
+				m.broadcastKeyState(huskipc.KeyPhaseUp, k, false)
 			}
 		}
-		if !polled && (m.keyReleases || len(m.heldKeys) == 0) {
+		if !polled && len(m.heldKeys) == 0 {
 			// No OS modifier source and nothing to expire: let the chain lapse
 			// so an idle process does no work. A key press restarts it.
 			m.modTickOn = false
@@ -602,7 +614,7 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		m.lastInput = time.Now()
 		next, cmd := m.handleKey(msg)
-		if len(m.heldKeys) > 0 && !m.keyReleases {
+		if len(m.heldKeys) > 0 {
 			// A lapsed chain (no OS modifier source) restarts to expire the held key.
 			cmd = tea.Batch(cmd, m.startModifierTick())
 		}
@@ -614,6 +626,9 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(tea.KeyPressMsg{Code: tea.KeyExtended, Text: "[" + msg.Content + "]"})
 
 	case tea.KeyboardEnhancementsMsg:
+		// The renderer re-queries on every keyboard change, so this can fall
+		// back to false mid-session; the shorter expiry then applies again from
+		// the next tick, restarted by the next key press.
 		m.keyReleases = msg.SupportsEventTypes()
 		return m, nil
 
