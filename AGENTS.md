@@ -32,7 +32,7 @@ Registry, published-slot rendering/routing and protocol compatibility tests live
 
 | Path | Purpose |
 | :--- | :--- |
-| `cmd/husk/` | Host workbench: slots, dock/palette, mouse resize, activity rail; `modifiers_darwin.go` polls Alt/Option via Quartz at 25Hz |
+| `cmd/husk/` | Host workbench: slots, dock/palette, mouse resize, activity rail. Files: `main.go` (flags, startup, `--dump-frame` driver), `model.go` (model type, `Init`/`Update`, key-state), `transport.go` (accept/spawn/stream/cleanup), `input.go` (keys, mouse, drag), `commands.go` (rail buttons, palette), `layout.go` (`recomputeLayout`, rects, frames), `render.go` (`View` and helpers), `demo.go` (`--demo-frame` / `--demo pubslots` fixtures only); `modifiers_darwin.go` polls Alt/Option via Quartz at 25Hz |
 | `pkg/huskipc/` | IPC envelope and legacy payloads (`protocol.go`), published extension payloads (`published.go`), JSON-lines reader/writer |
 | `pkg/manifest/` | `husk-plugin.json` parsing (`manifest.go`): id, name, version, language, description, command (argv, relative to the manifest dir), transport (`socket` default \| `stdio`), slots |
 | `pkg/theme/` | Styling (being moved to Charm defaults) |
