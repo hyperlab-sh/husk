@@ -72,7 +72,11 @@ type EventSubscribePayload struct {
 	ID string `json:"id"`
 }
 
-// ProtocolErrorPayload rejects an invalid operation without dropping the connection.
+// ProtocolErrorPayload rejects one message: an invalid operation, a malformed
+// or oversized line, or an unknown message type. The connection stays open,
+// except after a rejected hello, where it is closed once the error is sent.
+// MessageType is the rejected message's type ("" when it was unreadable).
+// A peer must never answer a protocol_error with a protocol_error.
 type ProtocolErrorPayload struct {
 	MessageType string `json:"message_type"`
 	Message     string `json:"message"`

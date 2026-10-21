@@ -6,7 +6,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/hyperlab-sh/husk/pkg/frame"
 	"github.com/hyperlab-sh/husk/pkg/huskipc"
 )
 
@@ -136,7 +135,7 @@ func TestReviewContributionUpsertChecksAuthenticatedOwner(t *testing.T) {
 
 func TestReviewDisconnectRecomputesFramelessGeometry(t *testing.T) {
 	m := newWorkbenchModel("", nil, t.TempDir())
-	a, _ := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "a", Slots: []huskipc.SlotID{huskipc.SlotMainStage}, Frames: map[huskipc.SlotID]frame.Spec{huskipc.SlotMainStage: {Border: true}}})
+	a, _ := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "a", Slots: []huskipc.SlotID{huskipc.SlotMainStage}, Frames: map[huskipc.SlotID]huskipc.FrameSpec{huskipc.SlotMainStage: {Border: true}}})
 	_, b := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "b"})
 	before := m.slotRects[huskipc.SlotMainStage]
 	if before.InnerW != before.Width-2 {
@@ -213,7 +212,7 @@ func TestReviewModalOrdinaryRowsPreserveMouseMetadata(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := newWorkbenchModel("", nil, t.TempDir())
-			_, a := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "a", Slots: []huskipc.SlotID{huskipc.SlotModalSurface}, Frames: map[huskipc.SlotID]frame.Spec{huskipc.SlotModalSurface: {Border: true}}})
+			_, a := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "a", Slots: []huskipc.SlotID{huskipc.SlotModalSurface}, Frames: map[huskipc.SlotID]huskipc.FrameSpec{huskipc.SlotModalSurface: {Border: true}}})
 			m.Update(ipcEventMsg{pluginID: "a", env: huskipc.Envelope{Type: "slot_update", SlotUpdate: &huskipc.SlotUpdatePayload{Slot: huskipc.SlotModalSurface, Lines: []string{"", "", "ordinary publisher row"}, HitTargets: []huskipc.RowHitTarget{{Line: 2, ID: "one", Kind: "row", Action: "select", Payload: map[string]string{"key": "value"}}}}}})
 			m.openModal("a", "demo")
 			m.recomputeLayout()
@@ -246,7 +245,7 @@ func TestReviewRegionRendersBeforeSlotUpdate(t *testing.T) {
 			}
 			t.Run(name, func(t *testing.T) {
 				m := newWorkbenchModel("", nil, t.TempDir())
-				_, _ = addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "a", Slots: []huskipc.SlotID{surface}, Frames: map[huskipc.SlotID]frame.Spec{surface: {Border: border}}, PublishedSlots: []huskipc.SlotDeclarePayload{{ID: "a.region", Kind: "region", Rect: &huskipc.PublishedRect{Surface: surface, X: 2, Y: 2, Width: 12, Height: 1}}}})
+				_, _ = addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "a", Slots: []huskipc.SlotID{surface}, Frames: map[huskipc.SlotID]huskipc.FrameSpec{surface: {Border: border}}, PublishedSlots: []huskipc.SlotDeclarePayload{{ID: "a.region", Kind: "region", Rect: &huskipc.PublishedRect{Surface: surface, X: 2, Y: 2, Width: 12, Height: 1}}}})
 				_, b := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "b"})
 				m.Update(ipcEventMsg{pluginID: "b", env: huskipc.Envelope{Type: "slot_contribute", SlotContribute: &huskipc.SlotContributePayload{SlotID: "a.region", ID: "b.button", Content: "[Action]", OnClick: "b.action"}}})
 				if surface == huskipc.SlotModalSurface {
