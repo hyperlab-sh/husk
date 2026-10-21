@@ -222,6 +222,34 @@ func TestStagePluginGetsSlotResizeWhenSideColumnsComeAndGo(t *testing.T) {
 	}
 }
 
+// With zero plugins the default focus (sidebar list) must survive, so a
+// sidebar plugin that connects has keys from its first frame.
+func TestDefaultFocusSurvivesZeroPluginStartup(t *testing.T) {
+	m := goldenModel()
+	if m.focusedSlot != huskipc.SlotSidebarList {
+		t.Fatalf("zero-plugin focus moved to %q", m.focusedSlot)
+	}
+	m.Update(pluginRegisteredMsg{sidePlugin(io.Discard)})
+	if m.focusedSlot != huskipc.SlotSidebarList {
+		t.Errorf("focus after sidebar plugin connects = %q, want the sidebar list", m.focusedSlot)
+	}
+}
+
+// Focus pushed off a vanished column comes back when the column does.
+func TestFocusReturnsWhenSideColumnReturns(t *testing.T) {
+	m := goldenModel()
+	side := sidePlugin(io.Discard)
+	m.Update(pluginRegisteredMsg{side})
+	m.Update(pluginDisconnectedMsg{plugin: side})
+	if m.focusedSlot != huskipc.SlotMainStage {
+		t.Fatalf("focus = %q after the column vanished, want the main stage", m.focusedSlot)
+	}
+	m.Update(pluginRegisteredMsg{sidePlugin(io.Discard)})
+	if m.focusedSlot != huskipc.SlotSidebarList {
+		t.Errorf("focus = %q after the column returned, want the sidebar list", m.focusedSlot)
+	}
+}
+
 func TestVanishingSideCancelsDragMovesFocusAndDisablesResizeKeys(t *testing.T) {
 	m := goldenModel()
 	side := sidePlugin(io.Discard)

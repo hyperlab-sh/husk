@@ -161,6 +161,10 @@ type WorkbenchModel struct {
 	hoverDivider string
 	hoverRailIdx int
 
+	// focusFallback is the side slot focus was moved off when its column
+	// vanished; it comes back when the column does.
+	focusFallback huskipc.SlotID
+
 	modifiers   huskipc.ModifierState
 	altLatched  bool
 	blurred     bool      // terminal reported focus loss
