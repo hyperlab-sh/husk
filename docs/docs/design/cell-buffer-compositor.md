@@ -28,7 +28,7 @@ correct but structural debt:
 
 In `charm.land/bubbletea/v2` v2.1.0, `tea.View.Content` is a `string`; there is
 no layer or drawable field. The renderer parses `Content` with
-`uv.NewStyledString` into its own `uv.ScreenBuffer` and diffs that against the
+`uv.NewStyledString` into its own screen buffer and diffs that against the
 previous frame. So the host cannot hand Bubble Tea a cell grid; it can only
 hand it a string that decodes to the grid it wants. Diffing is already cell
 based and stays Bubble Tea's job.
@@ -38,7 +38,7 @@ based and stays Bubble Tea's job.
 spaces, which breaks the exact-width frame invariant (`requireFrameGeometry`,
 full-width bars), and `lipgloss.Layer` draws a whole multi-line string with one
 pen, so a style left open on one plugin line would continue onto the next. The
-host therefore uses `uv.ScreenBuffer` directly.
+host therefore composes into its own cell buffer (see Implementation notes).
 
 ## Current data flow
 
@@ -59,19 +59,19 @@ View
 
 ## Proposed data flow
 
-One `canvas` (a `uv.ScreenBuffer` of `m.width` x `m.height`, width method
+One `canvas` (a cell grid of `m.width` x `m.height`, width method
 `ansi.GraphemeWidth`, matching the `ansi.StringWidth` math the layout uses) is
 created per `View` call, written in z order, and serialized once.
 
-`uv.NewScreenBuffer` defaults to `Method: ansi.WcWidth`, so the width method
-must be set explicitly; without it the canvas silently disagrees with the
-layout on emoji ZWJ sequences and flags:
+Ultraviolet's screen buffers default to `Method: ansi.WcWidth`, so the width
+method must be set explicitly; without it the canvas silently disagrees with
+the layout on emoji ZWJ sequences and flags. The plan sketched this on a
+`uv.ScreenBuffer`; the built canvas keeps the method itself (see
+Implementation notes):
 
 ```go
 func newCanvas(w, h int) *canvas {
-	buf := uv.NewScreenBuffer(w, h)
-	buf.Method = ansi.GraphemeWidth // not the WcWidth default
-	return &canvas{buf: buf}
+	return &canvas{buf: uv.NewBuffer(w, h), method: ansi.GraphemeWidth, w: w, h: h}
 }
 ```
 
