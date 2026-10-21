@@ -1,6 +1,6 @@
 # Cell-buffer compositor
 
-Status: proposed. Scope: `cmd/husk` rendering only. No wire, manifest or
+Status: implemented (see "Implementation notes"). Scope: `cmd/husk` rendering only. No wire, manifest or
 plugin-visible change.
 
 ## Problem
@@ -137,7 +137,7 @@ All in `package main` under `cmd/husk`; no exported API in `pkg/` changes.
 | `spliceOverlay`, `overlayLabel` | deleted |
 | `(*publicationRegistry).renderPublished(...) ([]string, []contributionHit)` | split: `layoutPublished(...) publishedLayout` (anchor-substituted rows, region draws, hits; used by input) and `(publishedLayout).draw(c, x, y)`. `renderPublished` stays as a thin wrapper that draws into a scratch canvas and returns its rows, so input routing and `published_render_test.go` keep their shape |
 | `publishedContent` | returns `publishedLayout` |
-| `surfaceContentLines` | drops its `closeSGR` call in slice 4 (`blitLines` parses each line from a zero pen, so the close is redundant); clipping, padding and the `…` tail are unchanged |
+| `surfaceContentLines` | drops its `closeSGR` call in slice 4 (`blitLines` parses each line from a zero pen, so the close is redundant); clipping and the `…` tail are unchanged, padding is dropped (see "Implementation notes") |
 | `sgr.go` (`sgrOpen`, `closeSGR`) | deleted in slice 5; its callers (`spliceOverlay`, `overlayLabel`, the close glyph in `renderFrame`, the region compositor, `surfaceContentLines`) are all gone by the end of slice 4 |
 | `renderTooSmall`, `renderTopWorkbenchBar`, `renderBottomKeybindBar`, `fitLineWidth`, `recomputeLayout`, `hitOrder` | unchanged |
 
@@ -252,6 +252,24 @@ its own.
 - **Scope creep.** Converting widgets to direct cell drawing, or moving
   hit-testing onto a compositor, are tempting while the canvas exists. Both
   are out of scope.
+
+## Implementation notes
+
+Where the code differs from the plan above:
+
+- The canvas holds a plain `uv.Buffer` plus its own width method, not a
+  `uv.ScreenBuffer`: the screen buffer's touch tracking is unused cost here,
+  and a small `uv.Screen` adapter over the buffer enforces each write's clip
+  rectangle and blanks a wide glyph that would cross the clip's right edge.
+- Cell buffers are recycled through a `sync.Pool` (package state, never model
+  state), which keeps the per-frame garbage close to the string compositor's.
+- `drawFrame` is split into a content blit and `drawChrome`; surfaces and the
+  modal draw their published layout and then call `drawChrome` directly.
+- `surfaceContentLines` no longer pads with spaces. Padding after a line that
+  leaves a style open would carry that style once `closeSGR` was gone; the
+  canvas clears the rest of each row instead.
+- `BenchmarkIdleTickView/view` at 120x40 went from about 0.40 ms/op before
+  slice 1 to about 0.30 ms/op after slice 5.
 
 ## Out of scope
 
