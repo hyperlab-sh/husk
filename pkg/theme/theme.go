@@ -34,6 +34,11 @@ type Palette struct {
 // draws is contrast-checked by TestDefaultPaletteContrast (text 4.5:1,
 // borders and other non-text 3:1); change a role only with that test green.
 func Default() Palette {
+	// The ladder is Canvas < Slot < Elevated/Hover < Selected, each step at
+	// least TestSurfaceLadderSeparation's ratio apart so pills, hover rows and
+	// selections stay visible on the slot background. Elevated cannot move up:
+	// Danger, Info and InkSubtle are held to 4.5:1 on it and BBQ is already at
+	// their limit, so SlotShift is sized to fit between Canvas and BBQ.
 	return Palette{
 		Name:            "CharmTone",
 		Canvas:          charmtone.Pepper.Hex(),

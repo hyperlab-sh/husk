@@ -16,6 +16,7 @@ import (
 func (m *WorkbenchModel) View() tea.View {
 	if m.tooSmall() {
 		view := tea.NewView(m.renderTooSmall())
+		view.BackgroundColor = lipgloss.Color(m.palette.Canvas)
 		view.AltScreen = true
 		view.MouseMode = tea.MouseModeAllMotion
 		view.ReportFocus = true
@@ -55,9 +56,18 @@ func (m *WorkbenchModel) View() tea.View {
 	if m.showPalette {
 		m.drawCommandPalette(c)
 	}
+	// The app background: every cell still on the default background (the
+	// gutter, cells no surface owns) takes Canvas, so the slot shade derived
+	// from Canvas is lighter than what the user sees on every terminal.
+	// Overlays and surfaces have already set their own backgrounds.
+	c.fillDefaultBg(uv.Rect(0, 0, m.width, m.height), lipgloss.Color(m.palette.Canvas))
 	out := c.render()
 	c.release()
 	view := tea.NewView(out)
+	// Terminals that support OSC 11 also get their own background set, so
+	// cells outside the grid (resize flashes, scrollback edges) match; Bubble
+	// Tea resets it on exit.
+	view.BackgroundColor = lipgloss.Color(m.palette.Canvas)
 	view.AltScreen = true
 	view.MouseMode = tea.MouseModeAllMotion
 	view.ReportFocus = true
@@ -395,6 +405,7 @@ func (m *WorkbenchModel) closeStyle() lipgloss.Style {
 func (m *WorkbenchModel) drawFrame(c *canvas, slotID huskipc.SlotID, rect SlotRect, spec frame.Spec, label string, lines []string) {
 	c.blitLines(rect.InnerX, rect.InnerY, rect.InnerW, rect.InnerH, lines)
 	m.drawChrome(c, slotID, rect, spec, label)
+	m.fillSlotBg(c, rect)
 }
 
 // drawChrome draws the frame chrome a plugin declared for rect, after its
