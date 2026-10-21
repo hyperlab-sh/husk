@@ -191,19 +191,6 @@ func (m *WorkbenchModel) renderTopWorkbenchBar() string {
 		Padding(0, 1).
 		Render(fmt.Sprintf("● %d plugins", len(m.plugins)))
 
-	// Rail shortcuts come from the rail items plugins declared.
-	railKeys := []string{"F1 home"}
-	for _, ri := range m.orderedRailItems() {
-		if ri.Shortcut != "" {
-			railKeys = append(railKeys, strings.ToUpper(ri.Shortcut)+" "+ri.Label)
-		}
-	}
-	railHint := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(m.palette.Info)).
-		Background(lipgloss.Color(m.palette.SurfaceElevated)).
-		Padding(0, 1).
-		Render("Rail: " + strings.Join(railKeys, "  "))
-
 	themePill := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(m.palette.AccentSecondary)).
 		Background(lipgloss.Color(m.palette.SurfaceElevated)).
@@ -245,8 +232,34 @@ func (m *WorkbenchModel) renderTopWorkbenchBar() string {
 			Render("⌥ ALT HELD · Shortcuts Active") + " "
 	}
 
-	left := brand + sub + pluginCountBadge + " " + railHint
+	head := brand + sub + pluginCountBadge + " "
 	right := dragPill + themePill
+	// Rail shortcuts come from the rail items plugins declared, spelled as the
+	// rail's own shortcut labels. Entries that do not fit beside the right-hand
+	// pills are dropped from the end rather than pushing those pills off.
+	railKeys := []string{"F1 home"}
+	for _, ri := range m.orderedRailItems() {
+		if ri.Shortcut != "" {
+			railKeys = append(railKeys, railShortcutLabel(ri.Shortcut)+" "+ri.Label)
+		}
+	}
+	railStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(m.palette.Info)).
+		Background(lipgloss.Color(m.palette.SurfaceElevated)).
+		Padding(0, 1)
+	budget := m.width - ansi.StringWidth(head) - ansi.StringWidth(right) - 1
+	railHint := ""
+	for n := len(railKeys); n > 0; n-- {
+		text := "Rail: " + strings.Join(railKeys[:n], "  ")
+		if n < len(railKeys) {
+			text += "  …"
+		}
+		if r := railStyle.Render(text); ansi.StringWidth(r) <= budget {
+			railHint = r
+			break
+		}
+	}
+	left := head + railHint
 	gap := max(1, m.width-ansi.StringWidth(left)-ansi.StringWidth(right))
 	line := left + strings.Repeat(" ", gap) + right
 	return lipgloss.NewStyle().
