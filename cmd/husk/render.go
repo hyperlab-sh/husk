@@ -583,15 +583,17 @@ func (m *WorkbenchModel) renderHotspotArchitectureStage() string {
 		lines = append(lines, row1, row2)
 	}
 
-	m.slotUpdates[huskipc.SlotMainStage] = &huskipc.SlotUpdatePayload{
+	// The explorer is derived entirely from model state, so it is built here
+	// and never stored: View must not write the model, and storing it in
+	// slotUpdates would overwrite the main-stage plugin's last payload.
+	explorer := &huskipc.SlotUpdatePayload{
 		PluginID: "husk.core",
 		Slot:     huskipc.SlotMainStage,
-		Title:    "Slot Architecture Explorer",
-		Badge:    "9 HOTSPOTS",
+		Title:    coreFrame.Label,
 		Lines:    lines,
 	}
 	// The explorer renders through its own core rect, not the plugin's.
-	rows := m.surfaceContentLines(m.slotUpdates[huskipc.SlotMainStage], coreW, coreH)
+	rows := m.surfaceContentLines(explorer, coreW, coreH)
 	return m.renderFrame(huskipc.SlotMainStage, coreRect, coreFrame, coreFrame.Label, rows)
 }
 
