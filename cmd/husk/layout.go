@@ -17,6 +17,14 @@ const (
 	minTermHeight = 24
 )
 
+// surfaceGutter is the number of blank columns between the centre column
+// (main header and stage) and the side panel, so text clipped at the right
+// edge of the centre never touches the panel's first column. It is carved from
+// the centre; sidePaneW and drag maths are unchanged. The sidebar needs none:
+// its rects are the sidebar width exactly (the resize drag relies on that) and
+// its lines are short row labels.
+const surfaceGutter = 1
+
 // tooSmall reports whether the real terminal is below the supported minimum.
 func (m *WorkbenchModel) tooSmall() bool {
 	return m.width < minTermWidth || m.height < minTermHeight
@@ -123,8 +131,12 @@ func (m *WorkbenchModel) recomputeLayout() {
 		hdrH = 4
 	}
 	stageH := max(8, bodyH-hdrH)
-	m.slotRects[huskipc.SlotMainHeader] = m.frameRect(huskipc.SlotMainHeader, railW+leftW, 1, centerW, hdrH)
-	m.slotRects[huskipc.SlotMainStage] = m.frameRect(huskipc.SlotMainStage, railW+leftW, 1+hdrH, centerW, stageH)
+	centerRectW := centerW
+	if rightW > 0 {
+		centerRectW -= surfaceGutter
+	}
+	m.slotRects[huskipc.SlotMainHeader] = m.frameRect(huskipc.SlotMainHeader, railW+leftW, 1, centerRectW, hdrH)
+	m.slotRects[huskipc.SlotMainStage] = m.frameRect(huskipc.SlotMainStage, railW+leftW, 1+hdrH, centerRectW, stageH)
 
 	if rightW > 0 {
 		m.slotRects[huskipc.SlotSidePanel] = m.frameRect(huskipc.SlotSidePanel, railW+leftW+centerW, 1, rightW, bodyH)
