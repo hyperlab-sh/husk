@@ -75,7 +75,11 @@ func (m *WorkbenchModel) View() tea.View {
 	if m.showPalette {
 		baseView = m.overlayCommandPalette(baseView)
 	}
-	view := tea.NewView(baseView)
+	c := newCanvas(m.width, m.height)
+	c.blitBlock(0, 0, baseView)
+	out := c.render()
+	c.release()
+	view := tea.NewView(out)
 	view.AltScreen = true
 	view.MouseMode = tea.MouseModeAllMotion
 	view.ReportFocus = true
