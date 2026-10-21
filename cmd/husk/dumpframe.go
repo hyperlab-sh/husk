@@ -24,6 +24,12 @@ const dumpFrameTimeout = 3 * time.Second
 // It is a program timer re-armed by each plugin message, not a sleep.
 const dumpFrameQuiet = 300 * time.Millisecond
 
+// dumpFrameMaxSettle caps how long, measured from the moment every awaited
+// surface has content, the frame keeps waiting for the quiet window. A plugin
+// that streams updates faster than dumpFrameQuiet (live data) would otherwise
+// re-arm the window forever; at the cap the frame is taken as it stands.
+const dumpFrameMaxSettle = time.Second
+
 // dumpFrameOptions describes what --dump-frame waits for.
 type dumpFrameOptions struct {
 	// Launched is the number of plugin processes started; the frame is taken
@@ -35,6 +41,8 @@ type dumpFrameOptions struct {
 	RailMode string
 	// Quiet overrides dumpFrameQuiet when positive.
 	Quiet time.Duration
+	// MaxSettle overrides dumpFrameMaxSettle when positive.
+	MaxSettle time.Duration
 	// Timeout overrides dumpFrameTimeout when positive.
 	Timeout time.Duration
 	// Stderr receives host diagnostics (a --rail with no matching item).
@@ -43,6 +51,9 @@ type dumpFrameOptions struct {
 
 // dumpQuietMsg fires when a quiet window ends; Gen discards stale timers.
 type dumpQuietMsg struct{ Gen int }
+
+// dumpCapMsg fires when the maximum settle time since ready has elapsed.
+type dumpCapMsg struct{}
 
 // dumpFrameDriver wraps the workbench so the real tea.Program loop runs it:
 // every message goes through the model's Update on the program goroutine, and
@@ -57,6 +68,8 @@ type dumpFrameDriver struct {
 	armed        bool
 	gen          int
 	quiet        time.Duration
+	maxSettle    time.Duration
+	capArmed     bool
 	settled      bool
 }
 
@@ -65,6 +78,13 @@ func (d *dumpFrameDriver) Init() tea.Cmd {
 }
 
 func (d *dumpFrameDriver) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if _, ok := msg.(dumpCapMsg); ok {
+		if d.ready {
+			d.settled = true
+			return d, tea.Quit
+		}
+		return d, nil
+	}
 	if q, ok := msg.(dumpQuietMsg); ok {
 		if q.Gen == d.gen && d.ready {
 			d.settled = true
@@ -104,7 +124,13 @@ func (d *dumpFrameDriver) arm() tea.Cmd {
 	if d.quiet <= 0 {
 		return func() tea.Msg { return dumpQuietMsg{Gen: gen} }
 	}
-	return tea.Tick(d.quiet, func(time.Time) tea.Msg { return dumpQuietMsg{Gen: gen} })
+	quiet := tea.Tick(d.quiet, func(time.Time) tea.Msg { return dumpQuietMsg{Gen: gen} })
+	if d.capArmed {
+		return quiet
+	}
+	// First time ready: start the one-shot cap that bounds re-arming.
+	d.capArmed = true
+	return tea.Batch(quiet, tea.Tick(d.maxSettle, func(time.Time) tea.Msg { return dumpCapMsg{} }))
 }
 
 // advance opens the requested rail item once all plugins registered and
@@ -164,7 +190,11 @@ func runDumpFrame(m *WorkbenchModel, opt dumpFrameOptions) (string, error) {
 	if opt.Launched == 0 {
 		quiet = 0 // no plugin can still be talking
 	}
-	d := &dumpFrameDriver{WorkbenchModel: m, opt: opt, mode: opt.RailMode, quiet: quiet}
+	maxSettle := opt.MaxSettle
+	if maxSettle <= 0 {
+		maxSettle = dumpFrameMaxSettle
+	}
+	d := &dumpFrameDriver{WorkbenchModel: m, opt: opt, mode: opt.RailMode, quiet: quiet, maxSettle: maxSettle}
 	p := tea.NewProgram(d,
 		tea.WithContext(ctx),
 		tea.WithInput(nil),
@@ -178,6 +208,12 @@ func runDumpFrame(m *WorkbenchModel, opt dumpFrameOptions) (string, error) {
 	frame := m.View().Content
 	switch {
 	case d.settled:
+		return frame, nil
+	case errors.Is(err, tea.ErrProgramPanic):
+		return frame, err
+	case d.ready && (errors.Is(err, context.DeadlineExceeded) || errors.Is(err, tea.ErrProgramKilled)):
+		// Everything registered and published; the plugin is just still
+		// streaming. That is not an error.
 		return frame, nil
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, tea.ErrProgramKilled):
 		return frame, fmt.Errorf("timed out after %s waiting for %d plugin(s) to publish (registered %d, slots %d)",
