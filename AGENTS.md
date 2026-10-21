@@ -1,56 +1,48 @@
-# Agent Instructions
+# Husk — Agent Instructions
 
-This project uses **bd** (beads) for issue tracking. Run `bd prime` for full workflow context.
+Husk is a minimal, domain-agnostic TUI workbench in Go (bubbletea + lipgloss). It only provides **slots**, **hooks** and **events**; every plugin is an independent OS process speaking newline-delimited JSON over a Unix socket (`HUSK_SOCKET_PATH`) or stdio, in any language. The layout mirrors `bb`'s 9-slot model (`/work/lab/bb/plugins/plugin-api-docs`). The first real client is `herdr-sidebar`; Dolphin (a Rust Herdr client, repo `hyperlab-sh/dolphin`) is a planned plugin and does not live here. Design research is not in the repo: it lives in the space's local-only `notes/research/` (`../../notes/research/` from the worktree). The docs site (docmd) is in `docs/`.
 
-> **Architecture in one line:** Issues live in a local Dolt database
-> (`.beads/dolt/`); cross-machine sync uses `bd dolt push/pull` (a
-> git-compatible protocol), stored under `refs/dolt/data` on your git
-> remote — separate from `refs/heads/*` where your code lives.
-> `.beads/issues.jsonl` is a passive export, not the wire protocol.
->
-> See [sync-concepts](https://github.com/gastownhall/beads/blob/main/docs/core-concepts/sync-concepts.md)
-> for the one-screen overview and anti-patterns (don't treat JSONL as the
-> source of truth; don't `bd import` during normal operation; don't
-> reach for third-party Dolt hosting before trying the default).
+This is a hyper space: project files live in `worktrees/main/`; `bin/`, `data/`, `notes/`, `scratch/` at the space root are local-only. Read `HYPER.md` at the space root for layout rules.
 
-## Quick Reference
+## Build & Test
 
 ```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --claim  # Claim work atomically
-bd close <id>         # Complete work
-bd dolt push          # Push beads data to remote
+go build -o ../../bin/husk ./cmd/husk
+go build -o ../../bin/herdr-sidebar ./cmd/herdr-sidebar
+go vet ./...
+
+../../bin/husk                              # run the workbench
+../../bin/husk --dump-frame                 # non-interactive frame dump
+../../bin/husk --dump-frame --rail modal    # also: full-canvas, stage; --hold-alt
 ```
 
-## Non-Interactive Shell Commands
+There are no Go tests yet. Use `--dump-frame` to check rendering changes. Manifests reference binaries as `./bin/<name>`, resolved against the space root's `bin/`.
 
-**ALWAYS use non-interactive flags** with file operations to avoid hanging on confirmation prompts.
+## Layout
 
-Shell commands like `cp`, `mv`, and `rm` may be aliased to include `-i` (interactive) mode on some systems, causing the agent to hang indefinitely waiting for y/n input.
+| Path | Purpose |
+| :--- | :--- |
+| `cmd/husk/` | Host workbench: slots, dock/palette, mouse resize, activity rail; `modifiers_darwin.go` polls Alt/Option via Quartz at 25Hz |
+| `cmd/herdr-sidebar/` | Go plugin talking to `~/.config/herdr/herdr.sock`; publishes `workspace_context` |
+| `pkg/huskipc/` | IPC protocol (`protocol.go`) and client (`client.go`) |
+| `pkg/herdr/` | Herdr socket client |
+| `pkg/theme/` | Styling (being moved to Charm defaults) |
+| `plugins/` | Out-of-process plugins: `tv-search` (modal), `fleet-dashboard` (full-canvas), `project-git` (stage), all Bash `plugin.sh`; `herdr-sidebar/husk-plugin.json` is the manifest for the Go plugin |
 
-**Use these forms instead:**
-```bash
-# Force overwrite without prompting
-cp -f source dest           # NOT: cp source dest
-mv -f source dest           # NOT: mv source dest
-rm -f file                  # NOT: rm file
+IPC messages: `hello`/`welcome`, `slot_update`, `slot_resize`, `slot_key`, `slot_mouse`, `key_state`, `workspace_context`, `command_invoke`, toasts. Plugin placements: `modal`, `full-canvas`, `stage`.
 
-# For recursive operations
-rm -rf directory            # NOT: rm -r directory
-cp -rf source dest          # NOT: cp -r source dest
-```
+## Conventions
 
-**Other commands that may prompt:**
-- `scp` - use `-o BatchMode=yes` for non-interactive
-- `ssh` - use `-o BatchMode=yes` to fail instead of prompting
-- `apt-get` - use `-y` flag
-- `brew` - use `HOMEBREW_NO_AUTO_UPDATE=1` env var
+- Husk core stays domain-agnostic: Herdr-specific logic belongs in a plugin, not `cmd/husk`.
+- Plugins must never assume a language; the JSON-lines protocol is the only contract. Changing it means updating `pkg/huskipc/protocol.go` and every plugin.
+- Use Charm's default palette (ANSI / lipgloss presets). Do not add custom hex themes.
+- Conventional commits with detailed messages. No attribution trailers.
+- `STATUS.md` tracks known issues; `SUMMARY.md` is the design history; `README.md` is user-facing.
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:1105d646 -->
 ## Beads Issue Tracker
 
-This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.
+This project uses **bd (beads)** for issue tracking. The database is shared with Dolphin and lives at `/work/lab/.beads` (Husk issues use the `husk-` prefix, Dolphin issues `dolphin-`). Run `bd prime` to see full workflow context and commands.
 
 ### Quick Reference
 
@@ -79,21 +71,10 @@ The managed Beads block is task-tracking guidance, not permission to override re
 
 ## Session Completion
 
-This protocol applies when ending a Beads implementation workflow. It is subordinate to explicit user, repository, and orchestrator instructions.
-
 1. **File issues for remaining work** - Create beads for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
+2. **Run quality gates** (if code changed) - build, `go vet`, `--dump-frame` checks
 3. **Update issue status** - Close finished work, update in-progress items
-4. **Handle git/sync by active profile**:
-   ```bash
-   # Conservative/minimal/default: report status and proposed commands; wait for approval.
-   git status
-
-   # Team-maintainer opt-in only, unless current instructions forbid it:
-   git pull --rebase
-   git push
-   git status
-   ```
+4. **Handle git/sync by active profile** - report `git status` and proposed commands; wait for approval
 5. **Hand off** - Summarize changes, validation, issue status, and any blocked sync/commit/push step
 
 **Critical rules:**
@@ -101,27 +82,3 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 - Do not commit or push without clear authority from the active profile or the current user request.
 - If a required sync or push is blocked, stop and report the exact command and error.
 <!-- END BEADS INTEGRATION -->
-
-<!-- BEGIN BEADS CODEX SETUP: generated by bd setup codex -->
-## Beads Issue Tracker
-
-Use Beads (`bd`) for durable task tracking in repositories that include it. Use the `beads` skill at `.agents/skills/beads/SKILL.md` (project install) or `~/.agents/skills/beads/SKILL.md` (global install) for Beads workflow guidance, then use the `bd` CLI for issue operations.
-
-### Quick Reference
-
-```bash
-bd ready                # Find available work
-bd show <id>            # View issue details
-bd update <id> --claim  # Claim work
-bd close <id>           # Complete work
-bd prime                # Refresh Beads context
-```
-
-### Rules
-
-- Use `bd` for all task tracking; do not create markdown TODO lists.
-- Run `bd prime` when Beads context is missing or stale. Codex 0.129.0+ can load Beads context automatically through native hooks; use `/hooks` to inspect or toggle them.
-- Keep persistent project memory in Beads via `bd remember`; do not create ad hoc memory files.
-
-**Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/core-concepts/sync-concepts.md for details and anti-patterns.
-<!-- END BEADS CODEX SETUP -->
