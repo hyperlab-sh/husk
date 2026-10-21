@@ -289,14 +289,14 @@ func (m *WorkbenchModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.broadcastSlotResize()
 		return m, m.showLocalToast("info", "Layout Reset", "Restored default slot dimensions")
 	case "<", ",":
-		if m.showSidebar && m.sidebarWidth > 26 {
+		if m.leftSideShown() && m.sidebarWidth > 26 {
 			m.sidebarWidth -= 2
 			m.recomputeLayout()
 			m.broadcastSlotResize()
 		}
 		return m, nil
 	case ">", ".":
-		if m.showSidebar && m.sidebarWidth < 56 {
+		if m.leftSideShown() && m.sidebarWidth < 56 {
 			m.sidebarWidth += 2
 			m.recomputeLayout()
 			m.broadcastSlotResize()

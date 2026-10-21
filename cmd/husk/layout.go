@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"slices"
+	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -83,10 +84,30 @@ func (m *WorkbenchModel) rightSideShown() bool {
 	return m.showSidePane && m.surfaceOwner(huskipc.SlotSidePanel) != ""
 }
 
+// dropVanishedSides cancels a drag on, and moves focus off, a side column
+// that is no longer shown (its plugin left or its dock was hidden).
+func (m *WorkbenchModel) dropVanishedSides() {
+	left, right := m.leftSideShown(), m.rightSideShown()
+	if !left && strings.HasPrefix(m.activeDrag, "sidebar-") || !right && m.activeDrag == "sidepanel-width" {
+		m.activeDrag, m.hoverDivider = "", ""
+	}
+	switch m.focusedSlot {
+	case huskipc.SlotSidebarNavigation, huskipc.SlotSidebarList, huskipc.SlotSidebarFooter:
+		if !left {
+			m.focusedSlot = huskipc.SlotMainStage
+		}
+	case huskipc.SlotSidePanel:
+		if !right {
+			m.focusedSlot = huskipc.SlotMainStage
+		}
+	}
+}
+
 func (m *WorkbenchModel) recomputeLayout() {
 	if m.layoutFrozen() {
 		return
 	}
+	m.dropVanishedSides()
 	totalW := max(minTermWidth, m.width)
 	bodyH := max(20, m.height-2)
 
@@ -285,11 +306,20 @@ func (m *WorkbenchModel) currentSlotSizes() map[huskipc.SlotID]huskipc.SlotSize 
 }
 
 func (m *WorkbenchModel) broadcastSlotResize() {
+	m.broadcastSlotResizeExcept("")
+}
+
+// broadcastSlotResizeExcept skips one plugin, used for a plugin that has just
+// registered and was sent the current sizes in its welcome.
+func (m *WorkbenchModel) broadcastSlotResizeExcept(skip string) {
 	if m.layoutFrozen() {
 		return
 	}
 	sizes := m.currentSlotSizes()
-	for _, cp := range m.plugins {
+	for id, cp := range m.plugins {
+		if id == skip {
+			continue
+		}
 		_ = cp.Writer.Send(huskipc.Envelope{
 			Type: "slot_resize",
 			SlotResize: &huskipc.SlotResizePayload{
