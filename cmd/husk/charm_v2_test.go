@@ -187,8 +187,8 @@ func TestCharmV2PastePreservesWireAndDoesNotRunShortcuts(t *testing.T) {
 	}
 	m.showPalette = true
 	m.Update(tea.PasteMsg{Content: "["})
-	if !m.showSidebar || !m.showPalette || m.paletteQuery != "" {
-		t.Fatal("paste ran a dock shortcut or changed palette input")
+	if !m.showSidebar || !m.showPalette || m.paletteQuery != "[" {
+		t.Fatal("paste ran a dock shortcut or mis-handled palette input")
 	}
 }
 
@@ -321,23 +321,72 @@ func TestCharmV2MouseResizeLifecycle(t *testing.T) {
 	}
 }
 
-func TestPalettePasteNonASCIIInsertsTextWithoutBrackets(t *testing.T) {
+func TestPalettePasteInsertsTextWithoutBrackets(t *testing.T) {
 	for _, tc := range []struct {
 		name, paste, want string
 	}{
+		{"ascii word", "deploy", "deploy"},
+		{"ascii single", "q", "q"},
+		{"ascii with spaces", "open the file", "open the file"},
+		{"ascii bracketed", "[x]", "[x]"},
+		{"lone bracket", "[", "["},
 		{"accented", "café", "café"},
 		{"cjk", "日本語", "日本語"},
 		{"emoji", "👍🏽", "👍🏽"},
-		{"ascii stays ignored", "abc", ""},
-		{"multiline stays ignored", "café\nx", ""},
+		{"multiline ascii", "line one\nline two", "line one line two"},
+		{"multiline non-ascii crlf", "café\r\nx", "café x"},
+		{"tab", "a\tb", "a b"},
+		{"control chars dropped", "a\x1bb\x00c", "abc"},
+		{"empty", "", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := newWorkbenchModel("", nil, t.TempDir())
 			m.showPalette = true
-			m.Update(tea.PasteMsg{Content: tc.paste})
+			_, cmd := m.Update(tea.PasteMsg{Content: tc.paste})
+			if cmd != nil {
+				t.Fatal("paste returned a command")
+			}
 			if m.paletteQuery != tc.want {
 				t.Fatalf("palette query after paste %q = %q, want %q", tc.paste, m.paletteQuery, tc.want)
 			}
+			if !m.showPalette || !m.showSidebar {
+				t.Fatal("paste closed the palette or ran a dock shortcut")
+			}
 		})
+	}
+}
+
+func TestPalettePasteAppendsToTypedTextAndResetsCursor(t *testing.T) {
+	m := newWorkbenchModel("", nil, t.TempDir())
+	m.showPalette = true
+	m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	m.paletteCursor = 2
+	m.Update(tea.PasteMsg{Content: "bc"})
+	m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	if m.paletteQuery != "abcd" {
+		t.Fatalf("query = %q, want abcd", m.paletteQuery)
+	}
+	if m.paletteCursor != 0 {
+		t.Fatalf("cursor = %d, want 0", m.paletteCursor)
+	}
+}
+
+func TestPaletteTypedSingleCharsStillWork(t *testing.T) {
+	m := newWorkbenchModel("", nil, t.TempDir())
+	m.showPalette = true
+	for _, r := range "q[é" {
+		m.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+	if m.paletteQuery != "q[é" {
+		t.Fatalf("query = %q, want q[é", m.paletteQuery)
+	}
+}
+
+func TestPaletteKeepsBracketedExtendedKeyText(t *testing.T) {
+	m := newWorkbenchModel("", nil, t.TempDir())
+	m.showPalette = true
+	m.Update(tea.KeyPressMsg{Code: tea.KeyExtended, Text: "[é]"})
+	if m.paletteQuery != "[é]" {
+		t.Fatalf("query = %q, want [é] (IME text keeps its brackets)", m.paletteQuery)
 	}
 }

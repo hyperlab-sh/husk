@@ -221,7 +221,7 @@ func (m *WorkbenchModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		default:
 			if paletteTextFor(msg, key) {
-				m.paletteQuery += paletteQueryText(msg, key)
+				m.paletteQuery += key
 				m.paletteCursor = 0
 			}
 			return m, nil
@@ -396,15 +396,27 @@ func paletteTextFor(msg tea.KeyPressMsg, key string) bool {
 	return isPaletteText(key)
 }
 
-// paletteQueryText is the text a palette key press adds to the query. A paste
-// reaches handleKey as an extended key whose text is the paste wrapped in
-// brackets (see the tea.PasteMsg case in Update); the wrapper only guards host
-// shortcuts, so the query gets the pasted content without it.
-func paletteQueryText(msg tea.KeyPressMsg, key string) string {
-	if msg.Key().Code == tea.KeyExtended && len(key) > 2 && key[0] == '[' && key[len(key)-1] == ']' {
-		return key[1 : len(key)-1]
+// pastePalette appends pasted text to the palette query. Pastes are handled
+// from the tea.PasteMsg itself rather than inferred from the bracketed key
+// spelling used for plugins, so ASCII and non-ASCII text behave alike. The
+// query is a single line: line breaks and tabs become spaces and other
+// control characters are dropped.
+func (m *WorkbenchModel) pastePalette(content string) (tea.Model, tea.Cmd) {
+	clean := strings.Map(func(r rune) rune {
+		switch {
+		case r == '\n' || r == '\r' || r == '\t':
+			return ' '
+		case unicode.IsControl(r):
+			return -1
+		}
+		return r
+	}, strings.ReplaceAll(content, "\r\n", "\n"))
+	if clean == "" {
+		return m, nil
 	}
-	return key
+	m.paletteQuery += clean
+	m.paletteCursor = 0
+	return m, nil
 }
 
 // chordPrefixes are the legacy modifier prefixes of a chord spelling.
