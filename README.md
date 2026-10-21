@@ -4,7 +4,7 @@ A minimal, language-agnostic TUI workbench. Husk owns the screen, a set of **slo
 
 Why: terminal tools usually force a choice between a monolithic app and plugins that can only be panes in a grid. Husk gives plugins real places in the interface (sidebar, header, stage, overlays) while keeping them fault-isolated. A crashing plugin never takes the workbench down.
 
-Husk is the host for [Dolphin](https://github.com/hyperlab-sh/dolphin), an agentic development environment TUI. It knows nothing about Dolphin or any other application; it only provides surfaces, hooks and events.
+Husk is an application-agnostic TUI workbench; everything app-specific lives in plugins. It only provides surfaces, hooks and events.
 
 ## Status
 
