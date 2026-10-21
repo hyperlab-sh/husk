@@ -109,6 +109,17 @@ Every message is one JSON object on one line (at most 4 MiB, `huskipc.MaxLineByt
 | `close_modal` | plugin to host | Close the open modal |
 | `protocol_error` | either way | A message was rejected (see [Errors](#errors)) |
 
+### JSON Schema
+
+[`wire-schema.json`](wire-schema.json) is a JSON Schema (draft 2020-12) for one protocol line, generated from the `pkg/huskipc` structs, so a Rust or Bash plugin author does not have to infer which fields are optional. It encodes:
+
+- a property is `required` exactly when its Go `json` tag has no `omitempty`; everything else is optional and may simply be left out;
+- a Go slice or map that is nil is encoded as `null`, so required arrays and objects also accept `null`;
+- no object sets `additionalProperties: false`, because minor releases add optional fields: validators must tolerate unknown fields, as the host does (the Dolphin fixtures carry extra palette keys);
+- the envelope `type` is an enum of every message type, and each type requires the payload of the same name (`close_modal` is a boolean, not an object).
+
+Regenerate it with `go generate ./pkg/huskipc` after changing any wire type; `TestCommittedSchemaIsCurrent` fails while the committed file is stale, and `TestGoMarshaledEnvelopesValidate` and `TestDolphinFixturesValidate` check that what the structs marshal and what the Rust crate's fixtures contain both validate. The generator lives in `pkg/huskipc/schema` (it also holds the small validator the tests use) and `cmd/genschema`. The schema describes shape only: it does not say which messages a plugin may send (see [Errors](#errors)).
+
 ### Versioning
 
 `hello.protocol_version` and `welcome.protocol_version` carry the wire protocol version as `"MAJOR.MINOR"` (`huskipc.ProtocolVersion`, currently `1.1`). A minor release only adds optional fields and message types, which both sides ignore when they do not know them; a major release is a breaking change.
