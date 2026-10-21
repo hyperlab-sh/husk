@@ -9,7 +9,6 @@ description: "Build and run Husk."
 
 ```bash
 go build -o bin/husk ./cmd/husk
-go build -o bin/herdr-sidebar ./cmd/herdr-sidebar
 go vet ./...
 ```
 

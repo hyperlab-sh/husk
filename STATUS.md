@@ -12,7 +12,7 @@
 | Component | Status | Details |
 | :--- | :--- | :--- |
 | **Husk Workbench (`cmd/husk`)** | **Functional** | Multi-slot TUI workbench running live with 9 slots, dock toggles (`[`, `]`, `/`), Command Palette (`ctrl+p`), Alt-key shortcut peek, and mouse border dragging (`=`). |
-| **Herdr Go Plugin (`cmd/herdr-sidebar`)** | **Functional** | Communicates with active Herdr socket (`~/.config/herdr/herdr.sock`), handles 11 workspaces & agents, publishes `workspace_context`, eliminates recursive mirroring loops. |
+| **Herdr Go Plugin (`cmd/herdr-sidebar`)** | **Moved to the Dolphin repo** | Communicates with active Herdr socket (`~/.config/herdr/herdr.sock`), handles 11 workspaces & agents, publishes `workspace_context`, eliminates recursive mirroring loops. |
 | **Activity Rail (`⓪ activity-rail`)** | **Functional** | Minimal borderless 5-col column using Nerd Font glyphs (``, ``, ``, ``, ``, ``) with half-block square pill selection. |
 | **Alt/Option Modifier Poller** | **Functional** | macOS Quartz `CGEventSourceFlagsState` poller at 25Hz broadcast via `key_state` IPC. Toggles rail icons to shortcut labels in real time. |
 | **Activity Rail Plugins (Bash)** | **Functional (Mock/TUI stage)** | Scripts for `tv-search`, `fleet-dashboard`, and `project-git` operate over `stdio` IPC, demonstrating modal, full-canvas, and stage modes. |

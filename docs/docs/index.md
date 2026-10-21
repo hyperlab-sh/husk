@@ -9,11 +9,11 @@ Husk is a domain-agnostic TUI workbench written in Go (bubbletea and lipgloss). 
 
 Every plugin is an independent OS process. Plugins talk to Husk over newline-delimited JSON on a Unix socket (`HUSK_SOCKET_PATH`) or over stdio, so they can be written in any language. A crashing plugin never takes the workbench down.
 
-The slot layout follows the model used by `bb`. The first real plugin is `herdr-sidebar`, which brings Herdr workspaces and agents into Husk. [Dolphin](https://github.com/hyperlab-sh/dolphin) builds on Husk as a Herdr client.
+The slot layout follows the model used by `bb`. Husk is the host for [Dolphin](https://github.com/hyperlab-sh/dolphin), an agentic development environment TUI, but it knows nothing about Dolphin or any other application.
 
 ## Status
 
-Husk is early. The workbench core, the IPC protocol, the activity rail and `herdr-sidebar` work. The rail plugins (`tv-search`, `fleet-dashboard`, `project-git`) are still mock UIs. Open work is tracked in beads.
+Husk is early. The workbench core, the IPC protocol, and the activity rail work. The rail plugins (`tv-search`, `fleet-dashboard`, `project-git`) are still mock UIs. Open work is tracked in beads.
 
 See [Getting Started](/getting-started/) to run it and [Architecture](/architecture/) for the slot model and protocol.
 

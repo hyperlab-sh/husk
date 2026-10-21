@@ -17,8 +17,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 
-	"husk/pkg/huskipc"
-	"husk/pkg/theme"
+	"github.com/hyperlab-sh/husk/pkg/huskipc"
+	"github.com/hyperlab-sh/husk/pkg/theme"
 )
 
 type ConnectedPlugin struct {

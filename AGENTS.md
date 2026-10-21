@@ -1,6 +1,6 @@
 # Husk — Agent Instructions
 
-Husk is a minimal, domain-agnostic TUI workbench in Go (bubbletea + lipgloss). It only provides **slots**, **hooks** and **events**; every plugin is an independent OS process speaking newline-delimited JSON over a Unix socket (`HUSK_SOCKET_PATH`) or stdio, in any language. The layout mirrors `bb`'s 9-slot model (`/work/lab/bb/plugins/plugin-api-docs`). The first real client is `herdr-sidebar`; Dolphin (a Rust Herdr client, repo `hyperlab-sh/dolphin`) is a planned plugin and does not live here. Design research is not in the repo: it lives in the space's local-only `notes/research/` (`../../notes/research/` from the worktree). The docs site (docmd) is in `docs/`.
+Husk is a minimal, domain-agnostic TUI workbench in Go (bubbletea + lipgloss). It only provides **slots**, **hooks** and **events**; every plugin is an independent OS process speaking newline-delimited JSON over a Unix socket (`HUSK_SOCKET_PATH`) or stdio, in any language. The layout mirrors `bb`'s 9-slot model (`/work/lab/bb/plugins/plugin-api-docs`). Husk is the host for Dolphin (repo `hyperlab-sh/dolphin`, an agentic development environment TUI backed by Herdr) but must stay application-agnostic: nothing Herdr- or Dolphin-specific belongs in this repo. Design research is not in the repo: it lives in the space's local-only `notes/research/` (`../../notes/research/` from the worktree). The docs site (docmd) is in `docs/`.
 
 This is a hyper space: project files live in `worktrees/main/`; `bin/`, `data/`, `notes/`, `scratch/` at the space root are local-only. Read `HYPER.md` at the space root for layout rules.
 
@@ -8,7 +8,6 @@ This is a hyper space: project files live in `worktrees/main/`; `bin/`, `data/`,
 
 ```bash
 go build -o ../../bin/husk ./cmd/husk
-go build -o ../../bin/herdr-sidebar ./cmd/herdr-sidebar
 go vet ./...
 
 ../../bin/husk                              # run the workbench
@@ -23,11 +22,9 @@ There are no Go tests yet. Use `--dump-frame` to check rendering changes. Manife
 | Path | Purpose |
 | :--- | :--- |
 | `cmd/husk/` | Host workbench: slots, dock/palette, mouse resize, activity rail; `modifiers_darwin.go` polls Alt/Option via Quartz at 25Hz |
-| `cmd/herdr-sidebar/` | Go plugin talking to `~/.config/herdr/herdr.sock`; publishes `workspace_context` |
 | `pkg/huskipc/` | IPC protocol (`protocol.go`) and client (`client.go`) |
-| `pkg/herdr/` | Herdr socket client |
 | `pkg/theme/` | Styling (being moved to Charm defaults) |
-| `plugins/` | Out-of-process plugins: `tv-search` (modal), `fleet-dashboard` (full-canvas), `project-git` (stage), all Bash `plugin.sh`; `herdr-sidebar/husk-plugin.json` is the manifest for the Go plugin |
+| `plugins/` | Out-of-process plugins: `tv-search` (modal), `fleet-dashboard` (full-canvas), `project-git` (stage), all Bash `plugin.sh` mock UIs. The module path is `github.com/hyperlab-sh/husk`; `pkg/huskipc` and `pkg/theme` are imported by Dolphin, so keep them stable |
 
 IPC messages: `hello`/`welcome`, `slot_update`, `slot_resize`, `slot_key`, `slot_mouse`, `key_state`, `workspace_context`, `command_invoke`, toasts. Plugin placements: `modal`, `full-canvas`, `stage`.
 

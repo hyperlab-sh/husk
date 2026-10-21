@@ -1,4 +1,4 @@
-module husk
+module github.com/hyperlab-sh/husk
 
 go 1.26.6
 

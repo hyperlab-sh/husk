@@ -17,7 +17,7 @@ unsigned int huskGetModifierFlags() {
 }
 */
 import "C"
-import "husk/pkg/huskipc"
+import "github.com/hyperlab-sh/husk/pkg/huskipc"
 
 func pollOSModifiers() (huskipc.ModifierState, bool) {
 	bits := uint(C.huskGetModifierFlags())

@@ -6,7 +6,7 @@ import (
 	"io"
 	"sync"
 
-	"husk/pkg/theme"
+	"github.com/hyperlab-sh/husk/pkg/theme"
 )
 
 type SlotID string
