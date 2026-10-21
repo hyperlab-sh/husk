@@ -63,6 +63,11 @@ IDs use the contributor's namespace. Husk rejects foreign namespaces with
 `{"type":"protocol_error","protocol_error":{"message_type":"slot_declare","message":"..."}}`.
 A plugin ID contains letters, digits, hyphens, underscores or dot-separated
 components (existing IDs such as `bash.tv-search` remain valid); `husk` is reserved.
+The **final dot** separates the plugin ID from one non-empty, dot-free resource
+name. This applies to publications, contribution IDs, request IDs and `on_click`
+commands: `x.y.button` belongs to plugin `x.y`, never parent plugin `x`.
+Violations return `protocol_error`. Upserts and cleanup also check the exact
+authenticated owner, not a namespace prefix.
 
 The host registers its own slots in the same registry, internally as
 `husk.sidebar-list`, `husk.main-stage`, etc. Existing surface IDs such as
@@ -111,7 +116,8 @@ Publishers must send anchors, **not** also render the snapshot themselves.
 
 A `region` slot reserves a rectangle relative to the content of a host surface
 held by the publisher. Rows stack vertically, multiline content is supported,
-and the full reserved rectangle is cleared and clipped to the surface:
+and the full reserved rectangle is cleared and clipped to the surface. Regions
+compose over the initial blank canvas immediately; no `slot_update` is required:
 
 ```json
 {"type":"slot_declare","slot_declare":{"id":"a.actions","title":"Actions","description":"Reserved action area","kind":"region","rect":{"surface":"main-stage","x":0,"y":5,"width":28,"height":3}}}
@@ -129,6 +135,8 @@ contributor, not to the publisher's row handler:
 ```
 
 `row_key` identifies the anchor instance (empty for region contributions).
+Without `on_click`, a contribution is passive: clicks retain the publisher's
+normal `slot_mouse` routing instead of being swallowed.
 
 ### Hooks
 

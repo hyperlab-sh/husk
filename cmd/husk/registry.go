@@ -68,8 +68,11 @@ func validPluginID(id string) bool {
 }
 
 func ownID(plugin, id string) error {
-	if !validPluginID(plugin) || !strings.HasPrefix(id, plugin+".") || len(id) <= len(plugin)+1 || strings.ContainsAny(id, " \t\r\n\x1b;=\\") {
-		return fmt.Errorf("id %q must use the %s.<name> namespace", id, plugin)
+	// The final dot separates the plugin ID from a single resource-name
+	// component. Dotted plugin IDs remain valid without overlapping parents.
+	separator := strings.LastIndexByte(id, '.')
+	if !validPluginID(plugin) || separator < 0 || id[:separator] != plugin || separator == len(id)-1 || strings.ContainsAny(id, " \t\r\n\x1b;=\\") {
+		return fmt.Errorf("id %q must use %s.<name> with a non-empty dot-free name", id, plugin)
 	}
 	return nil
 }
@@ -174,6 +177,9 @@ func (r *publicationRegistry) contribute(plugin string, c huskipc.SlotContribute
 	entry := huskipc.SlotContribution{SlotContributePayload: c, PluginID: plugin}
 	for i, old := range s.Contributions {
 		if old.ID == c.ID {
+			if old.PluginID != plugin {
+				return nil, fmt.Errorf("contribution %q belongs to another authenticated plugin", c.ID)
+			}
 			s.Contributions[i] = entry
 			return []registryDelivery{r.slotDelivery(c.SlotID)}, nil
 		}

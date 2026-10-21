@@ -971,34 +971,11 @@ func (m *WorkbenchModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 				btn = "wheel_up"
 			}
 
-			var hitID, hitKind, hitAction string
-			var hitPayload map[string]string
-			if su := m.slotUpdates[slotID]; su != nil {
-				for _, ht := range su.HitTargets {
-					if ht.Line == relY {
-						hitID = ht.ID
-						hitKind = ht.Kind
-						hitAction = ht.Action
-						hitPayload = ht.Payload
-						break
-					}
-				}
-			}
-
 			ownerID := m.slotOwners[slotID]
 			if cp, ok := m.plugins[ownerID]; ok {
 				_ = cp.Writer.Send(huskipc.Envelope{
-					Type: "slot_mouse",
-					SlotMouse: &huskipc.SlotMousePayload{
-						Slot:       slotID,
-						X:          relX,
-						Y:          relY,
-						Button:     btn,
-						HitID:      hitID,
-						HitKind:    hitKind,
-						HitAction:  hitAction,
-						HitPayload: hitPayload,
-					},
+					Type:      "slot_mouse",
+					SlotMouse: m.publisherMousePayload(slotID, relX, relY, btn),
 				})
 			}
 			return m, nil
@@ -1680,12 +1657,8 @@ func (m *WorkbenchModel) overlayModalPlugin(base string) string {
 	innerW, innerH := rect.InnerW, rect.InnerH
 
 	su := m.slotUpdates[huskipc.SlotModalSurface]
-	// Compose contributions inside the frame's content rect; absent content
-	// remains a blank canvas, with no implicit title row or padding.
-	rows := m.surfaceContentLines(su, innerW, innerH)
-	if su != nil {
-		rows, _ = m.registry.renderPublished(huskipc.SlotModalSurface, m.slotOwners[huskipc.SlotModalSurface], su.Lines, innerW, innerH)
-	}
+	// A declared region composes over the blank canvas before slot_update too.
+	rows, _ := m.publishedContent(huskipc.SlotModalSurface, innerW, innerH)
 
 	spec := m.frameFor(huskipc.SlotModalSurface)
 	label := ""
@@ -1840,10 +1813,7 @@ func (m *WorkbenchModel) renderSurface(slotID huskipc.SlotID, calloutNum, slotNa
 			label = su.Title
 		}
 	}
-	lines := m.surfaceContentLines(su, rect.InnerW, rect.InnerH)
-	if su != nil {
-		lines, _ = m.registry.renderPublished(slotID, m.slotOwners[slotID], su.Lines, rect.InnerW, rect.InnerH)
-	}
+	lines, _ := m.publishedContent(slotID, rect.InnerW, rect.InnerH)
 	if m.showHotspots && len(lines) > 0 {
 		hot := lipgloss.NewStyle().
 			Foreground(lipgloss.Color(m.palette.Warning)).
