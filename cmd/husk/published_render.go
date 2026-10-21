@@ -78,7 +78,9 @@ func (r *publicationRegistry) renderPublished(surface huskipc.SlotID, owner stri
 		}
 		var rowHits []contributionHit
 		rows[y], rowHits = r.replaceAnchors(owner, line, width, y)
-		rows[y] = fitLineWidth(rows[y], width)
+		// A plugin line may leave a style open; close it before the padding
+		// and the frame edge so it cannot paint cells the plugin does not own.
+		rows[y] = fitLineWidth(closeSGR(rows[y]), width)
 		hits = append(hits, rowHits...)
 	}
 	ids := make([]string, 0)
@@ -135,8 +137,10 @@ func (r *publicationRegistry) renderPublished(surface huskipc.SlotID, owner stri
 				break
 			}
 		}
+		// Each fragment is closed before the next is appended (and before its
+		// own padding), so no colour crosses a region edge; see spliceOverlay.
 		for i, text := range regionRows {
-			rows[y+i] = fitLineWidth(ansi.Cut(rows[y+i], 0, x), x) + fitLineWidth(text, w) + fitLineWidth(ansi.Cut(rows[y+i], x+w, width), width-x-w)
+			rows[y+i] = fitLineWidth(closeSGR(ansi.Cut(rows[y+i], 0, x)), x) + fitLineWidth(closeSGR(text), w) + fitLineWidth(closeSGR(ansi.Cut(rows[y+i], x+w, width)), width-x-w)
 		}
 	}
 	return rows, hits
