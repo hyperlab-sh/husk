@@ -41,7 +41,7 @@ func (m *WorkbenchModel) railButtons() []railButton {
 		btns = append(btns, railButton{
 			icon:     item.Icon,
 			label:    item.Label,
-			shortcut: strings.ToUpper(item.Shortcut),
+			shortcut: railShortcutLabel(item.Shortcut),
 			active:   isAct,
 			kind:     "plugin",
 			item:     item,
@@ -330,6 +330,25 @@ func (m *WorkbenchModel) runPluginBinding(pluginID, cmdID string) (tea.Model, te
 		m.sendCommandInvoke(cp, cmdID)
 	}
 	return m, nil
+}
+
+// railShortcutLabel formats a slot_key-spelled shortcut for display:
+// modifiers and named keys title-cased ("ctrl+g" -> "Ctrl+g", "f4" -> "F4",
+// "alt+enter" -> "Alt+Enter"). A single printable key keeps its case, so
+// "d"/"D" and "alt+x"/"alt+X" stay distinct.
+func railShortcutLabel(key string) string {
+	parts := strings.Split(key, "+")
+	if len(parts) > 1 && parts[len(parts)-1] == "" {
+		// "ctrl++" style: the key itself is "+".
+		parts = append(parts[:len(parts)-2], "+")
+	}
+	last := len(parts) - 1
+	for i, p := range parts {
+		if (i < last || len([]rune(p)) > 1) && p != "" {
+			parts[i] = strings.ToUpper(p[:1]) + p[1:]
+		}
+	}
+	return strings.Join(parts, "+")
 }
 
 // railShortcutItem returns the rail item whose declared shortcut is key.
