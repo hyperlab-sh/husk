@@ -121,6 +121,10 @@ Every message is one JSON object on one line (at most 4 MiB, `huskipc.MaxLineByt
 
 Regenerate it with `go generate ./pkg/huskipc` after changing any wire type; `TestCommittedSchemaIsCurrent` fails while the committed file is stale, and `TestGoMarshaledEnvelopesValidate` and `TestDolphinFixturesValidate` check that what the structs marshal and what the Rust crate's fixtures contain both validate. The generator lives in `pkg/huskipc/schema` (it also holds the small validator the tests use) and `cmd/genschema`. The schema describes shape only: it does not say which messages a plugin may send (see [Errors](#errors)).
 
+### Enumerated fields
+
+Fields with a closed vocabulary use named Go string types, and `pkg/huskipc` exports the validation so consumers do not re-implement it: `SlotID` (`slot_key.slot`, `key_state.slot`, `slot_update.slot`, ...), `KeyPhase` (`key_state.phase`: `down`, `up`, `repeat`, `sync`) and `RailPlacement` (`rail_items[].placement`: `modal`, `full-canvas`, `stage`) each have a `Valid()` method, and `KeyStatePayload`, `SlotKeyPayload` and `RailItemSpec` have `Validate()`. The named types marshal exactly as the plain strings did, so the JSON and `wire-schema.json` are unchanged; the schema keeps them as `string` because minor releases may add values.
+
 ### Versioning
 
 `hello.protocol_version` and `welcome.protocol_version` carry the wire protocol version as `"MAJOR.MINOR"` (`huskipc.ProtocolVersion`, currently `1.1`). A minor release only adds optional fields and message types, which both sides ignore when they do not know them; a major release is a breaking change.
