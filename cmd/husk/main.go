@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"os"
@@ -153,8 +154,14 @@ func main() {
 		return
 	}
 
+	// Writing to stderr while the TUI owns the terminal corrupts the screen,
+	// so host log lines are held and printed once the program exits.
+	var tuiLog bytes.Buffer
+	model.logOut = &tuiLog
 	p := tea.NewProgram(model)
-	if _, err := p.Run(); err != nil {
+	_, err = p.Run()
+	_, _ = os.Stderr.Write(tuiLog.Bytes())
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "husk error: %v\n", err)
 		os.Exit(1)
 	}

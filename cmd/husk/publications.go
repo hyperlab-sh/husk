@@ -7,7 +7,14 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/huskipc"
 )
 
-type pluginDisconnectedMsg struct{ plugin *ConnectedPlugin }
+// pluginDisconnectedMsg reports that a plugin connection ended. reason is
+// never nil: io.EOF for an orderly close, a read error, or the outbound
+// writer's failure (huskipc.ErrWriteTimeout, huskipc.ErrSendQueueFull or a
+// wrapped write error).
+type pluginDisconnectedMsg struct {
+	plugin *ConnectedPlugin
+	reason error
+}
 
 func (m *WorkbenchModel) deliverPublications(deliveries []registryDelivery) {
 	for _, d := range deliveries {

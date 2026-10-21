@@ -1,10 +1,13 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -98,6 +101,37 @@ type WorkbenchModel struct {
 	activeToast    *huskipc.ToastPayload
 	toastSeq       int
 	totalIPCEvents uint64
+
+	// Outbound policy for each plugin connection (see handleStream).
+	sendQueueCapacity int
+	writeTimeout      time.Duration
+	logOut            io.Writer // host log lines, such as disconnect reasons
+}
+
+const (
+	pluginSendQueueCapacity = 1024
+	pluginWriteTimeout      = 5 * time.Second
+)
+
+// disconnectReason renders a pluginDisconnectedMsg reason for logs and toasts.
+func disconnectReason(err error) string {
+	switch {
+	case err == nil, errors.Is(err, io.EOF):
+		return "connection closed (EOF)"
+	case errors.Is(err, huskipc.ErrWriteTimeout), errors.Is(err, huskipc.ErrSendQueueFull):
+		return "stopped reading: " + strings.TrimPrefix(err.Error(), "huskipc: ")
+	case errors.Is(err, huskipc.ErrWriterClosed):
+		return "closed by host"
+	case strings.HasPrefix(err.Error(), "huskipc: write: "):
+		return "write error: " + strings.TrimPrefix(err.Error(), "huskipc: write: ")
+	}
+	return "read error: " + err.Error()
+}
+
+func (m *WorkbenchModel) logf(format string, args ...any) {
+	if m.logOut != nil {
+		fmt.Fprintf(m.logOut, "husk: "+format+"\n", args...)
+	}
 }
 
 const activityRailWidth = 5
@@ -129,6 +163,10 @@ func newWorkbenchModel(socketPath string, listener net.Listener, cwd string) *Wo
 		heldKeys:     make(map[string]time.Time),
 		showHotspots: false,
 		stageMode:    "plugin",
+
+		sendQueueCapacity: pluginSendQueueCapacity,
+		writeTimeout:      pluginWriteTimeout,
+		logOut:            os.Stderr,
 	}
 }
 
@@ -230,14 +268,27 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case pluginDisconnectedMsg:
+		if m.plugins[msg.plugin.Info.PluginID] != msg.plugin {
+			// Rejected at hello, or a stale connection already replaced.
+			return m, waitForIPC(m.subChan)
+		}
+		reason := disconnectReason(msg.reason)
 		m.disconnectPublications(msg.plugin)
-		return m, waitForIPC(m.subChan)
+		m.logf("plugin %s disconnected: %s", msg.plugin.Info.PluginID, reason)
+		return m, tea.Batch(
+			waitForIPC(m.subChan),
+			m.showLocalToast("warn", "Plugin disconnected", msg.plugin.Info.PluginID+": "+reason),
+		)
 
 	case pluginRegisteredMsg:
 		cp := msg.plugin
 		if err := m.registerPublications(cp.Info); err != nil {
 			m.rejectPublication(cp, "hello", err)
-			if cp.Closer != nil {
+			m.logf("rejected hello from plugin %q: %v", cp.Info.PluginID, err)
+			// Flush the protocol_error before closing.
+			if cp.Writer.Queued() {
+				_ = cp.Writer.Close()
+			} else if cp.Closer != nil {
 				_ = cp.Closer.Close()
 			}
 			return m, waitForIPC(m.subChan)
