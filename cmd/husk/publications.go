@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"image"
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/hyperlab-sh/husk/pkg/huskipc"
@@ -344,7 +345,7 @@ func (m *WorkbenchModel) publisherMousePayload(surface huskipc.SlotID, x, y int,
 // consume one cell per edge; labels/close glyphs never add a content title row.
 func (m *WorkbenchModel) handlePublishedModalMouse(x, y int, left, wheelDown, wheelUp bool) bool {
 	rect := m.modalRect
-	if x < rect.X || x >= rect.X+rect.Width || y < rect.Y || y >= rect.Y+rect.Height {
+	if !image.Pt(x, y).In(rect.Rect()) {
 		return false
 	}
 	x, y = x-rect.InnerX, y-rect.InnerY

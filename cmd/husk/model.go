@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"image"
 	"io"
 	"net"
 	"os"
@@ -31,6 +32,14 @@ type ConnectedPlugin struct {
 	// process the connection came from (the peer itself or the wrapper that
 	// started it).
 	PeerPID int
+}
+
+// Rect returns the outer rectangle as a half-open image.Rectangle, so point
+// and clip tests can use Point.In, Intersect and Overlaps.
+func (r SlotRect) Rect() image.Rectangle {
+	// A literal, not image.Rect: Rect swaps inverted corners, which would turn a
+	// negative size into a non-empty rectangle.
+	return image.Rectangle{Min: image.Pt(r.X, r.Y), Max: image.Pt(r.X+r.Width, r.Y+r.Height)}
 }
 
 type SlotRect struct {

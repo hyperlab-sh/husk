@@ -1,6 +1,7 @@
 package main
 
 import (
+	"image"
 	"strings"
 	"time"
 	"unicode"
@@ -323,7 +324,7 @@ func isPaletteText(key string) bool {
 // dividers, so only they may start a drag.
 func (m *WorkbenchModel) onBorderRing(x, y int) bool {
 	for slot, r := range m.slotRects {
-		if x < r.X || x >= r.X+r.Width || y < r.Y || y >= r.Y+r.Height {
+		if !image.Pt(x, y).In(r.Rect()) {
 			continue
 		}
 		if x != r.X && x != r.X+r.Width-1 && y != r.Y && y != r.Y+r.Height-1 {
@@ -533,7 +534,7 @@ func (m *WorkbenchModel) handleMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 		if slotID == huskipc.SlotActivityRail {
 			continue
 		}
-		if msg.X >= rect.X && msg.X < rect.X+rect.Width && msg.Y >= rect.Y && msg.Y < rect.Y+rect.Height {
+		if image.Pt(msg.X, msg.Y).In(rect.Rect()) {
 			if isLeftClick && (slotID == huskipc.SlotSidebarList || slotID == huskipc.SlotMainStage || slotID == huskipc.SlotSidePanel || slotID == huskipc.SlotWorkspaceStage || slotID == huskipc.SlotFullCanvas) {
 				m.focusedSlot = slotID
 				m.broadcastSlotResize()
