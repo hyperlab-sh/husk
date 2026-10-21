@@ -185,8 +185,11 @@ func (m *WorkbenchModel) handleStream(r io.Reader, w io.Writer, closer io.Closer
 	})
 }
 
-func (m *WorkbenchModel) spawnSocketCommand(argv []string) error {
+func (m *WorkbenchModel) spawnSocketCommand(dir string, argv []string) error {
 	cmd := exec.Command(argv[0], argv[1:]...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
 	cmd.Env = append(os.Environ(), "HUSK_SOCKET_PATH="+m.socketPath)
 	if err := cmd.Start(); err != nil {
 		return err
@@ -195,8 +198,11 @@ func (m *WorkbenchModel) spawnSocketCommand(argv []string) error {
 	return nil
 }
 
-func (m *WorkbenchModel) spawnStdioCommand(argv []string) error {
+func (m *WorkbenchModel) spawnStdioCommand(dir string, argv []string) error {
 	cmd := exec.Command(argv[0], argv[1:]...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
 	cmd.Env = append(os.Environ(), "HUSK_SOCKET_PATH="+m.socketPath)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -2012,9 +2018,9 @@ func main() {
 		argv := p.ResolvedCommand()
 		var err error
 		if p.Transport == manifest.TransportStdio {
-			err = model.spawnStdioCommand(argv)
+			err = model.spawnStdioCommand(p.WorkDir(), argv)
 		} else {
-			err = model.spawnSocketCommand(argv)
+			err = model.spawnSocketCommand(p.WorkDir(), argv)
 		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "husk: failed to launch plugin %s: %v\n", p.ID, err)

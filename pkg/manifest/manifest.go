@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // FileName is the manifest file name expected inside a plugin directory.
@@ -38,18 +39,64 @@ type Plugin struct {
 	Dir string `json:"-"`
 }
 
-// ResolvedCommand returns the command with relative entries resolved against
-// the manifest directory. Entry 0 is always resolved; later entries are only
-// resolved when they look like file paths (contain a path separator and exist
-// relative to Dir).
+// ResolvedCommand returns the command ready to execute:
+//
+//   - argv[0] is left as-is when it is a bare name (looked up on PATH, so
+//     interpreter commands like ["python3", "./plugin.py"] work); any other
+//     relative argv[0] is resolved against the manifest directory; absolute
+//     paths are kept.
+//   - later arguments are only rewritten when they look like explicit
+//     manifest-relative paths: they must contain a path separator and either
+//     start with "./" or "../", or exist relative to the manifest directory.
+//     Arbitrary option arguments are never touched.
+//
+// Execute the result with the working directory returned by WorkDir so that
+// manifest-relative arguments resolve correctly regardless of Husk's cwd.
 func (p *Plugin) ResolvedCommand() []string {
 	if len(p.Command) == 0 {
 		return nil
 	}
 	out := make([]string, len(p.Command))
-	out[0] = p.resolve(p.Command[0])
-	copy(out[1:], p.Command[1:])
+	out[0] = p.resolveExecutable(p.Command[0])
+	for i := 1; i < len(p.Command); i++ {
+		if p.isManifestRelativePath(p.Command[i]) {
+			out[i] = p.resolve(p.Command[i])
+		} else {
+			out[i] = p.Command[i]
+		}
+	}
 	return out
+}
+
+// WorkDir is the working directory a plugin should be launched in: the
+// directory containing its manifest (or, for plain executables, the
+// executable's directory).
+func (p *Plugin) WorkDir() string {
+	if p.Dir == "" {
+		return "."
+	}
+	return p.Dir
+}
+
+func (p *Plugin) resolveExecutable(s string) string {
+	if filepath.IsAbs(s) {
+		return s
+	}
+	if !strings.ContainsRune(s, filepath.Separator) {
+		return s // bare name: leave to PATH lookup
+	}
+	return p.resolve(s)
+}
+
+func (p *Plugin) isManifestRelativePath(s string) bool {
+	if filepath.IsAbs(s) || !strings.ContainsRune(s, filepath.Separator) {
+		return false
+	}
+	if strings.HasPrefix(s, "./") || strings.HasPrefix(s, "../") {
+		return true
+	}
+	_, err := os.Stat(filepath.Join(p.Dir, s))
+	return err == nil
 }
 
 func (p *Plugin) resolve(path string) string {
@@ -92,6 +139,9 @@ func parseFile(path string) (*Plugin, error) {
 		return nil, fmt.Errorf("manifest: parse %s: %w", path, err)
 	}
 	p.Dir = filepath.Dir(path)
+	if abs, err := filepath.Abs(p.Dir); err == nil {
+		p.Dir = abs
+	}
 	if err := p.validate(); err != nil {
 		return nil, fmt.Errorf("manifest: %s: %w", path, err)
 	}
@@ -116,14 +166,19 @@ func Load(path string) (*Plugin, error) {
 		if _, err := os.Stat(manifestPath); err == nil && filepath.Base(manifestPath) == FileName {
 			return parseFile(manifestPath)
 		}
-		// Plain executable (or script): implicit socket-transport plugin.
+		// Plain executable (or script): implicit socket-transport plugin. Resolve
+		// to an absolute path once so later resolution cannot double it up.
+		abs, err := filepath.Abs(path)
+		if err != nil {
+			abs = path
+		}
 		return &Plugin{
-			ID:        filepath.Base(path),
-			Name:      filepath.Base(path),
+			ID:        filepath.Base(abs),
+			Name:      filepath.Base(abs),
 			Version:   "0.0.0",
-			Command:   []string{path},
+			Command:   []string{abs},
 			Transport: TransportSocket,
-			Dir:       filepath.Dir(path),
+			Dir:       filepath.Dir(abs),
 		}, nil
 	}
 	if parts := splitCommand(path); len(parts) > 1 {

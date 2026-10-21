@@ -155,7 +155,7 @@ while IFS= read -r line; do
   msg_type=$(printf '%s' "$line" | jq -r '.type // empty' 2>/dev/null || true)
   case "$msg_type" in
     welcome)
-      CURRENT_CWD=$(printf '%s' "$line" | jq -r '.welcome.context.cwd // $PWD')
+      CURRENT_CWD=$(printf '%s' "$line" | jq -r --arg fb "$PWD" '.welcome.context.cwd // $fb')
       CURRENT_WS_ID=$(printf '%s' "$line" | jq -r '.welcome.context.workspace_id // "demo"')
       CURRENT_WS_LABEL=$(printf '%s' "$line" | jq -r '.welcome.context.workspace_label // "Demo"')
       ALT_HELD=$(printf '%s' "$line" | jq -r '.welcome.modifiers.alt // false')
@@ -165,7 +165,7 @@ while IFS= read -r line; do
       render_stage
       ;;
     workspace_context)
-      CURRENT_CWD=$(printf '%s' "$line" | jq -r '.workspace_context.cwd // $PWD')
+      CURRENT_CWD=$(printf '%s' "$line" | jq -r --arg fb "$PWD" '.workspace_context.cwd // $fb')
       CURRENT_WS_ID=$(printf '%s' "$line" | jq -r '.workspace_context.workspace_id // "demo"')
       CURRENT_WS_LABEL=$(printf '%s' "$line" | jq -r '.workspace_context.workspace_label // "Demo"')
       CURRENT_REPO=$(printf '%s' "$line" | jq -r '.workspace_context.repo_name // ""')
