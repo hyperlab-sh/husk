@@ -168,3 +168,36 @@ func TestViewRequestsFocusReporting(t *testing.T) {
 		t.Fatal("too-small view must keep focus reporting enabled")
 	}
 }
+
+func TestModifierTickLapsesWithoutOSSource(t *testing.T) {
+	m, _, _ := tickModel(t)
+	m.pollMods = func() (huskipc.ModifierState, bool) { return huskipc.ModifierState{}, false }
+	m.startModifierTick()
+	_, cmd := m.Update(modifierTickMsg{})
+	if cmd != nil || m.modTickOn {
+		t.Fatal("tick with no OS source and no held keys must lapse")
+	}
+}
+
+func TestModifierTickWithoutOSSourceExpiresHeldKeysThenLapses(t *testing.T) {
+	m, _, _ := tickModel(t)
+	m.pollMods = func() (huskipc.ModifierState, bool) { return huskipc.ModifierState{}, false }
+
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
+	if cmd == nil || !m.modTickOn {
+		t.Fatal("key press that records a held key must restart a lapsed chain")
+	}
+	if len(m.heldKeys) == 0 {
+		t.Fatal("expected a held key")
+	}
+	if _, cmd := m.Update(modifierTickMsg{}); cmd == nil {
+		t.Fatal("chain must keep running while a held key is pending")
+	}
+	m.heldKeys["x"] = time.Now().Add(-time.Second)
+	if _, cmd := m.Update(modifierTickMsg{}); cmd != nil || m.modTickOn {
+		t.Fatal("chain must lapse once the held key expired")
+	}
+	if len(m.heldKeys) != 0 {
+		t.Fatalf("held keys not expired: %v", m.heldKeys)
+	}
+}
