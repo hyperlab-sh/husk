@@ -515,7 +515,7 @@ func (m *WorkbenchModel) renderHotspotArchitectureStage() string {
 
 	var lines []string
 	lines = append(lines,
-		titleStyle.Render("HUSK WORKBENCH HOTSPOT & SLOT ARCHITECTURE (bb plugin-api-docs counterpart)"),
+		titleStyle.Render("HUSK WORKBENCH SLOT ARCHITECTURE"),
 		subStyle.Render("Every numbered region is an out-of-process IPC slot over husk.sock / stdio. Press 'v' to toggle back."),
 		subtle.Render(strings.Repeat("─", innerW)),
 	)
@@ -538,15 +538,15 @@ func (m *WorkbenchModel) renderHotspotArchitectureStage() string {
 			Bold(true).
 			Render(fmt.Sprintf("%-20s", slot.ID))
 
-		bbMap := lipgloss.NewStyle().
+		titleText := lipgloss.NewStyle().
 			Foreground(lipgloss.Color(m.palette.AccentSecondary)).
-			Render(fmt.Sprintf("bb:%-26s", slot.BBHotspot))
+			Render(fmt.Sprintf("%-20s", slot.Title))
 
 		ownerPill := lipgloss.NewStyle().
 			Foreground(lipgloss.Color(m.palette.Success)).
 			Render("owner: " + owner)
 
-		row1 := fmt.Sprintf(" %s %s  %s  %s", numBadge, idText, bbMap, ownerPill)
+		row1 := fmt.Sprintf(" %s %s  %s  %s", numBadge, idText, titleText, ownerPill)
 		row2 := "      " + subtle.Render(slot.Description)
 		if selected {
 			row1 = lipgloss.NewStyle().Background(lipgloss.Color(m.palette.SurfaceSelected)).Render(fitLineWidth(row1, innerW))

@@ -1,14 +1,9 @@
 package theme
 
-import (
-	"image/color"
-
-	"charm.land/lipgloss/v2"
-)
-
 // Palette is a flat colour token set shared by the workbench and its plugins.
 // All values are ANSI (0-15) or xterm-256 (16-255) colour codes so terminals
-// render Husk with their own Charm default palette.
+// render Husk with their own Charm default palette. It carries only generic
+// roles; a plugin that needs application-specific colours defines its own.
 type Palette struct {
 	Name            string `json:"name"`
 	Canvas          string `json:"canvas"`
@@ -29,15 +24,6 @@ type Palette struct {
 	Warning         string `json:"warning"`
 	Danger          string `json:"danger"`
 	Info            string `json:"info"`
-
-	SpaceGreen  string `json:"space_green"`
-	SpaceCyan   string `json:"space_cyan"`
-	SpaceIndigo string `json:"space_indigo"`
-	SpaceYellow string `json:"space_yellow"`
-	SpaceLime   string `json:"space_lime"`
-	SpacePurple string `json:"space_purple"`
-	SpacePink   string `json:"space_pink"`
-	SpaceOrange string `json:"space_orange"`
 }
 
 // Default is Husk's single palette, built only from ANSI/256 colour codes.
@@ -62,37 +48,5 @@ func Default() Palette {
 		Warning:         "11",
 		Danger:          "9",
 		Info:            "14",
-
-		SpaceGreen:  "10",
-		SpaceCyan:   "14",
-		SpaceIndigo: "63",
-		SpaceYellow: "11",
-		SpaceLime:   "120",
-		SpacePurple: "135",
-		SpacePink:   "205",
-		SpaceOrange: "208",
-	}
-}
-
-func (p Palette) SpaceColor(tokenKey string) color.Color {
-	switch tokenKey {
-	case "space_green":
-		return lipgloss.Color(p.SpaceGreen)
-	case "space_cyan":
-		return lipgloss.Color(p.SpaceCyan)
-	case "space_indigo":
-		return lipgloss.Color(p.SpaceIndigo)
-	case "space_yellow":
-		return lipgloss.Color(p.SpaceYellow)
-	case "space_lime":
-		return lipgloss.Color(p.SpaceLime)
-	case "space_purple":
-		return lipgloss.Color(p.SpacePurple)
-	case "space_pink":
-		return lipgloss.Color(p.SpacePink)
-	case "space_orange":
-		return lipgloss.Color(p.SpaceOrange)
-	default:
-		return lipgloss.Color(p.Accent)
 	}
 }

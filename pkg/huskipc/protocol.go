@@ -32,17 +32,19 @@ const (
 type RailPlacement string
 
 const (
-	PlacementModal      RailPlacement = "modal"       // Case 1: Floating modal (tv, telescope, session search)
-	PlacementFullCanvas RailPlacement = "full-canvas" // Case 2: Entire canvas minus activity rail (dashboards, plugin mgr)
-	PlacementStage      RailPlacement = "stage"       // Case 3: Canvas minus sidebar (lazygit, gh dash, vim)
+	PlacementModal      RailPlacement = "modal"       // Floating surface over the workbench
+	PlacementFullCanvas RailPlacement = "full-canvas" // Everything right of the activity rail
+	PlacementStage      RailPlacement = "stage"       // The canvas minus the sidebar
 )
 
 type RailItemSpec struct {
-	ID          string        `json:"id"`
-	PluginID    string        `json:"plugin_id,omitempty"`
-	Icon        string        `json:"icon"`
-	Badge       string        `json:"badge,omitempty"`
-	Label       string        `json:"label"`
+	ID       string `json:"id"`
+	PluginID string `json:"plugin_id,omitempty"`
+	Icon     string `json:"icon"`
+	Badge    string `json:"badge,omitempty"`
+	Label    string `json:"label"`
+	// Shortcut is a key in the host's slot_key spelling ("f4", "ctrl+g") that
+	// activates (or, when already active, closes) this rail item.
 	Shortcut    string        `json:"shortcut,omitempty"`
 	Placement   RailPlacement `json:"placement"`
 	Description string        `json:"description,omitempty"`
@@ -52,11 +54,13 @@ type RailItemSpec struct {
 	Frame *frame.Spec `json:"frame,omitempty"`
 }
 
+// SlotMeta describes one of the nine fixed host surfaces. Titles and
+// descriptions are generic layout roles: Husk assigns no application meaning
+// to a surface; the occupying plugin decides what it shows.
 type SlotMeta struct {
 	ID          SlotID `json:"id"`
 	Number      int    `json:"number"`
 	Title       string `json:"title"`
-	BBHotspot   string `json:"bb_hotspot"`
 	Description string `json:"description"`
 }
 
@@ -64,65 +68,56 @@ var AllSlots = []SlotMeta{
 	{
 		ID:          SlotActivityRail,
 		Number:      0,
-		Title:       "Activity Bar / Icon Rail",
-		BBHotspot:   "sidebar-navigation (rail)",
-		Description: "Far-left vertical icon column launching Modal (1), Full-Canvas (2), or Stage-minus-Sidebar (3) plugins.",
+		Title:       "Activity Rail",
+		Description: "Far-left icon column; launches plugin rail items as modal, full-canvas or stage placements.",
 	},
 	{
 		ID:          SlotSidebarNavigation,
 		Number:      1,
 		Title:       "Sidebar Navigation",
-		BBHotspot:   "sidebar-navigation (header)",
-		Description: "Top switcher above the sidebar list (Spaces, Tree, Agents, Sort/Filter).",
+		Description: "Top sidebar band above the sidebar list.",
 	},
 	{
 		ID:          SlotSidebarList,
 		Number:      2,
-		Title:       "Sidebar List Surface",
-		BBHotspot:   "thread-list",
-		Description: "Primary sidebar surface for Spaces, Worktrees, Tabs, Panes, and live Agents.",
+		Title:       "Sidebar List",
+		Description: "Primary sidebar surface.",
 	},
 	{
 		ID:          SlotThreadRowStatus,
 		Number:      3,
-		Title:       "Row Status & Telemetry",
-		BBHotspot:   "thread-row-status",
-		Description: "Per-row agent status spinners, context % gauges, and worktree pills.",
+		Title:       "Row Status",
+		Description: "Narrow status surface beside the sidebar list.",
 	},
 	{
 		ID:          SlotSidebarFooter,
 		Number:      4,
 		Title:       "Sidebar Footer",
-		BBHotspot:   "sidebar-footer",
-		Description: "Persistent bottom sidebar bar for daemon health, socket telemetry, and quick toggles.",
+		Description: "Bottom sidebar band.",
 	},
 	{
 		ID:          SlotMainHeader,
 		Number:      5,
 		Title:       "Main Header",
-		BBHotspot:   "thread-header",
-		Description: "Stage header displaying active Workspace, Worktree branch, Tab pills, and quick actions.",
+		Description: "Header band above the main stage.",
 	},
 	{
 		ID:          SlotMainStage,
 		Number:      6,
-		Title:       "Main Stage / Project Canvas",
-		BBHotspot:   "nav-panel / stage",
-		Description: "Central canvas rendering Workspace Topology or active Stage plugin (lazygit, gh dash).",
+		Title:       "Main Stage",
+		Description: "Central canvas.",
 	},
 	{
 		ID:          SlotSidePanel,
 		Number:      7,
-		Title:       "Side Panel Drawer",
-		BBHotspot:   "thread-panel",
-		Description: "Collapsible right-hand inspector for deep Agent context, tokens, & Husk IPC telemetry.",
+		Title:       "Side Panel",
+		Description: "Collapsible right-hand drawer.",
 	},
 	{
 		ID:          SlotAppOverlay,
 		Number:      8,
-		Title:       "Command Palette & Modal Overlays",
-		BBHotspot:   "command-palette / app-overlay",
-		Description: "Modal Command Palette (Ctrl+P), Rail Modal plugins (tv/telescope), and Toast stack.",
+		Title:       "App Overlay",
+		Description: "Overlay layer for the command palette, modal rail items and toasts.",
 	},
 }
 
@@ -141,6 +136,12 @@ type CommandSpec struct {
 	Description string `json:"description,omitempty"`
 }
 
+// KeybindSpec binds a key (in the host's slot_key spelling, e.g. "f4",
+// "ctrl+g", "alt+2", "n") to a command. With WhenSlot set the binding only
+// fires while that surface has focus; without it the binding is global. When
+// the key fires, Husk runs a built-in husk.* command or activates the rail item
+// whose ID equals CommandID; otherwise it sends command_invoke with CommandID
+// to the plugin that declared the binding. Host shortcuts take precedence.
 type KeybindSpec struct {
 	Key         string `json:"key"`
 	CommandID   string `json:"command_id"`
