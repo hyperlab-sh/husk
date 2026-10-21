@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -84,7 +84,7 @@ func (v *validator) check(s map[string]any, inst any, path string) {
 		for k := range val {
 			keys = append(keys, k)
 		}
-		sort.Strings(keys)
+		slices.Sort(keys)
 		extra, hasExtra := s["additionalProperties"].(map[string]any)
 		for _, k := range keys {
 			if ps, ok := props[k].(map[string]any); ok {
