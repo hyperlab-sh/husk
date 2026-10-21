@@ -300,6 +300,43 @@ func TestCleanupKillsPluginThatIgnoresSIGTERM(t *testing.T) {
 	}
 }
 
+// A stdio plugin holds the host's pipe ends open, so the kill after WaitDelay
+// must also release the pipes or Wait would block on them.
+func TestCleanupKillsStdioPluginThatIgnoresSIGTERM(t *testing.T) {
+	t.Setenv("HUSK_FAKE_PLUGIN", "ignore-term")
+	m, log := lifecycleModel(t, filepath.Join(t.TempDir(), socketName), nil)
+	m.stopGrace = 300 * time.Millisecond
+	if err := m.spawnPlugin("fake", manifest.TransportStdio, "", fakeArgv); err != nil {
+		t.Fatal(err)
+	}
+	p := m.procs[0]
+	for deadline := time.Now().Add(10 * time.Second); ; {
+		if data, _ := os.ReadFile(p.logPath); strings.Contains(string(data), "ignoring") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("fake plugin never started")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	start := time.Now()
+	m.cleanup()
+	elapsed := time.Since(start)
+	if elapsed < m.stopGrace || elapsed > 3*time.Second {
+		t.Fatalf("cleanup took %s, want the %s grace and then a prompt kill", elapsed, m.stopGrace)
+	}
+	ps := p.cmd.ProcessState
+	if ps == nil {
+		t.Fatal("killed plugin was not waited for")
+	}
+	if ws, ok := ps.Sys().(syscall.WaitStatus); !ok || !ws.Signaled() || ws.Signal() != syscall.SIGKILL {
+		t.Fatalf("plugin state = %s, want killed", ps)
+	}
+	if !strings.Contains(log.String(), "husk: plugin fake did not exit within 300ms of SIGTERM; killing it\n") {
+		t.Fatalf("log = %q", log.String())
+	}
+}
+
 func TestLaunchFailureIsLoggedAndToasted(t *testing.T) {
 	dir := t.TempDir()
 	body := `{"id":"ghost","name":"Ghost","version":"1","command":["./missing-binary"]}`
