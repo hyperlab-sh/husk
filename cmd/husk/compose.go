@@ -7,6 +7,7 @@ import (
 
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/lucasb-eyer/go-colorful"
 )
 
 // canvas is the cell grid one View call composes the frame into. Surfaces,
@@ -21,6 +22,9 @@ type canvas struct {
 	// disagrees on emoji ZWJ sequences and flags.
 	method ansi.Method
 	w, h   int
+	// shadowed records the popup rects whose shadow this frame already cast, so
+	// drawing the same popup twice darkens the cells beneath once.
+	shadowed map[uv.Rectangle]bool
 }
 
 // canvasBuffers recycles cell buffers between frames: a 144x40 buffer is
@@ -90,16 +94,21 @@ func (c *canvas) draw(area uv.Rectangle, s string) {
 // blitBlock draws a multi-line string with its top-left cell at (x, y). The
 // block is opaque: every cell of its bounding box (widest line by line count)
 // is replaced, including cells a shorter line leaves unwritten.
-func (c *canvas) blitBlock(x, y int, s string) {
+//
+// It returns the rectangle the block occupies (empty for an empty string), which
+// callers pass to castShadow.
+func (c *canvas) blitBlock(x, y int, s string) uv.Rectangle {
 	if s == "" {
-		return
+		return uv.Rectangle{}
 	}
 	w, h := 0, 0
 	for line := range strings.SplitSeq(s, "\n") {
 		w = max(w, c.method.StringWidth(line))
 		h++
 	}
-	c.draw(uv.Rect(x, y, w, h), s)
+	r := uv.Rect(x, y, w, h)
+	c.draw(r, s)
+	return r
 }
 
 // blitLines draws lines into the w x h rectangle at (x, y), one line at a
@@ -121,6 +130,83 @@ func (c *canvas) blitLines(x, y, w, h int, lines []string) {
 // trailing blanks.
 func (c *canvas) render() string {
 	return uv.Lines(c.buf.Lines).Render()
+}
+
+// A popup casts a shadow offset popupShadowDX columns right and popupShadowDY
+// rows down. Cells under it keep their glyphs and attributes; their colours are
+// blended popupShadowStrength of the way to black (0 leaves them, 1 is black),
+// so a rule passing under the shadow turns dark instead of being erased. Black
+// is the right target on light themes too: a shadow darkens.
+const (
+	popupShadowDX       = 2
+	popupShadowDY       = 1
+	popupShadowStrength = 0.65
+)
+
+// castShadow darkens the cells of popup's shadow: popup shifted by
+// (popupShadowDX, popupShadowDY), minus popup itself, clipped to the canvas.
+// A cell with no foreground or background of its own is resolved against ink
+// and canvas first, so default-colour plugin cells darken like painted ones.
+// A wide glyph is darkened whole when the shadow covers either half. Casting
+// the same popup rect again in one frame is a no-op; a different rect (a nested
+// popup) darkens further. Call it right after the popup is drawn.
+func (c *canvas) castShadow(popup uv.Rectangle, ink, canvas color.Color) {
+	if popup.Empty() || c.shadowed[popup] {
+		return
+	}
+	if c.shadowed == nil {
+		c.shadowed = map[uv.Rectangle]bool{}
+	}
+	c.shadowed[popup] = true
+	bounds := c.buf.Bounds()
+	for y := popup.Min.Y + popupShadowDY; y < popup.Max.Y+popupShadowDY; y++ {
+		if y < bounds.Min.Y || y >= bounds.Max.Y {
+			continue
+		}
+		lo, hi := popup.Min.X+popupShadowDX, popup.Max.X+popupShadowDX
+		inPopup := y < popup.Max.Y
+		if inPopup {
+			lo = max(lo, popup.Max.X) // the popup's own cells are not shadowed
+		}
+		lo, hi = max(lo, bounds.Min.X), min(hi, bounds.Max.X)
+		if lo >= hi {
+			continue
+		}
+		// Do not split a wide glyph: take in the lead cell when the span starts
+		// on its continuation, and the continuation when it ends on a lead.
+		if cell := c.buf.CellAt(lo, y); cell != nil && cell.Width == 0 && lo > bounds.Min.X && !(inPopup && lo-1 < popup.Max.X) {
+			lo--
+		}
+		if cell := c.buf.CellAt(hi-1, y); cell != nil && cell.Width > 1 {
+			hi = min(hi-1+cell.Width, bounds.Max.X)
+		}
+		for x := lo; x < hi; x++ {
+			if cell := c.buf.CellAt(x, y); cell != nil {
+				darken(cell, ink, canvas)
+			}
+		}
+	}
+}
+
+// darken blends a cell's resolved foreground and background toward black.
+func darken(cell *uv.Cell, ink, canvas color.Color) {
+	fg, bg := cell.Style.Fg, cell.Style.Bg
+	if fg == nil {
+		fg = ink
+	}
+	if bg == nil {
+		bg = canvas
+	}
+	cell.Style.Fg = towardBlack(fg)
+	cell.Style.Bg = towardBlack(bg)
+}
+
+func towardBlack(c color.Color) color.Color {
+	cc, ok := colorful.MakeColor(c)
+	if !ok {
+		return c
+	}
+	return cc.BlendRgb(colorful.Color{}, popupShadowStrength).Clamped()
 }
 
 // fillDefaultBg gives every cell of area that has no background of its own the
