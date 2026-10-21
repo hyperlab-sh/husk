@@ -1,6 +1,7 @@
 package main
 
 import (
+	"sort"
 	"strings"
 	"time"
 
@@ -94,24 +95,22 @@ func (m *WorkbenchModel) detectRailHoverAt(x, y int) int {
 	return -1
 }
 
+// orderedRailItems returns rail items in registration order: plugins appear in
+// the order they connected, items in the order each plugin declared them. Husk
+// has no preferred application order.
 func (m *WorkbenchModel) orderedRailItems() []huskipc.RailItemSpec {
-	order := []string{"rail.tv-search", "rail.fleet-dashboard", "rail.project-git"}
-	var res []huskipc.RailItemSpec
-	seen := map[string]bool{}
-	for _, want := range order {
-		for _, item := range m.railItems {
-			if item.ID == want {
-				res = append(res, item)
-				seen[item.ID] = true
-			}
+	return append([]huskipc.RailItemSpec(nil), m.railItems...)
+}
+
+// firstRailItemWithPlacement returns the first registered rail item that opens
+// the given placement.
+func (m *WorkbenchModel) firstRailItemWithPlacement(p huskipc.RailPlacement) (huskipc.RailItemSpec, bool) {
+	for _, item := range m.orderedRailItems() {
+		if item.Placement == p {
+			return item, true
 		}
 	}
-	for _, item := range m.railItems {
-		if !seen[item.ID] {
-			res = append(res, item)
-		}
-	}
-	return res
+	return huskipc.RailItemSpec{}, false
 }
 
 type paletteCommand struct {
@@ -120,7 +119,21 @@ type paletteCommand struct {
 }
 
 func (m *WorkbenchModel) allCommands() []paletteCommand {
-	builtins := []paletteCommand{
+	builtins := builtinCommands()
+	for _, pid := range m.sortedPluginIDs() {
+		for _, c := range m.plugins[pid].Info.Commands {
+			builtins = append(builtins, paletteCommand{
+				CommandSpec: c,
+				PluginID:    pid,
+			})
+		}
+	}
+	return builtins
+}
+
+// builtinCommands lists the host's own workbench commands.
+func builtinCommands() []paletteCommand {
+	return []paletteCommand{
 		{
 			CommandSpec: huskipc.CommandSpec{
 				ID:          "husk.home",
@@ -134,10 +147,10 @@ func (m *WorkbenchModel) allCommands() []paletteCommand {
 		{
 			CommandSpec: huskipc.CommandSpec{
 				ID:          "husk.hotspots.toggle_stage",
-				Title:       "Husk Workbench: Toggle Stage between Live Plugin & bb Slot Architecture Map",
+				Title:       "Husk Workbench: Toggle Stage between Live Plugin & Slot Architecture Map",
 				Category:    "Workbench",
 				Shortcut:    "v / ctrl+i",
-				Description: "Inspect all 9 bb-style workbench slots, owners, PIDs, and IPC counters",
+				Description: "Inspect all 9 workbench slots and their owners",
 			},
 			PluginID: "husk.core",
 		},
@@ -147,7 +160,7 @@ func (m *WorkbenchModel) allCommands() []paletteCommand {
 				Title:       "Husk Workbench: Toggle Numbered Slot Callout Badges (⓪–⑧)",
 				Category:    "Workbench",
 				Shortcut:    "h",
-				Description: "Shows or hides numbered bb hotspot badges in every slot header",
+				Description: "Shows or hides numbered slot badges on every surface",
 			},
 			PluginID: "husk.core",
 		},
@@ -182,16 +195,6 @@ func (m *WorkbenchModel) allCommands() []paletteCommand {
 			PluginID: "husk.core",
 		},
 	}
-
-	for pid, cp := range m.plugins {
-		for _, c := range cp.Info.Commands {
-			builtins = append(builtins, paletteCommand{
-				CommandSpec: c,
-				PluginID:    pid,
-			})
-		}
-	}
-	return builtins
 }
 
 func (m *WorkbenchModel) filteredCommands() []paletteCommand {
@@ -215,33 +218,6 @@ func (m *WorkbenchModel) executeCommand(cmdID string) (tea.Model, tea.Cmd) {
 	switch cmdID {
 	case "husk.home":
 		m.activateHomeWorkbench()
-		return m, nil
-
-	case "tv.open":
-		for _, ri := range m.railItems {
-			if ri.ID == "rail.tv-search" {
-				m.activateRailItem(ri)
-				return m, nil
-			}
-		}
-		return m, nil
-
-	case "fleet.open":
-		for _, ri := range m.railItems {
-			if ri.ID == "rail.fleet-dashboard" {
-				m.activateRailItem(ri)
-				return m, nil
-			}
-		}
-		return m, nil
-
-	case "gitstage.open":
-		for _, ri := range m.railItems {
-			if ri.ID == "rail.project-git" {
-				m.activateRailItem(ri)
-				return m, nil
-			}
-		}
 		return m, nil
 
 	case "husk.hotspots.toggle_stage":
@@ -293,20 +269,113 @@ func (m *WorkbenchModel) executeCommand(cmdID string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	for _, cp := range m.plugins {
+	// A command whose ID names a rail item activates that item, so plugins can
+	// expose their rail items in the palette and bind keys to them.
+	if ri, ok := m.railItemByID(cmdID); ok {
+		m.activateRailItem(ri)
+		return m, nil
+	}
+
+	for _, pid := range m.sortedPluginIDs() {
+		cp := m.plugins[pid]
 		for _, c := range cp.Info.Commands {
 			if c.ID == cmdID {
-				_ = cp.Writer.Send(huskipc.Envelope{
-					Type: "command_invoke",
-					CommandInvoke: &huskipc.CommandInvokePayload{
-						CommandID: cmdID,
-					},
-				})
+				m.sendCommandInvoke(cp, cmdID)
 				return m, nil
 			}
 		}
 	}
 	return m, nil
+}
+
+func (m *WorkbenchModel) sendCommandInvoke(cp *ConnectedPlugin, cmdID string) {
+	_ = cp.Writer.Send(huskipc.Envelope{
+		Type: "command_invoke",
+		CommandInvoke: &huskipc.CommandInvokePayload{
+			CommandID: cmdID,
+		},
+	})
+}
+
+func (m *WorkbenchModel) sortedPluginIDs() []string {
+	ids := make([]string, 0, len(m.plugins))
+	for id := range m.plugins {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+// isHostCommand reports whether cmdID is handled by the host itself: a
+// built-in husk.* command or the ID of a registered rail item.
+func (m *WorkbenchModel) isHostCommand(cmdID string) bool {
+	for _, c := range builtinCommands() {
+		if c.ID == cmdID {
+			return true
+		}
+	}
+	_, ok := m.railItemByID(cmdID)
+	return ok
+}
+
+// runPluginBinding executes a key binding declared by pluginID: host commands
+// and rail item IDs run in the host, anything else goes to the declaring
+// plugin as command_invoke (whether or not it also lists the command).
+func (m *WorkbenchModel) runPluginBinding(pluginID, cmdID string) (tea.Model, tea.Cmd) {
+	if m.isHostCommand(cmdID) {
+		return m.executeCommand(cmdID)
+	}
+	if cp, ok := m.plugins[pluginID]; ok {
+		m.sendCommandInvoke(cp, cmdID)
+	}
+	return m, nil
+}
+
+// railShortcutItem returns the rail item whose declared shortcut is key.
+// Shortcuts use the host's slot_key spelling, compared exactly.
+func (m *WorkbenchModel) railShortcutItem(key string) (huskipc.RailItemSpec, bool) {
+	for _, item := range m.orderedRailItems() {
+		if item.Shortcut != "" && item.Shortcut == key {
+			if _, ok := m.plugins[item.PluginID]; ok {
+				return item, true
+			}
+		}
+	}
+	return huskipc.RailItemSpec{}, false
+}
+
+// keyBinding finds the plugin key binding for key given the focused surface.
+// Precedence: bindings scoped to the focused surface (when_slot), then global
+// bindings of the focused surface's owner, then global bindings of other
+// plugins. Ties resolve by plugin ID, then declaration order.
+func (m *WorkbenchModel) keyBinding(key string, focused huskipc.SlotID) (pluginID string, kb huskipc.KeybindSpec, ok bool) {
+	ids := m.sortedPluginIDs()
+	for _, pid := range ids {
+		for _, b := range m.plugins[pid].Info.Keybindings {
+			if b.Key == key && b.WhenSlot != "" && b.WhenSlot == focused {
+				return pid, b, true
+			}
+		}
+	}
+	owner := m.keyOwner(focused)
+	if cp, found := m.plugins[owner]; found {
+		for _, b := range cp.Info.Keybindings {
+			if b.Key == key && b.WhenSlot == "" {
+				return owner, b, true
+			}
+		}
+	}
+	for _, pid := range ids {
+		if pid == owner {
+			continue
+		}
+		for _, b := range m.plugins[pid].Info.Keybindings {
+			if b.Key == key && b.WhenSlot == "" {
+				return pid, b, true
+			}
+		}
+	}
+	return "", huskipc.KeybindSpec{}, false
 }
 
 func (m *WorkbenchModel) showLocalToast(level, title, message string) tea.Cmd {
