@@ -61,7 +61,22 @@ View
 
 One `canvas` (a `uv.ScreenBuffer` of `m.width` x `m.height`, width method
 `ansi.GraphemeWidth`, matching the `ansi.StringWidth` math the layout uses) is
-created per `View` call, written in z order, and serialized once:
+created per `View` call, written in z order, and serialized once.
+
+`uv.NewScreenBuffer` defaults to `Method: ansi.WcWidth`, so the width method
+must be set explicitly; without it the canvas silently disagrees with the
+layout on emoji ZWJ sequences and flags:
+
+```go
+func newCanvas(w, h int) *canvas {
+	buf := uv.NewScreenBuffer(w, h)
+	buf.Method = ansi.GraphemeWidth // not the WcWidth default
+	return &canvas{buf: buf}
+}
+```
+
+`compose_test.go` pins this: blitting a ZWJ emoji (`👩‍💻`) and a flag (`🇧🇷`)
+followed by `x` must place `x` at the column `ansi.StringWidth` predicts.
 
 ```
 View
@@ -122,8 +137,9 @@ All in `package main` under `cmd/husk`; no exported API in `pkg/` changes.
 | `spliceOverlay`, `overlayLabel` | deleted |
 | `(*publicationRegistry).renderPublished(...) ([]string, []contributionHit)` | split: `layoutPublished(...) publishedLayout` (anchor-substituted rows, region draws, hits; used by input) and `(publishedLayout).draw(c, x, y)`. `renderPublished` stays as a thin wrapper that draws into a scratch canvas and returns its rows, so input routing and `published_render_test.go` keep their shape |
 | `publishedContent` | returns `publishedLayout` |
-| `sgr.go` (`sgrOpen`, `closeSGR`) | deleted once no caller remains |
-| `renderTooSmall`, `renderTopWorkbenchBar`, `renderBottomKeybindBar`, `fitLineWidth`, `surfaceContentLines`, `recomputeLayout`, `hitOrder` | unchanged |
+| `surfaceContentLines` | drops its `closeSGR` call in slice 4 (`blitLines` parses each line from a zero pen, so the close is redundant); clipping, padding and the `…` tail are unchanged |
+| `sgr.go` (`sgrOpen`, `closeSGR`) | deleted in slice 5; its callers (`spliceOverlay`, `overlayLabel`, the close glyph in `renderFrame`, the region compositor, `surfaceContentLines`) are all gone by the end of slice 4 |
+| `renderTooSmall`, `renderTopWorkbenchBar`, `renderBottomKeybindBar`, `fitLineWidth`, `recomputeLayout`, `hitOrder` | unchanged |
 
 Hit-testing (`hitOrder`, `clickContributionAt`, `detectDividerAt`) keeps
 working on `slotRects` and contribution hits; the compositor does not take
@@ -144,12 +160,36 @@ its own.
    same commit; the commit body states that only bytes changed and the
    cell-equivalence test proves it. From here on the serializer is fixed, so
    every later slice must leave the goldens byte-identical.
+
+   Tests that read `View` bytes must be converted in this slice, because the
+   serializer changes them. `uv.Lines.Render` writes style transitions with
+   `StyleDiff`, which emits off codes and replacement colours rather than a
+   reset (a red cell followed by an fg-styled cell serializes as
+   `\x1b[41mss\x1b[38;2;1;2;3;49mX`). The test helper `cellStyles` only
+   accumulates parameters and treats only `0` or an empty list as a reset, so
+   it would read the cells after that `49` as still `41`. Two tests are
+   affected:
+
+   - `TestCommandPaletteOverStyledStageNoBleed` (runs `cellStyles` over
+     `m.View().Content`): rewritten to decode the frame with `frameCells` and
+     check each cell's `uv.Style.Bg` against the red stage colour. The
+     assertion is the same: red only on stage content cells outside the
+     palette box.
+   - `TestChromeRendersPaletteAsTruecolor` (substring search for
+     `38;2;R;G;B` / `48;2;R;G;B` in `View` bytes): rewritten to look for a
+     decoded cell whose `Fg` / `Bg` equals each palette role, so it does not
+     depend on how the serializer groups parameters.
+
+   Every other test that reads `View().Content` compares `ansi.Strip` text and
+   is unaffected. Tests that run `cellStyles` on the output of `spliceOverlay`,
+   `renderPublished` or `surfaceContentLines` see the same bytes as before in
+   this slice and are converted with the code they test (slices 2 and 4).
 2. **Overlays.** `drawModal`, `drawToast`, `drawCommandPalette` blit their
    boxes onto the canvas after the base is blitted. Delete `spliceOverlay`.
-   Rewrite `TestSpliceOverlayNoSGRBleed`, `TestSpliceOverlayWellFormedBytesUnchanged`
-   and `TestCommandPaletteOverStyledStageNoBleed` to assert on decoded cells
-   (overlay cells carry only overlay styles; base cells right of the overlay
-   keep their own style).
+   Rewrite `TestSpliceOverlayNoSGRBleed` and
+   `TestSpliceOverlayWellFormedBytesUnchanged` as canvas tests that assert on
+   decoded cells (overlay cells carry only overlay styles; base cells right of
+   the overlay keep their own style).
 3. **Surfaces.** `drawSurface` / `drawFrame` / `drawHotspotArchitectureStage`
    draw at their rects; bars and rail blit at their rows/rect. Remove the
    joins and the gutter fill. A golden diff here is not "expected churn": it
@@ -157,10 +197,16 @@ its own.
    hit-testing bug to fix, not to `-update` away.
 4. **Regions and labels.** Split `renderPublished` into layout and draw;
    regions clear and fill their rect on the canvas; labels and the close glyph
-   are drawn as cells. `TestRegionCompositorNoSGRBleed` and
-   `TestPublishedLineOpenStyleStopsAtContent` move to cell assertions.
-5. **Cleanup.** Delete `sgr.go` and `TestSgrOpen` if nothing calls `closeSGR`;
-   update the AGENTS.md paragraph on string splicing and the architecture
+   are drawn as cells. Remove the `closeSGR` call from `surfaceContentLines`:
+   content now reaches the canvas only through `blitLines`, which parses each
+   line from a zero pen, so the close is redundant. `TestRegionCompositorNoSGRBleed`
+   and `TestPublishedLineOpenStyleStopsAtContent` move to cell assertions,
+   including the part of the latter that checks `surfaceContentLines` bytes
+   directly: it becomes "blit the line with `blitLines`, the padding cells
+   have a zero style". Its `sgrOpen(rows[1])` check is dropped with it.
+   After this slice no production code calls `closeSGR` or `sgrOpen`.
+5. **Cleanup.** Delete `sgr.go` and `TestSgrOpen` (slice 4 removed the last
+   callers; `go vet` and the build confirm it); update the AGENTS.md paragraph on string splicing and the architecture
    doc's rendering notes. Record `BenchmarkIdleTickView` before slice 1 and
    after slice 5 in the commit body.
 
@@ -179,11 +225,15 @@ its own.
 - **`TestViewIsPure`** stays green because the canvas never leaves `View`.
 - **Bleed tests** are not deleted, only re-expressed on cells, so they become
   stronger: they check every cell's style, not the absence of a byte pattern.
+  The ones that read `View` bytes are converted in slice 1, together with the
+  serializer change that breaks their byte assumptions; the rest are
+  converted in the slice that replaces the code they test.
 
 ## Risks
 
 - **Width method.** The canvas uses grapheme width to agree with the layout's
-  `ansi.StringWidth`. Bubble Tea's renderer uses wcwidth unless the terminal
+  `ansi.StringWidth`; this is set explicitly in `newCanvas` because the
+  buffer defaults to wcwidth. Bubble Tea's renderer uses wcwidth unless the terminal
   reports grapheme clustering. That mismatch exists today and is not made
   worse, but it is now visible in one place; do not "fix" it here.
 - **Wide glyphs at clip edges.** A wide cell cut by a region rect or an
