@@ -125,6 +125,11 @@ type WorkbenchModel struct {
 	quit       chan struct{}    // closed when cleanup starts
 	stopGrace  time.Duration    // SIGTERM-to-SIGKILL grace on shutdown
 
+	// handoffGrace bounds how long a launcher's manifest declarations wait
+	// for the real plugin's hello; handoffPending holds the ids still waiting.
+	handoffGrace   time.Duration
+	handoffPending map[string]struct{}
+
 	// pluginCtx parents every plugin process; stopPlugins cancels it.
 	pluginCtx    context.Context
 	pluginCancel context.CancelFunc
@@ -236,6 +241,7 @@ func newWorkbenchModel(socketPath string, listener net.Listener, cwd string) *Wo
 		subChan:      make(chan tea.Msg, 256),
 		quit:         make(chan struct{}),
 		stopGrace:    pluginStopGrace,
+		handoffGrace: pluginHandoffGrace,
 		plugins:      make(map[string]*ConnectedPlugin),
 		manifests:    make(map[string]*manifest.Plugin),
 		slotUpdates:  make(map[huskipc.SlotID]*huskipc.SlotUpdatePayload),
@@ -430,7 +436,7 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.broadcastSlotResize()
 		return m, nil
 
-	case pluginExitedMsg, pluginLaunchFailedMsg, hostNoticeMsg:
+	case pluginExitedMsg, pluginLaunchFailedMsg, hostNoticeMsg, handoffExpiredMsg:
 		toast := m.handleLifecycleMsg(msg)
 		return m, tea.Batch(waitForIPC(m.subChan), toast)
 
@@ -482,6 +488,7 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, waitForIPC(m.subChan)
 		}
 		m.plugins[cp.Info.PluginID] = cp
+		delete(m.handoffPending, cp.Info.PluginID) // the real plugin claimed the declarations
 		for _, ri := range cp.Info.RailItems {
 			ri.PluginID = cp.Info.PluginID
 			replaced := false

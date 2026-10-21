@@ -345,7 +345,13 @@ declarations are removed when the plugin disconnects, or when its process fails
 whose process exits with status 0 before connecting is treated as a launcher
 that started the real plugin (for example a wrapper script that backgrounds it):
 its declarations stay registered for that plugin's later `hello`, and Husk logs
-`plugin <id> exited cleanly before connecting; keeping its manifest declarations`.
+`plugin <id> exited cleanly before connecting; keeping its manifest declarations`
+and shows an info toast rather than a warning. The wait is bounded: if no plugin
+with that id has connected 30 seconds after the launcher exited, Husk logs
+`did not connect within 30s of its launcher exiting`, shows a warning toast and
+removes the declarations as it would for a failed exit. A plugin that connects
+after that is still checked against its manifest, but must declare its own slots,
+hooks and events.
 A stdio plugin's stream ends with its process, so a stdio exit before `hello`
 always removes them. A `hello` that is rejected keeps them, together
 with any contributions already made to them. Contributions made to a manifest

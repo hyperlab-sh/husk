@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/hyperlab-sh/husk/pkg/huskipc"
 	"github.com/hyperlab-sh/husk/pkg/manifest"
 )
@@ -397,4 +399,124 @@ func TestCleanStdioExitBeforeHelloDropsManifestDeclarations(t *testing.T) {
 		t.Fatal("stdio exit not reported as before hello")
 	}
 	assertNoDeclarations(t, m)
+}
+
+// launchHandoff launches declaringManifest as a socket launcher that exits 0
+// before hello and applies the exit message with a short hand-off grace. It
+// returns the command Update produced for it.
+func launchHandoff(t *testing.T) (*WorkbenchModel, tea.Cmd) {
+	t.Helper()
+	t.Setenv("HUSK_FAKE_PLUGIN", "launcher")
+	l, path, _, err := listenPrivate(shortTempDir(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, _ := lifecycleModel(t, path, l)
+	m.handoffGrace = 20 * time.Millisecond
+	mf := declaringManifest()
+	mf.Command = fakeArgv
+	if err := m.launchPlugin(mf); err != nil {
+		t.Fatal(err)
+	}
+	msg := awaitMsg[pluginExitedMsg](t, m)
+	if !msg.handedOff {
+		t.Fatal("clean socket exit not flagged as handed off")
+	}
+	_, cmd := m.Update(msg)
+	return m, cmd
+}
+
+// expiryFrom runs cmd (a batch of the toast and grace ticks) and returns the
+// hand-off expiry message it produces.
+func expiryFrom(t *testing.T, cmd tea.Cmd) handoffExpiredMsg {
+	t.Helper()
+	found := make(chan handoffExpiredMsg, 1)
+	// Each sub-command runs in its own goroutine so the 2.6s toast tick does
+	// not delay the short grace tick.
+	var run func(c tea.Cmd)
+	run = func(c tea.Cmd) {
+		if c == nil {
+			return
+		}
+		go func() {
+			switch v := c().(type) {
+			case tea.BatchMsg:
+				for _, sub := range v {
+					run(sub)
+				}
+			case handoffExpiredMsg:
+				found <- v
+			}
+		}()
+	}
+	run(cmd)
+	select {
+	case msg := <-found:
+		return msg
+	case <-time.After(2 * time.Second):
+		t.Fatal("no hand-off expiry was scheduled")
+		return handoffExpiredMsg{}
+	}
+}
+
+func TestHandoffDeclarationsSurviveWhenRealPluginConnectsWithinGrace(t *testing.T) {
+	m, cmd := launchHandoff(t)
+	if _, waiting := m.handoffPending["acme.p"]; !waiting {
+		t.Fatal("hand-off not tracked after the launcher exited")
+	}
+	hello := `{"type":"hello","hello":{"plugin_id":"acme.p","slots":["main-stage"]}}` + "\n"
+	peer, cp := connectDeclaring(t, m, hello)
+	defer peer.Close()
+	if cp == nil {
+		t.Fatal("the real plugin's hello was not registered")
+	}
+	if _, waiting := m.handoffPending["acme.p"]; waiting {
+		t.Fatal("hello did not cancel the pending hand-off")
+	}
+	// The grace timer still fires, after the hello: it must change nothing.
+	m.Update(expiryFrom(t, cmd))
+	if m.registry.Slots["acme.p.rows"] == nil || m.registry.Hooks["acme.p.before"] == nil || m.registry.Events["acme.p.changed"] == nil {
+		t.Fatal("expiry dropped declarations the connected plugin had claimed")
+	}
+	if m.plugins["acme.p"] == nil {
+		t.Fatal("connected plugin was removed")
+	}
+}
+
+func TestHandoffDeclarationsDroppedWhenNoPluginConnectsWithinGrace(t *testing.T) {
+	m, cmd := launchHandoff(t)
+	if m.registry.Slots["acme.p.rows"] == nil {
+		t.Fatal("declarations were not kept for the grace period")
+	}
+	m.Update(expiryFrom(t, cmd))
+	assertNoDeclarations(t, m)
+	if _, waiting := m.handoffPending["acme.p"]; waiting {
+		t.Fatal("hand-off still pending after expiry")
+	}
+	if m.manifests["acme.p"] == nil {
+		t.Fatal("manifest was dropped; a late hello would no longer be checked")
+	}
+	if m.activeToast == nil || m.activeToast.Level != "warn" || m.activeToast.Title != "Plugin never connected" {
+		t.Fatalf("toast = %+v", m.activeToast)
+	}
+}
+
+func TestHandoffExitToastIsInfoNotWarn(t *testing.T) {
+	m, _ := launchHandoff(t)
+	if m.activeToast == nil || m.activeToast.Level != "info" || m.activeToast.Title != "Plugin launcher exited" {
+		t.Fatalf("toast = %+v", m.activeToast)
+	}
+	if m.activeToast.Message != "acme.p: exit status 0: fake: started the real plugin" {
+		t.Fatalf("toast message = %q", m.activeToast.Message)
+	}
+}
+
+func TestStdioExitKeepsWarnToastAndSchedulesNoExpiry(t *testing.T) {
+	m, msg := launchEarlyExit(t, "launcher", manifest.TransportStdio)
+	if msg.handedOff || len(m.handoffPending) != 0 {
+		t.Fatal("stdio exit treated as a hand-off")
+	}
+	if m.activeToast == nil || m.activeToast.Level != "warn" || m.activeToast.Title != "Plugin exited" {
+		t.Fatalf("toast = %+v", m.activeToast)
+	}
 }

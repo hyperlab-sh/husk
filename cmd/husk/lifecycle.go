@@ -29,6 +29,12 @@ import (
 
 const (
 	pluginStopGrace = 2 * time.Second
+	// pluginHandoffGrace is how long the manifest declarations of a socket
+	// launcher that exited 0 wait for the plugin it started to send hello.
+	// Past it they are dropped as if the process had failed. Slow starts
+	// (runtimes, first-run builds) fit well inside 30s; a plugin that connects
+	// later is still checked against its manifest but must declare for itself.
+	pluginHandoffGrace = 30 * time.Second
 	// pluginKillWait bounds the wait after SIGKILL; it only matters when a
 	// grandchild keeps a stdio pipe open after the plugin itself died.
 	pluginKillWait = time.Second
@@ -59,6 +65,9 @@ type pluginExitedMsg struct {
 	logPath    string   // stderr log file
 	stderrTail []string // last non-empty stderr lines, ANSI stripped
 }
+
+// handoffExpiredMsg fires pluginHandoffGrace after a launcher's clean exit.
+type handoffExpiredMsg struct{ id string }
 
 // pluginLaunchFailedMsg reports a plugin whose process could not be started.
 type pluginLaunchFailedMsg struct {
@@ -287,16 +296,23 @@ func (m *WorkbenchModel) handleLifecycleMsg(msg tea.Msg) tea.Cmd {
 			when = " before hello"
 		}
 		m.logf("plugin %s exited%s (%s); stderr log: %s", msg.id, when, msg.status, msg.logPath)
+		var expiry tea.Cmd
 		if m.plugins[msg.id] == nil {
 			// Exited without a registered connection (before hello, or
 			// never connected). A socket launcher that exited 0 may have
 			// started the real plugin, which connects later: keep the
-			// declarations its manifest registered at launch. A failed
-			// exit, or a stdio stream (which ended with its process),
-			// drops them. The manifest itself stays either way, so a late
-			// hello is still checked against it.
+			// declarations its manifest registered at launch, for at most
+			// handoffGrace. A failed exit, or a stdio stream (which ended
+			// with its process), drops them. The manifest itself stays
+			// either way, so a late hello is still checked against it.
 			if msg.handedOff {
-				m.logf("plugin %s exited cleanly before connecting; keeping its manifest declarations for a plugin it started", msg.id)
+				m.logf("plugin %s exited cleanly before connecting; keeping its manifest declarations for %s for a plugin it started", msg.id, m.handoffGrace)
+				if m.handoffPending == nil {
+					m.handoffPending = make(map[string]struct{})
+				}
+				m.handoffPending[msg.id] = struct{}{}
+				id := msg.id
+				expiry = tea.Tick(m.handoffGrace, func(time.Time) tea.Msg { return handoffExpiredMsg{id: id} })
 			} else {
 				m.deliverPublications(m.registry.removePlugin(msg.id))
 			}
@@ -308,7 +324,23 @@ func (m *WorkbenchModel) handleLifecycleMsg(msg tea.Msg) tea.Cmd {
 		if len(msg.stderrTail) > 0 {
 			text += ": " + msg.stderrTail[len(msg.stderrTail)-1]
 		}
+		if msg.handedOff {
+			// A launcher returning is the normal start-up path, not a fault:
+			// info level, and the log line above keeps the detail.
+			return tea.Batch(expiry, m.showLocalToast("info", "Plugin launcher exited", text))
+		}
 		return m.showLocalToast("warn", "Plugin exited", text)
+	case handoffExpiredMsg:
+		if _, waiting := m.handoffPending[msg.id]; !waiting {
+			return nil // the real plugin connected in time
+		}
+		delete(m.handoffPending, msg.id)
+		if m.plugins[msg.id] != nil {
+			return nil
+		}
+		m.logf("plugin %s did not connect within %s of its launcher exiting; dropping its manifest declarations", msg.id, m.handoffGrace)
+		m.deliverPublications(m.registry.removePlugin(msg.id))
+		return m.showLocalToast("warn", "Plugin never connected", msg.id+": launcher exited but no plugin connected within "+m.handoffGrace.String())
 	case pluginLaunchFailedMsg:
 		m.logf("failed to launch plugin %s: %v", msg.id, msg.err)
 		return m.showLocalToast("error", "Plugin failed to launch", fmt.Sprintf("%s: %v", msg.id, msg.err))
