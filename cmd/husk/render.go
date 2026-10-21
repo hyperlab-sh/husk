@@ -47,14 +47,18 @@ func (m *WorkbenchModel) View() tea.View {
 	// Overlays are opaque blocks drawn over the base in z order: each replaces
 	// every cell of its box and nothing it leaves open reaches a cell it did
 	// not write.
+	// Each popup then casts a shadow (castShadow) that darkens what is under it.
+	ink, canvasBg := lipgloss.Color(m.palette.Ink), lipgloss.Color(m.palette.Canvas)
 	if m.modalOwner().Open() {
 		m.drawModal(c)
+		r := m.modalRect
+		c.castShadow(uv.Rect(r.X, r.Y, r.Width, r.Height), ink, canvasBg)
 	}
 	if m.activeToast != nil {
-		m.drawToast(c)
+		c.castShadow(m.drawToast(c), ink, canvasBg)
 	}
 	if m.showPalette {
-		m.drawCommandPalette(c)
+		c.castShadow(m.drawCommandPalette(c), ink, canvasBg)
 	}
 	// The app background: every cell still on the default background (the
 	// gutter, cells no surface owns) takes Canvas, so the slot shade derived
@@ -629,9 +633,9 @@ func (m *WorkbenchModel) drawHotspotArchitectureStage(c *canvas) {
 }
 
 // drawToast draws the active toast near the top-right corner.
-func (m *WorkbenchModel) drawToast(c *canvas) {
+func (m *WorkbenchModel) drawToast(c *canvas) uv.Rectangle {
 	if m.activeToast == nil {
-		return
+		return uv.Rectangle{}
 	}
 	borderCol := lipgloss.Color(m.palette.Info)
 	switch m.activeToast.Level {
@@ -654,11 +658,11 @@ func (m *WorkbenchModel) drawToast(c *canvas) {
 		Width(toastW).
 		Render(title + "\n" + msg)
 
-	c.blitBlock(max(2, m.width-toastW-4), 2, box)
+	return c.blitBlock(max(2, m.width-toastW-4), 2, box)
 }
 
 // drawCommandPalette draws the command palette box.
-func (m *WorkbenchModel) drawCommandPalette(c *canvas) {
+func (m *WorkbenchModel) drawCommandPalette(c *canvas) uv.Rectangle {
 	palW := min(82, m.width-8)
 	cmds := m.filteredCommands()
 
@@ -696,7 +700,7 @@ func (m *WorkbenchModel) drawCommandPalette(c *canvas) {
 
 	x := max(2, (m.width-palW)/2)
 	y := max(3, m.height/6)
-	c.blitBlock(x, y, box)
+	return c.blitBlock(x, y, box)
 }
 
 // Palette row layout: one lead cell, the tag column, a gap, the title, a gap,

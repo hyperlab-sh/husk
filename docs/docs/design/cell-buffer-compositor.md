@@ -271,6 +271,31 @@ Where the code differs from the plan above:
 - `BenchmarkIdleTickView/view` at 120x40 went from about 0.40 ms/op before
   slice 1 to about 0.30 ms/op after slice 5.
 
+## Popup shadow
+
+Overlays (modal, toast, command palette) are opaque, so on their own they read
+flat. After each overlay is drawn, `View` calls `canvas.castShadow` with the
+rectangle `blitBlock` returned (the modal uses its slot rect). The shadow is the
+popup rect shifted 2 columns right and 1 row down, minus the popup itself,
+clipped to the canvas (a popup against an edge just loses the part that falls
+off-screen; it is not flipped).
+
+- Cells under the shadow keep their glyph, width, link and attributes; only
+  `Fg` and `Bg` change, each blended 65% of the way to black
+  (`popupShadowStrength`). Black is the target on light themes as well, since
+  a shadow darkens.
+- A cell with no foreground or background of its own (plugin cells that
+  never set one) is resolved first: foreground against the palette `Ink`,
+  background against `Canvas`, the colours the app background pass would give
+  them. The pass runs before that background fill, and its cells then carry an
+  explicit background, so the fill leaves them alone.
+- A wide glyph is darkened whole when the shadow covers either of its cells.
+- Cells carry their own colours, so nothing leaks into neighbours when the
+  frame is serialized.
+- The canvas remembers which popup rects already cast in the frame; casting
+  the same rect twice does not darken twice. A different rect (a palette over a
+  modal) stacks and darkens the overlap further.
+
 ## Out of scope
 
 - Any change to Bubble Tea's renderer or to `tea.View` usage beyond
