@@ -86,6 +86,13 @@ func (m *WorkbenchModel) handleStream(r io.Reader, w io.Writer, closer io.Closer
 // naming its type and otherwise ignored, so a plugin that talks before saying
 // hello learns why nothing happens.
 func (m *WorkbenchModel) serveStream(r io.Reader, w io.Writer, closer io.Closer, onHello func()) {
+	m.serveStreamFor("", r, w, closer, onHello)
+}
+
+// serveStreamFor is serveStream for a stream known to belong to the launched
+// manifest plugin expectID (empty when the stream is anonymous). A hello on
+// such a stream must carry that plugin_id.
+func (m *WorkbenchModel) serveStreamFor(expectID string, r io.Reader, w io.Writer, closer io.Closer, onHello func()) {
 	var (
 		registered atomic.Pointer[ConnectedPlugin]
 		once       sync.Once
@@ -117,10 +124,11 @@ func (m *WorkbenchModel) serveStream(r io.Reader, w io.Writer, closer io.Closer,
 		if cp == nil {
 			if env.Type == "hello" && env.Hello != nil {
 				cp = &ConnectedPlugin{
-					Info:      *env.Hello,
-					Writer:    writer,
-					Closer:    closer,
-					Connected: time.Now(),
+					Info:       *env.Hello,
+					Writer:     writer,
+					Closer:     closer,
+					Connected:  time.Now(),
+					ExpectedID: expectID,
 				}
 				registered.Store(cp)
 				if onHello != nil {

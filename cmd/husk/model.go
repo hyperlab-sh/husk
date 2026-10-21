@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/hyperlab-sh/husk/pkg/huskipc"
+	"github.com/hyperlab-sh/husk/pkg/manifest"
 	"github.com/hyperlab-sh/husk/pkg/theme"
 )
 
@@ -21,6 +22,9 @@ type ConnectedPlugin struct {
 	Closer     io.Closer
 	Connected  time.Time
 	FramesRecv uint64
+	// ExpectedID is the manifest id of the process this stream belongs to,
+	// known only for stdio plugins; empty otherwise.
+	ExpectedID string
 }
 
 type SlotRect struct {
@@ -106,6 +110,7 @@ type WorkbenchModel struct {
 	quit        chan struct{}    // closed when cleanup starts
 	stopGrace   time.Duration    // SIGTERM-to-SIGKILL grace on shutdown
 	plugins     map[string]*ConnectedPlugin
+	manifests   map[string]*manifest.Plugin // launched manifest plugins by id; hellos are checked against them
 	railItems   []huskipc.RailItemSpec
 	slotUpdates map[huskipc.SlotID]*huskipc.SlotUpdatePayload
 	slotRects   map[huskipc.SlotID]SlotRect
@@ -198,6 +203,7 @@ func newWorkbenchModel(socketPath string, listener net.Listener, cwd string) *Wo
 		quit:         make(chan struct{}),
 		stopGrace:    pluginStopGrace,
 		plugins:      make(map[string]*ConnectedPlugin),
+		manifests:    make(map[string]*manifest.Plugin),
 		slotUpdates:  make(map[huskipc.SlotID]*huskipc.SlotUpdatePayload),
 		slotRects:    make(map[huskipc.SlotID]SlotRect),
 		wsContext:    huskipc.WorkspaceContextPayload{WorkspaceID: "demo", WorkspaceLabel: "Demo", Cwd: cwd},
@@ -412,6 +418,9 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pluginRegisteredMsg:
 		cp := msg.plugin
 		err := huskipc.CheckProtocolVersion(cp.Info.ProtocolVersion)
+		if err == nil {
+			err = m.checkManifest(cp)
+		}
 		if err == nil {
 			err = m.registerPublications(cp.Info)
 		}
