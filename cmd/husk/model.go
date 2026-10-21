@@ -147,6 +147,9 @@ type WorkbenchModel struct {
 	lastInput   time.Time // last key or mouse event, for tick cadence
 	pollMods    func() (huskipc.ModifierState, bool)
 	heldKeys    map[string]time.Time
+	// keyReleases is true once the terminal confirmed it reports key release
+	// events; held keys are then cleared by KeyReleaseMsg, not the timeout.
+	keyReleases bool
 
 	activeRailID    string // "" (Home), or rail item ID
 	activePlacement huskipc.RailPlacement
@@ -497,13 +500,15 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.syncModifierTransitions(osMods)
 		}
 		now := time.Now()
-		for k, ts := range m.heldKeys {
-			if now.Sub(ts) > 320*time.Millisecond {
-				delete(m.heldKeys, k)
-				m.broadcastKeyState(huskipc.KeyPhaseUp, k, false)
+		if !m.keyReleases {
+			for k, ts := range m.heldKeys {
+				if now.Sub(ts) > 320*time.Millisecond {
+					delete(m.heldKeys, k)
+					m.broadcastKeyState(huskipc.KeyPhaseUp, k, false)
+				}
 			}
 		}
-		if !polled && len(m.heldKeys) == 0 {
+		if !polled && (m.keyReleases || len(m.heldKeys) == 0) {
 			// No OS modifier source and nothing to expire: let the chain lapse
 			// so an idle process does no work. A key press restarts it.
 			m.modTickOn = false
@@ -597,7 +602,7 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		m.lastInput = time.Now()
 		next, cmd := m.handleKey(msg)
-		if len(m.heldKeys) > 0 {
+		if len(m.heldKeys) > 0 && !m.keyReleases {
 			// A lapsed chain (no OS modifier source) restarts to expire the held key.
 			cmd = tea.Batch(cmd, m.startModifierTick())
 		}
@@ -607,6 +612,10 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// v1 delivered bracketed paste as a key whose string was wrapped in
 		// brackets, preventing pasted text from triggering host shortcuts.
 		return m.handleKey(tea.KeyPressMsg{Code: tea.KeyExtended, Text: "[" + msg.Content + "]"})
+
+	case tea.KeyboardEnhancementsMsg:
+		m.keyReleases = msg.SupportsEventTypes()
+		return m, nil
 
 	case tea.KeyReleaseMsg:
 		key := legacyKeyString(msg)

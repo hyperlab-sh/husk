@@ -19,6 +19,7 @@ func (m *WorkbenchModel) View() tea.View {
 		view.AltScreen = true
 		view.MouseMode = tea.MouseModeAllMotion
 		view.ReportFocus = true
+		view.KeyboardEnhancements.ReportEventTypes = true
 		return view
 	}
 	c := newCanvas(m.width, m.height)
@@ -57,6 +58,7 @@ func (m *WorkbenchModel) View() tea.View {
 	view.AltScreen = true
 	view.MouseMode = tea.MouseModeAllMotion
 	view.ReportFocus = true
+	view.KeyboardEnhancements.ReportEventTypes = true
 	return view
 }
 

@@ -3,6 +3,7 @@ package main
 import (
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -20,6 +21,50 @@ func TestCharmV2ViewDeclaresTerminalModes(t *testing.T) {
 	}
 	if !strings.Contains(ansi.Strip(view.Content), "[Inspect]") {
 		t.Fatal("view content missing composed frame")
+	}
+}
+
+func TestViewRequestsKeyEventTypes(t *testing.T) {
+	m := newWorkbenchModel("", nil, t.TempDir())
+	m.recomputeLayout()
+	if !m.View().KeyboardEnhancements.ReportEventTypes {
+		t.Fatal("View must request kitty key event types or KeyReleaseMsg never fires")
+	}
+}
+
+func TestKeyReleaseClearsHeldKeyWithoutTimer(t *testing.T) {
+	m := newWorkbenchModel("", nil, t.TempDir())
+	_, out := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "p"})
+	m.Update(tea.KeyboardEnhancementsMsg{Flags: ansi.KittyReportEventTypes})
+	if !m.keyReleases {
+		t.Fatal("event-type support not recorded")
+	}
+	m.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
+	// A held key older than the 320ms fallback must not be expired by the tick
+	// when the terminal reports releases.
+	m.heldKeys["x"] = time.Now().Add(-time.Second)
+	out.Reset()
+	m.Update(modifierTickMsg{})
+	if _, held := m.heldKeys["x"]; !held || out.Len() != 0 {
+		t.Fatal("timer expired a key although the terminal reports releases")
+	}
+	m.Update(tea.KeyReleaseMsg{Code: 'x', Text: "x"})
+	if _, held := m.heldKeys["x"]; held {
+		t.Fatal("release did not clear the held key")
+	}
+	msgs := envelopes(t, out)
+	if len(msgs) != 1 || msgs[0].KeyState == nil || msgs[0].KeyState.Phase != "up" {
+		t.Fatalf("release did not emit one key-up: %+v", msgs)
+	}
+}
+
+func TestHeldKeyTimerStillExpiresWithoutEventTypes(t *testing.T) {
+	m := newWorkbenchModel("", nil, t.TempDir())
+	m.Update(tea.KeyboardEnhancementsMsg{Flags: 1})
+	m.heldKeys["x"] = time.Now().Add(-time.Second)
+	m.Update(modifierTickMsg{})
+	if len(m.heldKeys) != 0 {
+		t.Fatal("fallback timer must still expire keys when releases are unreported")
 	}
 }
 
