@@ -658,6 +658,9 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return next, cmd
 
 	case tea.PasteMsg:
+		if m.showPalette && !m.layoutFrozen() {
+			return m.pastePalette(msg.Content)
+		}
 		// v1 delivered bracketed paste as a key whose string was wrapped in
 		// brackets, preventing pasted text from triggering host shortcuts.
 		return m.handleKey(tea.KeyPressMsg{Code: tea.KeyExtended, Text: "[" + msg.Content + "]"})
