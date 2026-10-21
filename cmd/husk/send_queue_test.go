@@ -22,10 +22,17 @@ const slowHello = `{"type":"hello","hello":{"plugin_id":"slow","slots":["main-st
 // it never reads unless the test does. done closes when handleStream returns.
 func connectPipePlugin(t *testing.T, m *WorkbenchModel, hello string) (peer net.Conn, done chan struct{}) {
 	t.Helper()
+	return connectPipePluginFrom(t, m, streamOrigin{}, hello)
+}
+
+// connectPipePluginFrom is connectPipePlugin for a stream with a known origin
+// (a stdio manifest id or a socket peer pid).
+func connectPipePluginFrom(t *testing.T, m *WorkbenchModel, origin streamOrigin, hello string) (peer net.Conn, done chan struct{}) {
+	t.Helper()
 	host, peer := net.Pipe()
 	done = make(chan struct{})
 	go func() {
-		m.handleStream(host, host, host)
+		m.serveStreamOrigin(origin, host, host, host, nil)
 		close(done)
 	}()
 	go func() { _, _ = io.WriteString(peer, hello) }()

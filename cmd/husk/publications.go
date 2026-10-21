@@ -63,15 +63,45 @@ func (m *WorkbenchModel) registerPublications(hello huskipc.HelloPayload) (err e
 	return nil
 }
 
-// launchedID returns the manifest id of the live launched process whose pid is
-// pid, or "" when pid is unknown or not one of ours.
+// maxAncestryDepth bounds the parent walk in peerAncestry.
+const maxAncestryDepth = 64
+
+// peerAncestry returns pid followed by its ancestors, nearest first, ending
+// before init (pid 1) or at the first process whose parent cannot be read. It
+// is empty for pid <= 1.
+func peerAncestry(pid int) []int {
+	var chain []int
+	for depth := 0; pid > 1 && depth < maxAncestryDepth; depth++ {
+		chain = append(chain, pid)
+		ppid, err := parentPID(pid)
+		if err != nil || ppid == pid {
+			break
+		}
+		pid = ppid
+	}
+	return chain
+}
+
+// launchedID returns the manifest id of the live launched process that is pid
+// or its nearest ancestor, or "" when pid is unknown or descends from none of
+// ours. Walking the ancestry binds a plugin that a wrapper script (or any
+// launcher) started to the manifest the wrapper was launched from.
 func (m *WorkbenchModel) launchedID(pid int) string {
 	if pid <= 0 {
 		return ""
 	}
+	live := make(map[int]string, len(m.procs))
 	for _, p := range m.procs {
-		if p.cmd.Process != nil && p.cmd.Process.Pid == pid && !closed(p.done) {
-			return p.id
+		if p.cmd.Process != nil && !closed(p.done) {
+			live[p.cmd.Process.Pid] = p.id
+		}
+	}
+	if len(live) == 0 {
+		return ""
+	}
+	for _, a := range peerAncestry(pid) {
+		if id, ok := live[a]; ok {
+			return id
 		}
 	}
 	return ""
@@ -79,11 +109,12 @@ func (m *WorkbenchModel) launchedID(pid int) string {
 
 // checkManifest compares a hello with the manifest the plugin was launched
 // from. A stdio stream is tied to its process, and a socket peer whose kernel
-// pid is a launched process is bound to that process's manifest id, so in both
-// cases the hello must carry that manifest's id. A socket peer that is not a
-// launched process itself (a descendant of a wrapper script, or an external
-// client) is checked against the manifest named by the plugin_id it claims.
-// Plugins with no manifest are not checked.
+// pid is a launched process or a descendant of one (a plugin a wrapper script
+// started) is bound to the nearest such process's manifest id, so in both
+// cases the hello must carry that manifest's id. A socket peer outside every
+// launched process tree (an external client, or a daemon that detached and
+// was reparented) is checked against the manifest named by the plugin_id it
+// claims. Plugins with no manifest are not checked.
 func (m *WorkbenchModel) checkManifest(cp *ConnectedPlugin) error {
 	id := cp.Info.PluginID
 	if cp.ExpectedID != "" {

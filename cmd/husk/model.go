@@ -27,7 +27,9 @@ type ConnectedPlugin struct {
 	// known only for stdio plugins; empty otherwise.
 	ExpectedID string
 	// PeerPID is the kernel-reported pid of a socket peer, or 0 when unknown.
-	// checkManifest maps it to the launched process the connection came from.
+	// checkManifest maps it, through its process ancestry, to the launched
+	// process the connection came from (the peer itself or the wrapper that
+	// started it).
 	PeerPID int
 }
 
