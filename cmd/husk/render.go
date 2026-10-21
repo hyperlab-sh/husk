@@ -66,17 +66,20 @@ func (m *WorkbenchModel) View() tea.View {
 	body := lipgloss.JoinHorizontal(lipgloss.Top, cols...)
 	baseView := lipgloss.JoinVertical(lipgloss.Left, topBar, body, bottomBar)
 
-	if m.modalOwner().Open() {
-		baseView = m.overlayModalPlugin(baseView)
-	}
-	if m.activeToast != nil {
-		baseView = m.overlayToast(baseView)
-	}
-	if m.showPalette {
-		baseView = m.overlayCommandPalette(baseView)
-	}
 	c := newCanvas(m.width, m.height)
 	c.blitBlock(0, 0, baseView)
+	// Overlays are opaque blocks drawn over the base in z order: each replaces
+	// every cell of its box and nothing it leaves open reaches a cell it did
+	// not write.
+	if m.modalOwner().Open() {
+		m.drawModal(c)
+	}
+	if m.activeToast != nil {
+		m.drawToast(c)
+	}
+	if m.showPalette {
+		m.drawCommandPalette(c)
+	}
 	out := c.render()
 	c.release()
 	view := tea.NewView(out)
@@ -158,7 +161,9 @@ func (m *WorkbenchModel) renderActivityRailBox() string {
 	return strings.Join(rows, "\n")
 }
 
-func (m *WorkbenchModel) overlayModalPlugin(base string) string {
+// drawModal draws the modal surface, framed as its plugin declared, at the
+// modal rect.
+func (m *WorkbenchModel) drawModal(c *canvas) {
 	rect := m.modalRect
 	innerW, innerH := rect.InnerW, rect.InnerH
 
@@ -175,7 +180,7 @@ func (m *WorkbenchModel) overlayModalPlugin(base string) string {
 		}
 	}
 	box := m.renderFrame(huskipc.SlotModalSurface, rect, spec, label, rows)
-	return spliceOverlay(base, box, rect.X, rect.Y)
+	c.blitBlock(rect.X, rect.Y, box)
 }
 
 func (m *WorkbenchModel) renderTopWorkbenchBar() string {
@@ -605,9 +610,10 @@ func (m *WorkbenchModel) renderHotspotArchitectureStage() string {
 	return m.renderFrame(huskipc.SlotMainStage, coreRect, coreFrame, coreFrame.Label, rows)
 }
 
-func (m *WorkbenchModel) overlayToast(base string) string {
+// drawToast draws the active toast near the top-right corner.
+func (m *WorkbenchModel) drawToast(c *canvas) {
 	if m.activeToast == nil {
-		return base
+		return
 	}
 	borderCol := lipgloss.Color(m.palette.Info)
 	switch m.activeToast.Level {
@@ -630,10 +636,11 @@ func (m *WorkbenchModel) overlayToast(base string) string {
 		Width(toastW).
 		Render(title + "\n" + msg)
 
-	return spliceOverlay(base, box, max(2, m.width-toastW-4), 2)
+	c.blitBlock(max(2, m.width-toastW-4), 2, box)
 }
 
-func (m *WorkbenchModel) overlayCommandPalette(base string) string {
+// drawCommandPalette draws the command palette box.
+func (m *WorkbenchModel) drawCommandPalette(c *canvas) {
 	palW := min(82, m.width-8)
 	cmds := m.filteredCommands()
 
@@ -681,36 +688,7 @@ func (m *WorkbenchModel) overlayCommandPalette(base string) string {
 
 	x := max(2, (m.width-palW)/2)
 	y := max(3, m.height/6)
-	return spliceOverlay(base, box, x, y)
-}
-
-// spliceOverlay draws overlay over base with its top-left cell at
-// (startX, startY). No graphic rendition crosses a splice boundary:
-//
-//   - ansi.Cut keeps every escape sequence of the line, including those after
-//     the cut, so the left fragment ends in the state the whole base line ends
-//     in (often a background left open by plugin content). It is reset before
-//     the overlay so the overlay's cells carry only the overlay's own styles.
-//   - The overlay is reset before the right fragment, so an overlay line that
-//     ends with an open style does not paint the base cells after it.
-//   - The right fragment replays the base line's escapes from its start, so
-//     once the state is reset it resumes exactly the style its first cell had.
-func spliceOverlay(base, overlay string, startX, startY int) string {
-	baseLines := strings.Split(base, "\n")
-	ovLines := strings.Split(overlay, "\n")
-
-	for i, ovLine := range ovLines {
-		rowIdx := startY + i
-		if rowIdx < 0 || rowIdx >= len(baseLines) {
-			continue
-		}
-		bgLine := baseLines[rowIdx]
-		ovW := ansi.StringWidth(ovLine)
-		left := closeSGR(ansi.Cut(bgLine, 0, startX))
-		right := ansi.Cut(bgLine, startX+ovW, ansi.StringWidth(bgLine))
-		baseLines[rowIdx] = left + closeSGR(ovLine) + right
-	}
-	return strings.Join(baseLines, "\n")
+	c.blitBlock(x, y, box)
 }
 
 func fitLineWidth(s string, width int) string {

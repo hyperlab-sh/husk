@@ -6,6 +6,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/hyperlab-sh/husk/pkg/huskipc"
 )
@@ -119,8 +120,32 @@ func TestSgrOpen(t *testing.T) {
 	}
 }
 
-// No graphic rendition may cross a splice boundary: overlay cells carry only
-// the overlay's styles and base cells keep exactly the style they had.
+// cellSGR is the SGR parameter string that sets a decoded cell's style from
+// the default rendition ("" for the default itself), e.g. "41" or "1".
+func cellSGR(c uv.Cell) string {
+	seq := uv.StyleDiff(&uv.Style{}, &c.Style)
+	return strings.TrimSuffix(strings.TrimPrefix(seq, "\x1b["), "m")
+}
+
+// rowText and rowSGR read one decoded row's text and per-cell styles.
+func rowText(row uv.Line) string {
+	var b strings.Builder
+	for _, c := range row {
+		b.WriteString(c.Content)
+	}
+	return b.String()
+}
+
+func rowSGR(row uv.Line) []string {
+	out := make([]string, len(row))
+	for i, c := range row {
+		out[i] = cellSGR(c)
+	}
+	return out
+}
+
+// No graphic rendition may cross an overlay boundary: overlay cells carry
+// only the overlay's styles and base cells keep exactly the style they had.
 func TestSpliceOverlayNoSGRBleed(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -134,8 +159,8 @@ func TestSpliceOverlayNoSGRBleed(t *testing.T) {
 			want: []string{"41", "41", "41", "", "", "41", "41", "41", "41", "41"},
 		},
 		{
-			// ansi.Cut keeps escapes past the cut, so the left fragment used
-			// to end with the style that opens at column 3.
+			// A string splice cut with ansi.Cut kept escapes past the cut;
+			// the canvas never sees them, but the case stays pinned.
 			name: "style opening after the cut", base: "abc\x1b[44mdefghij", overlay: "XY", x: 1,
 			want: []string{"", "", "", "44", "44", "44", "44", "44", "44", "44"},
 		},
@@ -157,28 +182,40 @@ func TestSpliceOverlayNoSGRBleed(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			out := spliceOverlay("top\n"+tc.base+"\nbottom", tc.overlay, tc.x, 1)
-			rows := strings.Split(out, "\n")
-			if len(rows) != 3 || rows[0] != "top" || rows[2] != "bottom" {
-				t.Fatalf("rows outside the overlay changed: %q", rows)
+			w := ansi.StringWidth(tc.base)
+			c := newCanvas(w, 3)
+			c.blitBlock(0, 0, "top")
+			c.blitBlock(0, 1, tc.base)
+			c.blitBlock(0, 2, "bottom")
+			c.blitBlock(tc.x, 1, tc.overlay)
+			rows := frameCells(c.render())
+			if len(rows) != 3 || strings.TrimRight(rowText(rows[0]), " ") != "top" || strings.TrimRight(rowText(rows[2]), " ") != "bottom" {
+				t.Fatalf("rows outside the overlay changed: %q / %q", rowText(rows[0]), rowText(rows[2]))
 			}
-			if got, want := ansi.Strip(rows[1]), ansi.Strip(tc.base)[:tc.x]+ansi.Strip(tc.overlay)+ansi.Strip(tc.base)[tc.x+ansi.StringWidth(tc.overlay):]; got != want {
+			if got, want := rowText(rows[1]), ansi.Strip(tc.base)[:tc.x]+ansi.Strip(tc.overlay)+ansi.Strip(tc.base)[tc.x+ansi.StringWidth(tc.overlay):]; got != want {
 				t.Fatalf("text = %q, want %q", got, want)
 			}
-			if got := cellStyles(t, rows[1]); !reflect.DeepEqual(got, tc.want) {
-				t.Fatalf("cell styles = %q, want %q\nline %q", got, tc.want, rows[1])
+			if got := rowSGR(rows[1]); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("cell styles = %q, want %q", got, tc.want)
 			}
 		})
 	}
 }
 
-// Well-formed fragments (closed styles) splice byte-for-byte as before.
+// Well-formed fragments (closed styles) compose to exactly the cells the old
+// byte splice produced: the overlay's own styles inside its span, the base's
+// styles outside it.
 func TestSpliceOverlayWellFormedBytesUnchanged(t *testing.T) {
 	base := "\x1b[41mabcdef\x1b[m" + "ghij"
 	ov := "\x1b[1mXY\x1b[m"
 	want := ansi.Cut(base, 0, 3) + ov + ansi.Cut(base, 5, 10)
-	if got := spliceOverlay(base, ov, 3, 0); got != want {
-		t.Fatalf("got %q, want %q", got, want)
+	c := newCanvas(10, 1)
+	c.blitBlock(0, 0, base)
+	c.blitBlock(3, 0, ov)
+	got := c.render()
+	requireSameCells(t, want, got)
+	if s := rowSGR(frameCells(got)[0]); !reflect.DeepEqual(s, []string{"41", "41", "41", "1", "1", "41", "", "", "", ""}) {
+		t.Fatalf("cell styles = %q", s)
 	}
 }
 
@@ -257,11 +294,14 @@ func TestCommandPaletteOverStyledStageNoBleed(t *testing.T) {
 	m.slotUpdates[huskipc.SlotMainStage] = &huskipc.SlotUpdatePayload{PluginID: "p.stage", Slot: huskipc.SlotMainStage, Lines: lines}
 	m.showPalette = true
 
-	// Locate the palette box: splice it over an empty base and measure.
-	blank := strings.Split(m.overlayCommandPalette(strings.Repeat("\n", m.height-1)), "\n")
+	// Locate the palette box: draw it on an empty canvas and measure the
+	// cells it wrote.
+	pc := newCanvas(m.width, m.height)
+	m.drawCommandPalette(pc)
+	blank := frameCells(pc.render())
 	boxX, boxY := max(2, (m.width-min(82, m.width-8))/2), max(3, m.height/6)
-	boxW, boxH := ansi.StringWidth(blank[boxY]), 0
-	for y := boxY; y < len(blank) && blank[y] != ""; y++ {
+	boxW, boxH := ansi.StringWidth(strings.TrimRight(rowText(blank[boxY]), " "))-boxX, 0
+	for y := boxY; y < len(blank) && strings.TrimSpace(rowText(blank[y])) != ""; y++ {
 		boxH++
 	}
 	if boxW == 0 || boxH == 0 {

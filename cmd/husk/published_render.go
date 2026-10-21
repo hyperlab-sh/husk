@@ -138,7 +138,7 @@ func (r *publicationRegistry) renderPublished(surface huskipc.SlotID, owner stri
 			}
 		}
 		// Each fragment is closed before the next is appended (and before its
-		// own padding), so no colour crosses a region edge; see spliceOverlay.
+		// own padding), so no colour crosses a region edge; see closeSGR.
 		for i, text := range regionRows {
 			rows[y+i] = fitLineWidth(closeSGR(ansi.Cut(rows[y+i], 0, x)), x) + fitLineWidth(closeSGR(text), w) + fitLineWidth(closeSGR(ansi.Cut(rows[y+i], x+w, width)), width-x-w)
 		}
