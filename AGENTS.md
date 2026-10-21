@@ -17,6 +17,8 @@ go test ./pkg/...
 
 Tests live in `pkg/manifest` (manifest parsing) and `pkg/frame` (frame geometry), plus `cmd/husk` host regression tests for frame resolution, sizing and rendering; run them all with `go test ./...`. Use `--dump-frame` to check rendering changes and `--demo-frame` (optionally with `--rail modal|full-canvas|stage`) to render the built-in demo plugin that declares a border+label+close frame. Surfaces are a blank canvas; all plugin-surface chrome (border/label/close) is declared by the plugin (`hello.frames` or rail-item `frame`) and drawn by `cmd/husk` `renderFrame`.
 
+Golden frame tests (`cmd/husk/golden_frame_test.go`) run the real `WorkbenchModel` under `tea.Program` with `charmbracelet/x/exp/teatest/v2` (the v2 module; the unversioned path targets Bubble Tea v1), send messages, and compare the final `View().Content` with `cmd/husk/testdata/*.golden` (raw ANSI at 144x40): empty workbench, one plugin, palette open, all slots occupied. Regenerate after an intended visual change with `go test ./cmd/husk -run TestGoldenFrame -update`, then review the diff of the `.golden` files before committing. Goldens must be hermetic: use `goldenModel()` (no socket, no OS modifier poll, fixed size).
+
 Registry, published-slot rendering/routing and protocol compatibility tests live beside their code. Run affected tests with `go test ./cmd/husk ./pkg/huskipc`; use `--dump-frame --demo pubslots` for a self-contained two-plugin frame and `--dump-frame --plugin-dir ./plugins` for rendering with external plugins (build the reference binary first: `go build -o plugins/reference/reference ./plugins/reference`). Manifest `command` paths are relative to the manifest directory (e.g. `./reference`).
 
 ## Charm v2
@@ -41,6 +43,8 @@ Registry, published-slot rendering/routing and protocol compatibility tests live
 Mouse drags start only on a drawn divider: `detectDividerAt` requires the cell to be on the border ring of a surface whose frame declares `border` and to fall in that divider's band, so the first row or column of an unbordered surface is content. Palette query input accepts any printable rune (`isPaletteText`) and backspace removes a rune. `key_state.held`/`held_keys` for ordinary keys are best effort: entries expire 320ms after the last press (`model.go`), only `modifiers` is authoritative.
 
 `View` is pure: it reads the model and never writes it (`TestViewIsPure` deep-compares a rendered model with an unrendered twin). Derived UI such as the architecture explorer is built locally in the render function, never stored in `slotUpdates`; state changes belong in `Update`. String splicing (`spliceOverlay`, the region compositor in `published_render.go`) closes open SGR state at every fragment boundary with `closeSGR` (`sgr.go`), because `ansi.Cut` keeps every escape of the line, including those past the cut. Slot content is clipped to the inner rect, never wrapped or scrolled (`surfaceContentLines`).
+
+Layout: when the side panel is shown, `recomputeLayout` makes the header/stage rects `surfaceGutter` (1) cell narrower than the centre column and `View` fills that cell, so the panel starts at its own rect. The sidebar has no gutter: its rects are exactly `sidebarWidth` wide (`TestCharmV2MouseResizeLifecycle`).
 
 Minimum terminal size is 84x24 (`minTermWidth`/`minTermHeight` in `layout.go`): below it `View` renders `renderTooSmall`, a frame that exactly fills the real terminal; `m.width`/`m.height` hold the real size and are never clamped.
 
