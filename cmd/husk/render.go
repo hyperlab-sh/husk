@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/hyperlab-sh/husk/pkg/frame"
@@ -152,7 +153,7 @@ func (m *WorkbenchModel) drawModal(c *canvas) {
 
 	su := m.slotUpdates[huskipc.SlotModalSurface]
 	// A declared region composes over the blank canvas before slot_update too.
-	rows, _ := m.publishedContent(huskipc.SlotModalSurface, innerW, innerH)
+	m.publishedContent(huskipc.SlotModalSurface, innerW, innerH).draw(c, rect.InnerX, rect.InnerY)
 
 	spec := m.frameFor(huskipc.SlotModalSurface)
 	label := ""
@@ -162,7 +163,7 @@ func (m *WorkbenchModel) drawModal(c *canvas) {
 			label = su.Title
 		}
 	}
-	m.drawFrame(c, huskipc.SlotModalSurface, rect, spec, label, rows)
+	m.drawChrome(c, huskipc.SlotModalSurface, rect, spec, label)
 }
 
 func (m *WorkbenchModel) renderTopWorkbenchBar() string {
@@ -319,40 +320,35 @@ func (m *WorkbenchModel) drawSurface(c *canvas, slotID huskipc.SlotID, calloutNu
 			label = su.Title
 		}
 	}
-	lines, _ := m.publishedContent(slotID, rect.InnerW, rect.InnerH)
-	if m.showHotspots && len(lines) > 0 {
+	m.publishedContent(slotID, rect.InnerW, rect.InnerH).draw(c, rect.InnerX, rect.InnerY)
+	if m.showHotspots && rect.InnerW > 0 && rect.InnerH > 0 {
 		hot := lipgloss.NewStyle().
 			Foreground(lipgloss.Color(m.palette.Warning)).
 			Bold(true).
 			Render(calloutNum + " " + slotName)
-		lines[0] = overlayLabel(lines[0], hot)
+		c.draw(uv.Rect(rect.InnerX, rect.InnerY, min(ansi.StringWidth(hot), rect.InnerW), 1), hot)
 	}
-	m.drawFrame(c, slotID, rect, spec, label, lines)
+	m.drawChrome(c, slotID, rect, spec, label)
 }
 
-// surfaceContentLines pads/truncates slot_update lines to a surface's inner
-// area; absent content is a blank canvas. Content is clipped, never scrolled
-// or wrapped: a line wider than w is truncated with "…", and lines past
-// index h-1 are dropped. The host does not tell the plugin it clipped; the
-// plugin learns its inner size from slot_resize and must fit its own content
-// (see docs/docs/architecture.md, "Content clipping"). A style left open by a
-// line is closed before its padding so it cannot reach the frame edge.
+// surfaceContentLines clips slot_update lines to a surface's inner area;
+// absent content is a blank canvas. Content is clipped, never scrolled or
+// wrapped: a line wider than w is truncated with "…", and lines past index
+// h-1 are dropped. The host does not tell the plugin it clipped; the plugin
+// learns its inner size from slot_resize and must fit its own content (see
+// docs/docs/architecture.md, "Content clipping"). Lines are not padded: the
+// canvas clears the rest of each row when it draws them, from a zero pen, so
+// a style a line leaves open stops at its last character.
 func (m *WorkbenchModel) surfaceContentLines(su *huskipc.SlotUpdatePayload, w, h int) []string {
 	lines := make([]string, h)
-	for i := 0; i < h; i++ {
-		if su != nil && i < len(su.Lines) {
-			lines[i] = fitLineWidth(closeSGR(su.Lines[i]), w)
+	for i := 0; i < h && su != nil && i < len(su.Lines); i++ {
+		if ansi.StringWidth(su.Lines[i]) > w {
+			lines[i] = ansi.Truncate(su.Lines[i], w, "…")
 		} else {
-			lines[i] = strings.Repeat(" ", w)
+			lines[i] = su.Lines[i]
 		}
 	}
 	return lines
-}
-
-// overlayLabel replaces the start of a rendered line with label.
-func overlayLabel(line, label string) string {
-	rest := ansi.Cut(line, ansi.StringWidth(label), ansi.StringWidth(line))
-	return closeSGR(label) + rest
 }
 
 func (m *WorkbenchModel) frameLabelStyle() lipgloss.Style {
@@ -365,52 +361,46 @@ func (m *WorkbenchModel) closeStyle() lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.InkMuted)).Bold(true)
 }
 
-// drawFrame draws plugin content wrapped in the declared frame chrome at
-// rect. All Husk-drawn surface chrome lives here.
+// drawFrame draws content lines into rect's inner area, then the declared
+// frame chrome around (or over) them.
 func (m *WorkbenchModel) drawFrame(c *canvas, slotID huskipc.SlotID, rect SlotRect, spec frame.Spec, label string, lines []string) {
-	c.blitBlock(rect.X, rect.Y, m.frameString(slotID, rect, spec, label, lines))
+	c.blitLines(rect.InnerX, rect.InnerY, rect.InnerW, rect.InnerH, lines)
+	m.drawChrome(c, slotID, rect, spec, label)
 }
 
-// frameString renders content wrapped in the frame chrome. Without a
-// border, label and close glyph are overlaid on the first content row (no
-// geometry change).
-func (m *WorkbenchModel) frameString(slotID huskipc.SlotID, rect SlotRect, spec frame.Spec, label string, lines []string) string {
+// drawChrome draws the frame chrome a plugin declared for rect, after its
+// content. All Husk-drawn surface chrome lives here. With a border, the
+// edges, label and close glyph occupy the ring around the inner area.
+// Without one, the label and close glyph are drawn as cells over the first
+// content row (no geometry change); the close glyph keeps the row's last
+// cell and the label is truncated to the cells before it.
+func (m *WorkbenchModel) drawChrome(c *canvas, slotID huskipc.SlotID, rect SlotRect, spec frame.Spec, label string) {
 	if !spec.Enabled() {
-		return strings.Join(lines, "\n")
+		return
 	}
 	if !spec.Border {
-		if len(lines) > 0 {
-			row := lines[0]
-			rowW := ansi.StringWidth(row)
-			// reserve the close cell before placing the label
-			avail := rowW
-			if spec.Close {
-				avail = max(0, rowW-1)
-			}
-			if label != "" && avail > 0 {
-				styled := lipgloss.NewStyle().
-					Foreground(lipgloss.Color(m.palette.Accent)).
-					Bold(true).
-					Render(label)
-				if w := ansi.StringWidth(styled); w > avail {
-					styled = ansi.Truncate(styled, avail, "…")
-				}
-				row = overlayLabel(row, styled)
-			}
-			// clip any overflow back to the surface width (cell-aware, ANSI-safe)
-			if w := ansi.StringWidth(row); w > rowW {
-				row = ansi.Cut(row, 0, rowW)
-			}
-			if spec.Close {
-				body := closeSGR(ansi.Cut(row, 0, max(0, rowW-1)))
-				if pad := rowW - 1 - ansi.StringWidth(body); pad > 0 {
-					body += strings.Repeat(" ", pad)
-				}
-				row = body + m.closeStyle().Render("✕")
-			}
-			lines[0] = row
+		rowW := rect.InnerW
+		if rect.InnerH <= 0 || rowW <= 0 {
+			return
 		}
-		return strings.Join(lines, "\n")
+		avail := rowW
+		if spec.Close {
+			avail = rowW - 1
+		}
+		if label != "" && avail > 0 {
+			styled := lipgloss.NewStyle().
+				Foreground(lipgloss.Color(m.palette.Accent)).
+				Bold(true).
+				Render(label)
+			if w := ansi.StringWidth(styled); w > avail {
+				styled = ansi.Truncate(styled, avail, "…")
+			}
+			c.blitBlock(rect.InnerX, rect.InnerY, styled)
+		}
+		if spec.Close {
+			c.blitBlock(rect.InnerX+rowW-1, rect.InnerY, m.closeStyle().Render("✕"))
+		}
+		return
 	}
 
 	innerW := rect.InnerW
@@ -440,16 +430,14 @@ func (m *WorkbenchModel) frameString(slotID huskipc.SlotID, rect SlotRect, spec 
 		labelText +
 		closeText +
 		rightEdge.Render("╮")
-
-	var out []string
-	out = append(out, top)
+	c.blitBlock(rect.X, rect.Y, top)
 	lp := leftEdge.Render(leftGlyph)
 	rp := rightEdge.Render(rightGlyph)
-	for _, l := range lines {
-		out = append(out, lp+l+rp)
+	for i := 0; i < rect.InnerH; i++ {
+		c.blitBlock(rect.X, rect.InnerY+i, lp)
+		c.blitBlock(rect.InnerX+innerW, rect.InnerY+i, rp)
 	}
-	out = append(out, leftEdge.Render("╰")+botEdge.Render(strings.Repeat(botGlyph, innerW))+rightEdge.Render("╯"))
-	return strings.Join(out, "\n")
+	c.blitBlock(rect.X, rect.InnerY+rect.InnerH, leftEdge.Render("╰")+botEdge.Render(strings.Repeat(botGlyph, innerW))+rightEdge.Render("╯"))
 }
 
 // dividerEdgeStyles returns the edge styles/glyphs for a bordered surface,

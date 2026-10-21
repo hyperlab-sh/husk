@@ -236,15 +236,19 @@ func TestRegionCompositorNoSGRBleed(t *testing.T) {
 		{"", "", "", "", "", "", "44", "44", "44", "44"},
 		{"", "", "", "", "", "", "", "", "", ""},
 	}
-	for i, row := range rows {
-		if w := ansi.StringWidth(row); w != 10 {
-			t.Fatalf("row %d width = %d, want 10", i, w)
+	cells := frameCells(strings.Join(rows, "\n"))
+	if len(cells) != 3 {
+		t.Fatalf("rows = %d, want 3", len(cells))
+	}
+	for i, row := range cells {
+		if len(row) != 10 {
+			t.Fatalf("row %d width = %d, want 10", i, len(row))
 		}
-		if got := cellStyles(t, row); !reflect.DeepEqual(got, want[i]) {
-			t.Fatalf("row %d cell styles = %q, want %q\nline %q", i, got, want[i], row)
+		if got := rowSGR(row); !reflect.DeepEqual(got, want[i]) {
+			t.Fatalf("row %d cell styles = %q, want %q\nline %q", i, got, want[i], rows[i])
 		}
 	}
-	if got := ansi.Strip(rows[0]); got != "abRR  ghij" {
+	if got := rowText(cells[0]); got != "abRR  ghij" {
 		t.Fatalf("row 0 text = %q", got)
 	}
 }
@@ -253,16 +257,25 @@ func TestRegionCompositorNoSGRBleed(t *testing.T) {
 func TestPublishedLineOpenStyleStopsAtContent(t *testing.T) {
 	r := newPublicationRegistry()
 	rows, _ := r.renderPublished(huskipc.SlotMainStage, "a", []string{"\x1b[41mhi", "\x1b[41mtoo-long-line"}, 6, 2)
-	if got, want := cellStyles(t, rows[0]), []string{"41", "41", "", "", "", ""}; !reflect.DeepEqual(got, want) {
+	cells := frameCells(strings.Join(rows, "\n"))
+	if got, want := rowSGR(cells[0]), []string{"41", "41", "", "", "", ""}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("padded row styles = %q, want %q", got, want)
 	}
-	if sgrOpen(rows[1]) {
-		t.Fatalf("truncated row leaves a style open: %q", rows[1])
+	if got, want := rowText(cells[1]), "too-l…"; got != want {
+		t.Fatalf("truncated row = %q, want %q", got, want)
 	}
+
+	// Slot content keeps an open style in the line string; blitting it stops
+	// the style at the last content cell, so the rest of the row stays
+	// unstyled.
 	m := newWorkbenchModel("", nil, "")
 	lines := m.surfaceContentLines(&huskipc.SlotUpdatePayload{Lines: []string{"\x1b[41mhi"}}, 4, 1)
-	if got, want := cellStyles(t, lines[0]), []string{"41", "41", "", ""}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("surfaceContentLines styles = %q, want %q", got, want)
+	c := newCanvas(6, 1)
+	c.blitLines(1, 0, 4, 1, lines)
+	got := rowSGR(frameCells(c.render())[0])
+	c.release()
+	if want := []string{"", "41", "41", "", "", ""}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("blitted surfaceContentLines styles = %q, want %q", got, want)
 	}
 }
 
@@ -271,7 +284,7 @@ func TestPublishedLineOpenStyleStopsAtContent(t *testing.T) {
 func TestSurfaceContentLinesClips(t *testing.T) {
 	m := newWorkbenchModel("", nil, "")
 	lines := m.surfaceContentLines(&huskipc.SlotUpdatePayload{Lines: []string{"one", "two-is-long", "three"}}, 5, 2)
-	if want := []string{"one  ", "two-…"}; !reflect.DeepEqual(lines, want) {
+	if want := []string{"one", "two-…"}; !reflect.DeepEqual(lines, want) {
 		t.Fatalf("got %q, want %q", lines, want)
 	}
 }

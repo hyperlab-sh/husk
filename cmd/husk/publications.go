@@ -221,12 +221,12 @@ func (m *WorkbenchModel) disconnectPublications(cp *ConnectedPlugin) {
 }
 
 // publishedContent composes regions even before the publisher's first frame.
-func (m *WorkbenchModel) publishedContent(surface huskipc.SlotID, width, height int) ([]string, []contributionHit) {
+func (m *WorkbenchModel) publishedContent(surface huskipc.SlotID, width, height int) publishedLayout {
 	var source []string
 	if su := m.slotUpdates[surface]; su != nil {
 		source = su.Lines
 	}
-	return m.registry.renderPublished(surface, m.surfaceOwner(surface), source, width, height)
+	return m.registry.layoutPublished(surface, m.surfaceOwner(surface), source, width, height)
 }
 
 // clickContributionAt lets visible content win over overlapping resize hit
@@ -279,7 +279,7 @@ func (m *WorkbenchModel) clickContribution(surface huskipc.SlotID, x, y, width, 
 			return false
 		}
 	}
-	_, hits := m.publishedContent(surface, width, height)
+	hits := m.publishedContent(surface, width, height).Hits
 	for i := len(hits) - 1; i >= 0; i-- {
 		h := hits[i]
 		if h.Y == y && x >= h.X && x < h.X+h.Width {
