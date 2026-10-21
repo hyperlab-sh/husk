@@ -179,6 +179,7 @@ func (m *WorkbenchModel) drawModal(c *canvas) {
 		}
 	}
 	m.drawChrome(c, huskipc.SlotModalSurface, rect, spec, label)
+	m.fillSlotBg(c, rect)
 }
 
 func (m *WorkbenchModel) renderTopWorkbenchBar() string {
@@ -344,6 +345,19 @@ func (m *WorkbenchModel) drawSurface(c *canvas, slotID huskipc.SlotID, calloutNu
 		c.draw(uv.Rect(rect.InnerX, rect.InnerY, min(ansi.StringWidth(hot), rect.InnerW), 1), hot)
 	}
 	m.drawChrome(c, slotID, rect, spec, label)
+	m.fillSlotBg(c, rect)
+}
+
+// fillSlotBg paints the slot background token under the content area of rect:
+// cells with no background of their own take it, cells a plugin coloured keep
+// theirs. It runs after the frame chrome so a borderless frame's label row,
+// drawn over the first content row, is covered too; a border ring lies outside
+// the content area and keeps its own styling.
+func (m *WorkbenchModel) fillSlotBg(c *canvas, rect SlotRect) {
+	if m.palette.Slot == "" || rect.InnerW <= 0 || rect.InnerH <= 0 {
+		return
+	}
+	c.fillDefaultBg(uv.Rect(rect.InnerX, rect.InnerY, rect.InnerW, rect.InnerH), lipgloss.Color(m.palette.Slot))
 }
 
 // surfaceContentLines clips slot_update lines to a surface's inner area;

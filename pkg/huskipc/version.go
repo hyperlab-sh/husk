@@ -17,7 +17,10 @@ import (
 //
 // 1.1: welcome.palette and theme_changed.palette values are "#RRGGBB" strings
 // instead of ANSI/256 indices; the keys are unchanged.
-const ProtocolVersion = "1.1"
+//
+// 1.2: palette.slot_background, the background of slot content areas, derived
+// from the canvas (lighter on a dark canvas, darker on a light one).
+const ProtocolVersion = "1.2"
 
 // ProtocolMajor is the major component of ProtocolVersion.
 const ProtocolMajor = 1

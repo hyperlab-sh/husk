@@ -38,8 +38,8 @@ func TestCheckProtocolVersion(t *testing.T) {
 		}
 	}
 	for v, want := range map[string]string{
-		"2.0": `unsupported protocol_version "2.0": host speaks 1.1 (major 1)`,
-		"0.9": `unsupported protocol_version "0.9": host speaks 1.1 (major 1)`,
+		"2.0": `unsupported protocol_version "2.0": host speaks 1.2 (major 1)`,
+		"0.9": `unsupported protocol_version "0.9": host speaks 1.2 (major 1)`,
 		"one": `invalid protocol_version "one": want MAJOR.MINOR`,
 	} {
 		err := CheckProtocolVersion(v)
@@ -73,7 +73,7 @@ func TestProtocolVersionIsAdditive(t *testing.T) {
 		t.Fatal("protocol_version present on a zero welcome")
 	}
 	w := keys(WelcomePayload{ProtocolVersion: ProtocolVersion, HostVersion: "0.1.0"})
-	if string(w["protocol_version"]) != `"1.1"` || string(w["host_version"]) != `"0.1.0"` {
+	if string(w["protocol_version"]) != `"1.2"` || string(w["host_version"]) != `"0.1.0"` {
 		t.Fatalf("welcome = protocol_version %s host_version %s", w["protocol_version"], w["host_version"])
 	}
 

@@ -14,6 +14,7 @@ type Palette struct {
 	SurfaceElevated string `json:"surface_elevated"`
 	SurfaceSelected string `json:"surface_selected"`
 	SurfaceHover    string `json:"surface_hover"`
+	Slot            string `json:"slot_background,omitempty"`
 	Border          string `json:"border"`
 	BorderSubtle    string `json:"border_subtle"`
 	BorderFocused   string `json:"border_focused"`
@@ -40,6 +41,7 @@ func Default() Palette {
 		SurfaceElevated: charmtone.BBQ.Hex(),
 		SurfaceSelected: charmtone.Char.Hex(),
 		SurfaceHover:    charmtone.BBQ.Hex(),
+		Slot:            SlotBackground(charmtone.Pepper.Hex()),
 		Border:          charmtone.Squid.Hex(),
 		BorderSubtle:    charmtone.Iron.Hex(),
 		BorderFocused:   charmtone.Hazy.Hex(),
