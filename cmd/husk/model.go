@@ -85,6 +85,10 @@ type WorkbenchModel struct {
 
 	modifiers  huskipc.ModifierState
 	altLatched bool
+	blurred    bool      // terminal reported focus loss
+	modTickOn  bool      // a modifier tick is in flight
+	lastInput  time.Time // last key or mouse event, for tick cadence
+	pollMods   func() (huskipc.ModifierState, bool)
 	heldKeys   map[string]time.Time
 
 	activeRailID      string // "" (Home), or rail item ID
@@ -161,6 +165,7 @@ func newWorkbenchModel(socketPath string, listener net.Listener, cwd string) *Wo
 		sidePaneW:    36,
 		hoverRailIdx: -1,
 		heldKeys:     make(map[string]time.Time),
+		pollMods:     pollOSModifiers,
 		showHotspots: false,
 		stageMode:    "plugin",
 
@@ -176,15 +181,57 @@ func waitForIPC(sub chan tea.Msg) tea.Cmd {
 	}
 }
 
-func waitForModifierTick() tea.Cmd {
-	return tea.Tick(40*time.Millisecond, func(time.Time) tea.Msg {
+// Modifier polling cadence. The OS modifier poll is the only way to see a bare
+// Alt/Option press, so it cannot stop entirely while the terminal is focused;
+// it runs fast only while a modifier, held key or recent input makes the
+// result matter, and otherwise backs off. It stops completely on blur.
+const (
+	modifierTickActive = 40 * time.Millisecond
+	modifierTickIdle   = 150 * time.Millisecond
+	modifierActiveFor  = 2 * time.Second
+)
+
+func waitForModifierTick(d time.Duration) tea.Cmd {
+	return tea.Tick(d, func(time.Time) tea.Msg {
 		return modifierTickMsg{}
 	})
 }
 
+// modifierTickInterval picks the next poll delay from current activity.
+func (m *WorkbenchModel) modifierTickInterval(now time.Time) time.Duration {
+	mods := m.modifiers
+	if mods.Alt || mods.Ctrl || mods.Shift || mods.Super || len(m.heldKeys) > 0 ||
+		now.Sub(m.lastInput) < modifierActiveFor {
+		return modifierTickActive
+	}
+	return modifierTickIdle
+}
+
+// startModifierTick starts the poll chain unless one is already running or
+// the terminal is unfocused.
+func (m *WorkbenchModel) startModifierTick() tea.Cmd {
+	if m.modTickOn || m.blurred {
+		return nil
+	}
+	m.modTickOn = true
+	return waitForModifierTick(m.modifierTickInterval(time.Now()))
+}
+
+// handleBlur drops OS-derived modifier and held-key state (other apps' Alt
+// presses must not leak in) and lets the tick chain lapse. A latched Alt
+// (the "?" toggle or --hold-alt) is a host setting and survives.
+func (m *WorkbenchModel) handleBlur() {
+	m.blurred = true
+	m.syncModifierTransitions(huskipc.ModifierState{Alt: m.altLatched})
+	for k := range m.heldKeys {
+		delete(m.heldKeys, k)
+		m.broadcastKeyState("up", k, false)
+	}
+}
+
 func (m *WorkbenchModel) Init() tea.Cmd {
 	m.recomputeLayout()
-	return tea.Batch(waitForIPC(m.subChan), waitForModifierTick())
+	return tea.Batch(waitForIPC(m.subChan), m.startModifierTick())
 }
 
 func (m *WorkbenchModel) currentHeldKeys() []string {
@@ -330,8 +377,20 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, waitForIPC(m.subChan)
 
+	case tea.BlurMsg:
+		m.handleBlur()
+		return m, nil
+
+	case tea.FocusMsg:
+		m.blurred = false
+		return m, m.startModifierTick()
+
 	case modifierTickMsg:
-		if osMods, ok := pollOSModifiers(); ok {
+		if m.blurred {
+			m.modTickOn = false
+			return m, nil
+		}
+		if osMods, ok := m.pollMods(); ok {
 			if m.altLatched {
 				osMods.Alt = true
 			}
@@ -344,7 +403,7 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.broadcastKeyState("up", k, false)
 			}
 		}
-		return m, waitForModifierTick()
+		return m, waitForModifierTick(m.modifierTickInterval(now))
 
 	case ipcEventMsg:
 		cp := m.plugins[msg.pluginID]
@@ -412,9 +471,11 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseMsg:
+		m.lastInput = time.Now()
 		return m.handleMouse(msg)
 
 	case tea.KeyPressMsg:
+		m.lastInput = time.Now()
 		return m.handleKey(msg)
 
 	case tea.PasteMsg:

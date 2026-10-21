@@ -17,6 +17,7 @@ func (m *WorkbenchModel) View() tea.View {
 		view := tea.NewView(m.renderTooSmall())
 		view.AltScreen = true
 		view.MouseMode = tea.MouseModeAllMotion
+		view.ReportFocus = true
 		return view
 	}
 	topBar := m.renderTopWorkbenchBar()
@@ -73,6 +74,7 @@ func (m *WorkbenchModel) View() tea.View {
 	view := tea.NewView(baseView)
 	view.AltScreen = true
 	view.MouseMode = tea.MouseModeAllMotion
+	view.ReportFocus = true
 	return view
 }
 
