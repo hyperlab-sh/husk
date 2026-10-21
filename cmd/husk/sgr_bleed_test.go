@@ -247,7 +247,7 @@ func TestCommandPaletteOverStyledStageNoBleed(t *testing.T) {
 	m := newWorkbenchModel("", nil, "")
 	m.width, m.height = 144, 40
 	m.plugins["p.stage"] = &ConnectedPlugin{Info: huskipc.HelloPayload{PluginID: "p.stage"}}
-	m.slotOwners[huskipc.SlotMainStage] = "p.stage"
+	m.registry.Occupants[huskipc.SlotMainStage] = "p.stage"
 	m.recomputeLayout()
 	stage := m.slotRects[huskipc.SlotMainStage]
 	var lines []string

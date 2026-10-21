@@ -16,14 +16,14 @@ func pureViewModel(stageMode string, overlays bool) *WorkbenchModel {
 	m.logOut = nil
 	m.width, m.height = 144, 40
 	m.plugins["p.stage"] = &ConnectedPlugin{Info: huskipc.HelloPayload{PluginID: "p.stage"}}
-	m.slotOwners[huskipc.SlotMainStage] = "p.stage"
+	m.registry.Occupants[huskipc.SlotMainStage] = "p.stage"
 	m.slotUpdates[huskipc.SlotMainStage] = &huskipc.SlotUpdatePayload{PluginID: "p.stage", Slot: huskipc.SlotMainStage, Title: "Stage", Lines: []string{"\x1b[41mplugin stage line"}}
 	m.stageMode = stageMode
 	m.showHotspots = true
 	if overlays {
 		m.plugins["p.modal"] = &ConnectedPlugin{Info: huskipc.HelloPayload{PluginID: "p.modal"}}
 		m.railItems = append(m.railItems, huskipc.RailItemSpec{ID: "r.modal", PluginID: "p.modal", Icon: "m", Label: "modal", Placement: huskipc.PlacementModal})
-		m.activeModalRailID, m.activeModalPlugin = "r.modal", "p.modal"
+		m.openModal("p.modal", "r.modal")
 		m.slotUpdates[huskipc.SlotModalSurface] = &huskipc.SlotUpdatePayload{PluginID: "p.modal", Slot: huskipc.SlotModalSurface, Lines: []string{"\x1b[42mmodal"}}
 		m.activeToast = &huskipc.ToastPayload{Title: "t", Message: "m", Level: "warn"}
 		m.showPalette = true
