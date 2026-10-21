@@ -177,33 +177,46 @@ type RailActivatedPayload struct {
 type Envelope struct {
 	Type string `json:"type"`
 
-	Hello            *HelloPayload            `json:"hello,omitempty"`
-	Welcome          *WelcomePayload          `json:"welcome,omitempty"`
-	SlotUpdate       *SlotUpdatePayload       `json:"slot_update,omitempty"`
-	SlotResize       *SlotResizePayload       `json:"slot_resize,omitempty"`
-	SlotKey          *SlotKeyPayload          `json:"slot_key,omitempty"`
-	KeyState         *KeyStatePayload         `json:"key_state,omitempty"`
-	SlotMouse        *SlotMousePayload        `json:"slot_mouse,omitempty"`
-	CommandInvoke    *CommandInvokePayload    `json:"command_invoke,omitempty"`
-	ThemeChanged     *ThemeChangedPayload     `json:"theme_changed,omitempty"`
-	WorkspaceContext *WorkspaceContextPayload `json:"workspace_context,omitempty"`
-	RailActivated    *RailActivatedPayload    `json:"rail_activated,omitempty"`
-	CloseModal       bool                     `json:"close_modal,omitempty"`
-	EventEmit        *EventPayload            `json:"event,omitempty"`
-	Toast            *ToastPayload            `json:"toast,omitempty"`
+	Hello             *HelloPayload             `json:"hello,omitempty"`
+	Welcome           *WelcomePayload           `json:"welcome,omitempty"`
+	SlotUpdate        *SlotUpdatePayload        `json:"slot_update,omitempty"`
+	SlotResize        *SlotResizePayload        `json:"slot_resize,omitempty"`
+	SlotKey           *SlotKeyPayload           `json:"slot_key,omitempty"`
+	KeyState          *KeyStatePayload          `json:"key_state,omitempty"`
+	SlotMouse         *SlotMousePayload         `json:"slot_mouse,omitempty"`
+	CommandInvoke     *CommandInvokePayload     `json:"command_invoke,omitempty"`
+	ThemeChanged      *ThemeChangedPayload      `json:"theme_changed,omitempty"`
+	WorkspaceContext  *WorkspaceContextPayload  `json:"workspace_context,omitempty"`
+	RailActivated     *RailActivatedPayload     `json:"rail_activated,omitempty"`
+	CloseModal        bool                      `json:"close_modal,omitempty"`
+	EventEmit         *EventPayload             `json:"event,omitempty"`
+	Toast             *ToastPayload             `json:"toast,omitempty"`
+	SlotDeclare       *SlotDeclarePayload       `json:"slot_declare,omitempty"`
+	SlotContribute    *SlotContributePayload    `json:"slot_contribute,omitempty"`
+	SlotContributions *SlotContributionsPayload `json:"slot_contributions,omitempty"`
+	HookDeclare       *HookDeclarePayload       `json:"hook_declare,omitempty"`
+	HookSubscribe     *HookSubscribePayload     `json:"hook_subscribe,omitempty"`
+	HookCall          *HookCallPayload          `json:"hook_call,omitempty"`
+	HookResult        *HookResultPayload        `json:"hook_result,omitempty"`
+	EventDeclare      *EventDeclarePayload      `json:"event_declare,omitempty"`
+	EventSubscribe    *EventSubscribePayload    `json:"event_subscribe,omitempty"`
+	ProtocolError     *ProtocolErrorPayload     `json:"protocol_error,omitempty"`
 }
 
 type HelloPayload struct {
-	PluginID    string         `json:"plugin_id"`
-	Name        string         `json:"name"`
-	Version     string         `json:"version"`
-	Language    string         `json:"language"`
-	PID         int            `json:"pid"`
-	Description string         `json:"description"`
-	Slots       []SlotID       `json:"slots"`
-	RailItems   []RailItemSpec `json:"rail_items,omitempty"`
-	Commands    []CommandSpec  `json:"commands,omitempty"`
-	Keybindings []KeybindSpec  `json:"keybindings,omitempty"`
+	PluginID       string                `json:"plugin_id"`
+	Name           string                `json:"name"`
+	Version        string                `json:"version"`
+	Language       string                `json:"language"`
+	PID            int                   `json:"pid"`
+	Description    string                `json:"description"`
+	Slots          []SlotID              `json:"slots"`
+	RailItems      []RailItemSpec        `json:"rail_items,omitempty"`
+	Commands       []CommandSpec         `json:"commands,omitempty"`
+	Keybindings    []KeybindSpec         `json:"keybindings,omitempty"`
+	PublishedSlots []SlotDeclarePayload  `json:"published_slots,omitempty"`
+	Hooks          []HookDeclarePayload  `json:"hooks,omitempty"`
+	Events         []EventDeclarePayload `json:"events,omitempty"`
 
 	// Frames declares per-slot chrome (border / label / close) keyed by slot
 	// ID. Absent entry (or absent map) means the surface is a blank canvas.
