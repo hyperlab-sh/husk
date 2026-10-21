@@ -113,6 +113,12 @@ func TestGoldenFramePaletteOpen(t *testing.T) {
 	})
 	frame := runGolden(t, m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	requireFrameGeometry(t, frame)
+	plain := ansi.Strip(frame)
+	for _, want := range []string{"COMMAND PALETTE (app-overlay)", "❯ █"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("palette frame missing %q", want)
+		}
+	}
 	closed := goldenModel()
 	goldenPlugin(closed, "p.one", map[huskipc.SlotID][]string{
 		huskipc.SlotMainStage: {"stage line one"},
