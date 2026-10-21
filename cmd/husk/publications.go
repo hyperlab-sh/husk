@@ -62,6 +62,26 @@ func (m *WorkbenchModel) registerPublications(hello huskipc.HelloPayload) (err e
 	return nil
 }
 
+// checkManifest compares a hello with the manifest the plugin was launched
+// from. A stdio stream is tied to its process, so its hello must carry that
+// process's manifest id; any other hello is checked when its plugin_id names
+// a launched manifest. Plugins with no manifest are not checked.
+func (m *WorkbenchModel) checkManifest(cp *ConnectedPlugin) error {
+	id := cp.Info.PluginID
+	if cp.ExpectedID != "" {
+		id = cp.ExpectedID
+	}
+	mf := m.manifests[id]
+	if mf == nil {
+		return nil
+	}
+	slots := make([]string, len(cp.Info.Slots))
+	for i, s := range cp.Info.Slots {
+		slots[i] = string(s)
+	}
+	return mf.CheckHello(cp.Info.PluginID, slots)
+}
+
 func (m *WorkbenchModel) rejectPublication(cp *ConnectedPlugin, typ string, err error) {
 	_ = cp.Writer.Send(huskipc.Envelope{Type: "protocol_error", ProtocolError: &huskipc.ProtocolErrorPayload{MessageType: typ, Message: err.Error()}})
 }

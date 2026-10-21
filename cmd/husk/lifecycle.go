@@ -69,6 +69,10 @@ func (m *WorkbenchModel) launchPlugin(p *manifest.Plugin) error {
 	if transport == "" {
 		transport = manifest.TransportSocket
 	}
+	if m.manifests == nil {
+		m.manifests = make(map[string]*manifest.Plugin)
+	}
+	m.manifests[p.ID] = p
 	err := m.spawnPlugin(p.ID, transport, p.WorkDir(), p.ResolvedCommand())
 	if err != nil {
 		msg := pluginLaunchFailedMsg{id: p.ID, err: err}
@@ -150,7 +154,7 @@ func (m *WorkbenchModel) spawnPlugin(id, transport, dir string, argv []string) e
 		defer close(proc.done)
 		if stdout != nil {
 			// Wait closes the pipes, so the stream must end first.
-			m.serveStream(stdout, stdin, stdin, func() { proc.helloSeen.Store(true) })
+			m.serveStreamFor(id, stdout, stdin, stdin, func() { proc.helloSeen.Store(true) })
 		}
 		werr := cmd.Wait()
 		if m.shuttingDown() {

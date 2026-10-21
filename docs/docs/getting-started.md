@@ -47,6 +47,8 @@ A plugin directory contains a `husk-plugin.json`:
 ```
 
 - `command` is the executable plus arguments. A bare `command[0]` (e.g. `python3`) is looked up on `PATH`; a relative path (e.g. `./plugin.sh`) is resolved against the manifest directory, as are relative arguments starting with `./` or `../`. Arbitrary option arguments are never rewritten. Plugins run with the manifest directory as their working directory.
+- `command` given on the command line as `--plugin "<cmd> <args>"` (a path that does not exist) is split like a shell would: spaces separate arguments, single and double quotes group, a backslash escapes. An unterminated quote or trailing backslash is an error. To run an executable whose path contains spaces, point `--plugin` at the file or use a manifest.
+- `slots` is enforced. A plugin launched from a manifest must send a `hello` whose `plugin_id` equals the manifest `id` and whose `slots` are exactly the manifest's `slots` (order and duplicates ignored); otherwise Husk replies with a `protocol_error` and closes the connection. A manifest with no `slots` forbids claiming any surface. Plugins started from a bare executable or command line have no manifest and are not checked.
 - `transport` is `socket` (default; the plugin connects to the Unix socket named by `HUSK_SOCKET_PATH`) or `stdio` (the same JSON-lines protocol over stdin/stdout).
 - `--plugin <path>` accepts an executable, a plugin directory, or a `husk-plugin.json` path, and may be repeated. `--plugin-dir <dir>` loads every immediate subdirectory of `<dir>` that contains a `husk-plugin.json`, and may also be repeated.
 
