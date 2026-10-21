@@ -268,17 +268,20 @@ func TestCommandPaletteOverStyledStageNoBleed(t *testing.T) {
 		t.Fatal("could not locate the palette box")
 	}
 
-	rows := strings.Split(m.View().Content, "\n")
+	// Decode the frame into cells: the serializer writes style transitions as
+	// off codes and replacement colours, which a parameter accumulator would
+	// misread, so the check runs on each cell's own decoded background.
+	cells := frameCells(m.View().Content)
 	red := 0
-	for y, row := range rows {
-		for x, style := range cellStyles(t, row) {
-			if !hasSGR(style, "41") {
+	for y, row := range cells {
+		for x, cell := range row {
+			if !sameColor(cell.Style.Bg, ansi.Red) {
 				continue
 			}
 			inStage := x >= stage.InnerX && x < stage.InnerX+stage.InnerW && y >= stage.InnerY && y < stage.InnerY+stage.InnerH
 			inBox := x >= boxX && x < boxX+boxW && y >= boxY && y < boxY+boxH
 			if !inStage || inBox {
-				t.Fatalf("red background bled to cell (%d,%d) (stage %+v, palette at %d,%d %dx%d)\nrow %q", x, y, stage, boxX, boxY, boxW, boxH, row)
+				t.Fatalf("red background bled to cell (%d,%d) (stage %+v, palette at %d,%d %dx%d)", x, y, stage, boxX, boxY, boxW, boxH)
 			}
 			red++
 		}

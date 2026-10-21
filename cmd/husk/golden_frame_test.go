@@ -87,18 +87,48 @@ func requireFrameGeometry(t *testing.T, frame string) {
 	}
 }
 
+// goldenFrames builds each golden scenario's final frame. The golden tests
+// and TestGoldenFramesCellEquivalent share it so they render the same models.
+var goldenFrames = map[string]func(t *testing.T) string{
+	"TestGoldenFrameEmptyWorkbench": func(t *testing.T) string { return runGolden(t, goldenModel()) },
+	"TestGoldenFrameOnePlugin": func(t *testing.T) string {
+		m := goldenModel()
+		goldenPlugin(m, "p.one", map[huskipc.SlotID][]string{
+			huskipc.SlotMainStage: {"stage line one", "stage line two"},
+		})
+		return runGolden(t, m)
+	},
+	"TestGoldenFramePaletteOpen": func(t *testing.T) string {
+		m := goldenModel()
+		goldenPlugin(m, "p.one", map[huskipc.SlotID][]string{
+			huskipc.SlotMainStage: {"stage line one"},
+		})
+		return runGolden(t, m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
+	},
+	"TestGoldenFrameFullSlots": func(t *testing.T) string { return runGolden(t, fullSlotsModel()) },
+}
+
+func fullSlotsModel() *WorkbenchModel {
+	m := goldenModel()
+	goldenPlugin(m, "p.full", map[huskipc.SlotID][]string{
+		huskipc.SlotSidebarNavigation: {"nav"},
+		huskipc.SlotSidebarList:       {"list"},
+		huskipc.SlotSidebarFooter:     {"foot"},
+		huskipc.SlotMainHeader:        {strings.Repeat("HEADER ", 30)},
+		huskipc.SlotMainStage:         {"stage"},
+		huskipc.SlotSidePanel:         {"SIDEPANEL"},
+	})
+	return m
+}
+
 func TestGoldenFrameEmptyWorkbench(t *testing.T) {
-	frame := runGolden(t, goldenModel())
+	frame := goldenFrames[t.Name()](t)
 	requireFrameGeometry(t, frame)
 	golden.RequireEqual(t, frame)
 }
 
 func TestGoldenFrameOnePlugin(t *testing.T) {
-	m := goldenModel()
-	goldenPlugin(m, "p.one", map[huskipc.SlotID][]string{
-		huskipc.SlotMainStage: {"stage line one", "stage line two"},
-	})
-	frame := runGolden(t, m)
+	frame := goldenFrames[t.Name()](t)
 	requireFrameGeometry(t, frame)
 	if !strings.Contains(ansi.Strip(frame), "stage line one") {
 		t.Error("plugin content missing from frame")
@@ -107,11 +137,7 @@ func TestGoldenFrameOnePlugin(t *testing.T) {
 }
 
 func TestGoldenFramePaletteOpen(t *testing.T) {
-	m := goldenModel()
-	goldenPlugin(m, "p.one", map[huskipc.SlotID][]string{
-		huskipc.SlotMainStage: {"stage line one"},
-	})
-	frame := runGolden(t, m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
+	frame := goldenFrames[t.Name()](t)
 	requireFrameGeometry(t, frame)
 	plain := ansi.Strip(frame)
 	for _, want := range []string{"COMMAND PALETTE (app-overlay)", "❯ █"} {
@@ -132,15 +158,7 @@ func TestGoldenFramePaletteOpen(t *testing.T) {
 // With every region occupied, the header, stage and side panel must not run
 // into each other: a gutter column separates adjacent surfaces.
 func TestGoldenFrameFullSlots(t *testing.T) {
-	m := goldenModel()
-	goldenPlugin(m, "p.full", map[huskipc.SlotID][]string{
-		huskipc.SlotSidebarNavigation: {"nav"},
-		huskipc.SlotSidebarList:       {"list"},
-		huskipc.SlotSidebarFooter:     {"foot"},
-		huskipc.SlotMainHeader:        {strings.Repeat("HEADER ", 30)},
-		huskipc.SlotMainStage:         {"stage"},
-		huskipc.SlotSidePanel:         {"SIDEPANEL"},
-	})
+	m := fullSlotsModel()
 	frame := runGolden(t, m)
 	requireFrameGeometry(t, frame)
 

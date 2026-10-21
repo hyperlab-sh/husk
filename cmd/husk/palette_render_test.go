@@ -1,43 +1,49 @@
 package main
 
 import (
-	"fmt"
-	"strconv"
-	"strings"
+	"image/color"
 	"testing"
+
+	"charm.land/lipgloss/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 )
 
-// sgrRGB returns the 24-bit SGR parameter body for a "#RRGGBB" colour, with
-// prefix 38 for foreground or 48 for background.
-func sgrRGB(t *testing.T, prefix int, hex string) string {
-	t.Helper()
-	var c [3]int64
-	for i := range c {
-		v, err := strconv.ParseInt(hex[1+2*i:3+2*i], 16, 32)
-		if err != nil {
-			t.Fatalf("bad colour %q: %v", hex, err)
+// hasTruecolorCell reports whether some decoded cell carries want as a 24-bit
+// colour on the channel pick selects. Only a direct RGB SGR decodes to
+// color.RGBA; 256-colour and ANSI indices decode to other types.
+func hasTruecolorCell(cells uv.Lines, want color.Color, pick func(uv.Style) color.Color) bool {
+	for _, row := range cells {
+		for _, c := range row {
+			got, ok := pick(c.Style).(color.RGBA)
+			if ok && sameColor(got, want) {
+				return true
+			}
 		}
-		c[i] = v
 	}
-	return fmt.Sprintf("%d;2;%d;%d;%d", prefix, c[0], c[1], c[2])
+	return false
 }
 
 // The chrome must paint with the palette's hex roles as truecolor SGR, not
 // 256-colour or ANSI indices.
 func TestChromeRendersPaletteAsTruecolor(t *testing.T) {
 	m := pureViewModel("plugin", true)
-	out := m.View().Content
-	for name, want := range map[string]string{
-		"surface background":  sgrRGB(t, 48, m.palette.Surface),
-		"elevated background": sgrRGB(t, 48, m.palette.SurfaceElevated),
-		"selected background": sgrRGB(t, 48, m.palette.SurfaceSelected),
-		"ink foreground":      sgrRGB(t, 38, m.palette.Ink),
-		"accent foreground":   sgrRGB(t, 38, m.palette.Accent),
-		"muted foreground":    sgrRGB(t, 38, m.palette.InkMuted),
-		"focused border":      sgrRGB(t, 38, m.palette.BorderFocused),
+	cells := frameCells(m.View().Content)
+	fg := func(s uv.Style) color.Color { return s.Fg }
+	bg := func(s uv.Style) color.Color { return s.Bg }
+	for name, want := range map[string]struct {
+		hex  string
+		pick func(uv.Style) color.Color
+	}{
+		"surface background":  {m.palette.Surface, bg},
+		"elevated background": {m.palette.SurfaceElevated, bg},
+		"selected background": {m.palette.SurfaceSelected, bg},
+		"ink foreground":      {m.palette.Ink, fg},
+		"accent foreground":   {m.palette.Accent, fg},
+		"muted foreground":    {m.palette.InkMuted, fg},
+		"focused border":      {m.palette.BorderFocused, fg},
 	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("%s: frame has no SGR with %q", name, want)
+		if !hasTruecolorCell(cells, lipgloss.Color(want.hex), want.pick) {
+			t.Errorf("%s: no cell painted with truecolor %s", name, want.hex)
 		}
 	}
 }
