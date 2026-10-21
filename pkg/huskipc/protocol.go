@@ -6,6 +6,7 @@ import (
 	"io"
 	"sync"
 
+	"github.com/hyperlab-sh/husk/pkg/frame"
 	"github.com/hyperlab-sh/husk/pkg/theme"
 )
 
@@ -45,6 +46,10 @@ type RailItemSpec struct {
 	Shortcut    string        `json:"shortcut,omitempty"`
 	Placement   RailPlacement `json:"placement"`
 	Description string        `json:"description,omitempty"`
+
+	// Frame declares the chrome Husk draws around the surface opened by this
+	// rail item (border / label / close). Absent means a blank canvas.
+	Frame *frame.Spec `json:"frame,omitempty"`
 }
 
 type SlotMeta struct {
@@ -199,6 +204,10 @@ type HelloPayload struct {
 	RailItems   []RailItemSpec `json:"rail_items,omitempty"`
 	Commands    []CommandSpec  `json:"commands,omitempty"`
 	Keybindings []KeybindSpec  `json:"keybindings,omitempty"`
+
+	// Frames declares per-slot chrome (border / label / close) keyed by slot
+	// ID. Absent entry (or absent map) means the surface is a blank canvas.
+	Frames map[SlotID]frame.Spec `json:"frames,omitempty"`
 }
 
 type ModifierState struct {
