@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/hyperlab-sh/husk/pkg/huskipc"
 )
 
 // FileName is the manifest file name expected inside a plugin directory.
@@ -35,6 +37,15 @@ type Plugin struct {
 	Command     []string `json:"command"`
 	Transport   string   `json:"transport"`
 	Slots       []string `json:"slots"`
+
+	// PublishedSlots, Hooks and Events declare the plugin's extension points
+	// up front, with the same shapes and the same "<id>.<name>" namespace as
+	// hello.published_slots, hello.hooks and hello.events. Husk registers them
+	// when it launches the plugin, before the plugin connects, so other
+	// plugins can discover them. They are optional; a hello may repeat them.
+	PublishedSlots []huskipc.SlotDeclarePayload  `json:"published_slots,omitempty"`
+	Hooks          []huskipc.HookDeclarePayload  `json:"hooks,omitempty"`
+	Events         []huskipc.EventDeclarePayload `json:"events,omitempty"`
 
 	// Dir is the directory the manifest (or executable) was found in.
 	Dir string `json:"-"`
