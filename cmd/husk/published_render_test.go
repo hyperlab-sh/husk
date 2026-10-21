@@ -116,6 +116,22 @@ func TestPublishedRegionsStackClipAndOcclude(t *testing.T) {
 	}
 }
 
+// A wide source glyph cut by a region's left or right edge leaves no half
+// glyph: the region clears its cells and the orphaned half is blank.
+func TestPublishedRegionCutsWideGlyphCleanly(t *testing.T) {
+	r := newPublicationRegistry()
+	_ = r.claimSurface("a", huskipc.SlotMainStage)
+	if err := r.declareSlot("a", huskipc.SlotDeclarePayload{ID: "a.region", Kind: "region", Rect: &huskipc.PublishedRect{Surface: huskipc.SlotMainStage, X: 3, Y: 0, Width: 3, Height: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	mustContribute(t, r, "b", "a.region", "b.r", "XY界")
+	// 界 at columns 2-3 straddles the left edge, 世 at 5-6 the right edge.
+	rows, _ := r.renderPublished(huskipc.SlotMainStage, "a", []string{"ab界c世hi"}, 9, 1)
+	if want := "ab XY  hi"; len(rows) != 1 || rows[0] != want {
+		t.Fatalf("rows = %q, want %q", rows, want)
+	}
+}
+
 func TestPublishedEmptyRegionReservesSpace(t *testing.T) {
 	r := newPublicationRegistry()
 	_ = r.claimSurface("a", huskipc.SlotMainStage)
