@@ -203,3 +203,30 @@ func TestBlitBlockOpaqueAndClipped(t *testing.T) {
 		t.Fatalf("write below the canvas changed it: %q", got2)
 	}
 }
+
+// drawnRect runs draw on a canvas larger than rect, pre-filled with a
+// sentinel, fails if draw wrote any cell outside rect, and returns rect's rows
+// serialized on their own (each exactly rect.Width cells).
+func drawnRect(t *testing.T, rect SlotRect, draw func(c *canvas)) []string {
+	t.Helper()
+	const margin = 4
+	w, h := rect.X+rect.Width+margin, rect.Y+rect.Height+margin
+	c := newCanvas(w, h)
+	c.blitBlock(0, 0, strings.TrimSuffix(strings.Repeat(strings.Repeat("·", w)+"\n", h), "\n"))
+	draw(c)
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			if x >= rect.X && x < rect.X+rect.Width && y >= rect.Y && y < rect.Y+rect.Height {
+				continue
+			}
+			if cell := c.buf.CellAt(x, y); cell == nil || cell.Content != "·" {
+				t.Fatalf("draw wrote cell (%d,%d) outside rect %+v: %+v", x, y, rect, cell)
+			}
+		}
+	}
+	rows := make([]string, rect.Height)
+	for y := range rows {
+		rows[y] = uv.Line(c.buf.Lines[rect.Y+y][rect.X : rect.X+rect.Width]).Render()
+	}
+	return rows
+}
