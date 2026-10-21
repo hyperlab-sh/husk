@@ -32,8 +32,8 @@ func TestKittyWireSpellingOfAlternateKeys(t *testing.T) {
 	}
 }
 
-// Enter, Tab and Backspace releases are not reported without kitty flag 8, so
-// the held key outlives the physical key until the 1s safety net lapses.
+// On a terminal that reports releases but not kitty flag 8, Enter, Tab and
+// Backspace releases never arrive, so the held key outlives the physical key until the 1s safety net lapses.
 func TestUnreportedEnterTabBackspaceReleaseLapsesAtSafetyNet(t *testing.T) {
 	for _, tc := range []struct{ name, press, held string }{
 		{"enter", "\x1b[13u", "enter"},
@@ -66,6 +66,34 @@ func TestUnreportedEnterTabBackspaceReleaseLapsesAtSafetyNet(t *testing.T) {
 			if len(m.heldKeys) != 0 || len(msgs) != 1 || msgs[0].KeyState == nil ||
 				msgs[0].KeyState.Phase != huskipc.KeyPhaseUp || msgs[0].KeyState.Key != tc.held {
 				t.Fatalf("safety net: held %v, sent %+v", m.heldKeys, msgs)
+			}
+		})
+	}
+}
+
+// With flag 8 granted (View requests ReportAllKeysAsEscapeCodes) the release
+// of Enter, Tab and Backspace arrives and clears the held key at once.
+func TestFlag8EnterTabBackspaceReleaseClearsHeldKey(t *testing.T) {
+	for _, tc := range []struct{ name, press, release, held string }{
+		{"enter", "\x1b[13u", "\x1b[13;1:3u", "enter"},
+		{"tab", "\x1b[9u", "\x1b[9;1:3u", "tab"},
+		{"backspace", "\x1b[127u", "\x1b[127;1:3u", "backspace"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newWorkbenchModel("", nil, t.TempDir())
+			m.pollMods = func() (huskipc.ModifierState, bool) { return huskipc.ModifierState{}, false }
+			m.keyReleases = true
+			_, out := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "p"})
+			m.Update(decodeCharmEvent(t, tc.press))
+			if _, held := m.heldKeys[tc.held]; !held {
+				t.Fatalf("press held %v, want %s", m.heldKeys, tc.held)
+			}
+			out.Reset()
+			m.Update(decodeCharmEvent(t, tc.release))
+			msgs := envelopes(t, out)
+			if len(m.heldKeys) != 0 || len(msgs) != 1 || msgs[0].KeyState == nil ||
+				msgs[0].KeyState.Phase != huskipc.KeyPhaseUp || msgs[0].KeyState.Key != tc.held {
+				t.Fatalf("release: held %v, sent %+v", m.heldKeys, msgs)
 			}
 		})
 	}
