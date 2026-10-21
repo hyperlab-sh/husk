@@ -37,7 +37,7 @@ func (m *WorkbenchModel) registerPublications(hello huskipc.HelloPayload) (err e
 	}
 	defer func() {
 		if err != nil {
-			m.registry.removePlugin(id)
+			m.registry.rollbackHello(id)
 		}
 	}()
 	for _, s := range hello.Slots {

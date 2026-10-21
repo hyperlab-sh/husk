@@ -432,6 +432,48 @@ func (r *publicationRegistry) emitEvent(plugin string, event huskipc.EventPayloa
 	return out, nil
 }
 
+// ownedSlotDeliveries returns a slot_contributions snapshot for every slot the
+// plugin owns, sorted by slot id, so a plugin that connects after others
+// contributed (to manifest declarations, say) receives what it missed.
+func (r *publicationRegistry) ownedSlotDeliveries(plugin string) []registryDelivery {
+	ids := make([]string, 0, len(r.Slots))
+	for id, s := range r.Slots {
+		if s.Owner == plugin {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	out := make([]registryDelivery, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, r.slotDelivery(id))
+	}
+	return out
+}
+
+// rollbackHello undoes a failed hello for a plugin that was not connected:
+// surface claims and every declaration not registered from its manifest. The
+// manifest declarations, with the contributions and subscriptions other
+// plugins already made to them, stay.
+func (r *publicationRegistry) rollbackHello(plugin string) {
+	for slot, owner := range r.Occupants {
+		if owner == plugin {
+			delete(r.Occupants, slot)
+		}
+	}
+	for id, s := range r.Slots {
+		if s.Owner == plugin && !s.FromManifest {
+			delete(r.Slots, id)
+		}
+	}
+	for _, publications := range []map[string]*namedPublication{r.Hooks, r.Events} {
+		for id, p := range publications {
+			if p.Owner == plugin && !p.FromManifest {
+				delete(publications, id)
+			}
+		}
+	}
+}
+
 // removePlugin drops declarations, occupancy, subscriptions and contributions.
 // Sorted slot/request IDs keep notifications deterministic across map iteration.
 func (r *publicationRegistry) removePlugin(plugin string) []registryDelivery {

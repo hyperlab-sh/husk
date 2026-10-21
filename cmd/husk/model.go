@@ -466,9 +466,9 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Modifiers:       m.modifiers,
 			},
 		})
-		for _, slot := range cp.Info.PublishedSlots {
-			m.deliverPublications([]registryDelivery{m.registry.slotDelivery(slot.ID)})
-		}
+		// Every slot the plugin owns, not just those in its hello: manifest
+		// declarations may have gathered contributions before it connected.
+		m.deliverPublications(m.registry.ownedSlotDeliveries(cp.Info.PluginID))
 		return m, waitForIPC(m.subChan)
 
 	case tea.BlurMsg:
