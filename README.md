@@ -80,4 +80,4 @@ A plugin directory contains a `husk-plugin.json` manifest:
 | `Esc` | Dismiss a modal or leave full-canvas and stage modes |
 | `q`, `ctrl+c` | Quit and stop all plugins |
 
-Colours come from the Charm default palette: ANSI and 256-colour codes rendered by your terminal's own scheme.
+Colours come from the Charm default palette: CharmTone hex values (truecolor, downsampled by Bubble Tea on terminals that lack it), checked for WCAG contrast (4.5:1 for text, 3:1 for borders). Your terminal's own colour scheme no longer affects the chrome.

@@ -142,7 +142,7 @@ A `protocol_error` sent by a plugin, reporting a host message it could not use, 
 
 Frame declarations ride on existing messages: `hello.frames` (per-slot) and the `frame` field on rail items. Both are optional and additive — an older plugin that omits them simply renders as a blank canvas.
 
-`welcome.palette` and `theme_changed.palette` carry generic colour roles only (`canvas`, `surface*`, `border*`, `ink*`, `accent*`, `success`, `warning`, `danger`, `info`). A plugin that needs its own colour set, such as one colour per entity, defines it itself.
+`welcome.palette` and `theme_changed.palette` carry generic colour roles only (`canvas`, `surface*`, `border*`, `ink*`, `accent*`, `success`, `warning`, `danger`, `info`). Values are `#RRGGBB` strings (CharmTone), where earlier hosts sent ANSI/256 indices such as `"63"`; the keys are unchanged, so a plugin that passes them to a terminal-colour API keeps working. A plugin that needs its own colour set, such as one colour per entity, defines it itself.
 
 ## Input routing
 
