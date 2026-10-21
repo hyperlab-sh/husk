@@ -20,54 +20,24 @@ func (m *WorkbenchModel) View() tea.View {
 		view.ReportFocus = true
 		return view
 	}
-	topBar := m.renderTopWorkbenchBar()
-	bottomBar := m.renderBottomKeybindBar()
-
-	var cols []string
-	cols = append(cols, m.renderActivityRailBox())
-
-	if m.activePlacement == huskipc.PlacementFullCanvas {
-		fullBox := m.renderSurface(huskipc.SlotFullCanvas, "②-⑦", "full-canvas")
-		cols = append(cols, fullBox)
-	} else {
-		if m.showSidebar {
-			navBox := m.renderSurface(huskipc.SlotSidebarNavigation, "①", "sidebar-navigation")
-			listBox := m.renderSurface(huskipc.SlotSidebarList, "②③", "sidebar-list")
-			footBox := m.renderSurface(huskipc.SlotSidebarFooter, "④", "sidebar-footer")
-			leftCol := lipgloss.JoinVertical(lipgloss.Left, navBox, listBox, footBox)
-			cols = append(cols, leftCol)
-		}
-
-		if m.activePlacement == huskipc.PlacementStage {
-			stageBox := m.renderSurface(huskipc.SlotWorkspaceStage, "⑤-⑦", "workspace-stage")
-			cols = append(cols, stageBox)
-		} else {
-			hdrBox := m.renderSurface(huskipc.SlotMainHeader, "⑤", "main-header")
-			var stageBox string
-			if m.stageMode == "hotspots" {
-				stageBox = m.renderHotspotArchitectureStage()
-			} else {
-				stageBox = m.renderSurface(huskipc.SlotMainStage, "⑥", "main-stage")
-			}
-			centerCol := lipgloss.JoinVertical(lipgloss.Left, hdrBox, stageBox)
-			cols = append(cols, centerCol)
-
-			if _, ok := m.slotRects[huskipc.SlotSidePanel]; ok {
-				// recomputeLayout narrowed the centre column by surfaceGutter;
-				// fill that gap so the side panel lands on its own rect.
-				blank := strings.Repeat(" ", surfaceGutter)
-				cols = append(cols, strings.Repeat(blank+"\n", lipgloss.Height(centerCol)-1)+blank)
-				rightCol := m.renderSurface(huskipc.SlotSidePanel, "⑦", "side-panel")
-				cols = append(cols, rightCol)
-			}
+	c := newCanvas(m.width, m.height)
+	c.blitBlock(0, 0, m.renderTopWorkbenchBar())
+	// Every surface draws at its own slot rect, lowest slotZ first, so the
+	// geometry hit-testing uses is the geometry drawn. Cells no surface owns
+	// (the gutter beside the side panel) stay blank.
+	order := m.hitOrder()
+	for i := len(order) - 1; i >= 0; i-- {
+		h := order[i]
+		switch {
+		case h.ID == huskipc.SlotActivityRail:
+			c.blitBlock(h.Rect.X, h.Rect.Y, m.renderActivityRailBox())
+		case h.ID == huskipc.SlotMainStage && m.stageMode == "hotspots":
+			m.drawHotspotArchitectureStage(c)
+		default:
+			m.drawSurface(c, h.ID, surfaceCallouts[h.ID], string(h.ID))
 		}
 	}
-
-	body := lipgloss.JoinHorizontal(lipgloss.Top, cols...)
-	baseView := lipgloss.JoinVertical(lipgloss.Left, topBar, body, bottomBar)
-
-	c := newCanvas(m.width, m.height)
-	c.blitBlock(0, 0, baseView)
+	c.blitBlock(0, m.height-1, m.renderBottomKeybindBar())
 	// Overlays are opaque blocks drawn over the base in z order: each replaces
 	// every cell of its box and nothing it leaves open reaches a cell it did
 	// not write.
@@ -87,6 +57,19 @@ func (m *WorkbenchModel) View() tea.View {
 	view.MouseMode = tea.MouseModeAllMotion
 	view.ReportFocus = true
 	return view
+}
+
+// surfaceCallouts are the hotspot badge numbers shown on each surface when
+// hotspots are toggled on ('h').
+var surfaceCallouts = map[huskipc.SlotID]string{
+	huskipc.SlotSidebarNavigation: "①",
+	huskipc.SlotSidebarList:       "②③",
+	huskipc.SlotSidebarFooter:     "④",
+	huskipc.SlotMainHeader:        "⑤",
+	huskipc.SlotMainStage:         "⑥",
+	huskipc.SlotSidePanel:         "⑦",
+	huskipc.SlotWorkspaceStage:    "⑤-⑦",
+	huskipc.SlotFullCanvas:        "②-⑦",
 }
 
 func (m *WorkbenchModel) renderActivityRailBox() string {
@@ -179,8 +162,7 @@ func (m *WorkbenchModel) drawModal(c *canvas) {
 			label = su.Title
 		}
 	}
-	box := m.renderFrame(huskipc.SlotModalSurface, rect, spec, label, rows)
-	c.blitBlock(rect.X, rect.Y, box)
+	m.drawFrame(c, huskipc.SlotModalSurface, rect, spec, label, rows)
 }
 
 func (m *WorkbenchModel) renderTopWorkbenchBar() string {
@@ -319,14 +301,14 @@ func (m *WorkbenchModel) renderBottomKeybindBar() string {
 		Render(fitLineWidth(line, m.width))
 }
 
-// renderSurface renders a slot's region: plugin content (or blank canvas)
-// wrapped in the frame the occupying plugin declared. Husk adds no chrome of
-// its own; calloutNum/slotName only appear as a label overlay when hotspot
-// badges are toggled on ('h').
-func (m *WorkbenchModel) renderSurface(slotID huskipc.SlotID, calloutNum, slotName string) string {
+// drawSurface draws a slot's region at its rect: plugin content (or blank
+// canvas) wrapped in the frame the occupying plugin declared. Husk adds no
+// chrome of its own; calloutNum/slotName only appear as a label overlay when
+// hotspot badges are toggled on ('h').
+func (m *WorkbenchModel) drawSurface(c *canvas, slotID huskipc.SlotID, calloutNum, slotName string) {
 	rect, ok := m.slotRects[slotID]
 	if !ok {
-		return ""
+		return
 	}
 	su := m.slotUpdates[slotID]
 	spec := m.frameFor(slotID)
@@ -345,7 +327,7 @@ func (m *WorkbenchModel) renderSurface(slotID huskipc.SlotID, calloutNum, slotNa
 			Render(calloutNum + " " + slotName)
 		lines[0] = overlayLabel(lines[0], hot)
 	}
-	return m.renderFrame(slotID, rect, spec, label, lines)
+	m.drawFrame(c, slotID, rect, spec, label, lines)
 }
 
 // surfaceContentLines pads/truncates slot_update lines to a surface's inner
@@ -383,10 +365,16 @@ func (m *WorkbenchModel) closeStyle() lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.InkMuted)).Bold(true)
 }
 
-// renderFrame draws plugin content wrapped in the declared frame chrome.
-// All Husk-drawn surface chrome lives here. Without a border, label and close
-// glyph are overlaid on the first content row (no geometry change).
-func (m *WorkbenchModel) renderFrame(slotID huskipc.SlotID, rect SlotRect, spec frame.Spec, label string, lines []string) string {
+// drawFrame draws plugin content wrapped in the declared frame chrome at
+// rect. All Husk-drawn surface chrome lives here.
+func (m *WorkbenchModel) drawFrame(c *canvas, slotID huskipc.SlotID, rect SlotRect, spec frame.Spec, label string, lines []string) {
+	c.blitBlock(rect.X, rect.Y, m.frameString(slotID, rect, spec, label, lines))
+}
+
+// frameString renders content wrapped in the frame chrome. Without a
+// border, label and close glyph are overlaid on the first content row (no
+// geometry change).
+func (m *WorkbenchModel) frameString(slotID huskipc.SlotID, rect SlotRect, spec frame.Spec, label string, lines []string) string {
 	if !spec.Enabled() {
 		return strings.Join(lines, "\n")
 	}
@@ -534,7 +522,9 @@ func (m *WorkbenchModel) dividerEdgeStyles(slotID huskipc.SlotID) (left, right, 
 	return
 }
 
-func (m *WorkbenchModel) renderHotspotArchitectureStage() string {
+// drawHotspotArchitectureStage draws Husk's slot architecture explorer over
+// the main-stage slot rect.
+func (m *WorkbenchModel) drawHotspotArchitectureStage(c *canvas) {
 	rect := m.slotRects[huskipc.SlotMainStage]
 	// The architecture explorer is Husk's own UI and always draws its own core
 	// frame: derive a fresh inner rect from the OUTER slot rect so the explorer
@@ -607,7 +597,7 @@ func (m *WorkbenchModel) renderHotspotArchitectureStage() string {
 	}
 	// The explorer renders through its own core rect, not the plugin's.
 	rows := m.surfaceContentLines(explorer, coreW, coreH)
-	return m.renderFrame(huskipc.SlotMainStage, coreRect, coreFrame, coreFrame.Label, rows)
+	m.drawFrame(c, huskipc.SlotMainStage, coreRect, coreFrame, coreFrame.Label, rows)
 }
 
 // drawToast draws the active toast near the top-right corner.

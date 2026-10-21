@@ -147,7 +147,7 @@ func TestReviewDisconnectRecomputesFramelessGeometry(t *testing.T) {
 	if after.InnerW != after.Width || after.InnerH != after.Height || after.InnerX != after.X || after.InnerY != after.Y {
 		t.Fatalf("stale frame geometry after exit: %+v", after)
 	}
-	rows := strings.Split(ansi.Strip(m.renderSurface(huskipc.SlotMainStage, "", "")), "\n")
+	rows := drawnRect(t, after, func(c *canvas) { m.drawSurface(c, huskipc.SlotMainStage, "", "") })
 	if len(rows) != after.Height || ansi.StringWidth(rows[0]) != after.Width {
 		t.Fatal("blank surface shrank after framed owner exited")
 	}

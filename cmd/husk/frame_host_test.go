@@ -150,8 +150,9 @@ func TestRenderFrameBorderlessWidthInvariant(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			rect := SlotRect{X: 0, Y: 0, Width: tc.w, Height: 3, InnerX: 0, InnerY: 0, InnerW: tc.w, InnerH: 3}
 			lines := m.surfaceContentLines(nil, tc.w, 3)
-			out := m.renderFrame(huskipc.SlotModalSurface, rect, frame.Spec{Label: tc.label, Close: tc.close}, tc.label, lines)
-			rows := strings.Split(out, "\n")
+			rows := drawnRect(t, rect, func(c *canvas) {
+				m.drawFrame(c, huskipc.SlotModalSurface, rect, frame.Spec{Label: tc.label, Close: tc.close}, tc.label, lines)
+			})
 			if len(rows) != 3 {
 				t.Fatalf("row count = %d, want 3", len(rows))
 			}
@@ -176,8 +177,9 @@ func TestRenderFrameBorderedNarrowClose(t *testing.T) {
 	m := newWorkbenchModel("", nil, "")
 	rect := SlotRect{X: 0, Y: 0, Width: 3, Height: 3, InnerX: 1, InnerY: 1, InnerW: 1, InnerH: 1}
 	lines := m.surfaceContentLines(nil, 1, 1)
-	out := m.renderFrame(huskipc.SlotMainStage, rect, frame.Spec{Border: true, Label: "Lab", Close: true}, "Lab", lines)
-	rows := strings.Split(out, "\n")
+	rows := drawnRect(t, rect, func(c *canvas) {
+		m.drawFrame(c, huskipc.SlotMainStage, rect, frame.Spec{Border: true, Label: "Lab", Close: true}, "Lab", lines)
+	})
 	if len(rows) != 3 {
 		t.Fatalf("row count = %d, want 3", len(rows))
 	}
@@ -200,7 +202,7 @@ func TestExplorerFillsMainStageSlot(t *testing.T) {
 	check := func(t *testing.T, m *WorkbenchModel) {
 		t.Helper()
 		rect := m.slotRects[huskipc.SlotMainStage]
-		rows := strings.Split(m.renderHotspotArchitectureStage(), "\n")
+		rows := drawnRect(t, rect, m.drawHotspotArchitectureStage)
 		if len(rows) != rect.Height {
 			t.Fatalf("explorer rows = %d, want slot height %d", len(rows), rect.Height)
 		}
