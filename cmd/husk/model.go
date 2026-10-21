@@ -6,7 +6,6 @@ import (
 	"io"
 	"net"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -98,7 +97,9 @@ type WorkbenchModel struct {
 	socketPath  string
 	listener    net.Listener
 	subChan     chan tea.Msg
-	childCmds   []*exec.Cmd
+	procs       []*pluginProcess // launched plugin processes (see lifecycle.go)
+	quit        chan struct{}    // closed when cleanup starts
+	stopGrace   time.Duration    // SIGTERM-to-SIGKILL grace on shutdown
 	plugins     map[string]*ConnectedPlugin
 	railItems   []huskipc.RailItemSpec
 	slotUpdates map[huskipc.SlotID]*huskipc.SlotUpdatePayload
@@ -188,6 +189,8 @@ func newWorkbenchModel(socketPath string, listener net.Listener, cwd string) *Wo
 		socketPath:   socketPath,
 		listener:     listener,
 		subChan:      make(chan tea.Msg, 256),
+		quit:         make(chan struct{}),
+		stopGrace:    pluginStopGrace,
 		plugins:      make(map[string]*ConnectedPlugin),
 		slotUpdates:  make(map[huskipc.SlotID]*huskipc.SlotUpdatePayload),
 		slotRects:    make(map[huskipc.SlotID]SlotRect),
@@ -358,6 +361,10 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.recomputeLayout()
 		m.broadcastSlotResize()
 		return m, nil
+
+	case pluginExitedMsg, pluginLaunchFailedMsg, hostNoticeMsg:
+		toast := m.handleLifecycleMsg(msg)
+		return m, tea.Batch(waitForIPC(m.subChan), toast)
 
 	case pluginDisconnectedMsg:
 		if m.plugins[msg.plugin.Info.PluginID] != msg.plugin {
