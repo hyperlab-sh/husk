@@ -28,7 +28,7 @@ func envelopes(t *testing.T, buf *bytes.Buffer) []huskipc.Envelope {
 }
 
 func TestPublishedHelloAtomicityAndLegacySlots(t *testing.T) {
-	m := newWorkbenchModel("", nil)
+	m := newWorkbenchModel("", nil, t.TempDir())
 	a, buf := addTestPlugin(m, huskipc.HelloPayload{PluginID: "a", Slots: []huskipc.SlotID{huskipc.SlotSidebarList}, PublishedSlots: []huskipc.SlotDeclarePayload{{ID: "a.action", Kind: "inline"}}, Hooks: []huskipc.HookDeclarePayload{{ID: "a.hook"}}, Events: []huskipc.EventDeclarePayload{{ID: "a.event"}}})
 	if m.plugins["a"] != a || m.slotOwners[huskipc.SlotSidebarList] != "a" || m.registry.Slots["a.action"] == nil || m.registry.Hooks["a.hook"] == nil || m.registry.Events["a.event"] == nil {
 		t.Fatal("hello did not register all publications")
@@ -63,7 +63,7 @@ func TestPublishedHelloAtomicityAndLegacySlots(t *testing.T) {
 }
 
 func TestPublishedClickRoutesToContributor(t *testing.T) {
-	m := newWorkbenchModel("", nil)
+	m := newWorkbenchModel("", nil, t.TempDir())
 	_, a := addTestPlugin(m, huskipc.HelloPayload{PluginID: "a", Slots: []huskipc.SlotID{huskipc.SlotMainStage}, PublishedSlots: []huskipc.SlotDeclarePayload{{ID: "a.action", Kind: "inline"}}})
 	b, bOut := addTestPlugin(m, huskipc.HelloPayload{PluginID: "b"})
 	m.Update(ipcEventMsg{pluginID: "b", env: huskipc.Envelope{Type: "slot_contribute", SlotContribute: &huskipc.SlotContributePayload{SlotID: "a.action", ID: "b.inspect", Content: "[Inspect]", OnClick: "b.inspect"}}})
@@ -107,7 +107,7 @@ func TestPublishedClickRoutesToContributor(t *testing.T) {
 func TestPublishedRegionAndModalClicks(t *testing.T) {
 	for _, surface := range []huskipc.SlotID{huskipc.SlotMainStage, huskipc.SlotModalSurface} {
 		t.Run(string(surface), func(t *testing.T) {
-			m := newWorkbenchModel("", nil)
+			m := newWorkbenchModel("", nil, t.TempDir())
 			_, _ = addTestPlugin(m, huskipc.HelloPayload{PluginID: "a", Slots: []huskipc.SlotID{surface}, PublishedSlots: []huskipc.SlotDeclarePayload{{ID: "a.region", Kind: "region", Rect: &huskipc.PublishedRect{Surface: surface, X: 2, Y: 1, Width: 6, Height: 2}}}})
 			_, b := addTestPlugin(m, huskipc.HelloPayload{PluginID: "b"})
 			m.Update(ipcEventMsg{pluginID: "b", env: huskipc.Envelope{Type: "slot_contribute", SlotContribute: &huskipc.SlotContributePayload{SlotID: "a.region", ID: "b.button", Content: "[Click]", OnClick: "b.click"}}})
@@ -140,7 +140,7 @@ func TestPublishedRegionAndModalClicks(t *testing.T) {
 }
 
 func TestPublishedRoutingAndMalformedPayloads(t *testing.T) {
-	m := newWorkbenchModel("", nil)
+	m := newWorkbenchModel("", nil, t.TempDir())
 	_, a := addTestPlugin(m, huskipc.HelloPayload{PluginID: "a"})
 	_, b := addTestPlugin(m, huskipc.HelloPayload{PluginID: "b"})
 	send := func(plugin string, e huskipc.Envelope) { m.Update(ipcEventMsg{pluginID: plugin, env: e}) }
@@ -173,7 +173,7 @@ func TestPublishedRoutingAndMalformedPayloads(t *testing.T) {
 }
 
 func TestPublishedStreamEOFCleanup(t *testing.T) {
-	m := newWorkbenchModel("", nil)
+	m := newWorkbenchModel("", nil, t.TempDir())
 	var wire bytes.Buffer
 	writer := huskipc.NewConnWriter(&wire)
 	_ = writer.Send(huskipc.Envelope{Type: "slot_declare", SlotDeclare: &huskipc.SlotDeclarePayload{ID: "anonymous.before", Kind: "inline"}})
@@ -198,7 +198,7 @@ func TestPublishedStreamEOFCleanup(t *testing.T) {
 }
 
 func TestPublishedUnauthorizedSurfaceUpdate(t *testing.T) {
-	m := newWorkbenchModel("", nil)
+	m := newWorkbenchModel("", nil, t.TempDir())
 	_, _ = addTestPlugin(m, huskipc.HelloPayload{PluginID: "a", Slots: []huskipc.SlotID{huskipc.SlotMainStage}})
 	_, b := addTestPlugin(m, huskipc.HelloPayload{PluginID: "b"})
 	b.Reset()
