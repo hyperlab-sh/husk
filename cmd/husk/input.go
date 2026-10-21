@@ -115,17 +115,16 @@ func (m *WorkbenchModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	if m.activeModalPlugin != "" {
+	if m.modalOwner().Open() {
 		closeKey := key == "esc"
-		if ri, ok := m.railItemByID(m.activeModalRailID); ok && ri.Shortcut != "" && ri.Shortcut == key {
+		if ri, ok := m.railItemByID(m.modalOwner().RailID); ok && ri.Shortcut != "" && ri.Shortcut == key {
 			closeKey = true // the item's own shortcut toggles it closed
 		}
 		if closeKey {
-			m.activeModalRailID = ""
-			m.activeModalPlugin = ""
+			m.closeModal()
 			return m, nil
 		}
-		if cp, ok := m.plugins[m.activeModalPlugin]; ok {
+		if cp, ok := m.plugins[m.modalOwner().PluginID]; ok {
 			_ = cp.Writer.Send(huskipc.Envelope{
 				Type: "slot_key",
 				SlotKey: &huskipc.SlotKeyPayload{
@@ -256,7 +255,7 @@ func (m *WorkbenchModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // or, for the surface opened by the active full-canvas/stage rail item, the
 // plugin that declared that rail item.
 func (m *WorkbenchModel) keyOwner(slot huskipc.SlotID) string {
-	if owner := m.slotOwners[slot]; owner != "" {
+	if owner := m.surfaceOwner(slot); owner != "" {
 		return owner
 	}
 	if ri, ok := m.activeRailItem(); ok {
@@ -393,8 +392,7 @@ func (m *WorkbenchModel) handleMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if isLeftClick {
 		if slot, ok := m.closeHitAt(msg.X, msg.Y); ok {
 			if slot == huskipc.SlotModalSurface {
-				m.activeModalRailID = ""
-				m.activeModalPlugin = ""
+				m.closeModal()
 			} else {
 				m.activateHomeWorkbench()
 			}
@@ -402,7 +400,7 @@ func (m *WorkbenchModel) handleMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	if m.activeModalRailID != "" && m.handlePublishedModalMouse(msg.X, msg.Y, isLeftClick, isWheelDown, isWheelUp) {
+	if m.modalOwner().Open() && m.handlePublishedModalMouse(msg.X, msg.Y, isLeftClick, isWheelDown, isWheelUp) {
 		return m, nil
 	}
 
@@ -441,7 +439,8 @@ func (m *WorkbenchModel) handleMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	for slotID, rect := range m.slotRects {
+	for _, hit := range m.hitOrder() {
+		slotID, rect := hit.ID, hit.Rect
 		if slotID == huskipc.SlotActivityRail {
 			continue
 		}
@@ -467,7 +466,7 @@ func (m *WorkbenchModel) handleMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 				btn = "wheel_up"
 			}
 
-			ownerID := m.slotOwners[slotID]
+			ownerID := m.surfaceOwner(slotID)
 			if cp, ok := m.plugins[ownerID]; ok {
 				_ = cp.Writer.Send(huskipc.Envelope{
 					Type:      "slot_mouse",
@@ -487,7 +486,7 @@ func (m *WorkbenchModel) closeHitAt(x, y int) (huskipc.SlotID, bool) {
 	// While a modal is open it is the topmost surface: clicks never reach a
 	// close button on the underlying canvas/stage (matching esc, which only
 	// dismisses the modal).
-	if m.activeModalPlugin != "" {
+	if m.modalOwner().Open() {
 		spec := m.frameFor(huskipc.SlotModalSurface)
 		if !spec.Close {
 			return "", false
@@ -506,7 +505,7 @@ func (m *WorkbenchModel) closeHitAt(x, y int) (huskipc.SlotID, bool) {
 		var rect SlotRect
 		switch slot {
 		case huskipc.SlotModalSurface:
-			if m.activeModalPlugin == "" {
+			if !m.modalOwner().Open() {
 				continue
 			}
 			rect = m.modalRect

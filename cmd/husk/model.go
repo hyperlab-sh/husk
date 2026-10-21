@@ -59,7 +59,6 @@ type WorkbenchModel struct {
 	plugins     map[string]*ConnectedPlugin
 	railItems   []huskipc.RailItemSpec
 	slotUpdates map[huskipc.SlotID]*huskipc.SlotUpdatePayload
-	slotOwners  map[huskipc.SlotID]string
 	slotRects   map[huskipc.SlotID]SlotRect
 	modalRect   SlotRect
 	demoFrame   bool
@@ -91,10 +90,9 @@ type WorkbenchModel struct {
 	pollMods   func() (huskipc.ModifierState, bool)
 	heldKeys   map[string]time.Time
 
-	activeRailID      string // "" (Home), or rail item ID
-	activePlacement   huskipc.RailPlacement
-	activeModalRailID string
-	activeModalPlugin string
+	activeRailID    string // "" (Home), or rail item ID
+	activePlacement huskipc.RailPlacement
+	modal           modalState // the one source of truth for the open modal; use modalOwner/openModal/closeModal
 
 	showHotspots   bool
 	stageMode      string // "plugin" or "hotspots"
@@ -149,7 +147,6 @@ func newWorkbenchModel(socketPath string, listener net.Listener, cwd string) *Wo
 		subChan:      make(chan tea.Msg, 256),
 		plugins:      make(map[string]*ConnectedPlugin),
 		slotUpdates:  make(map[huskipc.SlotID]*huskipc.SlotUpdatePayload),
-		slotOwners:   registry.Occupants,
 		slotRects:    make(map[huskipc.SlotID]SlotRect),
 		wsContext:    huskipc.WorkspaceContextPayload{WorkspaceID: "demo", WorkspaceLabel: "Demo", Cwd: cwd},
 		width:        144,
@@ -423,8 +420,7 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, waitForIPC(m.subChan)
 		}
 		if msg.env.CloseModal {
-			m.activeModalRailID = ""
-			m.activeModalPlugin = ""
+			m.closeModal()
 			if m.activePlacement == huskipc.PlacementFullCanvas {
 				m.activateHomeWorkbench()
 			}
@@ -432,7 +428,7 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.env.Type {
 		case "slot_update":
 			if su := msg.env.SlotUpdate; su != nil {
-				if m.slotOwners[su.Slot] != msg.pluginID {
+				if m.surfaceOwner(su.Slot) != msg.pluginID {
 					m.rejectPublication(m.plugins[msg.pluginID], "slot_update", fmt.Errorf("surface is not held by this plugin"))
 					break
 				}
@@ -510,8 +506,7 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *WorkbenchModel) activateHomeWorkbench() {
 	m.activeRailID = ""
 	m.activePlacement = ""
-	m.activeModalRailID = ""
-	m.activeModalPlugin = ""
+	m.closeModal()
 	m.stageMode = "plugin"
 	m.focusedSlot = huskipc.SlotSidebarList
 	m.recomputeLayout()
@@ -526,13 +521,11 @@ func (m *WorkbenchModel) activateRailItem(ri huskipc.RailItemSpec) {
 
 	switch ri.Placement {
 	case huskipc.PlacementModal:
-		if m.activeModalRailID == ri.ID {
-			m.activeModalRailID = ""
-			m.activeModalPlugin = ""
+		if m.modalOwner().RailID == ri.ID {
+			m.closeModal()
 			return
 		}
-		m.activeModalRailID = ri.ID
-		m.activeModalPlugin = ri.PluginID
+		m.openModal(ri.PluginID, ri.ID)
 		m.recomputeLayout()
 		rect := m.modalRect
 		_ = cp.Writer.Send(huskipc.Envelope{
@@ -552,8 +545,7 @@ func (m *WorkbenchModel) activateRailItem(ri huskipc.RailItemSpec) {
 			m.activateHomeWorkbench()
 			return
 		}
-		m.activeModalRailID = ""
-		m.activeModalPlugin = ""
+		m.closeModal()
 		m.activeRailID = ri.ID
 		m.activePlacement = huskipc.PlacementFullCanvas
 		m.focusedSlot = huskipc.SlotFullCanvas
@@ -576,8 +568,7 @@ func (m *WorkbenchModel) activateRailItem(ri huskipc.RailItemSpec) {
 			m.activateHomeWorkbench()
 			return
 		}
-		m.activeModalRailID = ""
-		m.activeModalPlugin = ""
+		m.closeModal()
 		m.activeRailID = ri.ID
 		m.activePlacement = huskipc.PlacementStage
 		if !m.showSidebar {
@@ -598,4 +589,39 @@ func (m *WorkbenchModel) activateRailItem(ri huskipc.RailItemSpec) {
 			},
 		})
 	}
+}
+
+// modalState identifies the open modal: the plugin that owns it and the rail
+// item that opened it. The zero value means no modal is open.
+type modalState struct {
+	PluginID string
+	RailID   string
+}
+
+// Open reports whether a modal is showing.
+func (s modalState) Open() bool { return s.PluginID != "" || s.RailID != "" }
+
+// modalOwner is the single accessor for the open modal's owner. Everything that
+// needs to know whether a modal is up, who owns it or which rail item opened it
+// reads it here; nothing else keeps a copy.
+func (m *WorkbenchModel) modalOwner() modalState { return m.modal }
+
+// openModal makes pluginID's rail item railID the open modal.
+func (m *WorkbenchModel) openModal(pluginID, railID string) {
+	m.modal = modalState{PluginID: pluginID, RailID: railID}
+}
+
+// closeModal dismisses the open modal, if any.
+func (m *WorkbenchModel) closeModal() { m.modal = modalState{} }
+
+// surfaceOwner is the plugin that owns slot right now. The modal surface is
+// owned by the open modal's plugin; every other surface by its registry
+// occupant ("" when the host draws it).
+func (m *WorkbenchModel) surfaceOwner(slot huskipc.SlotID) string {
+	if slot == huskipc.SlotModalSurface {
+		if mo := m.modalOwner(); mo.Open() {
+			return mo.PluginID
+		}
+	}
+	return m.registry.Occupants[slot]
 }

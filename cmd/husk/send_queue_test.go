@@ -114,13 +114,13 @@ func TestWriteTimeoutDisconnectsAndSurfacesReason(t *testing.T) {
 	m.writeTimeout = 50 * time.Millisecond
 	peer, done := connectPipePlugin(t, m, slowHello)
 	defer peer.Close()
-	if m.slotOwners[huskipc.SlotMainStage] != "slow" {
+	if m.surfaceOwner(huskipc.SlotMainStage) != "slow" {
 		t.Fatal("plugin did not claim main-stage")
 	}
 
 	d := nextDisconnect(t, m)
 	m.Update(d)
-	if len(m.plugins) != 0 || m.slotOwners[huskipc.SlotMainStage] != "" {
+	if len(m.plugins) != 0 || m.surfaceOwner(huskipc.SlotMainStage) != "" {
 		t.Fatal("timed-out plugin not removed")
 	}
 	const reason = "stopped reading: write timed out after 50ms"

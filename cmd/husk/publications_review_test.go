@@ -173,7 +173,7 @@ func TestReviewPassiveContributionPreservesPublisherMouse(t *testing.T) {
 			m.Update(ipcEventMsg{pluginID: "b", env: huskipc.Envelope{Type: "slot_contribute", SlotContribute: &huskipc.SlotContributePayload{SlotID: "a.status", ID: "b.status", Content: "[Ready]"}}})
 			m.Update(ipcEventMsg{pluginID: "a", env: huskipc.Envelope{Type: "slot_update", SlotUpdate: &huskipc.SlotUpdatePayload{Slot: surface, Lines: []string{"", "agent " + anchor("a.status", "one")}, HitTargets: []huskipc.RowHitTarget{{Line: 1, ID: "one", Kind: "row", Action: "select", Payload: map[string]string{"key": "value"}}}}}})
 			if surface == huskipc.SlotModalSurface {
-				m.activeModalPlugin, m.activeModalRailID = "a", "demo"
+				m.openModal("a", "demo")
 				m.recomputeLayout()
 			}
 			r := m.slotRects[surface]
@@ -215,7 +215,7 @@ func TestReviewModalOrdinaryRowsPreserveMouseMetadata(t *testing.T) {
 			m := newWorkbenchModel("", nil, t.TempDir())
 			_, a := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "a", Slots: []huskipc.SlotID{huskipc.SlotModalSurface}, Frames: map[huskipc.SlotID]frame.Spec{huskipc.SlotModalSurface: {Border: true}}})
 			m.Update(ipcEventMsg{pluginID: "a", env: huskipc.Envelope{Type: "slot_update", SlotUpdate: &huskipc.SlotUpdatePayload{Slot: huskipc.SlotModalSurface, Lines: []string{"", "", "ordinary publisher row"}, HitTargets: []huskipc.RowHitTarget{{Line: 2, ID: "one", Kind: "row", Action: "select", Payload: map[string]string{"key": "value"}}}}}})
-			m.activeModalPlugin, m.activeModalRailID = "a", "demo"
+			m.openModal("a", "demo")
 			m.recomputeLayout()
 			r := m.modalRect
 			a.Reset()
@@ -250,7 +250,7 @@ func TestReviewRegionRendersBeforeSlotUpdate(t *testing.T) {
 				_, b := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "b"})
 				m.Update(ipcEventMsg{pluginID: "b", env: huskipc.Envelope{Type: "slot_contribute", SlotContribute: &huskipc.SlotContributePayload{SlotID: "a.region", ID: "b.button", Content: "[Action]", OnClick: "b.action"}}})
 				if surface == huskipc.SlotModalSurface {
-					m.activeModalPlugin, m.activeModalRailID = "a", "demo"
+					m.openModal("a", "demo")
 					m.recomputeLayout()
 				}
 				if m.slotUpdates[surface] != nil {

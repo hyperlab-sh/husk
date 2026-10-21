@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
@@ -159,8 +160,8 @@ func (m *WorkbenchModel) frameFor(slotID huskipc.SlotID) frame.Spec {
 	railID := ""
 	switch slotID {
 	case huskipc.SlotModalSurface:
-		owner = m.activeModalPlugin
-		railID = m.activeModalRailID
+		owner = m.modalOwner().PluginID
+		railID = m.modalOwner().RailID
 	case huskipc.SlotFullCanvas, huskipc.SlotWorkspaceStage:
 		railID = m.activeRailID
 	}
@@ -170,7 +171,7 @@ func (m *WorkbenchModel) frameFor(slotID huskipc.SlotID) frame.Spec {
 		}
 	}
 	if owner == "" {
-		owner = m.slotOwners[slotID]
+		owner = m.surfaceOwner(slotID)
 	}
 	if owner != "" {
 		if cp, ok := m.plugins[owner]; ok {
@@ -185,6 +186,45 @@ func (m *WorkbenchModel) frameFor(slotID huskipc.SlotID) frame.Spec {
 		}
 	}
 	return frame.Spec{}
+}
+
+// slotHit is one laid-out surface in hit-test order.
+type slotHit struct {
+	ID   huskipc.SlotID
+	Rect SlotRect
+}
+
+// slotZ is the explicit stacking order of laid-out surfaces; higher is drawn
+// above and hit first. Placement surfaces sit above the regions they replace,
+// which sit above the activity rail.
+func slotZ(id huskipc.SlotID) int {
+	switch id {
+	case huskipc.SlotFullCanvas:
+		return 30
+	case huskipc.SlotWorkspaceStage:
+		return 20
+	case huskipc.SlotActivityRail:
+		return 0
+	default:
+		return 10
+	}
+}
+
+// hitOrder lists the laid-out surfaces topmost first: descending slotZ, ties
+// broken by slot ID, so overlapping rects always resolve to the same surface.
+func (m *WorkbenchModel) hitOrder() []slotHit {
+	hits := make([]slotHit, 0, len(m.slotRects))
+	for id, r := range m.slotRects {
+		hits = append(hits, slotHit{ID: id, Rect: r})
+	}
+	sort.Slice(hits, func(i, j int) bool {
+		zi, zj := slotZ(hits[i].ID), slotZ(hits[j].ID)
+		if zi != zj {
+			return zi > zj
+		}
+		return hits[i].ID < hits[j].ID
+	})
+	return hits
 }
 
 // railItemByID finds a registered rail item by ID.
@@ -217,7 +257,7 @@ func (m *WorkbenchModel) currentSlotSizes() map[huskipc.SlotID]huskipc.SlotSize 
 	// A visible modal is a surface too: report its (frame-aware) inner size so
 	// slot_resize after a terminal resize reaches the modal plugin. Absent
 	// while no modal is open.
-	if m.activeModalPlugin != "" {
+	if m.modalOwner().Open() {
 		out[huskipc.SlotModalSurface] = huskipc.SlotSize{
 			Width:   m.modalRect.InnerW,
 			Height:  m.modalRect.InnerH,

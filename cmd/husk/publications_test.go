@@ -32,7 +32,7 @@ func envelopes(t *testing.T, buf *bytes.Buffer) []huskipc.Envelope {
 func TestPublishedHelloAtomicityAndLegacySlots(t *testing.T) {
 	m := newWorkbenchModel("", nil, t.TempDir())
 	a, buf := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "a", Slots: []huskipc.SlotID{huskipc.SlotSidebarList}, PublishedSlots: []huskipc.SlotDeclarePayload{{ID: "a.action", Kind: "inline"}}, Hooks: []huskipc.HookDeclarePayload{{ID: "a.hook"}}, Events: []huskipc.EventDeclarePayload{{ID: "a.event"}}})
-	if m.plugins["a"] != a || m.slotOwners[huskipc.SlotSidebarList] != "a" || m.registry.Slots["a.action"] == nil || m.registry.Hooks["a.hook"] == nil || m.registry.Events["a.event"] == nil {
+	if m.plugins["a"] != a || m.surfaceOwner(huskipc.SlotSidebarList) != "a" || m.registry.Slots["a.action"] == nil || m.registry.Hooks["a.hook"] == nil || m.registry.Events["a.event"] == nil {
 		t.Fatal("hello did not register all publications")
 	}
 	msgs := envelopes(t, buf)
@@ -40,7 +40,7 @@ func TestPublishedHelloAtomicityAndLegacySlots(t *testing.T) {
 		t.Fatalf("bad welcome/initial contributions: %+v", msgs)
 	}
 	_, bad := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "b", Slots: []huskipc.SlotID{huskipc.SlotMainStage}, PublishedSlots: []huskipc.SlotDeclarePayload{{ID: "b.ok", Kind: "inline"}, {ID: "a.foreign", Kind: "inline"}}})
-	if m.plugins["b"] != nil || m.slotOwners[huskipc.SlotMainStage] != "" || m.registry.Slots["b.ok"] != nil {
+	if m.plugins["b"] != nil || m.surfaceOwner(huskipc.SlotMainStage) != "" || m.registry.Slots["b.ok"] != nil {
 		t.Fatal("failed hello was not rolled back")
 	}
 	if messages := envelopes(t, bad); len(messages) != 1 || messages[0].Type != "protocol_error" {
@@ -157,7 +157,7 @@ func TestPublishedRegionAndModalClicks(t *testing.T) {
 				}
 				m.Update(ipcEventMsg{pluginID: "a", env: huskipc.Envelope{Type: "slot_update", SlotUpdate: &huskipc.SlotUpdatePayload{Slot: surface, Lines: []string{"publisher", "", "", "agent " + anchor("a.inline", "agent-1")}}}})
 				if surface == huskipc.SlotModalSurface {
-					m.activeModalRailID, m.activeModalPlugin = "demo", "a"
+					m.openModal("a", "demo")
 					m.recomputeLayout()
 				}
 				rect := m.slotRects[surface]
@@ -202,7 +202,7 @@ func TestPublishedRegionAndModalClicks(t *testing.T) {
 						x--
 					}
 					m.Update(tea.MouseClickMsg{X: x, Y: rect.Y, Button: tea.MouseLeft})
-					if m.activeModalPlugin != "" || m.activeModalRailID != "" {
+					if m.modalOwner().Open() {
 						t.Fatal("contribution routing swallowed frame close")
 					}
 				}
@@ -217,7 +217,7 @@ func TestPublishedBorderlessFrameOccludesContribution(t *testing.T) {
 	_, b := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "b"})
 	m.Update(ipcEventMsg{pluginID: "b", env: huskipc.Envelope{Type: "slot_contribute", SlotContribute: &huskipc.SlotContributePayload{SlotID: "a.inline", ID: "b.button", Content: strings.Repeat("X", 100), OnClick: "b.click"}}})
 	m.Update(ipcEventMsg{pluginID: "a", env: huskipc.Envelope{Type: "slot_update", SlotUpdate: &huskipc.SlotUpdatePayload{Slot: huskipc.SlotModalSurface, Title: "Panel", Lines: []string{anchor("a.inline", "one")}}}})
-	m.activeModalPlugin, m.activeModalRailID = "a", "demo"
+	m.openModal("a", "demo")
 	m.recomputeLayout()
 	b.Reset()
 	r := m.modalRect
@@ -289,7 +289,7 @@ func TestPublishedStreamEOFCleanup(t *testing.T) {
 		t.Fatal("live stream not applied")
 	}
 	m.Update(<-m.subChan)
-	if len(m.plugins) != 0 || len(m.slotUpdates) != 0 || len(m.slotOwners) != 0 || m.registry.Slots["a.runtime"] != nil {
+	if len(m.plugins) != 0 || len(m.slotUpdates) != 0 || len(m.registry.Occupants) != 0 || m.registry.Slots["a.runtime"] != nil {
 		t.Fatal("EOF did not clean up stream")
 	}
 }

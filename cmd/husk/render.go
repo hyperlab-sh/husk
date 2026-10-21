@@ -62,7 +62,7 @@ func (m *WorkbenchModel) View() tea.View {
 	body := lipgloss.JoinHorizontal(lipgloss.Top, cols...)
 	baseView := lipgloss.JoinVertical(lipgloss.Left, topBar, body, bottomBar)
 
-	if m.activeModalRailID != "" {
+	if m.modalOwner().Open() {
 		baseView = m.overlayModalPlugin(baseView)
 	}
 	if m.activeToast != nil {
@@ -181,12 +181,12 @@ func (m *WorkbenchModel) renderTopWorkbenchBar() string {
 	modeLabel := " 3-Column Workbench "
 	switch m.activePlacement {
 	case huskipc.PlacementFullCanvas:
-		modeLabel = "  Full-Canvas Mode (Case 2) "
+		modeLabel = "  Full-Canvas Mode "
 	case huskipc.PlacementStage:
-		modeLabel = "  Stage-minus-Sidebar Mode (Case 3) "
+		modeLabel = "  Stage-minus-Sidebar Mode "
 	}
-	if m.activeModalRailID != "" {
-		modeLabel = "  Modal Overlay Active (Case 1) "
+	if m.modalOwner().Open() {
+		modeLabel = "  Modal Overlay Active "
 	}
 
 	sub := lipgloss.NewStyle().
@@ -552,7 +552,7 @@ func (m *WorkbenchModel) renderHotspotArchitectureStage() string {
 
 	for idx, slot := range huskipc.AllSlots {
 		selected := idx == m.hotspotCursor
-		owner := m.slotOwners[slot.ID]
+		owner := m.surfaceOwner(slot.ID)
 		if owner == "" {
 			owner = "husk.core (built-in)"
 		}

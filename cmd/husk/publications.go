@@ -144,7 +144,7 @@ func (m *WorkbenchModel) disconnectPublications(cp *ConnectedPlugin) {
 		return
 	} // stale EOF cannot remove a newer connection
 	delete(m.plugins, id)
-	for slot, owner := range m.slotOwners {
+	for slot, owner := range m.registry.Occupants {
 		if owner == id {
 			delete(m.slotUpdates, slot)
 		}
@@ -157,9 +157,8 @@ func (m *WorkbenchModel) disconnectPublications(cp *ConnectedPlugin) {
 		}
 	}
 	m.railItems = kept
-	if m.activeModalPlugin == id {
-		m.activeModalPlugin = ""
-		m.activeModalRailID = ""
+	if m.modalOwner().PluginID == id {
+		m.closeModal()
 	}
 	activeExists := false
 	for _, item := range m.railItems {
@@ -183,13 +182,14 @@ func (m *WorkbenchModel) publishedContent(surface huskipc.SlotID, width, height 
 	if su := m.slotUpdates[surface]; su != nil {
 		source = su.Lines
 	}
-	return m.registry.renderPublished(surface, m.slotOwners[surface], source, width, height)
+	return m.registry.renderPublished(surface, m.surfaceOwner(surface), source, width, height)
 }
 
 // clickContributionAt lets visible content win over overlapping resize hit
 // zones on borderless surfaces. Borders and blank cells remain draggable.
 func (m *WorkbenchModel) clickContributionAt(x, y int) bool {
-	for slot, rect := range m.slotRects {
+	for _, hit := range m.hitOrder() {
+		slot, rect := hit.ID, hit.Rect
 		if slot == huskipc.SlotActivityRail {
 			continue
 		}
@@ -286,7 +286,7 @@ func (m *WorkbenchModel) handlePublishedModalMouse(x, y int, left, wheelDown, wh
 	} else if wheelUp {
 		button = "wheel_up"
 	}
-	if cp := m.plugins[m.slotOwners[huskipc.SlotModalSurface]]; cp != nil {
+	if cp := m.plugins[m.surfaceOwner(huskipc.SlotModalSurface)]; cp != nil {
 		_ = cp.Writer.Send(huskipc.Envelope{Type: "slot_mouse", SlotMouse: m.publisherMousePayload(huskipc.SlotModalSurface, x, y, button)})
 	}
 	return true

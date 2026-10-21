@@ -51,13 +51,12 @@ func (m *WorkbenchModel) setupDemoFrame(railMode string) {
 		Writer:    huskipc.NewConnWriter(io.Discard),
 		Connected: time.Now(),
 	}
-	m.slotOwners[huskipc.SlotMainStage] = "husk.demo-frame"
+	m.registry.Occupants[huskipc.SlotMainStage] = "husk.demo-frame"
 	m.slotUpdates[huskipc.SlotMainStage] = newDemoUpdate(huskipc.SlotMainStage)
 
 	switch railMode {
 	case "modal":
-		m.activeModalRailID = "rail.demo-frame"
-		m.activeModalPlugin = "husk.demo-frame"
+		m.openModal("husk.demo-frame", "rail.demo-frame")
 		m.slotUpdates[huskipc.SlotModalSurface] = newDemoUpdate(huskipc.SlotModalSurface)
 	case "full-canvas":
 		m.activeRailID = "rail.demo-frame"

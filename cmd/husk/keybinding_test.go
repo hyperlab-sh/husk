@@ -65,9 +65,9 @@ func TestZeroPluginsHaveNoApplicationShortcuts(t *testing.T) {
 	m.recomputeLayout()
 	for _, key := range []string{"f2", "f3", "f4", "ctrl+f", "ctrl+g", "ctrl+e", "¡", "™", "£", "¢", "π", "√"} {
 		press(m, key)
-		if m.activeRailID != "" || m.activePlacement != "" || m.activeModalRailID != "" || m.showPalette || m.stageMode != "plugin" {
+		if m.activeRailID != "" || m.activePlacement != "" || m.modalOwner().Open() || m.showPalette || m.stageMode != "plugin" {
 			t.Fatalf("%q changed workbench state: rail=%q placement=%q modal=%q palette=%v stage=%q",
-				key, m.activeRailID, m.activePlacement, m.activeModalRailID, m.showPalette, m.stageMode)
+				key, m.activeRailID, m.activePlacement, m.modalOwner().RailID, m.showPalette, m.stageMode)
 		}
 	}
 	var kinds []string
@@ -173,13 +173,13 @@ func TestModalClosesOnOwnShortcutOnly(t *testing.T) {
 		RailItems: []huskipc.RailItemSpec{{ID: "mod.find", Label: "Find", Shortcut: "ctrl+t", Placement: huskipc.PlacementModal}}})
 	m.recomputeLayout()
 	press(m, "ctrl+t")
-	if m.activeModalRailID != "mod.find" || m.activeModalPlugin != "mod" {
+	if m.modalOwner().RailID != "mod.find" || m.modalOwner().PluginID != "mod" {
 		t.Fatal("ctrl+t did not open the modal")
 	}
 	out.Reset()
 	press(m, "f2")
 	press(m, "ctrl+f")
-	if m.activeModalRailID != "mod.find" {
+	if m.modalOwner().RailID != "mod.find" {
 		t.Fatal("f2/ctrl+f closed a modal that does not use them")
 	}
 	r := routed(t, out)
@@ -187,7 +187,7 @@ func TestModalClosesOnOwnShortcutOnly(t *testing.T) {
 		t.Fatalf("modal routing = %+v", r)
 	}
 	press(m, "ctrl+t")
-	if m.activeModalRailID != "" || m.activeModalPlugin != "" {
+	if m.modalOwner().Open() || m.modalOwner().Open() {
 		t.Fatal("modal shortcut did not close the modal")
 	}
 }

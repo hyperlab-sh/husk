@@ -31,13 +31,13 @@ func (m *WorkbenchModel) railButtons() []railButton {
 			icon:     "",
 			label:    "Home Workbench",
 			shortcut: "F1",
-			active:   m.activeRailID == "" && m.stageMode != "hotspots" && m.activeModalRailID == "",
+			active:   m.activeRailID == "" && m.stageMode != "hotspots" && !m.modalOwner().Open(),
 			kind:     "home",
 		},
 	}
 
 	for _, item := range m.orderedRailItems() {
-		isAct := m.activeRailID == item.ID || m.activeModalRailID == item.ID
+		isAct := m.activeRailID == item.ID || m.modalOwner().RailID == item.ID
 		btns = append(btns, railButton{
 			icon:     item.Icon,
 			label:    item.Label,
