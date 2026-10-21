@@ -48,3 +48,5 @@ See [Architecture](docs/docs/architecture.md) for the protocol.
 | Hold `Alt`/`Option` | Show shortcuts on the rail |
 | `Esc` | Dismiss a modal or leave full-canvas and stage modes |
 | `q`, `ctrl+c` | Quit and stop all plugins |
+
+Colours come from the Charm default palette: ANSI and 256-colour codes rendered by your terminal's own scheme.
