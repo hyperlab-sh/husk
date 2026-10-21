@@ -38,7 +38,7 @@ The layout has nine slots (`activity-rail`, `sidebar-navigation`, `sidebar-list`
 | `full-canvas` | — | `F3`, `ctrl+g` | Replaces the whole canvas right of the rail |
 | `stage` | `project-git` | `F4`, `ctrl+e` | Fills the canvas but keeps the sidebar |
 
-See [Architecture](docs/docs/architecture.md) for the protocol.
+Plugins can publish namespaced slots, hooks and events for other plugins to attach to. Inline slots expand at row anchors; region slots reserve a rectangle. Husk clips contributions and routes their clicks to the contributor, fans out asynchronous hooks, and delivers events only to subscribers. Try `husk --dump-frame --demo pubslots` for a self-contained two-plugin frame. See [Architecture](docs/docs/architecture.md#published-slots-hooks-and-events) for message shapes and lifecycle.
 
 ### Surfaces and frames
 
