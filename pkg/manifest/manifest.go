@@ -236,7 +236,7 @@ func Load(path string) (*Plugin, error) {
 	}
 	parts, err := splitCommand(path)
 	if err != nil {
-		return nil, fmt.Errorf("manifest: plugin path %s not found and is not a valid command: %w", path, err)
+		return nil, fmt.Errorf("manifest: plugin path %q not found and is not a valid command: %w", path, err)
 	}
 	if len(parts) > 1 {
 		return &Plugin{

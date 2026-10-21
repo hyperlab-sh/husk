@@ -327,6 +327,8 @@ func TestLoadNonexistentCommandLine(t *testing.T) {
 	}
 	if _, err := Load(`python3 "oops`); err == nil || !strings.Contains(err.Error(), "unterminated") {
 		t.Fatalf("unterminated quote error = %v", err)
+	} else if !strings.Contains(err.Error(), `plugin path "python3 \"oops" not found`) {
+		t.Fatalf("path is not quoted in %q", err)
 	}
 	if _, err := Load("/definitely/missing/plugin"); err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("single missing token error = %v", err)
