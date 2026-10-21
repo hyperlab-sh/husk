@@ -27,6 +27,7 @@ send_hello() {
   jq -cn --arg pid "$PID" '{
     type: "hello",
     hello: {
+      protocol_version: "1.0",
       plugin_id: "bash.project-git",
       name: "Lazygit / Project Git Stage (Bash)",
       version: "0.1.0",
