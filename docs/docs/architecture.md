@@ -61,6 +61,14 @@ A slot's region on screen is a **surface**, and it is a blank canvas: without a 
 
 Each element is independently on or off. A plugin declares frames in its `hello` message (`"frames": {"<slot-id>": {"border": true, "label": "…", "close": true}}`) and a rail item can declare one for the surface it opens (`"frame"` on the rail item). Only the border changes layout: plugins that declare a frame get a `slot_resize` with the inner dimensions; plugins that declare nothing get the full rect. Toasts and the command palette are Husk's own UI and keep their own chrome.
 
+### Content clipping
+
+A surface shows exactly its inner area (the `slot_resize` width and height). `slot_update.lines` are clipped to it, never wrapped or scrolled: a line wider than the surface is truncated (with `…` when it is plugin text), and lines past the last row are dropped. Husk does not report that it clipped anything; a plugin learns its size from `slot_resize` and is responsible for fitting, paging or scrolling its own content.
+
+### Styles stay inside their cells
+
+Plugin lines may carry ANSI SGR styling. Husk closes any style a line leaves open at the end of that line's content, so it cannot paint the padding after it, the frame edge or a neighbouring surface. Wherever Husk composes one piece of text over another (published regions over a surface, and the modal, toast and command palette over the workbench) it resets the style at each boundary: overlay cells show only the overlay's own styles, and the base cells on either side keep exactly the style they had. Well-formed lines that already end in a reset are passed through byte for byte.
+
 **Minimum size.** The layout needs at least 84x24 cells. On a smaller terminal Husk renders a "terminal too small (need 84x24, have WxH)" screen that fills the real terminal exactly (message shortened or truncated on narrow terminals, never wider than the terminal). While too small, mouse and key input are ignored (only quit works and nothing is forwarded to plugins), the last valid layout is kept and no `slot_resize` is sent; growing the terminal back restores the workbench.
 
 ## Protocol
