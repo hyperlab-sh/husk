@@ -117,7 +117,9 @@ and the full reserved rectangle is cleared and clipped to the surface:
 {"type":"slot_declare","slot_declare":{"id":"a.actions","title":"Actions","description":"Reserved action area","kind":"region","rect":{"surface":"main-stage","x":0,"y":5,"width":28,"height":3}}}
 ```
 
-Coordinates are zero-based terminal cells, excluding the host border/title.
+Coordinates are zero-based terminal cells in the surface's frame-aware inner
+rect. A declared border consumes one cell per edge; label/close overlays do not
+add a title row. Chrome-covered contribution cells do not invoke commands.
 If rectangles overlap, later slot IDs in lexical order overlay earlier ones.
 A click on visible contribution text with `on_click` goes directly to its
 contributor, not to the publisher's row handler:
