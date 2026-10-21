@@ -13,6 +13,12 @@ import (
 )
 
 func (m *WorkbenchModel) View() tea.View {
+	if m.tooSmall() {
+		view := tea.NewView(m.renderTooSmall())
+		view.AltScreen = true
+		view.MouseMode = tea.MouseModeAllMotion
+		return view
+	}
 	topBar := m.renderTopWorkbenchBar()
 	bottomBar := m.renderBottomKeybindBar()
 

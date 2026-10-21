@@ -344,7 +344,7 @@ func (m *WorkbenchModel) applyDragAt(x, y int) bool {
 }
 
 func (m *WorkbenchModel) handleMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
-	if m.showPalette {
+	if m.showPalette || m.tooSmall() {
 		return m, nil
 	}
 	msg := event.Mouse()
