@@ -91,14 +91,25 @@ func (m *WorkbenchModel) dropVanishedSides() {
 	if !left && strings.HasPrefix(m.activeDrag, "sidebar-") || !right && m.activeDrag == "sidepanel-width" {
 		m.activeDrag, m.hoverDivider = "", ""
 	}
+	// Focus moves only off a column that was on screen and has now gone; a
+	// column that never existed (the default focus is the sidebar list before
+	// any plugin connects) keeps it, so a plugin that connects later has keys
+	// from its first frame. The slot we left is remembered and restored when
+	// its column returns, unless focus has moved on since.
+	_, hadFocused := m.slotRects[m.focusedSlot]
 	switch m.focusedSlot {
 	case huskipc.SlotSidebarNavigation, huskipc.SlotSidebarList, huskipc.SlotSidebarFooter:
-		if !left {
-			m.focusedSlot = huskipc.SlotMainStage
+		if !left && hadFocused {
+			m.focusFallback, m.focusedSlot = m.focusedSlot, huskipc.SlotMainStage
 		}
 	case huskipc.SlotSidePanel:
-		if !right {
-			m.focusedSlot = huskipc.SlotMainStage
+		if !right && hadFocused {
+			m.focusFallback, m.focusedSlot = m.focusedSlot, huskipc.SlotMainStage
+		}
+	}
+	if fb := m.focusFallback; fb != "" && m.focusedSlot == huskipc.SlotMainStage {
+		if fb == huskipc.SlotSidePanel && right || fb != huskipc.SlotSidePanel && left {
+			m.focusedSlot, m.focusFallback = fb, ""
 		}
 	}
 }
