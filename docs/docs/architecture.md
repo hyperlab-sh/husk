@@ -340,8 +340,14 @@ manifest's, otherwise the `hello` is rejected with `protocol_error`
 `hello` may also declare extra slots, hooks and events the manifest does not
 list, and a `hello` that omits them keeps the manifest's. A later `slot_declare`,
 `hook_declare` or `event_declare` for a manifest-declared id is a duplicate. The
-declarations are removed when the plugin disconnects, or when its process exits
-without ever having connected; a `hello` that is rejected keeps them, together
+declarations are removed when the plugin disconnects, or when its process fails
+(non-zero status or a signal) without ever having connected. A socket plugin
+whose process exits with status 0 before connecting is treated as a launcher
+that started the real plugin (for example a wrapper script that backgrounds it):
+its declarations stay registered for that plugin's later `hello`, and Husk logs
+`plugin <id> exited cleanly before connecting; keeping its manifest declarations`.
+A stdio plugin's stream ends with its process, so a stdio exit before `hello`
+always removes them. A `hello` that is rejected keeps them, together
 with any contributions already made to them. Contributions made to a manifest
 slot before the plugin connects are sent to it as `slot_contributions` snapshots
 right after `welcome`, for every slot it owns whether or not its `hello` lists
