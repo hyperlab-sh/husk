@@ -60,8 +60,9 @@ type SlotRect struct {
 }
 
 type ipcEventMsg struct {
-	pluginID string
-	env      huskipc.Envelope
+	pluginID   string
+	env        huskipc.Envelope
+	connection *ConnectedPlugin
 }
 
 type pluginRegisteredMsg struct {
@@ -87,6 +88,7 @@ type WorkbenchModel struct {
 	slotRects   map[huskipc.SlotID]SlotRect
 	modalRect   SlotRect
 	demoFrame   bool
+	registry    *publicationRegistry
 
 	wsContext huskipc.WorkspaceContextPayload
 
@@ -129,13 +131,15 @@ type WorkbenchModel struct {
 const activityRailWidth = 5
 
 func newWorkbenchModel(socketPath string, listener net.Listener, cwd string) *WorkbenchModel {
+	registry := newPublicationRegistry()
 	return &WorkbenchModel{
+		registry:     registry,
 		socketPath:   socketPath,
 		listener:     listener,
 		subChan:      make(chan tea.Msg, 256),
 		plugins:      make(map[string]*ConnectedPlugin),
 		slotUpdates:  make(map[huskipc.SlotID]*huskipc.SlotUpdatePayload),
-		slotOwners:   make(map[huskipc.SlotID]string),
+		slotOwners:   registry.Occupants,
 		slotRects:    make(map[huskipc.SlotID]SlotRect),
 		wsContext:    huskipc.WorkspaceContextPayload{WorkspaceID: "demo", WorkspaceLabel: "Demo", Cwd: cwd},
 		width:        144,
@@ -170,12 +174,19 @@ func (m *WorkbenchModel) startAcceptLoop() {
 
 func (m *WorkbenchModel) handleStream(r io.Reader, w io.Writer, closer io.Closer) {
 	writer := huskipc.NewConnWriter(w)
-	var pluginID string
+	var cp *ConnectedPlugin
+	defer func() {
+		if closer != nil {
+			_ = closer.Close()
+		}
+		if cp != nil {
+			m.subChan <- pluginDisconnectedMsg{plugin: cp}
+		}
+	}()
 
 	_ = huskipc.ReadLoop(r, func(env huskipc.Envelope) {
-		if env.Type == "hello" && env.Hello != nil {
-			pluginID = env.Hello.PluginID
-			cp := &ConnectedPlugin{
+		if env.Type == "hello" && env.Hello != nil && cp == nil {
+			cp = &ConnectedPlugin{
 				Info:      *env.Hello,
 				Writer:    writer,
 				Closer:    closer,
@@ -184,7 +195,9 @@ func (m *WorkbenchModel) handleStream(r io.Reader, w io.Writer, closer io.Closer
 			m.subChan <- pluginRegisteredMsg{plugin: cp}
 			return
 		}
-		m.subChan <- ipcEventMsg{pluginID: pluginID, env: env}
+		if cp != nil && env.Type != "hello" {
+			m.subChan <- ipcEventMsg{pluginID: cp.Info.PluginID, env: env, connection: cp}
+		}
 	})
 }
 
@@ -198,6 +211,7 @@ func (m *WorkbenchModel) spawnSocketCommand(dir string, argv []string) error {
 		return err
 	}
 	m.childCmds = append(m.childCmds, cmd)
+	go func() { _ = cmd.Wait() }()
 	return nil
 }
 
@@ -219,7 +233,10 @@ func (m *WorkbenchModel) spawnStdioCommand(dir string, argv []string) error {
 		return err
 	}
 	m.childCmds = append(m.childCmds, cmd)
-	go m.handleStream(stdout, stdin, stdin)
+	go func() {
+		m.handleStream(stdout, stdin, stdin)
+		_ = cmd.Wait()
+	}()
 	return nil
 }
 
@@ -332,12 +349,20 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.broadcastSlotResize()
 		return m, nil
 
+	case pluginDisconnectedMsg:
+		m.disconnectPublications(msg.plugin)
+		return m, waitForIPC(m.subChan)
+
 	case pluginRegisteredMsg:
 		cp := msg.plugin
-		m.plugins[cp.Info.PluginID] = cp
-		for _, s := range cp.Info.Slots {
-			m.slotOwners[s] = cp.Info.PluginID
+		if err := m.registerPublications(cp.Info); err != nil {
+			m.rejectPublication(cp, "hello", err)
+			if cp.Closer != nil {
+				_ = cp.Closer.Close()
+			}
+			return m, waitForIPC(m.subChan)
 		}
+		m.plugins[cp.Info.PluginID] = cp
 		for _, ri := range cp.Info.RailItems {
 			ri.PluginID = cp.Info.PluginID
 			replaced := false
@@ -364,6 +389,9 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Modifiers:   m.modifiers,
 			},
 		})
+		for _, slot := range cp.Info.PublishedSlots {
+			m.deliverPublications([]registryDelivery{m.registry.slotDelivery(slot.ID)})
+		}
 		return m, waitForIPC(m.subChan)
 
 	case modifierTickMsg:
@@ -383,9 +411,14 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, waitForModifierTick()
 
 	case ipcEventMsg:
+		cp := m.plugins[msg.pluginID]
+		if cp == nil || (msg.connection != nil && msg.connection != cp) {
+			return m, waitForIPC(m.subChan)
+		}
 		m.totalIPCEvents++
-		if cp, ok := m.plugins[msg.pluginID]; ok {
-			cp.FramesRecv++
+		cp.FramesRecv++
+		if m.routePublication(msg.pluginID, msg.env) {
+			return m, waitForIPC(m.subChan)
 		}
 		if msg.env.CloseModal {
 			m.activeModalRailID = ""
@@ -397,10 +430,13 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.env.Type {
 		case "slot_update":
 			if su := msg.env.SlotUpdate; su != nil {
-				m.slotUpdates[su.Slot] = su
-				if m.slotOwners[su.Slot] == "" {
-					m.slotOwners[su.Slot] = su.PluginID
+				if m.slotOwners[su.Slot] != msg.pluginID {
+					m.rejectPublication(m.plugins[msg.pluginID], "slot_update", fmt.Errorf("surface is not held by this plugin"))
+					break
 				}
+				update := *su
+				update.PluginID = msg.pluginID
+				m.slotUpdates[su.Slot] = &update
 			}
 		case "workspace_context":
 			if wc := msg.env.WorkspaceContext; wc != nil {
@@ -870,6 +906,10 @@ func (m *WorkbenchModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	if m.activeModalRailID != "" && m.handlePublishedModalMouse(msg.X, msg.Y, isLeftClick, isWheelDown, isWheelUp) {
+		return m, nil
+	}
+
 	if isLeftClick {
 		if div := m.detectDividerAt(msg.X, msg.Y); div != "" {
 			m.activeDrag = div
@@ -914,6 +954,10 @@ func (m *WorkbenchModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			relX := msg.X - rect.InnerX
 			relY := msg.Y - rect.InnerY
 			if relX < 0 || relY < 0 || relX >= rect.InnerW || relY >= rect.InnerH {
+				return m, nil
+			}
+
+			if isLeftClick && m.clickContribution(slotID, relX, relY, rect.InnerW, rect.InnerH) {
 				return m, nil
 			}
 
@@ -1633,8 +1677,12 @@ func (m *WorkbenchModel) overlayModalPlugin(base string) string {
 	innerW, innerH := rect.InnerW, rect.InnerH
 
 	su := m.slotUpdates[huskipc.SlotModalSurface]
-	// no slot_update yet means a blank canvas, like every other surface
+	// Compose contributions inside the frame's content rect; absent content
+	// remains a blank canvas, with no implicit title row or padding.
 	rows := m.surfaceContentLines(su, innerW, innerH)
+	if su != nil {
+		rows, _ = m.registry.renderPublished(huskipc.SlotModalSurface, m.slotOwners[huskipc.SlotModalSurface], su.Lines, innerW, innerH)
+	}
 
 	spec := m.frameFor(huskipc.SlotModalSurface)
 	label := ""
@@ -1790,6 +1838,9 @@ func (m *WorkbenchModel) renderSurface(slotID huskipc.SlotID, calloutNum, slotNa
 		}
 	}
 	lines := m.surfaceContentLines(su, rect.InnerW, rect.InnerH)
+	if su != nil {
+		lines, _ = m.registry.renderPublished(slotID, m.slotOwners[slotID], su.Lines, rect.InnerW, rect.InnerH)
+	}
 	if m.showHotspots && len(lines) > 0 {
 		hot := lipgloss.NewStyle().
 			Foreground(lipgloss.Color(m.palette.Warning)).
@@ -2237,7 +2288,20 @@ func main() {
 	holdAlt := flag.Bool("hold-alt", false, "Simulate holding Alt/Option key on startup")
 	pluginPaths := repeatable("plugin", "Plugin: executable, plugin directory, or husk-plugin.json path (repeatable)")
 	pluginDirs := repeatable("plugin-dir", "Load every immediate subdirectory containing a husk-plugin.json (repeatable)")
+	demo := flag.String("demo", "", "In-process frame demo: pubslots (requires --dump-frame)")
 	flag.Parse()
+	cwd, _ := os.Getwd()
+	if *demo != "" {
+		if *demo != "pubslots" || !*dumpFrame {
+			fmt.Fprintln(os.Stderr, "--demo supports pubslots with --dump-frame")
+			os.Exit(2)
+		}
+		model := newWorkbenchModel("", nil, cwd)
+		model.recomputeLayout()
+		model.seedPubslotsDemo()
+		fmt.Println(model.View())
+		return
+	}
 
 	sockPath := filepath.Join(os.TempDir(), fmt.Sprintf("husk-%d.sock", os.Getpid()))
 	_ = os.Remove(sockPath)
@@ -2247,7 +2311,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	cwd, _ := os.Getwd()
 	model := newWorkbenchModel(sockPath, listener, cwd)
 	if *holdAlt {
 		model.altLatched = true
