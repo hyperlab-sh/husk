@@ -22,6 +22,7 @@ func (m *WorkbenchModel) View() tea.View {
 		view.KeyboardEnhancements.ReportEventTypes = true
 		view.KeyboardEnhancements.ReportAlternateKeys = true
 		view.KeyboardEnhancements.ReportAllKeysAsEscapeCodes = true
+		view.KeyboardEnhancements.ReportAssociatedText = true
 		return view
 	}
 	c := newCanvas(m.width, m.height)
@@ -65,8 +66,12 @@ func (m *WorkbenchModel) View() tea.View {
 	// code as its press, so both normalise to the same held-key name.
 	view.KeyboardEnhancements.ReportAlternateKeys = true
 	// All keys as escape codes makes kitty-protocol terminals report bare
-	// modifier presses (trackModifierKey); text keys still decode with Text.
+	// modifier presses (trackModifierKey). It also stops them sending a key's
+	// text, so associated text is requested too: without it the decoder can
+	// only rebuild Text from the key code, which loses AltGr symbols and
+	// dead-key and compose results on non-US layouts.
 	view.KeyboardEnhancements.ReportAllKeysAsEscapeCodes = true
+	view.KeyboardEnhancements.ReportAssociatedText = true
 	return view
 }
 
