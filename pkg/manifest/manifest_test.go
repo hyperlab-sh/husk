@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -268,5 +270,112 @@ func TestRelativePluginDirResolvesOnce(t *testing.T) {
 	}
 	if !filepath.IsAbs(plugins[0].WorkDir()) {
 		t.Errorf("WorkDir = %q, want absolute", plugins[0].WorkDir())
+	}
+}
+
+func TestSplitCommand(t *testing.T) {
+	cases := []struct {
+		in      string
+		want    []string
+		wantErr string
+	}{
+		{"a b c", []string{"a", "b", "c"}, ""},
+		{"  a \t b  ", []string{"a", "b"}, ""},
+		{"", nil, ""},
+		{`python3 "my plugin.py" --flag`, []string{"python3", "my plugin.py", "--flag"}, ""},
+		{`'/opt/my dir/bin' x`, []string{"/opt/my dir/bin", "x"}, ""},
+		{`/opt/my\ dir/bin x`, []string{"/opt/my dir/bin", "x"}, ""},
+		{`a "" b`, []string{"a", "", "b"}, ""},
+		{`--name="two words"`, []string{"--name=two words"}, ""},
+		{`"say \"hi\""`, []string{`say "hi"`}, ""},
+		{`"back\\slash"`, []string{`back\slash`}, ""},
+		{`"keep\nescape"`, []string{`keep\nescape`}, ""},
+		{`'no \escape here'`, []string{`no \escape here`}, ""},
+		{`a"b c"d`, []string{"ab cd"}, ""},
+		{`"unterminated x`, nil, "unterminated \" quote"},
+		{`'unterminated x`, nil, "unterminated ' quote"},
+		{`trailing\`, nil, "trailing backslash"},
+	}
+	for _, c := range cases {
+		got, err := splitCommand(c.in)
+		if c.wantErr != "" {
+			if err == nil || !strings.Contains(err.Error(), c.wantErr) {
+				t.Errorf("splitCommand(%q) err = %v, want %q", c.in, err, c.wantErr)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("splitCommand(%q) unexpected error %v", c.in, err)
+			continue
+		}
+		if !reflect.DeepEqual(got, c.want) {
+			t.Errorf("splitCommand(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestLoadNonexistentCommandLine(t *testing.T) {
+	p, err := Load(`python3 "my plugin.py"`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"python3", "my plugin.py"}; !reflect.DeepEqual(p.Command, want) {
+		t.Fatalf("Command = %q, want %q", p.Command, want)
+	}
+	if p.Path != "" {
+		t.Fatalf("implicit plugin has Path %q", p.Path)
+	}
+	if _, err := Load(`python3 "oops`); err == nil || !strings.Contains(err.Error(), "unterminated") {
+		t.Fatalf("unterminated quote error = %v", err)
+	}
+	if _, err := Load("/definitely/missing/plugin"); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("single missing token error = %v", err)
+	}
+}
+
+func TestCheckHello(t *testing.T) {
+	dir := t.TempDir()
+	path := writeManifest(t, dir, `{"id":"a.b","name":"n","version":"1","command":["x"],"slots":["main-stage","side-panel"]}`)
+	p, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Path != path {
+		t.Fatalf("Path = %q, want %q", p.Path, path)
+	}
+	cases := []struct {
+		id      string
+		slots   []string
+		wantErr string
+	}{
+		{"a.b", []string{"side-panel", "main-stage"}, ""},
+		{"a.b", []string{"main-stage", "main-stage", "side-panel"}, ""},
+		{"a.c", []string{"main-stage", "side-panel"}, `plugin_id "a.c" does not match manifest id "a.b"`},
+		{"a.b", []string{"main-stage"}, "omits declared slots [side-panel]"},
+		{"a.b", []string{"main-stage", "side-panel", "main-header"}, "claims undeclared slots [main-header]"},
+		{"a.b", []string{"main-header"}, "claims undeclared slots [main-header]; omits declared slots [main-stage side-panel]"},
+		{"a.b", nil, "omits declared slots [main-stage side-panel]"},
+	}
+	for _, c := range cases {
+		err := p.CheckHello(c.id, c.slots)
+		if c.wantErr == "" {
+			if err != nil {
+				t.Errorf("CheckHello(%q,%v) = %v, want nil", c.id, c.slots, err)
+			}
+		} else if err == nil || !strings.Contains(err.Error(), c.wantErr) {
+			t.Errorf("CheckHello(%q,%v) = %v, want %q", c.id, c.slots, err, c.wantErr)
+		}
+	}
+	// A manifest with no slots forbids claiming any.
+	pn := &Plugin{ID: "z", Path: "/z/" + FileName}
+	if err := pn.CheckHello("z", []string{"main-stage"}); err == nil {
+		t.Error("slotless manifest accepted a slot claim")
+	}
+	if err := pn.CheckHello("z", nil); err != nil {
+		t.Errorf("slotless manifest rejected empty claim: %v", err)
+	}
+	// Implicit plugins are never checked.
+	if err := (&Plugin{ID: "z"}).CheckHello("other", []string{"main-stage"}); err != nil {
+		t.Errorf("implicit plugin checked: %v", err)
 	}
 }
