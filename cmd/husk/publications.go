@@ -5,6 +5,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/hyperlab-sh/husk/pkg/huskipc"
+	"github.com/hyperlab-sh/husk/pkg/manifest"
 )
 
 // pluginDisconnectedMsg reports that a plugin connection ended. reason is
@@ -62,14 +63,33 @@ func (m *WorkbenchModel) registerPublications(hello huskipc.HelloPayload) (err e
 	return nil
 }
 
+// launchedID returns the manifest id of the live launched process whose pid is
+// pid, or "" when pid is unknown or not one of ours.
+func (m *WorkbenchModel) launchedID(pid int) string {
+	if pid <= 0 {
+		return ""
+	}
+	for _, p := range m.procs {
+		if p.cmd.Process != nil && p.cmd.Process.Pid == pid && !closed(p.done) {
+			return p.id
+		}
+	}
+	return ""
+}
+
 // checkManifest compares a hello with the manifest the plugin was launched
-// from. A stdio stream is tied to its process, so its hello must carry that
-// process's manifest id; any other hello is checked when its plugin_id names
-// a launched manifest. Plugins with no manifest are not checked.
+// from. A stdio stream is tied to its process, and a socket peer whose kernel
+// pid is a launched process is bound to that process's manifest id, so in both
+// cases the hello must carry that manifest's id. A socket peer that is not a
+// launched process itself (a descendant of a wrapper script, or an external
+// client) is checked against the manifest named by the plugin_id it claims.
+// Plugins with no manifest are not checked.
 func (m *WorkbenchModel) checkManifest(cp *ConnectedPlugin) error {
 	id := cp.Info.PluginID
 	if cp.ExpectedID != "" {
 		id = cp.ExpectedID
+	} else if lid := m.launchedID(cp.PeerPID); lid != "" {
+		id = lid
 	}
 	mf := m.manifests[id]
 	if mf == nil {
@@ -79,7 +99,11 @@ func (m *WorkbenchModel) checkManifest(cp *ConnectedPlugin) error {
 	for i, s := range cp.Info.Slots {
 		slots[i] = string(s)
 	}
-	return mf.CheckHello(cp.Info.PluginID, slots)
+	err := mf.CheckHello(cp.Info.PluginID, slots)
+	if err != nil && len(mf.Slots) == 0 && len(slots) > 0 {
+		err = fmt.Errorf("%w (the manifest declares no slots; add them to %s)", err, manifest.FileName)
+	}
+	return err
 }
 
 func (m *WorkbenchModel) rejectPublication(cp *ConnectedPlugin, typ string, err error) {

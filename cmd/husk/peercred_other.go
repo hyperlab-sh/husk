@@ -10,3 +10,7 @@ import (
 func peerUID(*net.UnixConn) (uint32, error) {
 	return 0, errors.New("peer credential check unsupported on this platform")
 }
+
+func peerPID(*net.UnixConn) (int, error) {
+	return 0, errors.New("peer pid lookup unsupported on this platform")
+}
