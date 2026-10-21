@@ -1,0 +1,287 @@
+[
+  {
+    "type": "hello",
+    "hello": {
+      "plugin_id": "example.plugin",
+      "name": "Example",
+      "version": "0.1.0",
+      "language": "rust",
+      "pid": 123,
+      "description": "Example plugin",
+      "slots": [
+        "sidebar-list"
+      ],
+      "rail_items": [
+        {
+          "id": "search",
+          "plugin_id": "example.plugin",
+          "icon": "S",
+          "badge": "2",
+          "label": "Search",
+          "shortcut": "s",
+          "placement": "modal",
+          "description": "Search"
+        }
+      ],
+      "commands": [
+        {
+          "id": "example.refresh",
+          "title": "Refresh",
+          "category": "Example",
+          "shortcut": "r",
+          "description": "Refresh"
+        }
+      ],
+      "keybindings": [
+        {
+          "key": "r",
+          "command_id": "example.refresh",
+          "description": "Refresh",
+          "when_slot": "sidebar-list"
+        }
+      ]
+    }
+  },
+  {
+    "type": "welcome",
+    "welcome": {
+      "host_version": "0.1.0",
+      "palette": {
+        "name": "Example",
+        "canvas": "#123456",
+        "surface": "#123456",
+        "surface_elevated": "#123456",
+        "surface_selected": "#123456",
+        "surface_hover": "#123456",
+        "border": "#123456",
+        "border_subtle": "#123456",
+        "border_focused": "#123456",
+        "ink": "#123456",
+        "ink_muted": "#123456",
+        "ink_subtle": "#123456",
+        "accent": "#123456",
+        "accent_secondary": "#123456",
+        "accent_soft": "#123456",
+        "success": "#123456",
+        "warning": "#123456",
+        "danger": "#123456",
+        "info": "#123456",
+        "space_green": "#123456",
+        "space_cyan": "#123456",
+        "space_indigo": "#123456",
+        "space_yellow": "#123456",
+        "space_lime": "#123456",
+        "space_purple": "#123456",
+        "space_pink": "#123456",
+        "space_orange": "#123456"
+      },
+      "slot_sizes": {
+        "sidebar-list": {
+          "width": 36,
+          "height": 28,
+          "focused": true,
+          "visible": true
+        }
+      },
+      "focused_slot": "sidebar-list",
+      "context": {
+        "workspace_id": "w1",
+        "workspace_label": "Example",
+        "tab_id": "t1",
+        "pane_id": "p1",
+        "cwd": "/home/example/project",
+        "repo_name": "example"
+      },
+      "modifiers": {
+        "alt": false,
+        "ctrl": false,
+        "shift": false,
+        "super": false
+      }
+    }
+  },
+  {
+    "type": "slot_update",
+    "slot_update": {
+      "plugin_id": "example.plugin",
+      "slot": "sidebar-list",
+      "title": "Example",
+      "subtitle": "Details",
+      "badge": "1",
+      "lines": [
+        "one",
+        "two"
+      ],
+      "hit_targets": [
+        {
+          "line": 0,
+          "id": "w1",
+          "kind": "workspace",
+          "action": "select_item",
+          "payload": {
+            "workspace_id": "w1"
+          }
+        }
+      ],
+      "status_meta": {
+        "connected": true,
+        "events": 2
+      }
+    }
+  },
+  {
+    "type": "slot_resize",
+    "slot_resize": {
+      "slot_sizes": {
+        "sidebar-list": {
+          "width": 36,
+          "height": 28,
+          "focused": true,
+          "visible": true
+        }
+      },
+      "focused_slot": "sidebar-list"
+    }
+  },
+  {
+    "type": "slot_key",
+    "slot_key": {
+      "slot": "sidebar-list",
+      "key": "j",
+      "modifiers": {
+        "alt": false,
+        "ctrl": false,
+        "shift": false,
+        "super": false
+      }
+    }
+  },
+  {
+    "type": "slot_mouse",
+    "slot_mouse": {
+      "slot": "sidebar-list",
+      "x": 1,
+      "y": 2,
+      "button": "left",
+      "hit_id": "w1",
+      "hit_kind": "workspace",
+      "hit_action": "select_item",
+      "hit_payload": {
+        "workspace_id": "w1"
+      }
+    }
+  },
+  {
+    "type": "key_state",
+    "key_state": {
+      "phase": "down",
+      "key": "alt",
+      "held": true,
+      "modifiers": {
+        "alt": true,
+        "ctrl": false,
+        "shift": false,
+        "super": false
+      },
+      "held_keys": [
+        "alt"
+      ],
+      "slot": "sidebar-list"
+    }
+  },
+  {
+    "type": "command_invoke",
+    "command_invoke": {
+      "command_id": "example.refresh",
+      "args": {
+        "mode": "all"
+      }
+    }
+  },
+  {
+    "type": "theme_changed",
+    "theme_changed": {
+      "palette": {
+        "name": "Example",
+        "canvas": "#123456",
+        "surface": "#123456",
+        "surface_elevated": "#123456",
+        "surface_selected": "#123456",
+        "surface_hover": "#123456",
+        "border": "#123456",
+        "border_subtle": "#123456",
+        "border_focused": "#123456",
+        "ink": "#123456",
+        "ink_muted": "#123456",
+        "ink_subtle": "#123456",
+        "accent": "#123456",
+        "accent_secondary": "#123456",
+        "accent_soft": "#123456",
+        "success": "#123456",
+        "warning": "#123456",
+        "danger": "#123456",
+        "info": "#123456",
+        "space_green": "#123456",
+        "space_cyan": "#123456",
+        "space_indigo": "#123456",
+        "space_yellow": "#123456",
+        "space_lime": "#123456",
+        "space_purple": "#123456",
+        "space_pink": "#123456",
+        "space_orange": "#123456"
+      }
+    }
+  },
+  {
+    "type": "workspace_context",
+    "workspace_context": {
+      "workspace_id": "w1",
+      "workspace_label": "Example",
+      "tab_id": "t1",
+      "pane_id": "p1",
+      "cwd": "/home/example/project",
+      "repo_name": "example"
+    }
+  },
+  {
+    "type": "rail_activated",
+    "rail_activated": {
+      "rail_id": "search",
+      "placement": "modal",
+      "active": true,
+      "width": 80,
+      "height": 24,
+      "context": {
+        "workspace_id": "w1",
+        "workspace_label": "Example",
+        "tab_id": "t1",
+        "pane_id": "p1",
+        "cwd": "/home/example/project",
+        "repo_name": "example"
+      }
+    }
+  },
+  {
+    "type": "toast",
+    "toast": {
+      "plugin_id": "example.plugin",
+      "level": "info",
+      "title": "Example",
+      "message": "Ready"
+    }
+  },
+  {
+    "type": "event",
+    "event": {
+      "plugin_id": "example.plugin",
+      "topic": "example.ready",
+      "data": {
+        "ready": true
+      }
+    }
+  },
+  {
+    "type": "close_modal",
+    "close_modal": true
+  }
+]
