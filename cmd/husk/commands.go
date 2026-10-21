@@ -151,7 +151,7 @@ func builtinCommands() []paletteCommand {
 				Title:       "Husk Workbench: Toggle Stage between Live Plugin & Slot Architecture Map",
 				Category:    "Workbench",
 				Shortcut:    "v / ctrl+i",
-				Description: "Inspect all 9 workbench slots and their owners",
+				Description: "Inspect every workbench slot and its owner",
 			},
 			PluginID: "husk.core",
 		},
@@ -431,4 +431,46 @@ func (m *WorkbenchModel) showLocalToast(level, title, message string) tea.Cmd {
 	return tea.Tick(2600*time.Millisecond, func(time.Time) tea.Msg {
 		return toastExpireMsg{id: seq}
 	})
+}
+
+type footerHint struct{ key, desc string }
+
+// maxPluginFooterHints caps how many plugin-declared bindings the footer
+// advertises so the host's own hints and the ipc counter keep their room.
+const maxPluginFooterHints = 4
+
+// footerHints returns the key hints the footer shows. Host chrome keys (home,
+// docks, palette, quit) are always present; action keys come only from
+// keybindings the plugin owning the focused surface declared with a
+// description, or from the built-in slot map when it is the focused stage.
+// With no plugins connected nothing application-specific is advertised.
+func (m *WorkbenchModel) footerHints() []footerHint {
+	hints := []footerHint{{"F1", " home"}}
+	if m.stageMode == "hotspots" && m.focusedSlot == huskipc.SlotMainStage {
+		hints = append(hints, footerHint{"j/k", "nav"})
+	}
+	seen := map[string]bool{}
+	if cp, ok := m.plugins[m.keyOwner(m.focusedSlot)]; ok {
+		n := 0
+		for _, b := range cp.Info.Keybindings {
+			if n == maxPluginFooterHints {
+				break
+			}
+			if b.Description == "" || b.Key == "" || seen[b.Key] {
+				continue
+			}
+			if b.WhenSlot != "" && b.WhenSlot != m.focusedSlot {
+				continue
+			}
+			seen[b.Key] = true
+			hints = append(hints, footerHint{railShortcutLabel(b.Key), b.Description})
+			n++
+		}
+	}
+	return append(hints,
+		footerHint{"drag/= ", "resize"},
+		footerHint{"[ ] /", "docks"},
+		footerHint{"ctrl+p", "palette"},
+		footerHint{"q", "quit"},
+	)
 }

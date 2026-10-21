@@ -289,15 +289,11 @@ func (m *WorkbenchModel) renderBottomKeybindBar() string {
 		return keyStyle.Render(k) + " " + descStyle.Render(d)
 	}
 
-	left := strings.Join([]string{
-		hint("F1", " home"),
-		hint("j/k", "nav"),
-		hint("⏎", "focus"),
-		hint("drag/= ", "resize"),
-		hint("[ ] /", "docks"),
-		hint("ctrl+p", "palette"),
-		hint("q", "quit"),
-	}, sep)
+	var parts []string
+	for _, h := range m.footerHints() {
+		parts = append(parts, hint(h.key, h.desc))
+	}
+	left := strings.Join(parts, sep)
 
 	ipcStat := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(m.palette.InkSubtle)).
