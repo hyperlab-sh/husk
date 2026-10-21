@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/hyperlab-sh/husk/pkg/frame"
 	"github.com/hyperlab-sh/husk/pkg/huskipc"
@@ -34,6 +35,7 @@ func TestViewRequestsKeyEventTypes(t *testing.T) {
 
 func TestKeyReleaseClearsHeldKeyWithoutTimer(t *testing.T) {
 	m := newWorkbenchModel("", nil, t.TempDir())
+	m.pollMods = func() (huskipc.ModifierState, bool) { return huskipc.ModifierState{}, false }
 	_, out := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "p"})
 	m.Update(tea.KeyboardEnhancementsMsg{Flags: ansi.KittyReportEventTypes})
 	if !m.keyReleases {
@@ -42,7 +44,7 @@ func TestKeyReleaseClearsHeldKeyWithoutTimer(t *testing.T) {
 	m.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 	// A held key older than the 320ms fallback must not be expired by the tick
 	// when the terminal reports releases.
-	m.heldKeys["x"] = time.Now().Add(-time.Second)
+	m.heldKeys["x"] = time.Now().Add(-500 * time.Millisecond)
 	out.Reset()
 	m.Update(modifierTickMsg{})
 	if _, held := m.heldKeys["x"]; !held || out.Len() != 0 {
@@ -60,11 +62,70 @@ func TestKeyReleaseClearsHeldKeyWithoutTimer(t *testing.T) {
 
 func TestHeldKeyTimerStillExpiresWithoutEventTypes(t *testing.T) {
 	m := newWorkbenchModel("", nil, t.TempDir())
+	m.pollMods = func() (huskipc.ModifierState, bool) { return huskipc.ModifierState{}, false }
 	m.Update(tea.KeyboardEnhancementsMsg{Flags: 1})
 	m.heldKeys["x"] = time.Now().Add(-time.Second)
 	m.Update(modifierTickMsg{})
 	if len(m.heldKeys) != 0 {
 		t.Fatal("fallback timer must still expire keys when releases are unreported")
+	}
+}
+
+func TestHeldKeySafetyExpiryWithEventTypes(t *testing.T) {
+	m := newWorkbenchModel("", nil, t.TempDir())
+	m.pollMods = func() (huskipc.ModifierState, bool) { return huskipc.ModifierState{}, false }
+	m.Update(tea.KeyboardEnhancementsMsg{Flags: ansi.KittyReportEventTypes})
+	m.heldKeys["x"] = time.Now().Add(-2 * time.Second)
+	m.Update(modifierTickMsg{})
+	if len(m.heldKeys) != 0 {
+		t.Fatal("a key whose release never arrived must lapse via the safety expiry")
+	}
+}
+
+func TestKeyboardEnhancementsFallbackResumesShortExpiry(t *testing.T) {
+	m := newWorkbenchModel("", nil, t.TempDir())
+	m.pollMods = func() (huskipc.ModifierState, bool) { return huskipc.ModifierState{}, false }
+	m.Update(tea.KeyboardEnhancementsMsg{Flags: ansi.KittyReportEventTypes})
+	m.Update(tea.KeyboardEnhancementsMsg{Flags: 1})
+	m.heldKeys["x"] = time.Now().Add(-500 * time.Millisecond)
+	m.Update(modifierTickMsg{})
+	if len(m.heldKeys) != 0 {
+		t.Fatal("short expiry did not resume after event types were lost")
+	}
+}
+
+func TestViewRequestsAlternateKeys(t *testing.T) {
+	m := newWorkbenchModel("", nil, t.TempDir())
+	m.recomputeLayout()
+	if !m.View().KeyboardEnhancements.ReportAlternateKeys {
+		t.Fatal("View must request alternate keys so shifted-symbol releases match their press")
+	}
+}
+
+func TestDecodedShiftedReleaseMatchesPress(t *testing.T) {
+	// Sequences as sent by a terminal with flags disambiguate|event-types|alternate-keys.
+	for _, tc := range []struct{ name, press, release, want string }{
+		{"bang", "!", "\x1b[49:33;2:3u", "!"},
+		{"question", "?", "\x1b[47:63;2:3u", "?"},
+		{"enter", "\r", "\x1b[13;1:3u", "enter"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var d uv.EventDecoder
+			_, pe := d.Decode([]byte(tc.press))
+			n, re := d.Decode([]byte(tc.release))
+			if n == 0 {
+				t.Fatal("release not decoded")
+			}
+			pk, ok1 := pe.(uv.KeyPressEvent)
+			rk, ok2 := re.(uv.KeyReleaseEvent)
+			if !ok1 || !ok2 {
+				t.Fatalf("decoded %T / %T", pe, re)
+			}
+			ps, rs := legacyKeyString(tea.KeyPressMsg(pk)), legacyKeyString(tea.KeyReleaseMsg(rk))
+			if ps != tc.want || rs != tc.want {
+				t.Fatalf("press %q release %q, want %q", ps, rs, tc.want)
+			}
+		})
 	}
 }
 
