@@ -103,7 +103,7 @@ Every message is one JSON object on one line (at most 4 MiB, `huskipc.MaxLineByt
 | `slot_update` | plugin to host | Render a slot |
 | `slot_resize` | host to plugin | Slot dimensions changed |
 | `slot_key`, `slot_mouse` | host to plugin | Input routed to a focused slot |
-| `key_state` | host to plugin | Modifier state, such as Alt held. Sent on transitions only; on terminal blur the host sends `up` for every modifier and held key it had reported (a latched Alt stays) |
+| `key_state` | host to plugin | Modifier state, such as Alt held. Sent on transitions only. `modifiers` is authoritative (it comes from the OS poll or the latched state). `held` and `held_keys` for ordinary keys are best effort: a terminal reports presses and, only with the keyboard protocol, releases, so the host drops a key from the held set 320 ms after its last press or repeat and sends an `up` for it then. Do not treat them as ground truth. On terminal blur the host sends `up` for every modifier and held key it had reported (a latched Alt stays) |
 | `workspace_context` | plugin to host, then broadcast | Selected workspace (`cwd`, label, repo) |
 | `command_invoke` | host to plugin | A palette command was chosen |
 | `toast` | plugin to host | Show a notification |
@@ -160,7 +160,7 @@ Frame declarations ride on existing messages: `hello.frames` (per-slot) and the 
 
 Husk binds no keys to any application. A key press is resolved in this order:
 
-1. **Palette and modal.** While the palette is open it takes every key. While a modal rail item is open, `esc` or that item's own `shortcut` closes it and every other key goes to the modal plugin as `slot_key` on `modal-surface`.
+1. **Palette and modal.** While the palette is open it takes every key; printable text of any script (not only ASCII) is appended to the query and `backspace` removes one character. While a modal rail item is open, `esc` or that item's own `shortcut` closes it and every other key goes to the modal plugin as `slot_key` on `modal-surface`.
 2. **Host shortcuts.** Quit, home (`esc`, `f1`, `alt+1`), palette, dock toggles, resize, the slot explorer and `tab` focus cycling. Plugins cannot override these.
 3. **Rail item shortcuts.** A rail item's `shortcut` opens it; pressing it again while it is active returns home.
 4. **Plugin key bindings** from `hello.keybindings` (`{"key":"n","command_id":"a.new","when_slot":"sidebar-list"}`). Bindings whose `when_slot` is the focused surface win, then global bindings (no `when_slot`) of the focused surface's owner, then global bindings of other plugins; ties resolve by plugin ID, then declaration order. While the focused surface has an occupant, other plugins' global bindings apply only to chord keys (`ctrl+`, `alt+` and function keys such as `f5`); every other key goes to the occupant in step 5, so a plugin's unscoped `r` or `1` never steals typing from another plugin's focused surface. Scope single-letter bindings with `when_slot` to the surface they serve. When a binding fires, a built-in `husk.*` command or a registered rail item ID runs in the host; any other ID is sent as `command_invoke` to the plugin that declared the binding.

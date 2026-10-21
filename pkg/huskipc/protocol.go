@@ -275,9 +275,9 @@ type ModifierState struct {
 type KeyStatePayload struct {
 	Phase     string        `json:"phase"`               // "down" | "up" | "repeat" | "sync"
 	Key       string        `json:"key"`                 // "alt", "ctrl", "shift", "super", or key identifier
-	Held      bool          `json:"held"`                // True while this key/modifier is actively held down
+	Held      bool          `json:"held"`                // Best effort for non-modifier keys: true until a release or the 320ms expiry
 	Modifiers ModifierState `json:"modifiers"`           // Authoritative snapshot of all currently held modifiers
-	HeldKeys  []string      `json:"held_keys,omitempty"` // All keys/modifiers currently held down
+	HeldKeys  []string      `json:"held_keys,omitempty"` // Non-modifier keys the host believes are down (best effort, see docs)
 	Slot      SlotID        `json:"slot,omitempty"`      // Active slot when transition occurred
 }
 

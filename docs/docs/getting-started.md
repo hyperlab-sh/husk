@@ -76,4 +76,4 @@ Husk binds no keys to any plugin. Each rail item opens from a click on the rail 
 | `Esc` | Dismiss a modal or leave full-canvas and stage modes |
 | `q`, `ctrl+c` | Quit and stop all plugin processes |
 
-Slot borders can be resized by dragging them with the mouse. Every other key goes to the plugin occupying the focused surface, unless a plugin declared a key binding for it.
+Slot borders can be resized by dragging them with the mouse. Only a border the occupying plugin declared (`"border": true`) is a drag handle; a click on an unbordered surface always reaches its content. Every other key goes to the plugin occupying the focused surface, unless a plugin declared a key binding for it.
