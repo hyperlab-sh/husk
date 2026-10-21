@@ -15,7 +15,7 @@ go test ./pkg/...
 ./bin/husk --dump-frame --rail modal    # also: full-canvas, stage; --hold-alt
 ```
 
-Unit tests live in `pkg/manifest/manifest_test.go`; run them with `go test ./pkg/manifest`.
+Tests live in `pkg/manifest` (manifest parsing) and `pkg/frame` (frame geometry), plus `cmd/husk` host regression tests for frame resolution, sizing and rendering; run them all with `go test ./...`. Use `--dump-frame` to check rendering changes and `--demo-frame` (optionally with `--rail modal|full-canvas|stage`) to render the built-in demo plugin that declares a border+label+close frame. Surfaces are a blank canvas; all plugin-surface chrome (border/label/close) is declared by the plugin (`hello.frames` or rail-item `frame`) and drawn by `cmd/husk` `renderFrame`. Manifests reference binaries as `./bin/<name>`.
 
 ## Layout
 
