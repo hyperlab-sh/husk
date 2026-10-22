@@ -13,7 +13,7 @@ Husk is the host. Plugins are separate processes that Husk spawns and supervises
 
 ### Socket security
 
-The host socket is local-user only. Husk creates a fresh `0700` directory under `$XDG_RUNTIME_DIR`, or under a `mkdtemp` directory in the system temp dir when that variable is unset or unusable, and binds the instance socket inside it with mode `0600`. The path is exported to plugins as `HUSK_SOCKET_PATH`. On every accepted connection the host reads the peer uid from the kernel (`SO_PEERCRED` on Linux, `LOCAL_PEERCRED` on macOS) and closes the connection unless it equals the host uid; if the credentials cannot be read, the connection is refused. The socket is removed on shutdown. A socket path longer than the platform's `sun_path` refuses to start. See [Pods](design/pods.md) and [Instances](design/instances.md).
+The host socket is local-user only. Husk uses a private `0700` runtime directory shared by the user's instances: `$XDG_RUNTIME_DIR/husk/` when that variable is set (an unusable one is an error, never a fallback), otherwise `/tmp/husk-<uid>/`. It must be a real directory owned by the user with no group or world bits, and it is never removed. Each instance binds `<instance-id>.sock` inside it with mode `0600`. The path is exported to plugins as `HUSK_SOCKET_PATH`. On every accepted connection the host reads the peer uid from the kernel (`SO_PEERCRED` on Linux, `LOCAL_PEERCRED` on macOS) and closes the connection unless it equals the host uid; if the credentials cannot be read, the connection is refused. The socket is removed on shutdown; stale-socket recovery is described in [Instances](design/instances.md). A socket path longer than the platform's `sun_path` refuses to start. See [Pods](design/pods.md) and [Instances](design/instances.md).
 
 Identity is a per-plugin token. Husk generates one for each launch and injects it as `HUSK_PLUGIN_TOKEN`; a socket request carries it in the top-level `token` member. A request with a valid token is attributed to that plugin, a request with no token comes from the user (the CLI), and an unknown or revoked token is refused with `denied`. The token is revoked as soon as the process is reaped or its channel closes. It is attribution between plugins of one user, not isolation: the peer uid check is the security boundary.
 
@@ -79,7 +79,7 @@ A slot's region on screen is a **surface**, and it is a blank canvas: without a 
 | `label` | Title text in/over the top edge | None |
 | `close` | ✕ button; click closes like `esc` | None |
 
-Each element is independently on or off. A plugin declares frames in its manifest (`"frames": {"<surface-id>": {"border": true, "label": "…", "close": true}}`) and a rail item can declare one for the surface it opens (`"frame"` on the rail item). Only the border changes layout: plugins that declare a frame get a `surface.resized` with the inner dimensions; plugins that declare nothing get the full rect. Toasts and the command palette are Husk's own UI and keep their own chrome.
+Each element is independently on or off. A plugin declares frames in its manifest, as `frame` on a `surfaces` entry (`"surfaces":[{"id":"<surface-id>","frame":{"border":true,"label":"…","close":true}}]`), and a rail item can declare one for the surface it opens (`"frame"` on the rail item). Only the border changes layout: plugins that declare a frame get a `surface.resized` with the inner dimensions; plugins that declare nothing get the full rect. Toasts and the command palette are Husk's own UI and keep their own chrome.
 
 ### Content clipping
 
@@ -143,7 +143,7 @@ Fields with a closed vocabulary use named Go string types in `pkg/protocol`, and
 
 `protocol.Version` is `"MAJOR.MINOR"` (currently `2.0`). A minor release only adds optional fields, methods, error codes and enum values, which both sides ignore when they do not know them; a major release is a breaking change. Husk speaks one major at a time and accepts any minor of its own.
 
-There is no handshake, so the check happens where the plugin is introduced: its manifest states the protocol major, and manifest conversion refuses a plugin whose major differs before it is launched. The host's full version is in the plugin's `HUSK_PROTOCOL_VERSION` environment variable and in the `session.ping` result. A refusal carries the code `version_mismatch`. Go plugins can use `protocol.CheckVersion`.
+There is no handshake, so the check happens where the plugin is introduced: its manifest's integer `protocol` must equal `protocol.Major` (checked by `Spec.Validate` at conversion; a mismatched plugin is not launched). A plugin that still sends a v1 `hello` gets one v1-shaped `protocol_error` line, and its Pod fails with `version_mismatch`. The host's full version is in the plugin's `HUSK_PROTOCOL_VERSION` environment variable and in the `session.ping` result. `protocol.CheckVersion` validates a "MAJOR.MINOR" string for Go plugins.
 
 `pkg/protocol` imports only the Go standard library: `FrameSpec` and `Palette` are plain wire structs, and the host converts them to its own `pkg/frame` and `pkg/theme` types, so a Go plugin importing the wire package pulls in no rendering code.
 
@@ -161,7 +161,7 @@ A request that fails gets an error reply `{"id": …, "error": {"code": …, "me
 
 A rejected message has no effect. Each rejection is logged. A peer never answers a `protocol.error` with another one, or two strict peers would loop; the host sends at most 10 per second per channel.
 
-Frame declarations live in the manifest (`frames`, per surface) and on rail items (`frame`). Both are optional: a plugin that omits them renders as a blank canvas.
+Frame declarations live in the manifest (`surfaces[].frame`) and on rail items (`frame`). Both are optional: a plugin that omits them renders as a blank canvas.
 
 `theme.changed` carries generic colour roles only (`canvas`, `slot_background`, `surface*`, `border*`, `ink*`, `accent*`, `success`, `warning`, `danger`, `info`). Values are `#RRGGBB` strings (CharmTone). `slot_background` is the colour Husk paints under slot content; a plugin that wants its own background to blend with the slot, rather than cut out of it, can use it, and one that ignores it is unaffected. A plugin that needs its own colour set, such as one colour per entity, defines it itself.
 
@@ -302,7 +302,7 @@ the plugin remains listed with its `failed` or `exited` status.
 ### Declaring in the manifest
 
 Declarations are manifest-only. A plugin's `husk-plugin.json` carries its
-`protocol` major, `command`, `slots`, `frames`, `actions`, `keybindings`,
+`protocol` major, `command`, `surfaces` (each with an optional `frame`), `actions`, `keybindings`,
 `rail_items`, `published_slots`, `hooks` and `events`, plus optional State
 slice, settings and secrets declarations. [Pods](design/pods.md) specifies the
 schema and `internal/pods/manifest` converts it into the plain declaration
@@ -310,16 +310,20 @@ catalog the rest of the host reads:
 
 ```json
 {
-  "id": "a", "name": "A", "version": "1", "protocol": 2, "command": ["./a"], "slots": ["main-stage"],
+  "manifest_version": 2, "protocol": 2,
+  "id": "a", "name": "A", "version": "1", "command": ["./a"],
+  "surfaces": [{"id": "main-stage"}],
   "published_slots": [{"id":"a.agent-line-action","title":"Row actions","kind":"inline"}],
-  "hooks": [{"id":"a.before-refresh","title":"Before refresh"}],
-  "events": [{"id":"a.selection-changed"}]
+  "hooks": {"publish": [{"id":"a.before-refresh","title":"Before refresh"}]},
+  "events": {"publish": [{"name":"a.selection-changed"}]}
 }
 ```
 
+A manifest without `manifest_version` is read as the older form (`slots`, array-shaped `hooks` and `events`).
+
 Declarations get the same validation as runtime requests (the
 `<plugin-id>.<name>` namespace, slot `kind`, a positive `rect`); a region's
-`rect.surface` must be one of the manifest's own `slots`. A manifest with an
+`rect.surface` must be one of the manifest's own `surfaces`. A manifest with an
 invalid declaration is not launched: Husk logs the problem and registers nothing
 from it, and other plugins still launch. Focus-local `keybindings` are validated
 at conversion too: a binding for a surface the plugin does not occupy, for
