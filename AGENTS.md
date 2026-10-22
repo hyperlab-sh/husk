@@ -35,6 +35,8 @@ The standalone v2 Event bus is tested with `go test -race ./internal/stem/eventb
 
 Host contracts live in `internal/host/contracts` (consumer-defined ports, launch seams, `Limiter`, `Config`/`Host`, `Occupant`/`Contribution`) with recording fakes in its `fakes` subpackage; test with `go test -race ./internal/host/...`. The package must not import Services or the Server (`TestImportsStayWithinAllowList`). Ports return `CodedError`; read the wire code with `contracts.CodeOf`, never the message. Fake clocks only, no sleeps.
 
+Services live under `internal/services/`, with shared contracts in the leaf `contracts` package and root aliases. `Rebuild(ctx, input)` prepares an unpublished candidate; only the coordinator applies it before the shared reload deadline. Public user-only exposure/mutation methods validate a verified Caller; Profile/grant writes are posted to the loop. Snapshots are immutable atomic-pointer publications. Services import no Stem/Pods or config filesystem implementation. Key spelling is shared through `internal/keyspelling`; the legacy host adopts it at switchover. Check Services with `go test -race ./internal/services/... ./internal/keyspelling/... ./pkg/theme/...`; tests inject clocks/dialogs/crypto and never sleep. A late reload request joins one queued follow-up after input capture, not an already-stale running flight. Plugin settings access (`Get` / `SnapshotFor`) is exact declared ownership plus public `husk.*`, never a subtree-prefix grant: plugin ids may contain dots and retain case; local setting keys are one lowercase segment.
+
 ## Charm v2
 
 - Import `charm.land/bubbletea/v2` and `charm.land/lipgloss/v2`; stable v2 uses these canonical vanity paths, not the old GitHub module paths. Bubbles is not currently used.
