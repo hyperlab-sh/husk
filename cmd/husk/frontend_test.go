@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"slices"
 	"runtime"
+	"slices"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
