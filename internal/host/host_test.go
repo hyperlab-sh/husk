@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -802,35 +803,159 @@ func TestSpawnRefusedOnceClosing(t *testing.T) {
 }
 
 // TeardownMsg handled while Close waits on the worker group must not Add to
-// it; under -race an unguarded wg.Add against Wait is reported.
-func TestTeardownRacingCloseIsSafe(t *testing.T) {
+// it. A held worker keeps shutdown inside the wait; one TeardownMsg for a live
+// Pod is then delivered through Update and its Reload worker must be refused.
+func TestTeardownWhileShutdownWaitsOnWorkersIsRefused(t *testing.T) {
 	hook, ready := readyHook("")
 	f := newFakes()
-	h, err := boot(t, func(c *contracts.Config) { c.Plugins = []string{writePlugin(t, "alpha", false)} }, withHook(hook), WithFactory(f.factory))
+	var mu sync.Mutex
+	var accepted []bool
+	atPods := make(chan struct{})
+	proceed := make(chan struct{})
+	h, err := boot(t, func(c *contracts.Config) { c.Plugins = []string{writePlugin(t, "alpha", false)} },
+		withHook(hook), WithFactory(f.factory),
+		withClose(func(step string) {
+			if step == "pods" { // plugins stopped; parked here until the Teardown is delivered
+				close(atPods)
+				<-proceed
+			}
+		}),
+		func(o *options) {
+			o.onSpawn = func(ok bool) { mu.Lock(); accepted = append(accepted, ok); mu.Unlock() }
+		})
 	if err != nil {
 		t.Fatal(err)
 	}
 	runHost(t, ready, h)
 	<-f.started
-	stop := make(chan struct{})
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for {
-			select {
-			case <-stop:
-				return
-			default:
-				h.root.cfg.Post(pods.TeardownMsg{PluginID: "alpha"})
-			}
+	hold := make(chan struct{})
+	held := make(chan struct{})
+	h.root.spawn(func() tea.Msg { close(held); <-hold; return nil })
+	<-held
+	closed := make(chan error, 1)
+	go func() { closed <- h.root.Close() }()
+	<-atPods // shutdown has begun (closing set) and the held worker keeps wg above zero
+	mu.Lock()
+	before := len(accepted)
+	mu.Unlock()
+	h.loop(func() {
+		if _, ok := h.root.pods.Pod("alpha"); !ok {
+			t.Error("precondition: alpha has no Pod")
 		}
-	}()
-	if err := h.root.Close(); err != nil {
+		h.root.Update(pods.TeardownMsg{PluginID: "alpha"})
+	})
+	mu.Lock()
+	got := append([]bool(nil), accepted[before:]...)
+	mu.Unlock()
+	close(proceed)
+	if len(got) != 1 || got[0] {
+		t.Errorf("spawn results during shutdown = %v, want one refusal", got)
+	}
+	select {
+	case err := <-closed:
+		t.Fatalf("Close returned %v while a worker was still held", err)
+	default:
+	}
+	close(hold)
+	if err := <-closed; err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
+// postGate is a Config.Post that blocks marked messages until the gate closes,
+// like a loop owner's post blocked on a full channel, and refuses everything
+// once the gate is closed.
+type postGate struct {
+	gate chan struct{}
+	next func(any) bool
+}
+
+type blockedPost struct{}
+
+func (g *postGate) post(m any) bool {
+	if _, ok := m.(blockedPost); ok {
+		<-g.gate
+		return false
+	}
+	select {
+	case <-g.gate:
+		return false
+	default:
+	}
+	return g.next(m)
+}
+
+// bootWithWorker boots a host with a running plugin and a worker in flight
+// whose last act is a Post that blocks until the gate closes.
+func bootWithWorker(t *testing.T, g *postGate, workerDone *atomic.Bool, steps *[]string, opts ...Option) *harness {
+	t.Helper()
+	hook, ready := readyHook("")
+	f := newFakes()
+	h, err := boot(t, func(c *contracts.Config) {
+		c.Plugins = []string{writePlugin(t, "alpha", false)}
+		g.next = c.Post
+		c.Post = g.post
+	}, append(opts, withHook(hook), WithFactory(f.factory), withClose(func(s string) { *steps = append(*steps, s) }))...)
+	if err != nil {
 		t.Fatal(err)
 	}
-	close(stop)
-	wg.Wait()
+	runHost(t, ready, h)
+	<-f.started
+	inWorker := make(chan struct{})
+	h.root.spawn(func() tea.Msg {
+		close(inWorker)
+		h.root.cfg.Post(blockedPost{})
+		workerDone.Store(true)
+		return nil
+	})
+	<-inWorker
+	return h
+}
+
+// Close from Update with a plugin running and a worker in flight: once the
+// loop owner closes the post gate (the documented precondition) the worker's
+// Post refuses, the worker ends and Close completes on the loop.
+func TestCloseFromUpdateWithLiveWorkerAfterGateClosed(t *testing.T) {
+	g := &postGate{gate: make(chan struct{})}
+	var workerDone atomic.Bool
+	var steps []string
+	h := bootWithWorker(t, g, &workerDone, &steps)
+	closed := make(chan error, 1)
+	g.next(fnMsg{fn: func() {
+		close(g.gate)
+		closed <- h.root.Close()
+	}})
+	if err := <-closed; err != nil {
+		t.Fatalf("Close from Update: %v", err)
+	}
+	if !workerDone.Load() {
+		t.Error("Close returned before the in-flight worker finished")
+	}
+	if want := []string{"calls", "server", "pods", "store"}; !slices.Equal(steps, want) {
+		t.Fatalf("steps = %v, want %v", steps, want)
+	}
+}
+
+// A Post that breaks the contract and blocks must not hang Close: the wait for
+// workers is bounded and Close says so.
+func TestCloseFromUpdateBoundsTheWaitOnABlockedPost(t *testing.T) {
+	g := &postGate{gate: make(chan struct{})}
+	var workerDone atomic.Bool
+	var steps []string
+	h := bootWithWorker(t, g, &workerDone, &steps, func(o *options) { o.workerWait = 20 * time.Millisecond })
+	closed := make(chan error, 1)
+	g.next(fnMsg{fn: func() { closed <- h.root.Close() }})
+	err := <-closed
+	if err == nil || !strings.Contains(err.Error(), "workers still running") {
+		t.Fatalf("Close = %v, want a workers-still-running error", err)
+	}
+	if workerDone.Load() {
+		t.Error("worker finished although its Post was still blocked")
+	}
+	if want := []string{"calls", "server", "pods", "store"}; !slices.Equal(steps, want) {
+		t.Fatalf("steps = %v, want %v", steps, want)
+	}
+	close(g.gate) // release the worker so the test leaks nothing
 }
 
 func TestTeardownOfUnknownPodLeavesDeclarations(t *testing.T) {
@@ -877,6 +1002,9 @@ func TestCloseDoesNotRunLoopWorkInlineOnAWedgedLoop(t *testing.T) {
 	close(release)
 	if err == nil || !strings.Contains(err.Error(), "wedged") {
 		t.Fatalf("Close = %v, want a wedged-loop error", err)
+	}
+	if strings.Contains(err.Error(), "final state flush") {
+		t.Fatalf("Close waited on the wedged loop a second time: %v", err)
 	}
 }
 
