@@ -16,8 +16,11 @@ import (
 // Minimum terminal size the workbench layout is designed for. Below it the
 // host renders a too-small screen instead of a garbled, overflowing frame.
 const (
-	minTermWidth  = 84
-	minTermHeight = 24
+	minTermWidth = 84
+	// minPanelCentreWidth is the centre column width, beside the sidebar,
+	// below which the side panel is not drawn.
+	minPanelCentreWidth = 72
+	minTermHeight       = 24
 )
 
 // surfaceGutter is the number of blank columns between the centre column
@@ -191,7 +194,7 @@ func (m *WorkbenchModel) placeSlots() {
 	}
 
 	rightW := 0
-	if m.rightSideShown() && remW-leftW >= 72 {
+	if m.rightSideShown() && remW-leftW >= minPanelCentreWidth {
 		rightW = min(m.sidePaneW, (remW-leftW)/2)
 	}
 	centerW := max(30, remW-leftW-rightW)

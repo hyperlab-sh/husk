@@ -159,6 +159,8 @@ func (co *Coordinator) Reload(ctx context.Context, reason Reason) ([]Report, err
 	if start {
 		go co.execute(f)
 	}
+	// ctx.Done() must not be read before the flight is joined above: tests
+	// take its first call as the signal that this caller is parked on it.
 	select {
 	case <-f.done:
 		if err := ctx.Err(); err != nil {
