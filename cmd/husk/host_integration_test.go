@@ -236,7 +236,7 @@ func TestWorkbenchOverTheRealHost(t *testing.T) {
 		if !gateClosed {
 			t.Error("host.Close ran before the post gate closed")
 		}
-	case <-t.Context().Done():
+	case <-time.After(20 * time.Second):
 		t.Fatal("q never closed the host")
 	}
 	select {
@@ -244,7 +244,7 @@ func TestWorkbenchOverTheRealHost(t *testing.T) {
 		if err != nil {
 			t.Fatalf("program: %v", err)
 		}
-	case <-t.Context().Done():
+	case <-time.After(20 * time.Second):
 		t.Fatal("program did not end after q")
 	}
 	if prog.post(struct{}{}) {
