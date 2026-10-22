@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"sync"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -382,5 +383,52 @@ func TestStartFailureIsSynchronousAndNeverLive(t *testing.T) {
 	}
 	if len(loop.logs) != 1 || loop.logs[0].Level != "error" {
 		t.Fatal("error logs", loop.logs)
+	}
+}
+
+// The handles map is the one structure read off the loop: the Stem State
+// write path resolves a plugin's write handle from a Server handler
+// goroutine (writeHandle before apply posts), while RegisterSlicesMsg and
+// TeardownMsg mutate it on the loop. The crossing is guarded by handlesMu
+// (round-2 finding 1); this test exercises it concurrently so the race
+// detector fails without the guard.
+func TestHandlesCrossingIsGuarded(t *testing.T) {
+	h, _, _, _ := hostFixture(t)
+	addPod(t, h, "files")
+	slices := NewPodSlices(h)
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					slices.Handle("files", "files.state")
+				}
+			}
+		}()
+	}
+
+	for i := 0; i < 200; i++ {
+		done := make(chan Registered, 1)
+		h.Handle(RegisterSlicesMsg{Register: map[string]func() (contracts.SliceHandle, error){
+			"files": func() (contracts.SliceHandle, error) { return &fakeHandle{namespace: "files.state"}, nil },
+		}, Done: done})
+		h.Handle(TeardownMsg{PluginID: "files"})
+		addPod(t, h, "files")
+	}
+
+	close(stop)
+	wg.Wait()
+
+	// The last teardown removed the handle and addPod does not re-register
+	// one (registration is RegisterSlicesMsg's job), so the lookup misses.
+	if _, ok := slices.Handle("files", "files.state"); ok {
+		t.Fatal("handle survived teardown")
 	}
 }

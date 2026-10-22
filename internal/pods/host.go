@@ -24,12 +24,20 @@ import (
 // ReplySink posting methods are worker-safe; all other methods run on the loop.
 // Stop returns a command that performs bounded waits away from the loop.
 type Host struct {
-	loop      Loop
-	opts      Options
-	ctx       context.Context
-	cancel    context.CancelFunc
-	pods      map[string]*Pod
+	loop   Loop
+	opts   Options
+	ctx    context.Context
+	cancel context.CancelFunc
+	pods   map[string]*Pod
+	// handles holds each Pod's slice owner handle from RegisterSlicesMsg
+	// until TeardownMsg, for teardown and the Stem State port's write path.
+	// Registration and teardown mutate it on the loop, but the Stem write
+	// path resolves handles off the loop (a Server handler goroutine resolves
+	// the handle before posting the write itself), so this is the one map
+	// guarded by a mutex instead of loop confinement; handlesMu covers only
+	// the map's own read, assignment and delete, never the handles' methods.
 	handles   map[string]contracts.SliceHandle
+	handlesMu sync.Mutex
 	gates     map[uint64][]string
 	preparing map[string]bool
 	nextGate  uint64
@@ -222,7 +230,9 @@ func (h *Host) Handle(msg tea.Msg) bool {
 				registered.Failed[id] = fmt.Errorf("slice registration: %w", err)
 				continue
 			}
+			h.handlesMu.Lock()
 			h.handles[id] = handle
+			h.handlesMu.Unlock()
 			registered.Handles[id] = handle
 		}
 		select {
@@ -235,9 +245,14 @@ func (h *Host) Handle(msg tea.Msg) bool {
 			return true
 		}
 		h.revoke(m.PluginID)
-		if handle, ok := h.handles[m.PluginID]; ok {
-			handle.Unregister()
+		h.handlesMu.Lock()
+		handle, hasHandle := h.handles[m.PluginID]
+		if hasHandle {
 			delete(h.handles, m.PluginID)
+		}
+		h.handlesMu.Unlock()
+		if hasHandle {
+			handle.Unregister()
 		}
 		delete(h.pods, m.PluginID)
 		delete(h.preparing, m.PluginID)
@@ -307,8 +322,9 @@ func (h *Host) Teardown(id string) tea.Cmd {
 
 // PodSlices adapts the Host's stored slice handles to the host's
 // SliceHandles lookup seam: the Stem State port resolves a plugin's write
-// capability by namespace here. Loop-only; a handle exists only while the
-// Pod is registered (from RegisterSlicesMsg until TeardownMsg).
+// capability by namespace here. The lookup runs off the loop on the Stem
+// write path, so it reads the guarded map (handlesMu); a handle exists only
+// while the Pod is registered (from RegisterSlicesMsg until TeardownMsg).
 type PodSlices struct{ host *Host }
 
 // NewPodSlices wraps h. The adapter exists because Host already has a
@@ -322,7 +338,9 @@ func (s PodSlices) Handle(pluginID, namespace string) (contracts.SliceHandle, bo
 	if s.host == nil || namespace != pluginID+".state" {
 		return nil, false
 	}
+	s.host.handlesMu.Lock()
 	handle, ok := s.host.handles[pluginID]
+	s.host.handlesMu.Unlock()
 	return handle, ok
 }
 
