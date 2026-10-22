@@ -15,18 +15,34 @@ import (
 // every engine call crosses the Loop seam with Do and carries the engine's
 // reply back out with it.
 type SurfacePort struct {
-	engine *surfaces.Engine
-	loop   Loop
+	engine  *surfaces.Engine
+	loop    Loop
+	content contracts.ContentSink
 }
 
 var _ contracts.SurfacePort = (*SurfacePort)(nil)
 
+// SurfaceOption adjusts NewSurfacePort.
+type SurfaceOption func(*SurfacePort)
+
+// WithContent routes accepted surface.update content to sink. The sink runs
+// on the loop, right after the engine accepted the update, with the plugin id
+// and the params unchanged; a refused update never reaches it. Nil drops
+// content.
+func WithContent(sink contracts.ContentSink) SurfaceOption {
+	return func(p *SurfacePort) { p.content = sink }
+}
+
 // NewSurfacePort wraps eng for the loop. Both arguments are required.
-func NewSurfacePort(eng *surfaces.Engine, loop Loop) *SurfacePort {
+func NewSurfacePort(eng *surfaces.Engine, loop Loop, opts ...SurfaceOption) *SurfacePort {
 	if eng == nil || loop == nil {
 		panic("stem: NewSurfacePort needs an Engine and a Loop")
 	}
-	return &SurfacePort{engine: eng, loop: loop}
+	p := &SurfacePort{engine: eng, loop: loop}
+	for _, opt := range opts {
+		opt(p)
+	}
+	return p
 }
 
 // run runs fn, an engine call, on the loop and carries its error back. A
@@ -50,7 +66,15 @@ func (p *SurfacePort) SurfaceUpdate(ctx context.Context, c contracts.Caller, par
 	if err := allowCaller(protocol.MethodSurfaceUpdate, c); err != nil {
 		return err
 	}
-	return p.run(ctx, func() error { return p.engine.SurfaceUpdate(c.PluginID, params) })
+	return p.run(ctx, func() error {
+		if err := p.engine.SurfaceUpdate(c.PluginID, params); err != nil {
+			return err
+		}
+		if p.content != nil {
+			p.content(c.PluginID, params)
+		}
+		return nil
+	})
 }
 
 // SurfaceClose serves surface.close (plugin callers only).

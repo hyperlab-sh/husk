@@ -68,6 +68,12 @@ type Root struct {
 	loopSeam  loopSeam
 	instStart time.Time
 
+	// Frontend support.
+	frontendSlices *contracts.FrontendSlices // set once by OwnSlices
+	hostActions    map[string]bool           // ids bound by RegisterHostAction
+	sizesDirty     bool                      // geometry, focus or visibility changed this tick
+	lastSizes      map[protocol.SurfaceID]protocol.SurfaceSize
+
 	// Lifecycle.
 	live      atomicBool   // New returned: the loop may be running
 	loopGID   atomic.Int64 // goroutine id of the loop, learned on its first Update
@@ -299,7 +305,7 @@ func (r *Root) buildStem() error {
 		return fmt.Errorf("event bus: %w", err)
 	}
 	r.disp, err = dispatcher.New(dispatcher.Options{
-		Catalog:  dispatcher.NewDocCatalog(func() map[string]map[string]any { return r.store.Declared(store.DeclaredPlugins) }, nil),
+		Catalog:  dispatcher.NewDocCatalog(func() map[string]map[string]any { return r.store.Declared(store.DeclaredPlugins) }, r.hostActionDefs),
 		Liveness: live,
 		Focus:    dispatcher.StateFocus(r.st),
 		Calls:    r.table,
@@ -323,6 +329,7 @@ func (r *Root) buildStem() error {
 		return fmt.Errorf("surfaces: %w", err)
 	}
 	r.catalog.onSlotsChanged = r.engine.CatalogChanged
+	r.st.OnFlush(r.markSizesDirty)
 	return nil
 }
 

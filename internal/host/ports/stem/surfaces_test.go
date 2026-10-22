@@ -3,6 +3,7 @@ package stem_test
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -322,5 +323,81 @@ func TestLoopShutdownAnswersUnavailable(t *testing.T) {
 	}
 	if _, ok := eng.ActiveToast(); ok {
 		t.Fatal("toast.show ran on the engine after shutdown")
+	}
+}
+
+type sunk struct {
+	plugin string
+	params protocol.SurfaceUpdateParams
+}
+
+// A sink sees exactly the accepted updates: plugin id from the authenticated
+// caller, params unchanged, called on the loop after the engine accepted.
+func TestContentSinkReceivesAcceptedUpdatesOnly(t *testing.T) {
+	_, eng, _, l, _ := newPort(t)
+	var seen []sunk
+	var onLoop []bool
+	port := stem.NewSurfacePort(eng, l, stem.WithContent(func(plugin string, p protocol.SurfaceUpdateParams) {
+		seen = append(seen, sunk{plugin, p})
+		onLoop = append(onLoop, l.inLoop.Load())
+	}))
+	ctx := context.Background()
+	owner := contracts.Caller{Kind: contracts.CallerPlugin, PluginID: "alpha.files"}
+	other := contracts.Caller{Kind: contracts.CallerPlugin, PluginID: "beta.notes"}
+
+	params := protocol.SurfaceUpdateParams{
+		Surface: protocol.SurfaceMainStage, Title: "T", Subtitle: "S", Badge: "3", Lines: []string{"one", "two"},
+		HitTargets: []protocol.RowHitTarget{{}}, StatusMeta: map[string]any{"k": "v"},
+	}
+	if err := port.SurfaceUpdate(ctx, owner, params); err != nil {
+		t.Fatalf("accepted update: %v", err)
+	}
+	if len(seen) != 1 {
+		t.Fatalf("sink calls after an accepted update = %d, want 1", len(seen))
+	}
+	if seen[0].plugin != "alpha.files" || !reflect.DeepEqual(seen[0].params, params) {
+		t.Errorf("sink got %q %+v, want the caller's id and the params unchanged", seen[0].plugin, seen[0].params)
+	}
+	if !onLoop[0] {
+		t.Error("the sink ran off the loop")
+	}
+
+	// Denied: another plugin's surface. Unoccupied: a surface nobody claimed.
+	// Invalid: not a host layout surface. Wrong caller kinds never reach the
+	// engine at all.
+	for name, c := range map[string]struct {
+		caller contracts.Caller
+		params protocol.SurfaceUpdateParams
+		code   string
+	}{
+		"occupied by another": {other, protocol.SurfaceUpdateParams{Surface: protocol.SurfaceMainStage, Lines: []string{"x"}}, "denied"},
+		"unoccupied":          {owner, protocol.SurfaceUpdateParams{Surface: protocol.SurfaceSidebarList, Lines: []string{"x"}}, "denied"},
+		"invalid surface":     {owner, protocol.SurfaceUpdateParams{Surface: "nope", Lines: []string{"x"}}, "invalid_params"},
+		"cli":                 {contracts.Caller{Kind: contracts.CallerCLI}, protocol.SurfaceUpdateParams{Surface: protocol.SurfaceMainStage}, "denied"},
+		"unauthenticated":     {contracts.Caller{Kind: contracts.CallerPlugin}, protocol.SurfaceUpdateParams{Surface: protocol.SurfaceMainStage}, "denied"},
+	} {
+		if code := contracts.CodeOf(port.SurfaceUpdate(ctx, c.caller, c.params)); code != c.code {
+			t.Errorf("%s: code = %q, want %q", name, code, c.code)
+		}
+	}
+	if len(seen) != 1 {
+		t.Fatalf("a refused update reached the sink: %+v", seen[1:])
+	}
+
+	// Closing the surface un-occupies it: the same owner's next update is refused.
+	if err := port.SurfaceClose(ctx, owner, protocol.SurfaceCloseParams{Surface: protocol.SurfaceMainStage}); err != nil {
+		t.Fatal(err)
+	}
+	if code := contracts.CodeOf(port.SurfaceUpdate(ctx, owner, params)); code != "denied" || len(seen) != 1 {
+		t.Errorf("update after close: code %q, sink calls %d; want denied and 1", code, len(seen))
+	}
+}
+
+// Without a sink an accepted update is still accepted (a headless host).
+func TestNoContentSinkStillAccepts(t *testing.T) {
+	port, _, _, _, _ := newPort(t)
+	owner := contracts.Caller{Kind: contracts.CallerPlugin, PluginID: "alpha.files"}
+	if err := port.SurfaceUpdate(context.Background(), owner, protocol.SurfaceUpdateParams{Surface: protocol.SurfaceMainStage}); err != nil {
+		t.Fatal(err)
 	}
 }

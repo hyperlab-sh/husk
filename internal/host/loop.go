@@ -169,6 +169,7 @@ func (r *Root) tick() {
 	}
 	if r.engine != nil {
 		r.engine.Flush()
+		r.pushResized()
 	}
 	if r.bus != nil {
 		r.bus.Flush()
@@ -233,6 +234,57 @@ func (r *Root) opening(pluginID string) []protocol.Message {
 func (r *Root) occupiedSizes(pluginID string) []protocol.SurfaceSize {
 	snap := r.st.Snapshot()
 	return occupiedSizes(snap, pluginID)
+}
+
+// markSizesDirty is the State flush listener: a write to the frontend's
+// husk.geometry or husk.focus, or to husk.surfaces (visibility), may change
+// what an occupant is told about its surfaces.
+func (r *Root) markSizesDirty(changes []state.Change, _ *state.Snapshot) {
+	for i := range changes {
+		switch changes[i].Namespace {
+		case state.GeometryNamespace, state.FocusNamespace, state.SurfacesNamespace:
+			r.sizesDirty = true
+			return
+		}
+	}
+}
+
+// pushResized tells the occupants of surfaces whose size, focus or
+// visibility changed since the last push (Engine.Resized sends each plugin
+// only its own surfaces). It is driven by the frontend's geometry and focus
+// writes (state.md, Surfaces resolution), after the tick's State flush and
+// the engine's resolution pass, so it reads the committed snapshot. A tick
+// that changed none of those namespaces does nothing.
+func (r *Root) pushResized() {
+	if !r.sizesDirty {
+		return
+	}
+	r.sizesDirty = false
+	snap := r.st.Snapshot()
+	res, ok := decodeSurfaces(snap)
+	if !ok {
+		return
+	}
+	plugins := map[string]bool{}
+	for _, occ := range res.Occupants {
+		plugins[occ.Plugin] = true
+	}
+	next := map[protocol.SurfaceID]protocol.SurfaceSize{}
+	var changed []protocol.SurfaceSize
+	for plugin := range plugins {
+		for _, size := range occupiedSizes(snap, plugin) {
+			next[size.Surface] = size
+		}
+	}
+	for _, id := range sortedSurfaces(res.Occupants) {
+		if size, ok := next[id]; ok && r.lastSizes[id] != size {
+			changed = append(changed, size)
+		}
+	}
+	r.lastSizes = next
+	if len(changed) > 0 {
+		r.engine.Resized(changed)
+	}
 }
 
 func occupiedSizes(snap *state.Snapshot, pluginID string) []protocol.SurfaceSize {
