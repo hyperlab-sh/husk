@@ -148,6 +148,7 @@ func TestRegisterPanicsWithoutEveryPort(t *testing.T) {
 		Settings: fakes.NewSettings(nil), Secrets: fakes.NewSecrets(nil),
 		Profile: fakes.NewProfile(nil), Theme: fakes.NewTheme(nil),
 		Keys: fakes.NewKeybinding(nil), Config: fakes.NewConfig(nil),
+		Limiter: NewWindowLimiter(fakes.NewClock(time.Unix(0, 0)), contracts.RateLimitPerSecond),
 	}
 	for _, drop := range []func(*Ports){
 		func(p *Ports) { p.Settings = nil },
@@ -156,6 +157,7 @@ func TestRegisterPanicsWithoutEveryPort(t *testing.T) {
 		func(p *Ports) { p.Theme = nil },
 		func(p *Ports) { p.Keys = nil },
 		func(p *Ports) { p.Config = nil },
+		func(p *Ports) { p.Limiter = nil },
 	} {
 		p := full
 		drop(&p)

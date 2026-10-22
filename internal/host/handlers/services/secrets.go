@@ -16,7 +16,8 @@ import (
 type Secrets struct {
 	Port contracts.SecretsPort
 	// Limiter is the shared settings.get/secrets.get budget, keyed by plugin
-	// id. Nil disables the cap (composition's explicit choice).
+	// id (services.md, Limits). Register requires it; only a hand-built
+	// adapter struct can leave it nil, and the guard only defends that.
 	Limiter contracts.Limiter
 }
 
