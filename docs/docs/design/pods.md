@@ -145,7 +145,7 @@ An unknown prefix gets error code `unknown_method`. Watch methods are the only p
 
 #### Caller identity: per-plugin token
 
-The Wrapper generates a token for each launch (32 bytes from `crypto/rand`, hex encoded) and injects it as `HUSK_PLUGIN_TOKEN`. The `husk` CLI reads that variable and puts it in the top-level `token` member of every request it sends; a plugin writing the socket itself does the same. A request with a valid token is `CallerPlugin` for that plugin; a request with no token is `CallerCLI`; a request with an unknown or revoked token is refused with `denied` and never downgraded to the user. The token is revoked when the process exits.
+The Wrapper generates a token for each launch (32 bytes from `crypto/rand`, hex encoded) and injects it as `HUSK_PLUGIN_TOKEN`. The `husk` CLI reads that variable and puts it in the top-level `token` member of every request it sends; a plugin writing the socket itself does the same. A request with a valid token is `CallerPlugin` for that plugin; a request with no token is `CallerCLI`; a request with an unknown or revoked token is refused with `denied` and never downgraded to the user. The token is registered before process start and revoked immediately when the process is reaped or its channel closes; it never appears in lifecycle snapshots, notices or host logs.
 
 This replaces peer-pid ancestry (`launchedID`, `peerAncestry`, `procparent_*.go`) because:
 
@@ -243,6 +243,39 @@ When several plugins launch together (startup, `--plugin-dir`), the Host runs st
 
 On process exit (`exited` or `failed`) the Pod revokes the token and keeps the slice's value; the catalog stays declared, so the plugin's actions resolve `unavailable` rather than `not_found` and its focus-local keys stay listed as `unavailable` ([Message kinds](message-kinds.md), [Keybindings](keybindings.md)). Only when the Pod is torn down (the plugin removed from the instance) does it call `Store.Undeclare`, ask the coordinator to reload with reason `plugin`, and unregister the slice according to its scope and retention ([State](state.md) decides).
 
+#### Host and loop boundary
+
+`pods.Host` is the concrete set of Pods, not the loop's interface. It implements `calls.Outbox`; each `Pod.Notify(method, params)` is the targeted notification Sink. `Host.Notify` broadcasts to live Pods in stable id order. The host imports no State, Store, Services or Instances implementation in this process-side slice.
+
+One `pods.Loop` interface replaces independent opening, preparation, liveness and log callbacks:
+
+```go
+// Post is worker-safe, may apply inbound backpressure, and must return during
+// shutdown. Opening, Liveness and Log run only on the loop and never block.
+// Prepare runs in a tea.Cmd worker and marshals any State writes back to the
+// owning loop; it may wait for Store declarations and the Services reload.
+type Loop interface {
+    Post(tea.Msg)
+    Opening(pluginID string) []protocol.Message
+    Prepare(context.Context, []manifest.Spec) Preparation
+    Liveness(LivenessMsg)
+    Log(LogMsg)
+}
+
+type Preparation struct {
+    Failed map[string]error // fatal declaration/slice failure for this plugin
+    ReloadError error      // completed reload report; does not prevent launch
+}
+```
+
+`Host.Add` rejects duplicates and reports `starting` through `Loop.Liveness`, without starting anything. After adding a batch, `Host.Prepare` returns one command. Its `PreparedMsg` is consumed by `Host.Handle` on the loop: failed plugins stay failed, a reload report error is logged but opens the gate, and surviving wrappers start with `Loop.Opening` queued before `live`. Late or duplicate gate completions never relaunch a Pod; shutdown prevents a pending gate from launching.
+
+`Loop.Liveness` is the explicit seam for writing `husk.pods` and publishing exit events. Workers post typed notices; `Host.Handle` applies them through `Loop.Liveness` and `Loop.Log` on the loop. `ClosedMsg` is handled by the caller with Calls cleanup before a later `ExitMsg` changes liveness. Message types are exported from `pods` (aliases of leaf Wrapper notices avoid an import cycle). Tokens are held in a worker-safe local registry, not State: they are registered before `Start` so even an immediate exit can revoke them. A `ReapedMsg` revokes authentication immediately after Wait; final stdout replies drain before normal `ClosedMsg` and `ExitMsg`, so a successful reply is not overtaken by process cleanup.
+
+`Host.Stop` marks shutdown on the loop and returns a worker command. The caller closes Calls and the Server first; that command closes stdin queues, cancels the shared process context, signals groups, and uses one absolute stop deadline plus one absolute kill-wait deadline across the whole set. Providers must keep `Post` callable, or make it return without delivery, after the UI stops; a blocked posting callback must not prevent process cleanup.
+
+The initial `pods/manifest.Spec` contains only ID, name, version, description, protocol, argv and work directory. The converter task extends it with declarations. Explicit relative executable paths resolve against the absolute manifest directory; later relative arguments resolve through `cmd.Dir`, and bare executable names retain PATH lookup.
+
 ### Wrapper
 
 ```go
@@ -283,7 +316,7 @@ Launch:
 - `exec.CommandContext(pluginCtx, argv[0], argv[1:]...)` with `cmd.Cancel` sending SIGTERM and `cmd.WaitDelay` = stop grace, as today. `cmd.Dir` = `Spec.WorkDir`.
 - `SysProcAttr.Setpgid = true`; Cancel and kill signal the process group, so a plugin started through a wrapper script stops with its children and no grandchild keeps a pipe open.
 - stdin and stdout are pipes; stderr is the log file handed over as an `*os.File` (no copy goroutine), as today.
-- After `cmd.Start`, the Pod queues the opening notifications [Protocol](protocol.md) lists, in order and before any request: `theme.changed`, one `surface.resized` carrying every surface the plugin occupies (a single snapshot, never one message per surface), `input.key_state`. Pods cannot build them alone: the modifier state is Input bookkeeping that is not in State ([State](state.md)). So `cmd/husk` injects at construction an `Opening func(pluginID string) []protocol.Message` that the loop builds from Theme, the `husk.geometry` rects and Input's modifier state; the Pod calls it on the loop right after `cmd.Start`, queues the lines, and only then writes `live`. Later `theme.changed` pushes follow a Theme generation change ([Services](services.md)); the Pods host sends them through each `Channel`.
+- After `cmd.Start`, the Pod queues the opening notifications [Protocol](protocol.md) lists, in order and before any request: `theme.changed`, one `surface.resized` carrying every surface the plugin occupies (a single snapshot, never one message per surface), `input.key_state`. Pods cannot build them alone: the modifier state is Input bookkeeping that is not in State ([State](state.md)). So `pods.Loop.Opening(pluginID string) []protocol.Message` builds them from Theme, the `husk.geometry` rects and Input's modifier state; the Pod calls it on the loop, starts the process and queues the lines before reporting `live`. Later `theme.changed` pushes follow a Theme generation change ([Services](services.md)); the Pods host sends them through each `Channel`.
 
 Environment, built from Husk's own environment with every inherited `HUSK_*` variable removed first:
 
@@ -334,16 +367,18 @@ Transitions:
 #### Wrapper invariants
 
 1. The Wrapper is the only writer of a plugin's stdin and the only reader of its stdout.
-2. `Send` never blocks the caller. It marshals on the caller's goroutine and enqueues on the bounded queue from `pkg/huskipc/queue.go` (capacity 1,024, 5 s write timeout, watchdog close on pipes).
+2. `Send` never blocks the caller. It marshals on the caller's goroutine and enqueues through `protocol.NewQueuedWriter` (capacity 1,024, 5 s write timeout, watchdog close on pipes). A private stdin mux serializes all physical writes; the single legacy rejection is a graceful-close trailer after queued v2 lines, not a second public writer.
 3. Stdout carries replies only. A stdout line that is a reply goes to `ReplySink.Reply`. For a malformed reply, the Wrapper salvages the protocol reader's `LineError.ID` and forwards a bare-id message through `ReplySink.Reply`, so the Loop posts `ReplyMsg` and Calls fails a matching call with `internal` / `data.reason: "invalid_reply"` instead of waiting for its timeout. Any other valid line is logged as `plugin <id> sent a non-reply on stdout` and answered with a `protocol.error` notification on stdin; the plugin stays up. The one exception is a major-1 `hello`, which gets one major-1 `protocol_error` line and stops the plugin ([Protocol](protocol.md)).
-4. A stdin failure (queue overflow, write timeout, write error) is fatal for the launch: `ReplySink.Closed` is called, the process group gets SIGTERM, then SIGKILL after the stop grace, and liveness becomes `failed`. A plugin that cannot read its stdin cannot be reached any other way, so keeping it alive only hides the fault.
+4. A stdin failure (queue overflow, write timeout, write error) is fatal for the launch: `ReplySink.Closed` is called, the process group gets SIGTERM, then SIGKILL after the stop grace, and liveness becomes `failed`. Pipe-closed errors (`EPIPE`, closed pipe/file) can race a clean exit, so they share the injected EOF-reap grace (100 ms by default): `Closed` and token revocation happen immediately, Wait decides the outcome if it completes inside that grace, and a surviving process is then treated as a fatal stdin failure. Overflow and write-timeout failures remain immediate. A plugin that cannot read its stdin cannot be reached any other way, so keeping it alive only hides the fault.
 5. `ReplySink.Closed` is called exactly once per launch, before liveness leaves `live`, so the Dispatcher never sees a `live` owner whose pending calls are already orphaned.
-6. Stdout EOF without process exit (the plugin closed stdout) is treated as a stdin failure (rule 4): the reply channel is gone.
+6. Stdout EOF without process exit within the reap grace is treated as a stdin failure (rule 4): the reply channel is gone. `EOFReapGrace` defaults to 100 ms and uses the injected clock, allowing an already-exiting child to be reaped without misclassifying its clean exit; it is the same option used for pipe-closed writes.
 7. Background goroutines never write the log or State directly; they post to the loop, which writes both.
 
 #### Shutdown
 
 On instance exit: the Loop closes the Calls table first, so socket callers waiting on an action get `cancelled` replies ([Calls](calls.md)); then the Server stops accepting and unregisters the instance (entry, then socket); every Wrapper closes its stdin queue (flush, then close, so the plugin sees EOF) and the shared plugin context is cancelled, which sends SIGTERM to every process group; one 2 s deadline covers all plugins; survivors get SIGKILL; Husk waits up to 1 s more for those. Exits during shutdown are `exited`, never reported as crashes. Non-empty logs are kept and their paths logged, as today; empty ones are removed by Store's GC ([Store](store.md)), since only Store deletes files.
+
+Process supervision remains attached to the group after its leader is reaped: children without inherited stdio still receive SIGTERM and, if necessary, SIGKILL after the grace. The launch's completion stays pending through that cleanup, including during the Host's shared shutdown deadline. Completed wrappers are never signalled again, avoiding a later signal to a reused pid or process-group id. Native group signalling is supported on Linux and macOS; unsupported platforms refuse launch rather than falling back to killing only the leader.
 
 ### Decoration (boundary only)
 
@@ -387,6 +422,7 @@ Decoration takes one surface's content (the cells or lines the plugin supplied t
 | Stale-instance ping | 500 ms | a live instance answers `session.ping` without touching the loop |
 | Stop grace (SIGTERM to SIGKILL) | 2 s | unchanged |
 | Kill wait after SIGKILL | 1 s | unchanged; only matters for unreapable processes |
+| EOF / pipe-close reap grace | 100 ms | avoids racing a clean process exit against stdout or stdin pipe closure; one injected option |
 | Stderr tail on crash | 3 lines from the last 8 KiB | unchanged |
 | Log file name attempts | 100 | unchanged |
 | Token | 32 random bytes, hex | unguessable; fits any env |
