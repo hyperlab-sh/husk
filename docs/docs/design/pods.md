@@ -139,7 +139,7 @@ Method families and their handlers (registered by `cmd/husk`; names and forms ar
 | `event.` | Event bus | `event.emit` (a request; a plugin may emit only under its own id, the bare CLI only under `user.`), `event.watch` (streams `event.deliver` notifications on this connection; for the CLI and debugging). |
 | `state.` | State | `state.get`, `state.snapshot`, `state.watch` for everyone. `state.set` and `state.patch` are accepted only from a plugin caller and only for that plugin's own slice; the Server forwards them to that plugin's Pod, which writes State as the slice owner. `state.clear` is CLI only. |
 | `settings.`, `theme.`, `secrets.`, `keys.`, `profile.`, `config.` | Services | `secrets.get` returns only what the Secrets service granted to `Caller.PluginID`. `config.reload` triggers the reload described in [Services](services.md). |
-| `plugin.` | Pods | `plugin.list` (spec summary plus liveness), `plugin.log` (log path for an id). |
+| `plugin.` | Pods | `plugin.list` (spec summary plus liveness), `plugin.log` (log path for an id). Both are the user's own: CLI-only callers, denied for plugins, Stem and zero-kind callers (D57); both read loop-owned Pod state through `Loop.Do` and answer unavailable when the loop no longer runs. |
 | `surface.`, `slot.`, `toast.` | Surfaces | `surface.update` and `surface.close` are notifications a plugin sends over a connection it keeps open; `slot.contribute` and `toast.show` likewise. |
 
 An unknown prefix gets error code `unknown_method`. Watch methods are the only place the Server pushes notifications to a socket connection; a plugin never needs them, because its subscribed events arrive on stdin.
@@ -257,12 +257,17 @@ One `pods.Loop` interface replaces independent opening, preparation, liveness an
 // shutdown. Opening, Liveness and Log run only on the loop and never block.
 // Prepare runs in a tea.Cmd worker and marshals any State writes back to the
 // owning loop; it may wait for Store declarations and the Services reload.
+// Do runs fn on the loop and returns once it has run (an error, without
+// running fn, when ctx ends first or the loop has shut down): the ports read
+// loop-owned Pod state from off-loop callers through it, answering
+// unavailable rather than racing the loop (D57).
 type Loop interface {
     Post(tea.Msg)
     Opening(pluginID string) []protocol.Message
     Prepare(context.Context, []manifest.Spec) Preparation
     Liveness(LivenessMsg)
     Log(LogMsg)
+    Do(context.Context, func()) error
 }
 
 type Preparation struct {

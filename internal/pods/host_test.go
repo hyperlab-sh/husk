@@ -42,6 +42,17 @@ func (l *fakeLoop) Prepare(ctx context.Context, specs []manifest.Spec) Preparati
 func (l *fakeLoop) Liveness(m LivenessMsg) { l.statuses = append(l.statuses, m) }
 func (l *fakeLoop) Log(m LogMsg)           { l.logs = append(l.logs, m) }
 
+// Do runs fn inline: the fake loop's goroutine is the test's goroutine.
+func (l *fakeLoop) Do(ctx context.Context, fn func()) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		fn()
+		return nil
+	}
+}
+
 type fakeProcess struct {
 	mu                                 sync.Mutex
 	id                                 string

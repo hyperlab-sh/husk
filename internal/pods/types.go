@@ -79,19 +79,26 @@ type PreparedMsg struct {
 // StoppedMsg is the bounded shared shutdown command's completion.
 type StoppedMsg struct{ Err error }
 
-// Loop is the single interface Pods needs from the host. Post is worker-safe,
-// may apply inbound backpressure, and must return during shutdown. Opening,
-// Liveness and Log are called only on the loop and must not block. Liveness is
-// the clearly named State/event seam; Pods itself never imports/writes State.
-// Prepare runs in a tea.Cmd worker, may wait on Store/Services, and must marshal
-// any State mutations back onto the owning loop rather than writing directly.
-// It declares catalogs/registers slices and waits for the reload to complete.
+// Loop is the single interface Pods needs from the host, and its seam onto
+// the host's Bubble Tea loop: the one goroutine that may read and mutate the
+// Host's Pod maps. Post is worker-safe, may apply inbound backpressure, and
+// must return during shutdown. Opening, Liveness and Log are called only on
+// the loop and must not block; Liveness is the clearly named State/event
+// seam, and Pods itself never imports or writes State. Prepare runs in a
+// tea.Cmd worker, may wait on Store/Services, and must marshal any State
+// mutations back onto the owning loop rather than writing directly; it
+// declares catalogs, registers slices and waits for the reload to complete.
+// Do runs fn on the loop goroutine and returns once it has run (an error,
+// without running fn, when ctx ends first or the loop has shut down); the
+// ports use it to read loop-owned state from off-loop callers such as
+// Server handlers.
 type Loop interface {
 	Post(tea.Msg)
 	Opening(pluginID string) []protocol.Message
 	Prepare(context.Context, []manifest.Spec) Preparation
 	Liveness(LivenessMsg)
 	Log(LogMsg)
+	Do(context.Context, func()) error
 }
 
 // Factory constructs real or fake process wrappers before token registration.
