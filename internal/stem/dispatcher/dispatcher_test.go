@@ -77,7 +77,7 @@ func newRig(t *testing.T) *rig {
 		"husk.nohandle": {ID: "husk.nohandle", Owner: "husk"},
 		"gone.act":      {ID: "gone.act", Owner: "gone"},
 	}
-	r.d = dispatcher.New(dispatcher.Options{
+	r.d = mustNew(t, dispatcher.Options{
 		Catalog: cat, Liveness: r.live, Focus: r.foc, Calls: r.table,
 		Logger: func(f string, a ...any) { r.logs = append(r.logs, f) },
 	})
@@ -404,7 +404,7 @@ func TestCallsFailuresBecomeCodes(t *testing.T) {
 	t.Run("per-plugin cap", func(t *testing.T) {
 		r := newRig(t)
 		r.table = calls.New(r.out, calls.TableOptions{Clock: r.clk, MaxPendingPerPlugin: 1})
-		r.d = dispatcher.New(dispatcher.Options{Catalog: catalog{"notes.new": {ID: "notes.new", Owner: "notes"}}, Liveness: r.live, Focus: r.foc, Calls: r.table})
+		r.d = mustNew(t, dispatcher.Options{Catalog: catalog{"notes.new": {ID: "notes.new", Owner: "notes"}}, Liveness: r.live, Focus: r.foc, Calls: r.table})
 		r.invoke(dispatcher.ActionRequest{Action: "notes.new", Caller: user})
 		if c := code(t, r.invoke(dispatcher.ActionRequest{Action: "notes.new", Caller: user})); c != "busy" {
 			t.Fatal(c)
@@ -413,7 +413,7 @@ func TestCallsFailuresBecomeCodes(t *testing.T) {
 	t.Run("overall cap", func(t *testing.T) {
 		r := newRig(t)
 		r.table = calls.New(r.out, calls.TableOptions{Clock: r.clk, MaxPending: 1})
-		r.d = dispatcher.New(dispatcher.Options{Catalog: catalog{"notes.new": {ID: "notes.new", Owner: "notes"}}, Liveness: r.live, Focus: r.foc, Calls: r.table})
+		r.d = mustNew(t, dispatcher.Options{Catalog: catalog{"notes.new": {ID: "notes.new", Owner: "notes"}}, Liveness: r.live, Focus: r.foc, Calls: r.table})
 		r.invoke(dispatcher.ActionRequest{Action: "notes.new", Caller: user})
 		if c := code(t, r.invoke(dispatcher.ActionRequest{Action: "notes.new", Caller: user})); c != "busy" {
 			t.Fatal(c)
@@ -453,13 +453,46 @@ func TestNilReplyIsHarmless(t *testing.T) {
 	r.d.Complete(r.table.Close()...)
 }
 
-func TestNewPanicsOnMissingViews(t *testing.T) {
-	defer func() {
-		if recover() == nil {
-			t.Fatal("no panic")
+func mustNew(t *testing.T, o dispatcher.Options) *dispatcher.Dispatcher {
+	t.Helper()
+	d, err := dispatcher.New(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
+func TestNewValidatesOptions(t *testing.T) {
+	r := newRig(t)
+	ok := dispatcher.Options{Catalog: catalog{}, Liveness: r.live, Focus: r.foc, Calls: r.table}
+	if _, err := dispatcher.New(dispatcher.Options{}); err == nil {
+		t.Fatal("missing views accepted")
+	}
+	for _, tc := range []struct {
+		timeout time.Duration
+		valid   bool
+	}{
+		{0, true}, {calls.MinTimeout, true}, {calls.MaxTimeout, true}, {30 * time.Second, true},
+		{-time.Second, false}, {time.Millisecond, false}, {calls.MinTimeout - 1, false}, {calls.MaxTimeout + 1, false},
+	} {
+		o := ok
+		o.Timeout = tc.timeout
+		if _, err := dispatcher.New(o); (err == nil) != tc.valid {
+			t.Errorf("timeout %s: err = %v", tc.timeout, err)
 		}
-	}()
-	dispatcher.New(dispatcher.Options{})
+	}
+}
+
+func TestHostHandlerPanicRepliesOnce(t *testing.T) {
+	r := newRig(t)
+	r.d.RegisterHost("husk.quit", func(dispatcher.ActionRequest) dispatcher.ActionReply { panic("boom") })
+	got := r.invoke(dispatcher.ActionRequest{Action: "husk.quit", Caller: user})
+	if c := code(t, got); c != "internal" {
+		t.Fatalf("code = %s", c)
+	}
+	if len(r.logs) != 1 {
+		t.Fatalf("panic not logged: %v", r.logs)
+	}
 }
 
 func TestCallerKindString(t *testing.T) {
