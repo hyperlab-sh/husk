@@ -3,6 +3,7 @@ package contracts
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/hyperlab-sh/husk/internal/substrate/state"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
@@ -76,7 +77,22 @@ type SessionPort interface {
 	Ping(ctx context.Context, c Caller) (protocol.SessionPingResult, error)
 }
 
-// SettingsPort serves settings.get and settings.list.
+// SettingEntry is one settings schema entry.
+type SettingEntry struct {
+	Key     string
+	Type    string
+	Default any
+	Enum    []string
+	Min     *int64
+	Max     *int64
+	Doc     string
+	Owner   string
+	Apply   string
+}
+
+// SettingsPort serves settings.get, settings.list, settings.schema and
+// settings.validate. Only get is open to plugins; the others are CLI methods
+// and answer denied to a plugin caller.
 //
 // A plugin caller sees exactly the keys its own manifest declared (owner
 // "plugin:<id>") plus public husk.* keys, never an arbitrary prefix subtree
@@ -88,6 +104,11 @@ type SettingsPort interface {
 	Get(ctx context.Context, c Caller, key string) (value any, source string, err error)
 	// List returns the visible keys with their effective values.
 	List(ctx context.Context, c Caller) (map[string]any, error)
+	// Schema serves settings.schema. owner "" means every owner.
+	Schema(ctx context.Context, c Caller, owner string) ([]SettingEntry, error)
+	// Validate serves settings.validate: a dry rebuild of the current
+	// documents, reporting every problem.
+	Validate(ctx context.Context, c Caller) (ValidationResult, error)
 }
 
 // SecretInfo is secret metadata. It never carries a value.
@@ -142,11 +163,15 @@ type Problem struct {
 	Message  string
 }
 
-// ThemeCheckResult is what theme.check reports: every violated pair.
-type ThemeCheckResult struct {
+// ValidationResult is the outcome of a dry build: whether the candidate would
+// apply and every problem found (all of them, not the first).
+type ValidationResult struct {
 	Applied  bool
 	Problems []Problem
 }
+
+// ThemeCheckResult is what theme.check reports: every violated pair.
+type ThemeCheckResult = ValidationResult
 
 // ThemePort serves theme.get and theme.check.
 type ThemePort interface {
@@ -188,4 +213,90 @@ type KeyListing struct {
 type KeybindingPort interface {
 	// List serves keys.list.
 	List(ctx context.Context, c Caller) (KeyListing, error)
+}
+
+// ReloadReport is one service's outcome in a reload.
+type ReloadReport struct {
+	Service  string
+	Gen      uint64
+	Applied  bool
+	Problems []Problem
+}
+
+// ConfigPort serves config.reload. The Services coordinator implements it;
+// the reload reason is "cli" and the coordinator, not the wire, picks it.
+type ConfigPort interface {
+	// Reload serves config.reload (user only) and returns one report per
+	// service once the coalesced reload has completed.
+	Reload(ctx context.Context, c Caller) ([]ReloadReport, error)
+}
+
+// EventPort serves the event.* requests. event.deliver is outbound only
+// (Pod.Notify or the Notifier) and has no port.
+type EventPort interface {
+	// Emit serves event.emit. The Server-set source is c.PluginID. A plugin may
+	// emit only under "<plugin_id>."; the bare CLI only under "user.", else
+	// denied. Returning nil means the event is on the bus, not delivered.
+	Emit(ctx context.Context, c Caller, name string, data json.RawMessage) error
+	// Watch serves event.watch: it subscribes the connection to events
+	// matching pattern (an exact name or "<prefix>.*"), pushes event.deliver
+	// notifications on n, and returns when ctx ends or the subscription is
+	// refused. The subscription is cancelled on return.
+	Watch(ctx context.Context, c Caller, pattern string, n Notifier) error
+}
+
+// HookResult is one subscriber's answer to a hook call.
+type HookResult struct {
+	Plugin string
+	Data   json.RawMessage
+	// Err is nil on success; otherwise its code is timeout, cancelled or
+	// the subscriber's own (failed).
+	Err CodedError
+}
+
+// HookPort serves hook.call. Hook subscription and publication are manifest
+// declarations (no wire method), so there is no registration seam here.
+type HookPort interface {
+	// HookCall serves hook.call from a socket caller and returns one result
+	// per live subscriber once all are accounted for (empty when none).
+	HookCall(ctx context.Context, c Caller, hook string, data json.RawMessage) ([]HookResult, error)
+}
+
+// PluginInfo is a plugin's spec summary plus liveness (plugin.list).
+type PluginInfo struct {
+	ID          string
+	Name        string
+	Version     string
+	Description string
+	Status      PodStatus
+	PID         int
+	StartedAt   time.Time
+	LastError   string
+	Log         string
+}
+
+// PluginPort serves plugin.list and plugin.log. Pods implements it.
+type PluginPort interface {
+	// List serves plugin.list.
+	List(ctx context.Context, c Caller) ([]PluginInfo, error)
+	// Log serves plugin.log: the log file path for a plugin id, or not_found.
+	Log(ctx context.Context, c Caller, pluginID string) (string, error)
+}
+
+// SurfacePort serves the plugin-originated notifications and requests that
+// Stem Surfaces owns, which write husk.surfaces. The surface and toast
+// methods are notifications: the adapter discards the error code after
+// logging it, but a refusal (a surface the plugin does not occupy is denied,
+// invalid fields are invalid_params) still comes back as a CodedError so a
+// request-shaped method (slot.contribute) can reply with it.
+type SurfacePort interface {
+	// SurfaceUpdate serves surface.update. The plugin is c.PluginID; any
+	// PluginID in p is ignored.
+	SurfaceUpdate(ctx context.Context, c Caller, p protocol.SurfaceUpdateParams) error
+	// SurfaceClose serves surface.close.
+	SurfaceClose(ctx context.Context, c Caller, p protocol.SurfaceCloseParams) error
+	// SlotContribute serves slot.contribute (a request: refusals are replies).
+	SlotContribute(ctx context.Context, c Caller, p protocol.SlotContributeParams) error
+	// ToastShow serves toast.show from a plugin or the CLI.
+	ToastShow(ctx context.Context, c Caller, p protocol.ToastShowParams) error
 }
