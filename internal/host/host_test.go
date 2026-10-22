@@ -655,7 +655,7 @@ func TestTeardownDropsOccupantsAndDeclarations(t *testing.T) {
 	<-f.started
 	h.loop(func() {
 		if res, _ := decodeSurfaces(h.root.st.Snapshot()); res.Occupants["sidebar-list"].Plugin != "alpha" {
-			t.Fatalf("precondition: occupants = %+v", res.Occupants)
+			t.Errorf("precondition: occupants = %+v", res.Occupants)
 		}
 	})
 	h.root.cfg.Post(pods.TeardownMsg{PluginID: "alpha"})
