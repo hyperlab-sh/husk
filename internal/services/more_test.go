@@ -455,3 +455,17 @@ func TestKeybindingProblemsKeepLayerFile(t *testing.T) {
 		}
 	}
 }
+
+// Palette overrides are published in one hex casing whatever the user typed.
+func TestThemeOverridesNormalizeHexCasing(t *testing.T) {
+	s := settings.New(settings.Options{})
+	in := input(`{"theme":{"allow_low_contrast":true,"palette":{"accent":"#AaBbCc"}}}`)
+	in.Doc.Origins = map[string]store.Layer{"theme.allow_low_contrast": store.LayerUser, "theme.palette.accent": store.LayerUser}
+	apply(t, s, in)
+	in.Settings = s.Snapshot()
+	th := stheme.New()
+	apply(t, th, in)
+	if got := th.Overrides()["accent"]; got != "#aabbcc" {
+		t.Errorf("override = %q, want #aabbcc", got)
+	}
+}
