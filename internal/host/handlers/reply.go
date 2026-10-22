@@ -78,3 +78,42 @@ func InvalidParams(req protocol.Message, field, detail string) protocol.Message 
 	}
 	return m
 }
+
+// DecodeParams unmarshals req.Params into dst. Absent params leave dst at its
+// zero value, which per-method required-field checks then reject. A decode
+// failure returns the invalid_params reply naming the offending field —
+// "params.<field>" for a typed field, "params" when the whole object has the
+// wrong shape. Adapters call it before their port, never after.
+func DecodeParams(req protocol.Message, dst any) *protocol.Message {
+	if len(req.Params) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(req.Params, dst); err != nil {
+		field := "params"
+		var te *json.UnmarshalTypeError
+		if errors.As(err, &te) && te.Field != "" {
+			field = "params." + te.Field
+		}
+		bad := InvalidParams(req, field, err.Error())
+		return &bad
+	}
+	return nil
+}
+
+// RequireString rejects an empty required string field. Adapters pair it
+// with DecodeParams: decode first, then reject blank identifiers while
+// allowing values that may legitimately be empty strings.
+func RequireString(req protocol.Message, field, value string) *protocol.Message {
+	if value == "" {
+		bad := InvalidParams(req, field, "is required")
+		return &bad
+	}
+	return nil
+}
+
+// Denied is the plain permission-refusal reply: code denied with message and
+// the request id echoed. Admit and the adapters' own denial rows build on
+// it; never hand-assemble the envelope.
+func Denied(req protocol.Message, message string) protocol.Message {
+	return *errReply(req, protocol.CodeDenied, message)
+}
