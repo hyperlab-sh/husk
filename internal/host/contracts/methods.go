@@ -39,8 +39,8 @@ func home(port, method string, kinds []CallerKind) MethodHome {
 // Reading of protocol.md: "plugin or CLI" is CLI and Plugin; "CLI to Husk"
 // is CLI only; state.set and state.patch are plugin only (a bare CLI is
 // denied, state.md); action.invoke also accepts Stem (Input and the palette
-// act for the user); settings.list is open to plugins because the port
-// filters it to their visible keys.
+// act for the user); settings.list is CLI only (plugins use settings.get
+// on their own keys).
 func MethodHomes() map[string]MethodHome {
 	return map[string]MethodHome{
 		protocol.MethodProtocolError: {Port: Unrouted},
@@ -81,7 +81,7 @@ func MethodHomes() map[string]MethodHome {
 		protocol.MethodToastShow:         home("SurfacePort", "ToastShow", anyCaller),
 
 		protocol.MethodSettingsGet:      home("SettingsPort", "Get", anyCaller),
-		protocol.MethodSettingsList:     home("SettingsPort", "List", anyCaller),
+		protocol.MethodSettingsList:     home("SettingsPort", "List", cliOnly),
 		protocol.MethodSettingsSchema:   home("SettingsPort", "Schema", cliOnly),
 		protocol.MethodSettingsValidate: home("SettingsPort", "Validate", cliOnly),
 
