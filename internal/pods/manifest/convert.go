@@ -16,6 +16,9 @@ import (
 
 const maxManifestBytes = 1 << 20
 
+// MaxFocusBindings is the manifest's document-order focus-binding limit.
+const MaxFocusBindings = 128
+
 func readManifest(r io.Reader) ([]byte, error) {
 	b, err := io.ReadAll(io.LimitReader(r, maxManifestBytes+1))
 	if err == nil && len(b) > maxManifestBytes {
@@ -106,7 +109,7 @@ func convert(src Source, modern bool) (*Spec, []Warning, error) {
 		if err := decodeField(fields, "manifest_version", &version); err != nil || version != 2 {
 			return nil, nil, errors.New("v2 manifest requires manifest_version 2")
 		}
-		if fields["protocol"] == nil {
+		if fields["protocol"] == nil || bytes.Equal(bytes.TrimSpace(fields["protocol"]), []byte("null")) {
 			return nil, nil, errors.New("v2 manifest requires protocol")
 		}
 		if err := decodeField(fields, "protocol", &s.Protocol); err != nil {
@@ -169,6 +172,10 @@ func convert(src Source, modern bool) (*Spec, []Warning, error) {
 		for _, surface := range s.Surfaces {
 			surfaces[string(surface.ID)] = true
 		}
+		overLimit := len(bindings) > MaxFocusBindings
+		if overLimit {
+			bindings = bindings[:MaxFocusBindings]
+		}
 		for i, b := range bindings {
 			code, message := "", ""
 			if b.Focus == "" || !surfaces[b.Focus] || b.Plugin != nil || b.Disable != nil {
@@ -182,6 +189,11 @@ func convert(src Source, modern bool) (*Spec, []Warning, error) {
 				continue
 			}
 			s.FocusBindings = append(s.FocusBindings, b.FocusBinding)
+		}
+		if overLimit {
+			message := fmt.Sprintf("focus-local bindings exceed the %d-entry limit; remaining entries dropped", MaxFocusBindings)
+			s.BindingProblems = append(s.BindingProblems, BindingProblem{Index: MaxFocusBindings, Code: "too_many", Message: message})
+			warnings = append(warnings, Warning{Code: "too_many", Field: "keybindings", Index: MaxFocusBindings, Message: message})
 		}
 	} else {
 		for _, key := range []string{"transport", "language"} {
@@ -304,14 +316,8 @@ func validateDeclarations(s *Spec) error {
 	for i := range s.SettingsDeclared {
 		v := &s.SettingsDeclared[i]
 		prefix := "plugins." + s.ID + "."
-		if strings.HasPrefix(v.Key, "plugins.") {
-			if !strings.HasPrefix(v.Key, prefix) {
-				return errors.New("foreign plugin setting prefix")
-			}
-			v.Key = strings.TrimPrefix(v.Key, prefix)
-		}
-		if !localKey(v.Key) || v.Default == nil {
-			return errors.New("setting needs a lowercase local key and explicit default")
+		if strings.Contains(v.Key, ".") || !localKey(v.Key) || v.Default == nil {
+			return errors.New("setting needs a single-segment lowercase local key and explicit default; dotted or already-qualified keys are not allowed")
 		}
 		v.Key = prefix + v.Key
 		if seenSettings[v.Key] {
