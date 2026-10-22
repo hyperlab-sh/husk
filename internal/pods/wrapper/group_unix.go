@@ -36,3 +36,6 @@ func signalGroup(pid int, kill bool) error {
 	}
 	return err
 }
+
+// logOpenNoFollow refuses to open the stderr log through a symlink.
+const logOpenNoFollow = syscall.O_NOFOLLOW

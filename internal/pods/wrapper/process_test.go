@@ -179,6 +179,10 @@ func newFixture(t *testing.T, mode string, alter func(*Options)) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Store creates the log before the wrapper reopens it.
+	if err := os.WriteFile(filepath.Join(dir, "fake.log"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	sink := fixtureSink{events: events, ctx: ctx}
 	opts := Options{Clock: clock, Post: sink.post, Replies: sink, LogPath: func(string) (string, error) { return filepath.Join(dir, "fake.log"), nil }, BaseEnv: []string{"PATH=" + os.Getenv("PATH"), "GORACE=atexit_sleep_ms=0", "HUSK_FAKE_PLUGIN=drop", "HUSK_DEBUG=drop", "HUSK_PLUGIN_TOKEN=drop", "CUSTOM_KEEP=present"}, SocketPath: filepath.Join(dir, "instance.sock"), InstanceID: "instance", BinPath: os.Args[0]}
@@ -543,3 +547,53 @@ func TestLaunchFailurePostsClosedOnceAndKeepsStoreOwnedLog(t *testing.T) {
 }
 
 var _ io.Reader = (*firstLineReader)(nil)
+
+// Store creates the stderr log; the wrapper reopens it and the plugin's stderr
+// lands there.
+func TestStartAppendsStderrToThePrecreatedLog(t *testing.T) {
+	f := newFixture(t, "legacy", nil)
+	f.start(t)
+	exit := awaitNotice[ExitMsg](t, f)
+	data, err := os.ReadFile(exit.Info.LogPath)
+	if err != nil || !strings.Contains(string(data), "saw legacy rejection") {
+		t.Fatalf("stderr did not land in the precreated log: %q %v", data, err)
+	}
+}
+
+// A missing log or a symlink planted at the log path fails the start; the
+// wrapper never creates the file nor follows a link.
+func TestStartRefusesMissingAndSymlinkedLog(t *testing.T) {
+	for name, prepare := range map[string]func(dir string) string{
+		"missing": func(dir string) string { return filepath.Join(dir, "absent.log") },
+		"symlink": func(dir string) string {
+			target := filepath.Join(dir, "victim")
+			if err := os.WriteFile(target, []byte("keep"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			link := filepath.Join(dir, "link.log")
+			if err := os.Symlink(target, link); err != nil {
+				t.Fatal(err)
+			}
+			return link
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var path string
+			f := newFixture(t, "legacy", func(o *Options) {
+				path = prepare(filepath.Dir(o.SocketPath))
+				o.LogPath = func(string) (string, error) { return path, nil }
+			})
+			err := f.w.Start(openingMessages())
+			if err == nil || !strings.Contains(err.Error(), "open stderr log") {
+				t.Fatalf("Start err = %v, want open stderr log failure", err)
+			}
+			if name == "missing" {
+				if _, err := os.Stat(path); !os.IsNotExist(err) {
+					t.Fatalf("wrapper created the log: %v", err)
+				}
+			} else if b, _ := os.ReadFile(filepath.Join(filepath.Dir(path), "victim")); string(b) != "keep" {
+				t.Fatalf("symlink target was written: %q", b)
+			}
+		})
+	}
+}
