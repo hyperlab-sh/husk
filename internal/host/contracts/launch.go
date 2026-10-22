@@ -3,6 +3,7 @@ package contracts
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/hyperlab-sh/husk/internal/substrate/state"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
@@ -22,17 +23,35 @@ const (
 	PodFailed PodStatus = "failed"
 )
 
+// PodStatusUpdate is one write to a plugin's husk.pods entry (status, pid,
+// started_at, last_error, log path; state.md). Zero or nil fields mean
+// "unchanged", so the sequence can write starting first and add the pid and
+// start time with live.
+type PodStatusUpdate struct {
+	// Status is the new status; "" leaves it unchanged.
+	Status PodStatus `json:"status,omitempty"`
+	// Detail is the last_error text; nil leaves it unchanged and a pointer
+	// to "" clears it.
+	Detail *string `json:"detail,omitempty"`
+	// PID is the process id; nil leaves it unchanged.
+	PID *int `json:"pid,omitempty"`
+	// StartedAt is the process start time; nil leaves it unchanged.
+	StartedAt *time.Time `json:"started_at,omitempty"`
+	// LogPath is the stderr log path; nil leaves it unchanged.
+	LogPath *string `json:"log_path,omitempty"`
+}
+
 // PodRegistry is launch steps 1 and 2 and the later status writes: the
 // duplicate-id check and the husk.pods slice. Loop-only.
 type PodRegistry interface {
 	// Reserve claims pluginID. A duplicate returns a CodedError (conflict)
 	// and changes nothing; the first loaded wins.
-	Reserve(pluginID string) error
-	// SetStatus writes status for a reserved id. detail is a last-error text,
-	// empty when none.
-	SetStatus(pluginID string, status PodStatus, detail string) error
+	Reserve(ctx context.Context, pluginID string) error
+	// SetStatus merges upd into the husk.pods entry of a reserved id; an
+	// unknown id is not_found.
+	SetStatus(ctx context.Context, pluginID string, upd PodStatusUpdate) error
 	// Release forgets pluginID when the Pod is torn down.
-	Release(pluginID string)
+	Release(ctx context.Context, pluginID string)
 }
 
 // CatalogDeclarer is launch step 3's Store half. The JSON comes from the

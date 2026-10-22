@@ -3,6 +3,8 @@ package fakes_test
 import (
 	"context"
 	"errors"
+	"reflect"
+	"runtime"
 	"testing"
 	"time"
 
@@ -39,97 +41,227 @@ var (
 	_ contracts.SurfacePort     = (*fakes.Surfaces)(nil)
 )
 
-var ctx = context.Background()
+var (
+	ctx    = context.Background()
+	plugin = contracts.Caller{Kind: contracts.CallerPlugin, PluginID: "a"}
+	cli    = contracts.Caller{Kind: contracts.CallerCLI}
+	denied = contracts.NewError(protocol.CodeDenied, "no", nil)
+)
 
-func TestHandlerAndNotifier(t *testing.T) {
-	h := &fakes.Handler{}
-	reply := h.Serve(ctx, contracts.Caller{Kind: contracts.CallerPlugin, PluginID: "a"}, protocol.Message{Method: "state.get"}, &fakes.Notifier{})
-	if reply.Result == nil || len(h.Calls()) != 1 {
-		t.Fatalf("reply %v calls %v", reply, h.Calls())
-	}
-	n := &fakes.Notifier{Err: errors.New("x")}
-	if n.Notify(protocol.Message{Method: "state.changed"}) == nil || len(n.Calls()) != 1 {
-		t.Fatal("notifier")
+func wantMethods(t *testing.T, rec *fakes.Recorder, want ...string) {
+	t.Helper()
+	if got := rec.Methods(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("methods = %v, want %v", got, want)
 	}
 }
 
-func TestPortsRecordAndReturn(t *testing.T) {
-	c := contracts.Caller{Kind: contracts.CallerCLI}
-	boom := contracts.NewError(protocol.CodeDenied, "no", nil)
-
-	st := &fakes.State{Revision: 7}
-	if rev, err := st.Set(ctx, c, "a.state", nil); rev != 7 || err != nil {
-		t.Fatal(rev, err)
+func TestRecorderOrderCallerAndReset(t *testing.T) {
+	rec := fakes.NewRecorder()
+	st := fakes.NewState(rec)
+	pr := fakes.NewProfile(rec)
+	st.Get(ctx, plugin, "s", "/p")
+	pr.Use(ctx, cli, "work")
+	calls := rec.Calls()
+	if len(calls) != 2 || calls[0].Method != "Get" || calls[0].Kind != contracts.CallerPlugin ||
+		calls[0].PluginID != "a" || calls[1].Kind != contracts.CallerCLI || calls[1].Args[0] != "work" {
+		t.Fatalf("calls = %+v", calls)
 	}
-	st.Err = boom
-	if err := st.Clear(ctx, c, "a.state"); contracts.CodeOf(err) != "denied" {
-		t.Fatal(err)
+	rec.Reset()
+	if len(rec.Calls()) != 0 {
+		t.Fatal("reset")
 	}
-	if got := (&fakes.Calls{Result: []byte(`{}`)}); got.Calls() != nil {
-		t.Fatal("fresh fake has calls")
-	}
-	if r, _ := (&fakes.Calls{Result: []byte(`1`)}).ActionInvoke(ctx, c, "x.y", nil); string(r) != "1" {
-		t.Fatal(r)
-	}
-	if p, _ := (&fakes.Session{Result: protocol.SessionPingResult{ID: "i"}}).Ping(ctx, c); p.ID != "i" {
-		t.Fatal(p)
-	}
-	if v, s, _ := (&fakes.Settings{Value: 3, Source: "user"}).Get(ctx, c, "k"); v != 3 || s != "user" {
-		t.Fatal(v, s)
-	}
-	sec := &fakes.Secrets{Value: []byte("v")}
-	if v, _ := sec.Reveal(ctx, c, "n"); string(v) != "v" || sec.Calls()[0] != "Reveal n" {
-		t.Fatal(sec.Calls())
-	}
-	if l, _ := (&fakes.Profile{Profiles: []contracts.ProfileInfo{{Name: "p"}}}).List(ctx, c); len(l) != 1 {
-		t.Fatal(l)
-	}
-	if p, _ := (&fakes.Theme{Palette: protocol.Palette{Name: "n"}}).Get(ctx, c); p.Name != "n" {
-		t.Fatal(p)
-	}
-	if l, _ := (&fakes.Keybinding{Listing: contracts.KeyListing{Entries: make([]contracts.KeyEntry, 2)}}).List(ctx, c); len(l.Entries) != 2 {
-		t.Fatal(l)
+	if fakes.NewState(nil).Recorder == nil {
+		t.Fatal("nil recorder must be replaced")
 	}
 }
 
-func TestLaunchSeams(t *testing.T) {
-	p := &fakes.Pods{}
-	if err := p.Reserve("a"); err != nil {
+// TestLaunchOrderAcrossFakes is the sequence host-launch has to assert.
+func TestLaunchOrderAcrossFakes(t *testing.T) {
+	rec := fakes.NewRecorder()
+	pods, cat, rl := fakes.NewPods(rec), fakes.NewCatalog(rec), fakes.NewReloader(rec)
+	sl, wr := fakes.NewSlices(rec), fakes.NewWrapper(rec)
+	pid, started := 42, time.Unix(5, 0)
+
+	if err := pods.Reserve(ctx, "a"); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.Reserve("a"); contracts.CodeOf(err) != "conflict" {
+	_ = pods.SetStatus(ctx, "a", contracts.PodStatusUpdate{Status: contracts.PodStarting})
+	_ = cat.Declare("a", nil, nil)
+	rl.Reload(ctx)
+	if _, err := sl.RegisterSlice(state.Spec{Namespace: "a.state"}); err != nil {
+		t.Fatal(err)
+	}
+	_ = wr.Start("a", nil)
+	_ = pods.SetStatus(ctx, "a", contracts.PodStatusUpdate{Status: contracts.PodLive, PID: &pid, StartedAt: &started})
+	wantMethods(t, rec, "Reserve", "SetStatus", "Declare", "Reload", "RegisterSlice", "Start", "SetStatus")
+
+	e, _ := pods.Entry("a")
+	if e.Status != contracts.PodLive || *e.PID != 42 || !e.StartedAt.Equal(started) {
+		t.Fatalf("merged entry = %+v", e)
+	}
+	if err := pods.Reserve(ctx, "a"); contracts.CodeOf(err) != "conflict" {
 		t.Fatalf("duplicate: %v", err)
 	}
-	if err := p.SetStatus("a", contracts.PodLive, ""); err != nil || p.Statuses["a"] != contracts.PodLive {
+	if err := pods.SetStatus(ctx, "zz", contracts.PodStatusUpdate{}); contracts.CodeOf(err) != "not_found" {
 		t.Fatal(err)
 	}
-	if err := p.SetStatus("zz", contracts.PodLive, ""); contracts.CodeOf(err) != "not_found" {
+	if _, err := sl.RegisterSlice(state.Spec{Namespace: "a.state"}); !errors.Is(err, state.ErrDuplicate) {
 		t.Fatal(err)
 	}
-	p.Release("a")
+	detail := ""
+	_ = pods.SetStatus(ctx, "a", contracts.PodStatusUpdate{Detail: &detail})
+	if e, _ = pods.Entry("a"); e.Status != contracts.PodLive || e.Detail == nil {
+		t.Fatalf("unchanged fields must survive: %+v", e)
+	}
+	pods.Release(ctx, "a")
+	if _, ok := pods.Entry("a"); ok {
+		t.Fatal("release")
+	}
+}
 
-	s := &fakes.Slices{}
-	h, err := s.RegisterSlice(state.Spec{Namespace: "a.state"})
-	if err != nil {
-		t.Fatal(err)
+func TestHandlerAndNotifier(t *testing.T) {
+	rec := fakes.NewRecorder()
+	h := fakes.NewHandler(rec)
+	if reply := h.Serve(ctx, plugin, protocol.Message{Method: "state.get"}, fakes.NewNotifier(rec)); reply.Result == nil {
+		t.Fatal(reply)
 	}
-	h.Unregister()
-	if _, err := s.RegisterSlice(state.Spec{Namespace: "a.state"}); !errors.Is(err, state.ErrDuplicate) {
-		t.Fatal(err)
+	n := fakes.NewNotifier(rec)
+	n.Err = errors.New("x")
+	if n.Notify(protocol.Message{Method: "state.changed"}) == nil {
+		t.Fatal("notify err")
 	}
-	if applied, _ := (&fakes.Reloader{Applied: true}).Reload(ctx); !applied {
-		t.Fatal("reload")
+	wantMethods(t, rec, "Serve", "Notify")
+}
+
+func TestPortsRecordCallerAndReturn(t *testing.T) {
+	rec := fakes.NewRecorder()
+
+	st := fakes.NewState(rec)
+	st.Revision = 7
+	if rev, err := st.Set(ctx, plugin, "a.state", nil); rev != 7 || err != nil {
+		t.Fatal(rev, err)
 	}
-	if err := (&fakes.Catalog{}).Declare("a", nil, nil); err != nil {
-		t.Fatal(err)
+	st.Err = denied
+	if contracts.CodeOf(st.Clear(ctx, plugin, "a.state")) != "denied" {
+		t.Fatal("clear")
 	}
-	w := &fakes.Wrapper{}
-	if err := w.Start("a", []protocol.Message{{}}); err != nil || w.Calls()[0] != "Start a 1" {
-		t.Fatal(err, w.Calls())
+	cl := fakes.NewCalls(rec)
+	cl.Result = []byte(`1`)
+	if r, _ := cl.ActionInvoke(ctx, cli, "x.y", nil); string(r) != "1" {
+		t.Fatal(r)
 	}
-	hf := &fakes.Host{}
+	se := fakes.NewSession(rec)
+	se.Result.ID = "i"
+	if p, _ := se.Ping(ctx, cli); p.ID != "i" {
+		t.Fatal(p)
+	}
+	sg := fakes.NewSettings(rec)
+	sg.Value, sg.Source = 3, "user"
+	sg.Entries = []contracts.SettingEntry{{Key: "k"}}
+	sg.Validation = contracts.ValidationResult{Applied: true}
+	if v, s, _ := sg.Get(ctx, plugin, "k"); v != 3 || s != "user" {
+		t.Fatal(v, s)
+	}
+	if e, _ := sg.Schema(ctx, cli, "plugin:a"); len(e) != 1 {
+		t.Fatal(e)
+	}
+	if v, _ := sg.Validate(ctx, cli); !v.Applied {
+		t.Fatal(v)
+	}
+	sc := fakes.NewSecrets(rec)
+	sc.Value = []byte("v")
+	if v, _ := sc.Reveal(ctx, cli, "n"); string(v) != "v" {
+		t.Fatal(v)
+	}
+	pf := fakes.NewProfile(rec)
+	pf.Profiles = []contracts.ProfileInfo{{Name: "p"}}
+	if l, _ := pf.List(ctx, cli); len(l) != 1 {
+		t.Fatal(l)
+	}
+	th := fakes.NewTheme(rec)
+	th.Palette.Name = "n"
+	if p, _ := th.Get(ctx, plugin); p.Name != "n" {
+		t.Fatal(p)
+	}
+	kb := fakes.NewKeybinding(rec)
+	kb.Listing.Entries = make([]contracts.KeyEntry, 2)
+	if l, _ := kb.List(ctx, plugin); len(l.Entries) != 2 {
+		t.Fatal(l)
+	}
+	cf := fakes.NewConfig(rec)
+	cf.Reports = []contracts.ReloadReport{{Service: "theme", Applied: true}}
+	if r, _ := cf.Reload(ctx, cli); len(r) != 1 {
+		t.Fatal(r)
+	}
+	hk := fakes.NewHooks(rec)
+	hk.Results = []contracts.HookResult{{Plugin: "p", Err: contracts.NewError(protocol.CodeTimeout, "t", nil)}}
+	if r, _ := hk.HookCall(ctx, cli, "a.h", nil); contracts.CodeOf(r[0].Err) != "timeout" {
+		t.Fatal(r)
+	}
+	pl := fakes.NewPlugins(rec)
+	pl.Infos, pl.Path = []contracts.PluginInfo{{ID: "a", Status: contracts.PodLive}}, "/l"
+	if i, _ := pl.List(ctx, cli); i[0].Status != contracts.PodLive {
+		t.Fatal(i)
+	}
+	if p, _ := pl.Log(ctx, cli, "a"); p != "/l" {
+		t.Fatal(p)
+	}
+	sf := fakes.NewSurfaces(rec)
+	_ = sf.SurfaceUpdate(ctx, plugin, protocol.SurfaceUpdateParams{Surface: protocol.SurfaceMainStage})
+	_ = sf.SurfaceClose(ctx, plugin, protocol.SurfaceCloseParams{Surface: protocol.SurfaceMainStage})
+	_ = sf.SlotContribute(ctx, plugin, protocol.SlotContributeParams{SlotID: "a.s"})
+	sf.Err = denied
+	if contracts.CodeOf(sf.ToastShow(ctx, plugin, protocol.ToastShowParams{Title: "t"})) != "denied" {
+		t.Fatal("toast")
+	}
+	hf := fakes.NewHost(rec)
 	if hf.Run(ctx) != nil || hf.Close() != nil {
 		t.Fatal("host")
+	}
+
+	// Every port call was attributed; the callerless seams are not in this log.
+	for _, c := range rec.Calls() {
+		if c.Method != "Run" && c.Method != "Close" && c.Kind == 0 {
+			t.Errorf("%s recorded no caller", c.Method)
+		}
+	}
+}
+
+// TestWatchRegistersReturnsAndUnregisters pins the shared Watch lifecycle.
+func TestWatchRegistersReturnsAndUnregisters(t *testing.T) {
+	rec := fakes.NewRecorder()
+	st, ev := fakes.NewState(rec), fakes.NewEvents(rec)
+	st.Snap = contracts.StateSnapshotResult{Seq: 9}
+	n := fakes.NewNotifier(rec)
+	wctx, cancel := context.WithCancel(ctx)
+
+	snap, err := st.Watch(wctx, cli, []string{"husk.focus"}, n)
+	if err != nil || snap.Seq != 9 {
+		t.Fatal(snap, err)
+	}
+	if err := ev.Watch(wctx, cli, "a.*", n); err != nil {
+		t.Fatal(err)
+	}
+	if st.Watching() != 1 || ev.Watching() != 1 {
+		t.Fatal("not registered after Watch returned")
+	}
+	if ev.Push(protocol.Message{Method: protocol.MethodEventDeliver}) != 1 {
+		t.Fatal("push")
+	}
+	cancel()
+	// AfterFunc runs on its own goroutine; poll without sleeping.
+	for i := 0; i < 1e6 && (st.Watching() != 0 || ev.Watching() != 0); i++ {
+		runtime.Gosched()
+	}
+	if st.Watching() != 0 || ev.Watching() != 0 {
+		t.Fatal("not unregistered after ctx end")
+	}
+	ev.Err = denied
+	if contracts.CodeOf(ev.Watch(ctx, cli, "x", n)) != "denied" || ev.Watching() != 0 {
+		t.Fatal("refused watch must register nothing")
+	}
+	if contracts.CodeOf(ev.Emit(ctx, plugin, "b.x", nil)) != "denied" {
+		t.Fatal("emit")
 	}
 }
 
@@ -154,47 +286,5 @@ func TestLimiterTwentyPerSecondPerKey(t *testing.T) {
 	clk.Advance(time.Millisecond)
 	if !l.Allow("a") {
 		t.Fatal("new window")
-	}
-}
-
-func TestWireFamilyPorts(t *testing.T) {
-	c := contracts.Caller{Kind: contracts.CallerPlugin, PluginID: "a"}
-	denied := contracts.NewError(protocol.CodeDenied, "no", nil)
-
-	if r, _ := (&fakes.Config{Reports: []contracts.ReloadReport{{Service: "theme", Applied: true}}}).Reload(ctx, c); len(r) != 1 {
-		t.Fatal(r)
-	}
-	se := &fakes.Settings{Entries: []contracts.SettingEntry{{Key: "k"}}, Validation: contracts.ValidationResult{Applied: true}}
-	if e, _ := se.Schema(ctx, c, "plugin:a"); len(e) != 1 || se.Calls()[0] != "Schema plugin:a" {
-		t.Fatal(e, se.Calls())
-	}
-	if v, _ := se.Validate(ctx, c); !v.Applied {
-		t.Fatal(v)
-	}
-	ev := &fakes.Events{Err: denied}
-	if contracts.CodeOf(ev.Emit(ctx, c, "b.x", nil)) != "denied" {
-		t.Fatal("emit")
-	}
-	if ev.Watch(ctx, c, "a.*", &fakes.Notifier{}) == nil || len(ev.Calls()) != 2 {
-		t.Fatal(ev.Calls())
-	}
-	hk := &fakes.Hooks{Results: []contracts.HookResult{{Plugin: "p", Err: contracts.NewError(protocol.CodeTimeout, "t", nil)}}}
-	if r, _ := hk.HookCall(ctx, c, "a.h", nil); contracts.CodeOf(r[0].Err) != "timeout" {
-		t.Fatal(r)
-	}
-	pl := &fakes.Plugins{Infos: []contracts.PluginInfo{{ID: "a", Status: contracts.PodLive}}, Path: "/l"}
-	if i, _ := pl.List(ctx, c); i[0].Status != contracts.PodLive {
-		t.Fatal(i)
-	}
-	if p, _ := pl.Log(ctx, c, "a"); p != "/l" {
-		t.Fatal(p)
-	}
-	sf := &fakes.Surfaces{}
-	_ = sf.SurfaceUpdate(ctx, c, protocol.SurfaceUpdateParams{Surface: protocol.SurfaceMainStage})
-	_ = sf.SurfaceClose(ctx, c, protocol.SurfaceCloseParams{Surface: protocol.SurfaceMainStage})
-	_ = sf.SlotContribute(ctx, c, protocol.SlotContributeParams{SlotID: "a.s"})
-	sf.Err = denied
-	if contracts.CodeOf(sf.ToastShow(ctx, c, protocol.ToastShowParams{Title: "t"})) != "denied" || len(sf.Calls()) != 4 {
-		t.Fatal(sf.Calls())
 	}
 }
