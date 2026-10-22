@@ -182,10 +182,9 @@ func (r *rig) serve(t *testing.T, reply string) protocol.Message {
 	t.Helper()
 	req := <-r.out.sent
 	var msg protocol.Message
-	if err := json.Unmarshal([]byte(reply), &msg); err != nil {
+	if err := json.Unmarshal([]byte(`{"id":`+req.ID.String()+`,`+reply[1:]), &msg); err != nil {
 		t.Fatal(err)
 	}
-	msg.ID = req.ID
 	r.loop.do(func() {
 		res, ok := r.table.Resolve("notes", msg)
 		if !ok {
@@ -201,6 +200,8 @@ func invoke(r *rig, c contracts.Caller, action string, args string) (json.RawMes
 	return r.port.ActionInvoke(context.Background(), c, action, json.RawMessage(args))
 }
 
+// A Stem caller over the port carries no focus snapshot of its own, so the
+// owner sees an empty focus: Input calls the Dispatcher directly to pass one.
 func TestOwnerRoundTrip(t *testing.T) {
 	r := newRig(t)
 	type res struct {
@@ -226,7 +227,7 @@ func TestOwnerRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(req.Params, &p); err != nil {
 		t.Fatal(err)
 	}
-	if req.Method != "action.invoke" || p.Action != "notes.new" || p.Args["title"] != "Todo" || p.Caller["kind"] != "input" || p.Focus["surface"] != "s" {
+	if req.Method != "action.invoke" || p.Action != "notes.new" || p.Args["title"] != "Todo" || p.Caller["kind"] != "input" || p.Focus["surface"] != "" {
 		t.Fatalf("owner saw %s %+v", req.Method, p)
 	}
 }
