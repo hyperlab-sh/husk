@@ -818,6 +818,47 @@ func TestWatcherLivenessAndCancel(t *testing.T) {
 	}
 }
 
+func TestForeignResolutionWriteReResolves(t *testing.T) {
+	st, eng, pods := newEngine(t, Options{Publications: publications{owners: map[string]string{"publisher.list": "publisher"}}})
+	pods.launch("alpha.files")
+	pods.launch("beta.notes")
+	pods.claim("alpha.files", string(protocol.SurfaceMainStage))
+	pods.declare("alpha.files", "publisher.list",
+		Contribution{ID: "alpha.files.item", Plugin: "alpha.files", Label: "one"})
+	settle(st, eng)
+
+	res := resolution(t, st)
+	if got := res.Occupants[protocol.SurfaceMainStage].Plugin; got != "alpha.files" {
+		t.Fatalf("occupant = %q", got)
+	}
+	if got := entryIDs(res.Contributions["publisher.list"]); len(got) != 1 || got[0] != "alpha.files.item" {
+		t.Fatalf("contributions = %v", got)
+	}
+
+	// A foreign write clears the resolution. The engine's cached view no
+	// longer describes it, but the declarations do: the next pass
+	// re-resolves every slot from them.
+	if _, err := st.Clear(state.SurfacesNamespace); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	settle(st, eng)
+
+	res = resolution(t, st)
+	if got := res.Occupants[protocol.SurfaceMainStage].Plugin; got != "alpha.files" {
+		t.Fatalf("occupant after clear = %q, want the claim re-resolved", got)
+	}
+	if got := entryIDs(res.Contributions["publisher.list"]); len(got) != 1 || got[0] != "alpha.files.item" {
+		t.Fatalf("contributions after clear = %v", got)
+	}
+
+	// The re-resolved value came from the current declarations, so a
+	// foreign write cannot smuggle in an occupant the declarations never
+	// claimed.
+	if got := res.Occupants[protocol.SurfaceSidebarList].Plugin; got != "" {
+		t.Fatalf("unclaimed surface occupied after clear: %q", got)
+	}
+}
+
 func TestInitialSweepResolvesPreRegisteredDeclarations(t *testing.T) {
 	st := state.New(state.Options{})
 	pods := newPod(t, st)

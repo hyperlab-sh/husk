@@ -151,6 +151,10 @@ type Engine struct {
 	declsCache map[string]*pluginDecl
 	dirty      bool
 
+	// lastRev is the resolution slice's revision as last committed by the
+	// engine. A mismatch seen at the next pass means a foreign write.
+	lastRev uint64
+
 	// freed tracks surfaces released since the last pass (surface.close,
 	// host force-close): a freed surface re-resolves standing claims.
 	freed map[protocol.SurfaceID]bool
@@ -207,6 +211,12 @@ func New(st *state.State, opts Options) (*Engine, error) {
 	}
 	st.OnFlush(func(changes []state.Change, snap *state.Snapshot) {
 		for i := range changes {
+			if changes[i].Namespace == state.SurfacesNamespace {
+				// The engine's own commits land here too; the next pass
+				// re-checks the revision to tell foreign writes from them.
+				e.dirty = true
+				continue
+			}
 			if _, _, ok := splitDeclarationNamespace(changes[i].Namespace); ok {
 				e.dirty = true
 				return
@@ -214,6 +224,9 @@ func New(st *state.State, opts Options) (*Engine, error) {
 		}
 	})
 	e.dirty = true
+	if ent, ok := st.Snapshot().Slices[state.SurfacesNamespace]; ok {
+		e.lastRev = ent.Revision
+	}
 	return e, nil
 }
 
@@ -246,6 +259,15 @@ func (e *Engine) Flush() {
 	}
 	e.dirty = false
 	snap := e.st.Snapshot()
+
+	// A foreign write to the resolution — state.clear, hydration, anything
+	// outside the engine — is authoritative: the cached declarations no
+	// longer describe the value, so this pass re-resolves every slot from
+	// the current declarations instead of diffing against a stale view.
+	if rev := snap.Slices[state.SurfacesNamespace].Revision; rev != e.lastRev {
+		e.log.Printf("surfaces: husk.surfaces changed outside the engine; re-resolving")
+		e.declsCache = map[string]*pluginDecl{}
+	}
 
 	// Gather the current declarations, namespace-sorted: one flush resolves
 	// in the same deterministic order State reports changes.
@@ -364,6 +386,8 @@ func (e *Engine) Flush() {
 
 	if err := e.slice.Update(func(v *Surfaces) { *v = res }); err != nil {
 		e.log.Printf("surfaces: husk.surfaces commit failed: %v", err)
+	} else {
+		e.markRev()
 	}
 
 	// Watchers are notified outside State's flush callback: the Notifier is
@@ -665,6 +689,7 @@ func (e *Engine) release(surface protocol.SurfaceID, only string) error {
 	if err := e.slice.Update(func(v *Surfaces) { delete(v.Occupants, surface) }); err != nil {
 		return err
 	}
+	e.markRev()
 	if occupant == "" {
 		return nil
 	}
@@ -677,6 +702,14 @@ func (e *Engine) release(surface protocol.SurfaceID, only string) error {
 	}
 	e.freed[surface] = true
 	return nil
+}
+
+// markRev records the resolution slice's current revision as the engine's
+// own, after a successful engine commit; a later mismatch is a foreign write.
+func (e *Engine) markRev() {
+	if ent, ok := e.st.Snapshot().Slices[state.SurfacesNamespace]; ok {
+		e.lastRev = ent.Revision
+	}
 }
 
 // recordRefusal keeps the bounded refusal history beside the counter: a
