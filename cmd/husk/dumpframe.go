@@ -255,10 +255,10 @@ func runDumpFrame(m *WorkbenchModel, opt dumpFrameOptions) (string, error) {
 		// Everything registered and published; the plugin is just still
 		// streaming. That is not an error.
 		return frame, nil
-	case (errors.Is(err, context.DeadlineExceeded) || errors.Is(err, tea.ErrProgramKilled)) && len(m.podStatus) < opt.Launched:
+	case (errors.Is(err, context.DeadlineExceeded) || errors.Is(err, tea.ErrProgramKilled)) && len(m.podStatus) > 0 && len(m.podStatus) < opt.Launched:
 		// The Pods layer refused a spec ("plugin not added" in the log), so
 		// it never got a husk.pods entry and the wait cannot complete.
-		return frame, fmt.Errorf("%d of %d planned plugins never got a Pod (the host log names why; pods %v)",
+		return frame, fmt.Errorf("timed out: %d of %d planned plugins never got a Pod (the host log names why; pods %v)",
 			opt.Launched-len(m.podStatus), opt.Launched, m.podStatus)
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, tea.ErrProgramKilled):
 		return frame, fmt.Errorf("timed out after %s waiting for plugins to publish (pods %v, slots %d)",
