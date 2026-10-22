@@ -3,9 +3,12 @@ package host
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 
@@ -15,6 +18,7 @@ import (
 	"github.com/hyperlab-sh/husk/internal/pods/wrapper"
 	"github.com/hyperlab-sh/husk/internal/stem/dispatcher"
 	"github.com/hyperlab-sh/husk/internal/substrate/state"
+	"github.com/hyperlab-sh/husk/internal/substrate/store"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
@@ -52,12 +56,54 @@ func (n *recNotifier) resized(t *testing.T) [][]protocol.SurfaceSize {
 
 // bootFrontend boots a host with one launched plugin "alpha" (claims
 // sidebar-list) and returns it with the frontend.
+// writeFrontendPlugin writes a v2 manifest claiming surfaces, with extra
+// top-level fields (actions, rail_items).
+func writeFrontendPlugin(t *testing.T, id string, surfaces []string, extra map[string]any) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), id)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var decls []any
+	for _, sf := range surfaces {
+		decls = append(decls, map[string]any{"id": sf})
+	}
+	doc := map[string]any{
+		"manifest_version": 2, "protocol": 2, "id": id, "name": id, "version": "1",
+		"command": []string{"./plugin"}, "surfaces": decls,
+	}
+	for k, v := range extra {
+		doc[k] = v
+	}
+	raw, _ := json.Marshal(doc)
+	if err := os.WriteFile(filepath.Join(dir, manifest.FileName), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// alphaPlugin claims sidebar-list, declares the action alpha.open and the
+// rail item alpha.panel.
+func alphaPlugin(t *testing.T) string {
+	return writeFrontendPlugin(t, "alpha", []string{"sidebar-list"}, map[string]any{
+		"actions":    []any{map[string]any{"id": "alpha.open", "title": "Open"}},
+		"rail_items": []any{map[string]any{"id": "alpha.panel", "icon": "A", "label": "Panel", "placement": "modal"}},
+	})
+}
+
 func bootFrontend(t *testing.T, mutate func(*contracts.Config)) (*harness, *fakes, contracts.Frontend) {
+	t.Helper()
+	return bootFrontendWith(t, mutate, alphaPlugin(t))
+}
+
+// bootFrontendWith launches the given plugin dirs in order and waits for
+// every one to start.
+func bootFrontendWith(t *testing.T, mutate func(*contracts.Config), dirs ...string) (*harness, *fakes, contracts.Frontend) {
 	t.Helper()
 	hook, ready := readyHook("")
 	f := newFakes()
 	h, err := boot(t, func(c *contracts.Config) {
-		c.Plugins = []string{writePlugin(t, "alpha", false)}
+		c.Plugins = dirs
 		if mutate != nil {
 			mutate(c)
 		}
@@ -66,8 +112,21 @@ func bootFrontend(t *testing.T, mutate func(*contracts.Config)) (*harness, *fake
 		t.Fatal(err)
 	}
 	runHost(t, ready, h)
-	<-f.started
+	for range dirs {
+		<-f.started
+	}
 	return h, f, h.root.Frontend()
+}
+
+// geometryOf builds a husk.geometry document with the given inner sizes.
+func geometryOf(inner map[string][2]int) json.RawMessage {
+	rects := map[string]any{}
+	for id, wh := range inner {
+		rects[id] = map[string]any{"x": 0, "y": 0, "width": wh[0] + 2, "height": wh[1] + 2,
+			"inner": map[string]any{"x": 1, "y": 1, "width": wh[0], "height": wh[1]}}
+	}
+	raw, _ := json.Marshal(map[string]any{"terminal": map[string]any{"width": 160, "height": 48}, "too_small": false, "rects": rects})
+	return raw
 }
 
 func geometryDoc(w, hgt int) json.RawMessage {
@@ -140,15 +199,20 @@ func TestInvokeActionRunsHostActionsAsTheStem(t *testing.T) {
 			t.Errorf("unregistered: err = %v, want not_found", o.err)
 		}
 		var gotArgs map[string]any
-		fe.RegisterHostAction("husk.test.ping", func(args map[string]any) (map[string]any, error) {
+		reg := func(id string, fn contracts.HostActionHandler) {
+			if err := fe.RegisterHostAction(id, fn); err != nil {
+				t.Errorf("RegisterHostAction(%q): %v", id, err)
+			}
+		}
+		reg("husk.test.ping", func(args map[string]any) (map[string]any, error) {
 			gotArgs = args
 			return map[string]any{"pong": true}, nil
 		})
-		fe.RegisterHostAction("alpha.panel", func(map[string]any) (map[string]any, error) { return nil, nil })
-		fe.RegisterHostAction("husk.test.deny", func(map[string]any) (map[string]any, error) {
+		reg("alpha.panel", func(map[string]any) (map[string]any, error) { return nil, nil })
+		reg("husk.test.deny", func(map[string]any) (map[string]any, error) {
 			return nil, contracts.NewError(protocol.CodeDenied, "nope", map[string]any{"why": "test"})
 		})
-		fe.RegisterHostAction("husk.test.boom", func(map[string]any) (map[string]any, error) { return nil, errors.New("plain") })
+		reg("husk.test.boom", func(map[string]any) (map[string]any, error) { return nil, errors.New("plain") })
 
 		o := invoke("husk.test.ping", map[string]any{"n": "1"})
 		if o.err != nil || o.res["pong"] != true || gotArgs["n"] != "1" {
@@ -173,7 +237,9 @@ func TestInvokeActionRunsHostActionsAsTheStem(t *testing.T) {
 			t.Errorf("a plugin invoking a host action: %+v, want denied", denied)
 		}
 		// Removal.
-		fe.RegisterHostAction("husk.test.ping", nil)
+		if err := fe.RegisterHostAction("husk.test.ping", nil); err != nil {
+			t.Errorf("removal: %v", err)
+		}
 		if o := invoke("husk.test.ping", nil); codeOf(o.err) != string(protocol.CodeNotFound) {
 			t.Errorf("removed: err = %v, want not_found", o.err)
 		}
@@ -334,21 +400,107 @@ func TestOwnSlicesRegistersOnceAndGeometryDrivesResized(t *testing.T) {
 }
 
 func TestResizedReachesOnlyTheOccupant(t *testing.T) {
-	h, _, fe := bootFrontend(t, nil)
-	var other recNotifier
+	t.Run("a watcher that occupies nothing hears nothing", func(t *testing.T) {
+		h, _, fe := bootFrontend(t, nil)
+		var alpha, other recNotifier
+		h.loop(func() {
+			s, err := fe.OwnSlices()
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			h.root.engine.WatchPlugin("alpha", &alpha)
+			h.root.engine.WatchPlugin("beta", &other) // watches, occupies nothing
+			if _, err := s.Geometry.Set(geometryDoc(30, 10)); err != nil {
+				t.Error(err)
+				return
+			}
+		})
+		h.loop(func() {
+			got := alpha.resized(t)
+			if len(got) != 1 || len(got[0]) != 1 || got[0][0].Surface != "sidebar-list" || got[0][0].Width != 30 || got[0][0].Height != 10 {
+				t.Errorf("alpha's pushes = %+v, want exactly one sidebar-list at 30x10", got)
+			}
+			if got := other.resized(t); len(got) != 0 {
+				t.Errorf("a non-occupant was told about sizes: %+v", got)
+			}
+		})
+	})
+	t.Run("two occupants each hear only their own surface", func(t *testing.T) {
+		beta := writeFrontendPlugin(t, "beta", []string{"workspace-stage"}, nil)
+		h, _, fe := bootFrontendWith(t, nil, alphaPlugin(t), beta)
+		var a, b recNotifier
+		h.loop(func() {
+			s, err := fe.OwnSlices()
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			h.root.engine.WatchPlugin("alpha", &a)
+			h.root.engine.WatchPlugin("beta", &b)
+			if _, err := s.Geometry.Set(geometryOf(map[string][2]int{"sidebar-list": {30, 10}, "workspace-stage": {100, 30}})); err != nil {
+				t.Error(err)
+				return
+			}
+		})
+		h.loop(func() {
+			ga, gb := a.resized(t), b.resized(t)
+			if len(ga) != 1 || len(ga[0]) != 1 || ga[0][0].Surface != "sidebar-list" || ga[0][0].Width != 30 {
+				t.Errorf("alpha's pushes = %+v, want only sidebar-list at 30", ga)
+			}
+			if len(gb) != 1 || len(gb[0]) != 1 || gb[0][0].Surface != "workspace-stage" || gb[0][0].Width != 100 || gb[0][0].Height != 30 {
+				t.Errorf("beta's pushes = %+v, want only workspace-stage at 100x30", gb)
+			}
+		})
+	})
+}
+
+// D53: a refused claim waits; when the holder closes the surface the waiting
+// plugin takes it in the same tick's resolution pass, and its occupant must
+// hear about it even though the surface's size did not change.
+func TestNewOccupantOfAnUnchangedSurfaceIsTold(t *testing.T) {
+	beta := writeFrontendPlugin(t, "beta", []string{"sidebar-list"}, nil)
+	h, _, fe := bootFrontendWith(t, nil, alphaPlugin(t), beta)
+	var a, b recNotifier
 	h.loop(func() {
 		s, err := fe.OwnSlices()
 		if err != nil {
-			t.Fatal(err)
+			t.Error(err)
+			return
 		}
-		h.root.engine.WatchPlugin("beta", &other) // watches, occupies nothing
+		if res, _ := decodeSurfaces(fe.Snapshot()); res.Occupants["sidebar-list"].Plugin != "alpha" {
+			t.Errorf("precondition: alpha must hold sidebar-list, got %+v", res.Occupants)
+			return
+		}
+		h.root.engine.WatchPlugin("alpha", &a)
+		h.root.engine.WatchPlugin("beta", &b)
 		if _, err := s.Geometry.Set(geometryDoc(30, 10)); err != nil {
-			t.Fatal(err)
+			t.Error(err)
+			return
 		}
 	})
-	if got := other.resized(t); len(got) != 0 {
-		t.Fatalf("a non-occupant was told about sizes: %+v", got)
-	}
+	h.loop(func() {
+		if got := b.resized(t); len(got) != 0 {
+			t.Errorf("beta heard about a surface it does not hold: %+v", got)
+			return
+		}
+		if err := h.root.engine.SurfaceClose("alpha", protocol.SurfaceCloseParams{Surface: "sidebar-list"}); err != nil {
+			t.Error(err)
+			return
+		}
+	})
+	// This fn runs after the tick that followed the close and before the next
+	// tick: the push must already have happened.
+	h.loop(func() {
+		got := b.resized(t)
+		if len(got) != 1 || len(got[0]) != 1 {
+			t.Errorf("beta's pushes = %+v, want one with sidebar-list", got)
+			return
+		}
+		if s := got[0][0]; s.Surface != "sidebar-list" || s.Width != 30 || s.Height != 10 {
+			t.Errorf("beta was told %+v, want sidebar-list at the current 30x10", s)
+		}
+	})
 }
 
 func TestUpdateSurfaceViewWritesOnlyTheFrontendHalf(t *testing.T) {
@@ -415,9 +567,7 @@ func TestRailItemsComeFromTheDeclaredCatalog(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, manifest.FileName), []byte(doc), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h, _, fe := bootFrontend(t, func(c *contracts.Config) { c.Plugins = append(c.Plugins, dir) })
-	_ = h
-	// Both plugins launch; wait for the second one to be declared.
+	h, _, fe := bootFrontendWith(t, nil, alphaPlugin(t), dir)
 	h.loop(func() {})
 	var items []contracts.RailItem
 	for _, it := range fe.RailItems() {
@@ -429,7 +579,7 @@ func TestRailItemsComeFromTheDeclaredCatalog(t *testing.T) {
 		t.Fatalf("RailItems = %+v", fe.RailItems())
 	}
 	first := items[0]
-	if first.ID != "railed.panel" || first.Placement != "modal" || first.Badge != "3" || first.Label != "Panel" || first.Icon != "P" ||
+	if first.ID != "railed.panel" || first.Placement != contracts.PlacementModal || first.Badge != "3" || first.Label != "Panel" || first.Icon != "P" ||
 		first.Frame == nil || !first.Frame.Border || !first.Frame.Close || first.Frame.Label != "Panel" {
 		t.Errorf("first rail item = %+v", first)
 	}
@@ -485,4 +635,188 @@ func TestConfigContentReceivesOnlyAcceptedSurfaceUpdates(t *testing.T) {
 		!slices.Equal(seen[0].p.Lines, []string{"a", "b"}) || len(seen[0].p.HitTargets) != 1 {
 		t.Errorf("sink got %+v, want the plugin id and the params unchanged", seen[0])
 	}
+}
+
+func TestRegisterHostActionRefusesWhatWouldShadowOrMisroute(t *testing.T) {
+	h, _, fe := bootFrontend(t, nil)
+	called := false
+	handler := func(map[string]any) (map[string]any, error) { called = true; return nil, nil }
+	h.loop(func() {
+		for _, tc := range []struct{ name, id, code string }{
+			{"malformed id", "nodots", string(protocol.CodeInvalidParams)},
+			{"neither husk.* nor a rail item", "gamma.thing", string(protocol.CodeInvalidParams)},
+			{"a plugin's declared action", "alpha.open", string(protocol.CodeConflict)},
+		} {
+			if err := fe.RegisterHostAction(tc.id, handler); codeOf(err) != tc.code {
+				t.Errorf("%s: RegisterHostAction(%q) = %v, want %s", tc.name, tc.id, err, tc.code)
+			}
+		}
+		// The refused registration must not shadow the plugin's action: the
+		// invocation goes to alpha's Pod (it waits for the plugin's reply)
+		// and never reaches the host handler.
+		pending := h.root.disp.Pending()
+		replied := false
+		fe.InvokeAction("alpha.open", nil, func(map[string]any, error) { replied = true })
+		if called || replied {
+			t.Errorf("alpha.open was answered by the host (handler called=%v, replied=%v)", called, replied)
+		}
+		if got := h.root.disp.Pending(); got != pending+1 {
+			t.Errorf("pending calls = %d, want %d: the invocation did not reach the plugin", got, pending+1)
+		}
+		if _, listed := h.root.hostActions["alpha.open"]; listed {
+			t.Error("a refused id was listed as a host action")
+		}
+		// What is allowed stays allowed: husk.* and a declared rail item id.
+		for _, id := range []string{"husk.anything", "alpha.panel"} {
+			if err := fe.RegisterHostAction(id, handler); err != nil {
+				t.Errorf("RegisterHostAction(%q): %v", id, err)
+			}
+		}
+		// Removal never fails, even for an id that was never registered.
+		if err := fe.RegisterHostAction("gamma.thing", nil); err != nil {
+			t.Errorf("removal of an unknown id: %v", err)
+		}
+	})
+}
+
+func TestRailItemsReportAnUndecodableDocumentOnce(t *testing.T) {
+	var mu sync.Mutex
+	var logs []string
+	h, err := boot(t, nil, WithLogger(func(level, msg string) {
+		mu.Lock()
+		logs = append(logs, level+" "+msg)
+		mu.Unlock()
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.root.store.Declare(store.DeclaredPlugins, "broken", map[string]any{"rail_items": "not a list"})
+	if items := h.root.RailItems(); len(items) != 0 {
+		t.Errorf("RailItems = %+v, want none", items)
+	}
+	h.root.RailItems()
+	mu.Lock()
+	defer mu.Unlock()
+	var n int
+	for _, l := range logs {
+		if strings.Contains(l, "broken") && strings.HasPrefix(l, "warn ") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("warnings for the broken document = %d, want exactly one: %q", n, logs)
+	}
+}
+
+// contracts may not import the manifest package, so the two rail item shapes
+// are pinned together here: a field added to one side fails this test.
+func TestRailItemShapeMatchesTheManifest(t *testing.T) {
+	jsonFields := func(typ reflect.Type) map[string]string {
+		out := map[string]string{}
+		for i := 0; i < typ.NumField(); i++ {
+			f := typ.Field(i)
+			name := strings.Split(f.Tag.Get("json"), ",")[0]
+			if name == "" || name == "-" {
+				continue
+			}
+			out[name] = f.Type.String()
+		}
+		return out
+	}
+	want := jsonFields(reflect.TypeOf(manifest.RailItemDecl{}))
+	got := jsonFields(reflect.TypeOf(contracts.RailItem{}))
+	delete(got, "plugin") // set by the frontend from the document's plugin id
+	// Placement is a named string on both sides; compare the underlying kind.
+	want["placement"], got["placement"] = "string", "string"
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("contracts.RailItem fields %v differ from manifest.RailItemDecl fields %v", got, want)
+	}
+	for _, p := range []manifest.RailPlacement{manifest.PlacementModal, manifest.PlacementFullCanvas, manifest.PlacementStage} {
+		if !contracts.RailPlacement(p).Valid() {
+			t.Errorf("placement %q valid in the manifest but not in contracts", p)
+		}
+	}
+	if contracts.RailPlacement("dock").Valid() || manifest.RailPlacement("dock").Valid() {
+		t.Error("an unknown placement is valid")
+	}
+	// A manifest declaration decodes into the contract type without loss.
+	decl := manifest.RailItemDecl{ID: "p.x", Icon: "i", Badge: "b", Label: "l", Placement: manifest.PlacementStage, Description: "d",
+		Frame: &protocol.FrameSpec{Border: true, Label: "L", Close: true}}
+	raw, _ := json.Marshal(decl)
+	var item contracts.RailItem
+	if err := json.Unmarshal(raw, &item); err != nil {
+		t.Fatal(err)
+	}
+	back, _ := json.Marshal(struct {
+		contracts.RailItem
+		Plugin string `json:"plugin,omitempty"`
+	}{RailItem: item})
+	var a, b map[string]any
+	_ = json.Unmarshal(raw, &a)
+	_ = json.Unmarshal(back, &b)
+	delete(b, "plugin")
+	if !reflect.DeepEqual(a, b) {
+		t.Errorf("round trip lost fields: %v -> %v", a, b)
+	}
+}
+
+// husk.layout is persistent: a late OwnSlices (on the loop, after Run) must
+// hydrate from Store's preloaded values like an early one, and later writes
+// must persist.
+func TestLayoutSliceHydratesAndPersistsAcrossHosts(t *testing.T) {
+	stateDir := t.TempDir()
+	layout := func(width int) json.RawMessage {
+		return json.RawMessage(fmt.Sprintf(`{"sidebar":{"shown":true,"width":%d}}`, width))
+	}
+	// run boots a host on the shared state dir, owns the slices before or
+	// after Run, reports the hydrated layout and writes next.
+	run := func(t *testing.T, afterRun bool, next json.RawMessage) json.RawMessage {
+		t.Helper()
+		hook, ready := readyHook("")
+		h, err := bootIn(t, stateDir, nil, withHook(hook))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got json.RawMessage
+		own := func() {
+			s, err := h.root.Frontend().OwnSlices()
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			got = h.root.Frontend().Snapshot().Slices[state.LayoutNamespace].Value
+			if next != nil {
+				if _, err := s.Layout.Set(next); err != nil {
+					t.Error(err)
+				}
+			}
+		}
+		if afterRun {
+			runHost(t, ready, h)
+			h.loop(own)
+			h.loop(func() {}) // the tick after the write has run
+		} else {
+			own()
+			runHost(t, ready, h)
+			h.loop(func() {})
+		}
+		h.shutdown()
+		return got
+	}
+	if got := run(t, false, layout(31)); !jsonEqual(got, json.RawMessage(`{}`)) {
+		t.Fatalf("a fresh state dir hydrated %s", got)
+	}
+	// Written before Run, read on the loop after Run, rewritten there.
+	if got := run(t, true, layout(44)); !jsonEqual(got, layout(31)) {
+		t.Fatalf("late OwnSlices hydrated %s, want %s", got, layout(31))
+	}
+	// The write made by a late OwnSlices persisted too.
+	if got := run(t, false, nil); !jsonEqual(got, layout(44)) {
+		t.Fatalf("early OwnSlices hydrated %s, want the late write %s", got, layout(44))
+	}
+}
+
+func jsonEqual(a, b json.RawMessage) bool {
+	var x, y any
+	return json.Unmarshal(a, &x) == nil && json.Unmarshal(b, &y) == nil && reflect.DeepEqual(x, y)
 }

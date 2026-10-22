@@ -66,7 +66,13 @@ type harness struct {
 // draining cfg.Post into Update.
 func boot(t *testing.T, mutate func(*contracts.Config), opts ...Option) (*harness, error) {
 	t.Helper()
-	state := t.TempDir()
+	return bootIn(t, t.TempDir(), mutate, opts...)
+}
+
+// bootIn is boot over a given state directory, so a second host can start on
+// what the first one persisted.
+func bootIn(t *testing.T, state string, mutate func(*contracts.Config), opts ...Option) (*harness, error) {
+	t.Helper()
 	t.Setenv("HOME", state)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(state, "config"))
 	t.Setenv("XDG_STATE_HOME", filepath.Join(state, "state"))

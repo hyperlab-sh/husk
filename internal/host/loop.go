@@ -168,7 +168,15 @@ func (r *Root) tick() {
 		r.st.Flush()
 	}
 	if r.engine != nil {
+		// A resolution the engine commits here (a claim that resolves, a
+		// release) lands in State after this tick's flush, so the listener
+		// only sees it next Update; read the revision around Flush instead
+		// and push in this tick.
+		before := r.surfacesRevision()
 		r.engine.Flush()
+		if r.surfacesRevision() != before {
+			r.sizesDirty = true
+		}
 		r.pushResized()
 	}
 	if r.bus != nil {
@@ -269,22 +277,35 @@ func (r *Root) pushResized() {
 	for _, occ := range res.Occupants {
 		plugins[occ.Plugin] = true
 	}
-	next := map[protocol.SurfaceID]protocol.SurfaceSize{}
+	next := map[protocol.SurfaceID]pushedSize{}
 	var changed []protocol.SurfaceSize
 	for plugin := range plugins {
 		for _, size := range occupiedSizes(snap, plugin) {
-			next[size.Surface] = size
+			next[size.Surface] = pushedSize{Plugin: plugin, Size: size}
 		}
 	}
 	for _, id := range sortedSurfaces(res.Occupants) {
-		if size, ok := next[id]; ok && r.lastSizes[id] != size {
-			changed = append(changed, size)
+		// A new occupant of an unchanged surface must be told too: its
+		// opening listed only what it occupied then.
+		if p, ok := next[id]; ok && r.lastSizes[id] != p {
+			changed = append(changed, p.Size)
 		}
 	}
 	r.lastSizes = next
 	if len(changed) > 0 {
 		r.engine.Resized(changed)
 	}
+}
+
+// pushedSize is what one surface's occupant was last told.
+type pushedSize struct {
+	Plugin string
+	Size   protocol.SurfaceSize
+}
+
+// surfacesRevision is the husk.surfaces revision of the committed snapshot.
+func (r *Root) surfacesRevision() uint64 {
+	return r.st.Snapshot().Slices[state.SurfacesNamespace].Revision
 }
 
 func occupiedSizes(snap *state.Snapshot, pluginID string) []protocol.SurfaceSize {

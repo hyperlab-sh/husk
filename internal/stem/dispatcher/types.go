@@ -145,6 +145,9 @@ type FocusSource interface {
 	Focus() FocusContext
 }
 
+// ValidActionID reports whether id is a well-formed catalog id.
+func ValidActionID(id string) bool { return validActionID(id) }
+
 // validActionID reports whether id is a well-formed catalog id: at least two
 // non-empty dot-separated segments and no whitespace or separator characters.
 func validActionID(id string) bool {

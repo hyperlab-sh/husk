@@ -45,13 +45,21 @@ type Frontend interface {
 	InvokeAction(action string, args map[string]any, reply func(result map[string]any, err error))
 
 	// RegisterHostAction binds an in-process handler for a husk.* action id or
-	// a rail item id and lists it in the action catalog under the host. The
-	// handler runs on the loop when the Dispatcher routes an invocation of id
-	// to it (InvokeAction, the CLI's action.invoke); its error is reported
-	// with its CodedError code, internal otherwise. A later registration of
-	// the same id replaces the earlier one; a nil handler removes it. Plugins
-	// cannot invoke host actions. Loop only.
-	RegisterHostAction(id string, handler HostActionHandler)
+	// for the id of a rail item some declared plugin carries (RailItems), and
+	// lists it in the action catalog under the host with its id and no title
+	// or description. Any other id is refused with invalid_params, and an id
+	// that a declared plugin already owns as an action is refused with
+	// conflict: the Dispatcher consults host actions before plugin documents,
+	// so accepting it would shadow the plugin's action. The handler runs on
+	// the loop when the Dispatcher routes an invocation of id to it
+	// (InvokeAction, the CLI's action.invoke); its error is reported with its
+	// CodedError code, internal otherwise. A later registration of the same id
+	// replaces the earlier one; a nil handler removes the binding and never
+	// fails. A rail item action stays listed while its plugin is dead; the
+	// Dispatcher's own liveness check answers an invocation for a dead
+	// plugin's surface, not this catalog. Plugins cannot invoke host actions.
+	// Loop only.
+	RegisterHostAction(id string, handler HostActionHandler) error
 
 	// SendKey delivers input.key to a live plugin's Pod. It returns a
 	// CodedError: not_found for an unknown plugin, unavailable for one that
@@ -71,7 +79,9 @@ type Frontend interface {
 
 	// OwnSlices registers the frontend's owner handles (husk.layout,
 	// husk.geometry, husk.focus). It may be called once, before the loop
-	// runs or on it; a second call fails. Handle methods are loop only.
+	// runs or on it after Run has started (a persistent husk.layout hydrates
+	// from Store's preloaded values either way); a second call fails. Handle
+	// methods are loop only.
 	OwnSlices() (FrontendSlices, error)
 
 	// UpdateSurfaceView applies fn to the frontend-owned half of
@@ -84,6 +94,29 @@ type Frontend interface {
 // invocation's JSON object, possibly nil; a nil result is an empty object.
 type HostActionHandler func(args map[string]any) (result map[string]any, err error)
 
+// RailPlacement is how a rail item opens its surface. It has the same wire
+// values as the manifest's rail item placement; a test pins the two shapes
+// together, because the pods package may not import this one.
+type RailPlacement string
+
+const (
+	// PlacementModal opens the surface as a modal overlay.
+	PlacementModal RailPlacement = "modal"
+	// PlacementFullCanvas opens it over everything right of the rail.
+	PlacementFullCanvas RailPlacement = "full-canvas"
+	// PlacementStage opens it as the workspace stage.
+	PlacementStage RailPlacement = "stage"
+)
+
+// Valid reports whether p is a known rail placement.
+func (p RailPlacement) Valid() bool {
+	switch p {
+	case PlacementModal, PlacementFullCanvas, PlacementStage:
+		return true
+	}
+	return false
+}
+
 // RailItem is one activity-rail item a plugin declared in its manifest
 // (rail_items[]). ID is "<plugin_id>.<name>" and doubles as the action id
 // that activates the item. Placement is modal, full-canvas or stage. Frame is
@@ -94,7 +127,7 @@ type RailItem struct {
 	Icon        string              `json:"icon"`
 	Badge       string              `json:"badge,omitempty"`
 	Label       string              `json:"label"`
-	Placement   string              `json:"placement"`
+	Placement   RailPlacement       `json:"placement"`
 	Description string              `json:"description,omitempty"`
 	Frame       *protocol.FrameSpec `json:"frame,omitempty"`
 }
