@@ -247,11 +247,13 @@ func TestSnapshotIsolation(t *testing.T) {
 }
 
 // TestContributionsOrdering pins the ordering the registry keeps per slot
-// for one plugin: arrival order within the slot, a repeated id replaced in
-// place, ids scoped to their slot, and an identical re-contribute committing
-// nothing. The combined order across plugins is a different slice's job: the
-// Surfaces engine resolves the per-plugin declarations into husk.surfaces in
-// arrival order, and this package only carries the declarations.
+// for one plugin: the order the Pod received the entries, a repeated id
+// replaced in place, ids scoped to their slot, and an identical
+// re-contribute committing nothing. The combined order across plugins is a
+// different slice's job: the Surfaces engine records it in husk.surfaces
+// (first observation across ticks; within one tick, by namespace then by
+// entry position), and this package only carries the orderless
+// declarations.
 func TestContributionsOrdering(t *testing.T) {
 	s := state.New(state.Options{})
 	_, con := registerBoth(t, s, pluginGit)
@@ -266,8 +268,8 @@ func TestContributionsOrdering(t *testing.T) {
 		t.Fatalf("Upsert commit: %v", err)
 	}
 
-	// Replacing branch with the same id keeps its arrival position in its
-	// slot, as today's contribute does.
+	// Replacing branch with the same id keeps its position in its slot, as
+	// today's contribute does.
 	replaced := branch
 	replaced.Label = "topic"
 	if err := con.Upsert(status, replaced); err != nil {
