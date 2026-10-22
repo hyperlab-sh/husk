@@ -83,10 +83,11 @@ The reload coordinator is a small function in the services package, not a sixth 
 ```go
 type Reason string // "cli" | "profile" | "plugin"
 
-// Reload runs on the caller's goroutine, never on the Bubble Tea loop: Store
-// re-reads files after Invalidate. Callers on the loop (the husk.profile
-// Listener, the Pods host) start it on the coordinator's goroutine and
-// receive its completion as a loop message.
+// Reload waits on a coordinator-owned flight, never doing work on the loop.
+// A request context controls only that caller's wait. Flight lifetime is the
+// coordinator's Context/Close plus its own shared 2 s deadline, not the first
+// waiter's context. Cancelling any waiter leaves shared and queued work alive.
+// Loop callers start their wait off-loop and receive a completion message.
 func (c *Coordinator) Reload(ctx context.Context, reason Reason) ([]Report, error)
 ```
 
@@ -195,7 +196,7 @@ Validation rules, applied to the whole merged document on every rebuild:
 2. Unknown key under `plugins.<id>.*` for a plugin that declares no schema: warning, value kept as raw.
 3. Wrong type, value outside `Min`/`Max`, or value not in `Enum`: error.
 4. A key whose `Apply` is `restart` and whose value changed since start: warning "restart required", the old value stays in the snapshot.
-5. Secrets never appear here. A document key whose name matches a registered secret name is an error ("secrets are not settings").
+5. Secrets never appear here. Compare a plugin's declared setting keys only against that same plugin's secret requests: an exact whole local key (or exact qualified key) match is an error ("secrets are not settings"). Never suffix-match or compare another owner's names, and never apply this plugin rule to host keys. A secret named `name` cannot invalidate `theme.name`.
 
 Rebuild is atomic: any error keeps the whole previous snapshot. A bad user value therefore never half-applies.
 
@@ -254,7 +255,7 @@ CLI: `husk theme show`, `husk theme check` (dry build with the contrast report),
 
 Keybinding turns the keymap layer documents and the manifest focus-local declarations into one resolved keymap and answers lookups from Input. It does not hold chord state: Input keeps the typed prefix and passes it in on each lookup. The policy it implements (layers and their rank, the keymap document shape, tombstones, sequences, special contexts, what `husk keys` reports) is fixed in [Keybindings](keybindings.md); this section fixes only the service mechanics.
 
-Key spelling is not redefined. A key is a string in the host's `slot_key` spelling produced by `legacyKeyString` (`cmd/husk/input.go`): Space is `" "`, NUL is `"ctrl+@"`, Alt precedes other modifiers (`alt+ctrl+x`), shifted Alt printables use their text (`alt+X`), Num and Scroll Lock are ignored, Caps Lock only affects printable casing. The loader normalizes a written key by parsing it against this spelling and rejects anything it cannot round-trip (`invalid_key` problem).
+Key spelling is not redefined. A key is a string in the host's `slot_key` spelling produced by `legacyKeyString` (`cmd/husk/input.go`): Space is `" "`, NUL is `"ctrl+@"`, Alt precedes other modifiers (`alt+ctrl+x`), shifted Alt printables use their text (`alt+X`), Num and Scroll Lock are ignored, Caps Lock only affects printable casing. The loader normalizes letters following modifiers to lowercase before applying Shift (`ctrl+X` becomes `ctrl+x`; `alt+shift+x` becomes `alt+X`). Shift plus a digit/symbol is rejected with `invalid_key` naming the produced character to bind instead (`shift+1` suggests `!`, `shift+/` suggests `?`). The same error detail reaches the loader's problem. Other non-round-trippable keys are rejected.
 
 Inputs, per rebuild:
 
@@ -309,10 +310,12 @@ type Secrets interface {
 }
 
 type Caller struct {
-    Kind string // "cli", "input", "host" or "plugin"; verified by Server
+    Kind string // explicit "cli", "input", "host" or "plugin"; empty/unknown is denied
     PluginID string // exact plugin identity; a nonempty id is never a user
 }
-// Public exposure/mutation methods check Caller. The accepted-dialog grant
+// Public exposure/mutation methods require an explicit verified kind: Caller{}
+// is never a user. A nonempty PluginID cannot claim user authority.
+// The accepted-dialog grant
 // uses a private trusted path and rechecks the current declaration digest.
 
 type SecretInfo struct {
@@ -376,7 +379,7 @@ CLI: `husk secrets list` (names, who declares, who is granted, whether set), `hu
 8. Any config-layer entry (`distribution`, `user`, `profile`) beats any manifest-declared entry for the same keys. Rank is `husk` < `focus-local` < `distribution` < `user` < `profile` ([Keybindings](keybindings.md)).
 9. A secret value never appears in State, settings, events, logs, toasts, `husk state` or an error message.
 10. A plugin can never grant, revoke, set or reveal a secret, and can never write settings.
-11. Reloads are serialized. A request that arrives before input capture shares the running flight; later requests share one queued follow-up flight. Capture starts before Store input gathering. The follow-up reads fresh config and declarations, so a plugin launch gate never accepts an older flight that could not have seen that plugin.
+11. Reloads are serialized. A request that arrives before input capture shares the running flight; later requests share one queued follow-up flight. Capture starts before Store input gathering. The follow-up reads fresh config and declarations, so a plugin launch gate never accepts an older flight that could not have seen that plugin. Each flight belongs to the coordinator lifetime and its own 2 s bound; requester cancellation detaches only that waiter, including the caller that first queued a follow-up.
 12. Services do not publish events except `services.reloaded` (coordinator) and `secrets.read` (name, plugin id and outcome, no value).
 13. Constructors register `husk.profile` and `husk.grants` on the loop. Public `Profile.Use`, `Secrets.Grant` and `Secrets.Revoke` authorize Caller then enqueue their State writes through the injected loop-post function (the shape of Store's `Options.Post`). Only queued callbacks mutate State. Profile's deleted-layer reset and the private accepted-dialog grant use the same path; dialog grants recheck the current digest at execution. Every other Service method, preparation and coordinator reload included, may run on any goroutine and writes no State.
 
@@ -393,7 +396,7 @@ CLI: `husk secrets list` (names, who declares, who is granted, whether set), `hu
 
 To the Stem: `Keybinding.Resolve`, `Keybinding.Hints`, `Keybinding.KeysFor`, `Theme.Palette`, `Settings.Snapshot`, `Profile.Active`, plus the `services.reloaded` event.
 
-To plugins, through the Server (all authenticated by the caller token the Server resolves): `settings.get`, `secrets.get`, `secrets.names`, `theme.get` (the same `Palette` as `theme.changed`), `keys.list` (only the plugin's own resolved bindings and their layer). Plugins also receive `theme.changed`, which the Pods host pushes down their stdin ([Pods](pods.md)).
+To plugins, through the Server (all authenticated by the caller token the Server resolves): `settings.get`, `secrets.get`, `secrets.names`, `theme.get` (the same `Palette` as `theme.changed`), `keys.list` (only the plugin's own resolved bindings and their layer, using exact catalog action ownership or exact declaring plugin id, never an action-id prefix). Plugins also receive `theme.changed`, which the Pods host pushes down their stdin ([Pods](pods.md)).
 
 To the CLI, through the Server: `husk profile ...`, `husk settings ...`, `husk theme ...`, `husk keys ...`, `husk secrets ...`, `husk config reload`. Each subcommand wraps one method from the [Protocol](protocol.md) table: `profile list|current` wrap `profile.list` (`current` prints the entry with `active`), `profile use` wraps `profile.use`; `settings get|list|schema|validate` wrap the `settings.*` method of the same name; `theme show|roles` wrap `theme.get` (`roles` prints its keys), `theme check` wraps `theme.check`; `secrets list` wraps `secrets.names`, and `secrets set|grant|revoke|reveal` wrap the `secrets.*` method of the same name, which answer `denied` to any caller with a plugin identity.
 

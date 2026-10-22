@@ -52,14 +52,14 @@ Rules:
 - **Layer first.** When several bindings match a key press, the highest layer wins. Within one layer, the more specific scope wins (plugin-qualified focus, then focus, then global). Within one layer and one scope, the first entry in the file wins and the loader reports each later duplicate as a `duplicate` problem.
 - **Configuration always beats a plugin.** A distribution, user or profile binding beats a focus-local binding on the same key, whatever the scope. A plugin can never take a key a person or an application chose.
 - **The `husk` layer is the weakest default.** A plugin's focus-local binding beats a built-in host key while its surface has focus. A distribution replaces the host keymap by overriding or disabling entries, or by dropping the layer (see `builtin` below).
-- **Disable is exact.** A `disable` entry removes the lower-layer entries with the same `(key, focus, plugin)` triple and nothing else. A global disable of `[` does not remove a plugin's focus-local `[`.
+- **Disable removal is exact; lookup still ranks.** A `disable` entry removes lower-layer entries with the same `(keys, focus, plugin)` triple. The tombstone itself remains a ranked candidate. Therefore a global user-layer disable of `[` outranks a plugin's focus-local `[` and yields `NoMatch` (the key falls through), even though the plugin declaration remains in the catalog/listing. This is the authoritative distinction between exact removal and the winning lookup result.
 - **A disabled or unbound key falls through.** If the winning candidate is a disable, or no candidate exists, the key goes to the focused surface's occupant as `slot_key`, exactly as an unbound key does today.
 - **No instance layer.** The Store `instance` layer (run flags) does not feed keymaps in v1.
 - **One distribution layer in v1.** Store takes a single distribution source (`Options.Distribution`, [Store](store.md)); an application that bundles plugins ships one merged distribution keymap. Several distribution layers ranked by registration order would be an additive change to Store and to this spec, not to the rank table.
 
 ### Key spelling and sequences
 
-Keys use the existing `slot_key` spelling and match exactly: `f4`, `ctrl+g`, `alt+2`, `n`, `esc`, `tab`. The loader normalizes `space` to the single space the wire uses and rejects any key it cannot normalize with an `invalid_key` problem.
+Keys use the existing `slot_key` spelling: `f4`, `ctrl+g`, `alt+2`, `n`, `esc`, `tab`. The loader normalizes `space` to the single wire space, and letters after modifiers to lowercase before applying Shift (`ctrl+X` → `ctrl+x`, `shift+x` → `X`). Shift+digit/symbol is rejected with an `invalid_key` problem naming the produced character to bind (`shift+1` → use `!`, `shift+/` → use `?`), rather than silently binding the unshifted key. Non-modified produced text retains its case.
 
 A binding names one key with `key` or a sequence of up to 4 keys with `keys: [...]` (`"keys": ["ctrl+k", "ctrl+s"]`); exactly one of the two is present. A sequence is never written as one space-separated string, because `" "` is itself a key. Input keeps the chord state and asks the service after each key. Rules:
 
@@ -249,7 +249,7 @@ Candidate selection for a key sequence `K` in context `C`:
 1. A binding is a **candidate** if its keys equal or begin with `K` and its scope matches `C`: global, or `Focus == C.FocusSurface` and (`Plugin` empty or `Plugin == C.FocusOwner`).
 2. Tombstones apply: for each `Disable` entry, remove every lower-layer entry with the same `(Keys, Focus, Plugin)`. The disable entry itself stays as a candidate for ranking purposes only and yields `NoMatch` if it wins.
 3. Order the rest by layer rank, then scope specificity, then `Source.Order` ascending (first wins).
-4. If the top candidate's keys equal `K` exactly, return `Match` (or `NoMatch` for a disable). If every candidate is longer than `K`, return `Prefix`.
+4. If the top candidate is a disable, return `NoMatch` immediately, including a partial disabled chord: a tombstone never returns `Prefix`. Otherwise return `Match` for its exact keys, or `Prefix` while its sequence needs more keys.
 5. All other candidates are **shadowed** and listed as such by `Listing`.
 
 Special contexts:
@@ -380,7 +380,7 @@ JSON output (one document, the reply `result`):
 1. **Plugins create no global binding.** A manifest entry without a `focus` has no effect on any key press.
 2. **Configuration outranks plugins.** Any distribution, user or profile entry beats any focus-local entry on the same key, in every context.
 3. **Rank order is fixed.** `husk` < `focus-local` < `distribution` < `user` < `profile`. No file changes it.
-4. **Disable removes exactly its triple.** A disable never affects an entry with a different `(key, focus, plugin)`.
+4. **Tombstone deletion follows the Disable rule above.** Exact removal does not bypass candidate precedence.
 5. **Resolve is pure.** The same layers and context give the same result. It reads no State, does no I/O and takes no lock held across a call out of the service.
 6. **The host binds no workbench key outside the `husk` layer.** Input contains no key literal other than the closed widget-local sets in the palette and the inspector.
 7. **A plugin's focus-local binding fires only while its surface has focus** and (for a plugin-qualified entry) while that plugin occupies it. A key never reaches a plugin that does not hold focus through a binding.
@@ -409,7 +409,7 @@ JSON output (one document, the reply `result`):
 | Condition | Who detects | What happens | What the user or plugin sees |
 |---|---|---|---|
 | Keymap file has a syntax error, first load | Store/Keybinding loader | The file's layer is dropped. Other layers load. | A toast at startup naming the file and line; `husk keys --problems` lists `parse_error`. |
-| Same error on reload | Loader | The previous good document for that layer stays active. | `config.reload` returns the problem; the keymap does not change. |
+| Same error on reload | Loader | The previous good document for that layer and profile file stays active. A different profile never inherits the earlier profile's map. | `config.reload` returns the problem; the keymap does not change. |
 | Unknown `version` | Loader | File rejected as above. | `unsupported_version` problem. |
 | Entry has an invalid key | Loader | That entry is dropped. | `invalid_key` problem with file and line. |
 | Entry has both `key` and `keys`, neither, or a `keys` array outside 2 to 4 entries | Loader | That entry is dropped. | `invalid_entry` problem. |
@@ -469,7 +469,7 @@ Behavior changes users can notice:
 1. **HuJSON for keymap files, like every other layer document.** Keymaps are hand-written and need comments; HuJSON gives comments and trailing commas without a second config parser in the binary ([Store](store.md), decision 1). An earlier draft chose TOML; one format for all documents wins.
 2. **Rank order `husk` < `focus-local` < `distribution` < `user` < `profile`.** The notes place focus-local below the user layer; this puts it above the built-in host keys and below every real config layer.
 3. **Layer first, specificity second.** A user global binding beats a plugin's focus-local binding on the same key. This is the strongest reading of "configuration beats plugins" and the easiest to explain; the user restores a plugin key with a focus-scoped entry.
-4. **Disable is a tombstone on an exact `(key, focus, plugin)` triple.** Narrow on purpose, so one line cannot silently kill unrelated bindings.
+4. **Disable removal and lookup follow the single Disable rule above.** Tombstones stay in ranked lookup; their catalog removal scope and lookup outcome are distinct.
 5. **A disabled or unbound key falls through to the occupant.** It does not swallow the key.
 6. **The built-in `husk` keymap reproduces today's keys, including bare letters such as `q`, `h`, `v`.** The migration changes no default. Distributions are the lever for changing them.
 7. **A distribution may drop the built-in layer with `builtin = false`.** Overriding entry by entry is not enough for an application that wants none of the host keys.
