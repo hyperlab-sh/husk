@@ -17,12 +17,36 @@ import (
 // runs Update to completion before the next message.
 type syncLoop struct{ ran int }
 
-func (l *syncLoop) Post(f func()) { l.ran++; f() }
+func (l *syncLoop) Do(ctx context.Context, fn func()) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	l.ran++
+	fn()
+	return nil
+}
+
+func (l *syncLoop) Post(fn func()) bool {
+	l.ran++
+	fn()
+	return true
+}
 
 // blockedLoop records closures without running them, modelling a busy loop.
 type blockedLoop struct{ pending []func() }
 
-func (l *blockedLoop) Post(f func()) { l.pending = append(l.pending, f) }
+func (l *blockedLoop) Do(ctx context.Context, fn func()) error {
+	l.pending = append(l.pending, fn)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return errors.New("loop never ran the closure")
+}
+
+func (l *blockedLoop) Post(fn func()) bool {
+	l.pending = append(l.pending, fn)
+	return true
+}
 
 // handleSource fakes the Pod-held handle seam: it serves exactly the handles
 // the test registered, keyed by plugin id and namespace.
