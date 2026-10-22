@@ -2,10 +2,13 @@ package services
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	host "github.com/hyperlab-sh/husk/internal/host/contracts"
 	services "github.com/hyperlab-sh/husk/internal/services"
+	c "github.com/hyperlab-sh/husk/internal/services/contracts"
 	"github.com/hyperlab-sh/husk/internal/services/secrets"
 	"github.com/hyperlab-sh/husk/internal/substrate/state"
 	"github.com/hyperlab-sh/husk/internal/substrate/store"
@@ -142,6 +145,88 @@ func TestSecretsUnsetValueIsNotLeaked(t *testing.T) {
 	} else if code, reason := codedOf(t, err); code != "not_found" || reason != "secret_unset" {
 		t.Fatalf("unset read: %s/%s", code, reason)
 	}
+}
+
+func TestCodedDeadlineAndMutation(t *testing.T) {
+	// A raw deadline outside the input methods is the caller's context
+	// expiring: plain timeout, no input_deadline reason.
+	err := coded(context.DeadlineExceeded)
+	if code, reason := codedOf(t, err); code != "timeout" || reason != "" {
+		t.Fatalf("plain deadline: %s/%s, want timeout/\"\"", code, reason)
+	}
+	// The input methods (settings.validate, theme.check) spell the input
+	// load's deadline as input_deadline.
+	err = codedInput(context.DeadlineExceeded)
+	if code, reason := codedOf(t, err); code != "timeout" || reason != "input_deadline" {
+		t.Fatalf("input deadline: %s/%s, want timeout/input_deadline", code, reason)
+	}
+	// coded never mutates the services error it inspects: an empty Message
+	// is filled into the reply, not written back into serr.
+	serr := &c.Error{Code: "denied", Reason: "user_only"}
+	if err := coded(serr); err.Error() != "denied: user_only" {
+		t.Fatalf("filled message = %q", err.Error())
+	}
+	if serr.Message != "" {
+		t.Fatalf("services error mutated: Message = %q", serr.Message)
+	}
+	if err := coded(serr); err.Error() != "denied: user_only" {
+		t.Fatalf("second conversion = %q", err.Error())
+	}
+}
+
+func TestSecretValueNeverAppearsInErrorStrings(t *testing.T) {
+	const value = "hunter2-super-secret"
+	port, _, posts, answers, _ := newSecrets(t)
+	ctx := context.Background()
+	if err := port.Set(ctx, userCaller, "git.token", []byte(value)); err != nil {
+		t.Fatal(err)
+	}
+	// Grant through the prompt flow, like the grant test: read returns
+	// needs_grant, the answer posts the grant to the loop.
+	if _, err := port.Get(ctx, filesCaller, "git.token"); err == nil {
+		t.Fatal("ungranted read allowed")
+	}
+	answers <- true
+	runPosted(t, posts)
+
+	// Every failing path a caller can reach while the value exists: reads
+	// that must not confirm or leak, foreign plugins, unknown names, plugin
+	// mutations — and the one success that returns the value for comparison.
+	if got, err := port.Get(ctx, filesCaller, "git.token"); err != nil {
+		t.Fatalf("granted read failed: %v", err)
+	} else if string(got) != value {
+		t.Fatalf("granted read = %q", got)
+	}
+	errs := []error{
+		mustErr(t, func() error { _, err := port.Reveal(ctx, filesCaller, "git.token"); return err }),
+		mustErr(t, func() error { _, err := port.Get(ctx, filesCaller, "nope"); return err }),
+		mustErr(t, func() error {
+			_, err := port.Get(ctx, host.Caller{Kind: host.CallerPlugin, PluginID: "other"}, "git.token")
+			return err
+		}),
+		mustErr(t, func() error { return port.Set(ctx, filesCaller, "git.token", []byte("x")) }),
+		mustErr(t, func() error { return port.Grant(ctx, filesCaller, "files", "git.token") }),
+	}
+	for i, err := range errs {
+		text := err.Error()
+		if de, ok := err.(host.DataError); ok {
+			if raw, marshalErr := json.Marshal(de.Data()); marshalErr == nil {
+				text += " " + string(raw)
+			}
+		}
+		if strings.Contains(text, value) {
+			t.Fatalf("error %d leaks the secret value: %s", i, text)
+		}
+	}
+}
+
+func mustErr(t *testing.T, f func() error) error {
+	t.Helper()
+	err := f()
+	if err == nil {
+		t.Fatal("call unexpectedly succeeded")
+	}
+	return err
 }
 
 func runPosted(t *testing.T, posts <-chan func()) {
