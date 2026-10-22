@@ -184,7 +184,7 @@ A major-1 plugin that slipped through (a manifest without a version, read by the
 
 There is no handshake on either channel. `hello` and `welcome` have no successor.
 
-**Stdio.** The pipe is the plugin's identity and the manifest is its declaration, so the plugin has nothing to claim. Everything `welcome` carried arrives as ordinary notifications, in this order, before any request: `theme.changed` (the palette), one `surface.resized` per surface the plugin occupies, `input.key_state` (the modifier state). Its identity, the socket path, the token and the host's protocol version are in its environment ([Pods](pods.md)). A plugin is `live` from the moment its process starts; messages sent before it reads them wait in its stdin queue.
+**Stdio.** The pipe is the plugin's identity and the manifest is its declaration, so the plugin has nothing to claim. Everything `welcome` carried arrives as ordinary notifications, in this order, before any request: `theme.changed` (the palette), one `surface.resized` snapshot containing all surfaces the plugin occupies, `input.key_state` (the modifier state). Its identity, the socket path, the token and the host's protocol version are in its environment ([Pods](pods.md)). A plugin is `live` from the moment its process starts; messages sent before it reads them wait in its stdin queue.
 
 **Socket.** A caller writes requests from the first line. Identity is the `token` member on each request, or its absence (the user). The CLI opens one connection per command and closes it when the reply arrives; a watch request keeps the connection open.
 
@@ -231,6 +231,16 @@ A requester that stops waiting ([Calls](calls.md) times a request out, or a sock
 Declarations (actions, surfaces, focus-local keys, published slots, hooks, events, slice) are manifest only; there are no `declare` or `subscribe` methods ([Pods](pods.md), [Message kinds](message-kinds.md)).
 
 Direction rule: stdin carries Husk's requests and notifications; stdout carries the plugin's replies and nothing else. Everything a plugin sends on its own initiative, a render above all, goes to the socket, over a connection the plugin keeps open for as long as it likes, with its token on each request. Each method's params schema is owned by the spec named in [Message kinds](message-kinds.md); this spec owns only the name and the form.
+
+### Surface resize snapshot
+
+`surface.resized` carries one consistent array of all affected surfaces, rather than one notification per surface. A terminal resize can change every surface at once. Opening notifications use the same shape, listing all surfaces the plugin occupies:
+
+```json
+{"method":"surface.resized","params":{"surfaces":[{"surface":"main-stage","width":80,"height":24,"focused":true,"visible":true}]}}
+```
+
+Each entry names the surface and its inner content dimensions in cells, focus and visibility. In moved surface and input params, the host-surface identifier field is `surface`, never the legacy `slot`. Published extension points still use `slot_id`; they are not host surfaces.
 
 ### Mapping from today's message types
 
@@ -290,7 +300,7 @@ The CLI is a socket client speaking this protocol and nothing else. It connects,
 
 ## Level 2: Migration from today
 
-- `pkg/huskipc/protocol.go`: `Envelope` and its per-type pointer fields are replaced by `protocol.Message`. Wire structs used as params (`Palette`, `FrameSpec`, `SlotSize`, `ModifierState`, `KeyStatePayload`, `SlotKeyPayload`, `SlotMousePayload`, `SlotUpdatePayload`, `ToastPayload`) move to `pkg/protocol` with the same JSON field names, renamed to `...Params`. `HelloPayload`, `CommandSpec`, `RailItemSpec`, `KeybindSpec` leave the wire for the manifest ([Pods](pods.md), [Keybindings](keybindings.md)). `WorkspaceContextPayload` and `RailActivatedPayload` leave the wire. `ConnWriter` becomes `protocol.Writer`.
+- `pkg/huskipc/protocol.go`: `Envelope` and its per-type pointer fields are replaced by `protocol.Message`. Wire value types and params (`Palette`, `FrameSpec`, `SlotSize`, `ModifierState`, `KeyStatePayload`, `SlotKeyPayload`, `SlotMousePayload`, `SlotUpdatePayload`, `ToastPayload`) move to `pkg/protocol` using v2 surface vocabulary: `SlotSize` becomes `SurfaceSize`, key/mouse/update payloads become `SurfaceKeyParams`, `SurfaceMouseParams` and `SurfaceUpdateParams`, and every host-surface identifier field is renamed from `slot` to `surface`. `KeyStatePayload` becomes `KeyStateParams`, `ToastPayload` becomes `ToastShowParams`; shared value types retain their names. Resize batches become `SurfaceResizedParams` with a `surfaces` array of `SurfaceSize` entries, as defined in Level 1, replacing the old `slot_sizes` map and separate `focused_slot`. Other JSON fields retain their spelling. `HelloPayload`, `CommandSpec`, `RailItemSpec`, `KeybindSpec` leave the wire for the manifest ([Pods](pods.md), [Keybindings](keybindings.md)). `WorkspaceContextPayload` and `RailActivatedPayload` leave the wire. `ConnWriter` becomes `protocol.Writer`.
 - `pkg/huskipc/version.go`: parsing and the compatibility rule move unchanged; constants become `"2.0"` and `2`. The check runs at manifest conversion and in the CLI, not on the wire.
 - `pkg/huskipc/read.go`: the buffering and oversized-line skip move unchanged; `deliver` decodes `Message` and classifies its form; `LineError` gains `Code`, `ID` and `Method`; `Payload()` becomes a builder for `protocol.error` or an error reply.
 - `pkg/huskipc/wirevalid.go`: moves unchanged; `Validate()` errors map to `invalid_params`.
