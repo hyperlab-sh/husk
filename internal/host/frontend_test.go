@@ -838,3 +838,86 @@ func jsonEqual(a, b json.RawMessage) bool {
 	var x, y any
 	return json.Unmarshal(a, &x) == nil && json.Unmarshal(b, &y) == nil && reflect.DeepEqual(x, y)
 }
+
+func TestPublishedSlotsAndSurfaceFramesComeFromTheDeclaredCatalog(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "pub")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	doc := `{"manifest_version":2,"protocol":2,"id":"pub","name":"pub","version":"1","command":["./p"],
+	  "surfaces":[{"id":"main-stage","frame":{"border":true,"label":"Pub","close":true}},{"id":"sidebar-list"}],
+	  "published_slots":[
+	    {"id":"pub.rows","title":"Rows","kind":"inline"},
+	    {"id":"pub.summary","title":"Summary","kind":"region","rect":{"surface":"main-stage","x":1,"y":2,"width":10,"height":3}}]}`
+	if err := os.WriteFile(filepath.Join(dir, manifest.FileName), []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h, _, fe := bootFrontendWith(t, nil, alphaPlugin(t), dir)
+	h.loop(func() {})
+	var slots []contracts.PublishedSlot
+	for _, s := range fe.PublishedSlots() {
+		if s.Plugin == "pub" {
+			slots = append(slots, s)
+		}
+	}
+	if len(slots) != 2 || slots[0].ID != "pub.rows" || slots[0].Kind != "inline" || slots[0].Rect != nil {
+		t.Fatalf("PublishedSlots = %+v", fe.PublishedSlots())
+	}
+	if r := slots[1].Rect; slots[1].Kind != "region" || r == nil || *r != (contracts.PublishedRect{Surface: protocol.SurfaceMainStage, X: 1, Y: 2, Width: 10, Height: 3}) {
+		t.Errorf("region slot = %+v", slots[1])
+	}
+	frames := fe.SurfaceFrames()["pub"]
+	if want := (protocol.FrameSpec{Border: true, Label: "Pub", Close: true}); frames[protocol.SurfaceMainStage] != want {
+		t.Errorf("frames = %+v", frames)
+	}
+	if _, ok := frames[protocol.SurfaceSidebarList]; ok {
+		t.Errorf("a surface without a frame must be absent: %+v", frames)
+	}
+}
+
+func TestActiveToastReadsTheEngineQueue(t *testing.T) {
+	h, _, fe := bootFrontend(t, nil)
+	h.loop(func() {})
+	h.loop(func() {
+		if _, ok := fe.ActiveToast(); ok {
+			t.Error("no toast was shown yet")
+		}
+		if err := h.root.engine.ToastShow("alpha", protocol.ToastShowParams{Level: "warn", Title: "T", Message: "M"}); err != nil {
+			t.Fatal(err)
+		}
+		got, ok := fe.ActiveToast()
+		if want := (contracts.Toast{Plugin: "alpha", Level: "warn", Title: "T", Message: "M"}); !ok || got != want {
+			t.Errorf("ActiveToast = %+v, %v", got, ok)
+		}
+	})
+}
+
+// A frontend that wrote State outside a host message flushes it with Tick:
+// the geometry write reaches the occupant inside the same Update.
+func TestTickFlushesFrontendWrites(t *testing.T) {
+	h, _, fe := bootFrontend(t, nil)
+	var slices contracts.FrontendSlices
+	var n recNotifier
+	h.loop(func() {
+		var err error
+		if slices, err = fe.OwnSlices(); err != nil {
+			t.Fatal(err)
+		}
+		h.root.engine.WatchPlugin("alpha", &n)
+	})
+	h.loop(func() {}) // settle anything pending from registration
+	base := len(n.resized(t))
+	h.loop(func() {
+		if _, err := slices.Geometry.Set(geometryDoc(41, 12)); err != nil {
+			t.Fatal(err)
+		}
+		if got := len(n.resized(t)); got != base {
+			t.Fatalf("resized pushed before Tick: %d, want %d", got, base)
+		}
+		h.root.Tick()
+		got := n.resized(t)
+		if len(got) != base+1 || got[base][0].Width != 41 || got[base][0].Height != 12 {
+			t.Errorf("Tick did not push the geometry write: %+v", got)
+		}
+	})
+}

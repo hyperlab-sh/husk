@@ -102,6 +102,11 @@ type Looped interface {
 	// Update applies one posted message and reports whether the host owned
 	// it. It is loop-only. Close may be called from Update (see Root.Close).
 	Update(msg any) bool
+	// Tick runs the end-of-Update flushes. A loop owner calls it at the end
+	// of an Update that wrote frontend-owned State without posting a host
+	// message, so those writes flush and reach the occupants in the same
+	// Update. Loop-only.
+	Tick()
 }
 
 // New builds Store, State, Services, Calls, Pods and the Server in dependency

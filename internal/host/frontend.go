@@ -173,7 +173,25 @@ type declaredPlugin struct {
 	Actions []struct {
 		ID string `json:"id"`
 	} `json:"actions"`
-	RailItems []contracts.RailItem `json:"rail_items"`
+	RailItems      []contracts.RailItem `json:"rail_items"`
+	PublishedSlots []struct {
+		ID   string                   `json:"id"`
+		Kind string                   `json:"kind"`
+		Rect *contracts.PublishedRect `json:"rect"`
+	} `json:"published_slots"`
+	Surfaces []struct {
+		ID    protocol.SurfaceID  `json:"id"`
+		Frame *protocol.FrameSpec `json:"frame"`
+	} `json:"surfaces"`
+}
+
+// declaredCatalog is everything the frontend reads from the declared plugins
+// documents.
+type declaredCatalog struct {
+	index  declaredIndex
+	rail   []contracts.RailItem
+	slots  []contracts.PublishedSlot
+	frames map[string]map[protocol.SurfaceID]protocol.FrameSpec
 }
 
 // declaredIndex indexes the declared plugins documents.
@@ -190,6 +208,11 @@ func (r *Root) declaredPlugins() declaredIndex {
 }
 
 func (r *Root) readDeclared() (declaredIndex, []contracts.RailItem) {
+	c := r.readCatalog()
+	return c.index, c.rail
+}
+
+func (r *Root) readCatalog() declaredCatalog {
 	docs := r.store.Declared(store.DeclaredPlugins)
 	ids := make([]string, 0, len(docs))
 	for id := range docs {
@@ -198,6 +221,8 @@ func (r *Root) readDeclared() (declaredIndex, []contracts.RailItem) {
 	sort.Strings(ids)
 	idx := declaredIndex{railIDs: map[string]bool{}, actions: map[string]string{}}
 	items := []contracts.RailItem{}
+	slots := []contracts.PublishedSlot{}
+	frames := map[string]map[protocol.SurfaceID]protocol.FrameSpec{}
 	for _, id := range ids {
 		raw, err := json.Marshal(docs[id])
 		var d declaredPlugin
@@ -216,8 +241,20 @@ func (r *Root) readDeclared() (declaredIndex, []contracts.RailItem) {
 			idx.railIDs[item.ID] = true
 			items = append(items, item)
 		}
+		for _, sl := range d.PublishedSlots {
+			slots = append(slots, contracts.PublishedSlot{Plugin: id, ID: sl.ID, Kind: sl.Kind, Rect: sl.Rect})
+		}
+		for _, sf := range d.Surfaces {
+			if sf.Frame == nil {
+				continue
+			}
+			if frames[id] == nil {
+				frames[id] = map[protocol.SurfaceID]protocol.FrameSpec{}
+			}
+			frames[id][sf.ID] = *sf.Frame
+		}
 	}
-	return idx, items
+	return declaredCatalog{index: idx, rail: items, slots: slots, frames: frames}
 }
 
 // warnDeclaredOnce reports an undecodable plugins document the first time it
@@ -240,6 +277,29 @@ func (r *Root) RailItems() []contracts.RailItem {
 	_, items := r.readDeclared()
 	return items
 }
+
+// PublishedSlots implements contracts.Frontend.
+func (r *Root) PublishedSlots() []contracts.PublishedSlot {
+	return r.readCatalog().slots
+}
+
+// SurfaceFrames implements contracts.Frontend.
+func (r *Root) SurfaceFrames() map[string]map[protocol.SurfaceID]protocol.FrameSpec {
+	return r.readCatalog().frames
+}
+
+// ActiveToast implements contracts.Frontend.
+func (r *Root) ActiveToast() (contracts.Toast, bool) {
+	t, ok := r.engine.ActiveToast()
+	if !ok {
+		return contracts.Toast{}, false
+	}
+	return contracts.Toast{Plugin: t.Plugin, Level: t.Level, Title: t.Title, Message: t.Message}, true
+}
+
+// Tick implements Looped: the end-of-Update flushes, for a frontend write
+// that was not caused by a host message.
+func (r *Root) Tick() { r.tick() }
 
 // OwnSlices implements contracts.Frontend.
 func (r *Root) OwnSlices() (contracts.FrontendSlices, error) {
