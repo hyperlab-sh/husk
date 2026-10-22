@@ -246,3 +246,27 @@ func TestReviewSchemaForExposureAndLocalKeyBoundaries(t *testing.T) {
 		})
 	}
 }
+
+// A plugin-supplied name that is not a well-formed secret name never reaches
+// the secrets.read event; the read is reported as not declared.
+func TestSecretsReadEventOmitsInvalidRequestedName(t *testing.T) {
+	var events []map[string]string
+	sec, _ := secrets.New(secrets.Options{State: state.New(state.Options{}), Clock: clock(), Crypto: &memoryCrypto{data: map[string][]byte{}}, Post: func(f func()) bool { return true }, Publisher: c.PublishFunc(func(_ string, data any) {
+		events = append(events, data.(map[string]string))
+	})})
+	defer sec.Close()
+	apply(t, sec, catalog("a"))
+	for _, name := range []string{"Bad Name\x1b[31m", "", strings.Repeat("x", 65), "UPPER"} {
+		if _, err := sec.Read(Caller{Kind: "plugin", PluginID: "a"}, name); err == nil {
+			t.Fatalf("read of %q succeeded", name)
+		}
+	}
+	if len(events) != 4 {
+		t.Fatalf("events = %v", events)
+	}
+	for _, e := range events {
+		if e["name"] != "" || e["outcome"] != "not_declared" || e["plugin_id"] != "a" {
+			t.Errorf("event %v carries the requested name or the wrong outcome", e)
+		}
+	}
+}

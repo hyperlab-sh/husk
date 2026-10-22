@@ -156,10 +156,12 @@ func (s *Service) event(name, plugin, outcome string) {
 
 // Read implements secrets.get. Only its successful return carries secret bytes.
 func (s *Service) Read(caller Caller, name string) (value []byte, err error) {
-	outcome := "unavailable"
-	defer func() { s.event(name, caller.PluginID, outcome) }()
+	outcome, reported := "unavailable", name
+	defer func() { s.event(reported, caller.PluginID, outcome) }()
 	if !validName(name) {
-		outcome = "not_declared"
+		// A requested name is plugin-controlled text: the event never echoes
+		// one that is not a well-formed secret name.
+		outcome, reported = "not_declared", ""
 		return nil, c.Failure("not_found", "not_declared")
 	}
 	if s.ctx.Err() != nil {
