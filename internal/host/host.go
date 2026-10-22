@@ -107,6 +107,10 @@ type Looped interface {
 	// message, so those writes flush and reach the occupants in the same
 	// Update. Loop-only.
 	Tick()
+	// Planned is the number of plugins the configured --plugin and
+	// --plugin-dir arguments resolved to, fixed when the host was built.
+	// Unlike the argument count it is zero for an empty directory.
+	Planned() int
 }
 
 // New builds Store, State, Services, Calls, Pods and the Server in dependency
@@ -594,3 +598,6 @@ func (r *Root) shutdown() error {
 	}
 	return errors.Join(errs...)
 }
+
+// Planned implements Looped.
+func (r *Root) Planned() int { return len(r.specs) }

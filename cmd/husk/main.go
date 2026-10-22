@@ -90,7 +90,7 @@ func main() {
 		}
 		model.attach(h, prog.closeGate)
 		frame, err := runDumpFrame(model, dumpFrameOptions{
-			Launched: len(*pluginPaths) + len(*pluginDirs),
+			Launched: h.Planned(),
 			RailMode: *railMode,
 			Stderr:   os.Stderr,
 			Program:  prog,

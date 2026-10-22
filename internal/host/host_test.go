@@ -1065,3 +1065,24 @@ func TestStoreClockAdaptsAnInjectedClock(t *testing.T) {
 		t.Fatal("Stop did not reach the injected timer")
 	}
 }
+
+// Planned counts the plugins the arguments resolved to, not the arguments: an
+// empty --plugin-dir plans none and a good one plans its plugins.
+func TestPlannedCountsResolvedPlugins(t *testing.T) {
+	empty := t.TempDir()
+	h, err := boot(t, func(c *contracts.Config) { c.PluginDirs = []string{empty} })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := h.root.Planned(); got != 0 {
+		t.Fatalf("empty dir planned %d plugins", got)
+	}
+	one := filepath.Dir(writePlugin(t, "alpha", false))
+	h2, err := boot(t, func(c *contracts.Config) { c.PluginDirs = []string{one} })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := h2.root.Planned(); got != 1 {
+		t.Fatalf("one-plugin dir planned %d plugins", got)
+	}
+}
