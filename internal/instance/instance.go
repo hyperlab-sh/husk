@@ -160,6 +160,10 @@ func RuntimeDir() (string, error) {
 	return runtimeDir(os.Getenv("XDG_RUNTIME_DIR"), "/tmp", os.Getuid())
 }
 
+// CheckRuntimeDir creates dir if absent and verifies the same private-directory
+// rule as RuntimeDir. It never falls back to another directory.
+func CheckRuntimeDir(dir string) error { return ensureDir(dir, os.Getuid()) }
+
 // runtimeDir is RuntimeDir with the roots injected: xdg is the value of
 // XDG_RUNTIME_DIR, tmpBase the root of the short fallback ("/tmp" in
 // production — the spec rules out the system temp directory, whose macOS
