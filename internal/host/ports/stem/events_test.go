@@ -21,6 +21,14 @@ type fakeLoop struct {
 	runs int
 }
 
+// Post satisfies the shared Loop seam (loop.go); the Event port never
+// calls it.
+func (l *fakeLoop) Post(fn func()) bool {
+	l.runs++
+	fn()
+	return true
+}
+
 func (l *fakeLoop) Do(ctx context.Context, fn func()) error {
 	if l.err != nil {
 		return l.err

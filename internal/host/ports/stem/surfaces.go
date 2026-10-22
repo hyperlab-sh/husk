@@ -14,15 +14,34 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
-// SurfacePort adapts a surfaces.Engine as contracts.SurfacePort.
+// SurfacePort adapts a surfaces.Engine as contracts.SurfacePort. The engine
+// is loop-confined and the Server calls this port from reader goroutines, so
+// every engine call crosses the Loop seam with Do and carries the engine's
+// reply back out with it.
 type SurfacePort struct {
 	engine *surfaces.Engine
+	loop   Loop
 }
 
-// NewSurfacePort wraps eng. The engine stays loop-only; the port is called
-// from the Server's handlers on the loop.
-func NewSurfacePort(eng *surfaces.Engine) *SurfacePort {
-	return &SurfacePort{engine: eng}
+var _ contracts.SurfacePort = (*SurfacePort)(nil)
+
+// NewSurfacePort wraps eng for the loop. Both arguments are required.
+func NewSurfacePort(eng *surfaces.Engine, loop Loop) *SurfacePort {
+	if eng == nil || loop == nil {
+		panic("stem: NewSurfacePort needs an Engine and a Loop")
+	}
+	return &SurfacePort{engine: eng, loop: loop}
+}
+
+// run runs fn, an engine call, on the loop and carries its error back. A Do
+// that cannot run fn — the request context ended or the loop shut down —
+// answers unavailable; the engine call never ran in that case.
+func (p *SurfacePort) run(ctx context.Context, fn func() error) error {
+	var err error
+	if lerr := p.loop.Do(ctx, func() { err = fn() }); lerr != nil {
+		return contracts.NewError(protocol.CodeUnavailable, "the host loop no longer runs", nil)
+	}
+	return codedEngine(err)
 }
 
 // SurfaceUpdate serves surface.update (plugin callers only).
@@ -30,7 +49,7 @@ func (p *SurfacePort) SurfaceUpdate(ctx context.Context, c contracts.Caller, par
 	if err := allowCaller(protocol.MethodSurfaceUpdate, c); err != nil {
 		return err
 	}
-	return codedEngine(p.engine.SurfaceUpdate(c.PluginID, params))
+	return p.run(ctx, func() error { return p.engine.SurfaceUpdate(c.PluginID, params) })
 }
 
 // SurfaceClose serves surface.close (plugin callers only).
@@ -38,7 +57,7 @@ func (p *SurfacePort) SurfaceClose(ctx context.Context, c contracts.Caller, para
 	if err := allowCaller(protocol.MethodSurfaceClose, c); err != nil {
 		return err
 	}
-	return codedEngine(p.engine.SurfaceClose(c.PluginID, params))
+	return p.run(ctx, func() error { return p.engine.SurfaceClose(c.PluginID, params) })
 }
 
 // SlotContribute serves slot.contribute (plugin callers only). Refusals are
@@ -47,7 +66,7 @@ func (p *SurfacePort) SlotContribute(ctx context.Context, c contracts.Caller, pa
 	if err := allowCaller(protocol.MethodSlotContribute, c); err != nil {
 		return err
 	}
-	return codedEngine(p.engine.SlotContribute(c.PluginID, params))
+	return p.run(ctx, func() error { return p.engine.SlotContribute(c.PluginID, params) })
 }
 
 // ToastShow serves toast.show from a plugin or the CLI. A CLI caller's empty
@@ -56,7 +75,7 @@ func (p *SurfacePort) ToastShow(ctx context.Context, c contracts.Caller, params 
 	if err := allowCaller(protocol.MethodToastShow, c); err != nil {
 		return err
 	}
-	return codedEngine(p.engine.ToastShow(c.PluginID, params))
+	return p.run(ctx, func() error { return p.engine.ToastShow(c.PluginID, params) })
 }
 
 // allowCaller reports whether c's kind may call method, per the homes the

@@ -3,6 +3,7 @@ package stem_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"sync/atomic"
 	"testing"
@@ -50,6 +51,25 @@ func (l *loop) do(fn func()) {
 	done := make(chan struct{})
 	l.q <- func() { fn(); close(done) }
 	<-done
+}
+
+// Post satisfies the shared Loop seam (loop.go): queueing fn like the host
+// loop's Post.
+func (l *loop) Post(fn func()) bool { return l.post(fn) }
+
+// Do satisfies the shared Loop seam: run fn on the loop goroutine and wait
+// for it, answering an error when the loop no longer runs or ctx ends.
+func (l *loop) Do(ctx context.Context, fn func()) error {
+	done := make(chan struct{})
+	if !l.post(func() { fn(); close(done) }) {
+		return errors.New("loop no longer runs")
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 type clock struct{ t time.Time }
