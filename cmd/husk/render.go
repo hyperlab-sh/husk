@@ -703,11 +703,11 @@ func (m *WorkbenchModel) drawCommandPalette(c *canvas) uv.Rectangle {
 	var rows []string
 	rows = append(rows, hdr, "", prompt, "", rule)
 
-	maxItems := min(12, len(cmds))
-	shown := cmds[:maxItems]
-	cols := paletteColumns(shown, iw)
-	for i, c := range shown {
-		rows = append(rows, m.paletteRow(c, i == m.paletteCursor, iw, cols))
+	// Columns come from every match, so they hold still while the window scrolls.
+	cols := paletteColumns(cmds, iw)
+	top := paletteWindowTop(m.paletteTop, m.paletteCursor, len(cmds))
+	for i := top; i < min(len(cmds), top+paletteVisibleRows); i++ {
+		rows = append(rows, m.paletteRow(cmds[i], i == m.paletteCursor, iw, cols))
 	}
 	if len(cmds) == 0 {
 		rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.InkSubtle)).Render("  No matching commands"))
@@ -734,7 +734,6 @@ const (
 	paletteHintMinWidth = 56
 	paletteTagMinWidth  = 36
 	paletteMaxTagWidth  = 16
-	paletteMaxHintWidth = 14
 	paletteMinTitle     = 10
 )
 
@@ -761,7 +760,6 @@ func paletteColumns(cmds []paletteCommand, iw int) paletteCols {
 		hintW = max(hintW, ansi.StringWidth(c.Shortcut))
 	}
 	tagW = min(tagW, paletteMaxTagWidth)
-	hintW = min(hintW, paletteMaxHintWidth)
 	if iw < paletteHintMinWidth {
 		hintW = 0
 	}

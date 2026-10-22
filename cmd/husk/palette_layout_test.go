@@ -146,25 +146,40 @@ func TestPaletteRowBackgroundFullWidth(t *testing.T) {
 // the supported terminal widths.
 func TestPaletteDrawnFrameRowsAligned(t *testing.T) {
 	for _, w := range []int{84, 100, 144} {
-		m := goldenModel()
-		m.width = w
-		m.recomputeLayout()
-		m.showPalette = true
-		c := newCanvas(m.width, m.height)
-		m.drawCommandPalette(c)
-		lines := strings.Split(ansi.Strip(c.render()), "\n")
-		var box []string
-		for _, l := range lines {
-			if t := strings.TrimSpace(l); t != "" {
-				box = append(box, t)
+		for _, scrolled := range []bool{false, true} {
+			m := goldenModel()
+			m.width = w
+			m.recomputeLayout()
+			m.showPalette = true
+			if scrolled {
+				// More results than rows, cursor past the first window: the
+				// drawn box must stay aligned and show the highlighted row.
+				m = paletteModel(t, manyActions(26)...)
+				m.width = w
+				m.recomputeLayout()
+				for range 17 {
+					press(m, "down")
+				}
+				if hl := highlightedRows(m); len(hl) != 1 {
+					t.Fatalf("w=%d: %d highlighted rows with the cursor at 17", w, len(hl))
+				}
 			}
-		}
-		if len(box) < 8 {
-			t.Fatalf("w=%d: palette box has %d rows", w, len(box))
-		}
-		for i, l := range box {
-			if ansi.StringWidth(l) != ansi.StringWidth(box[0]) {
-				t.Errorf("w=%d row %d width %d != %d: %q", w, i, ansi.StringWidth(l), ansi.StringWidth(box[0]), l)
+			c := newCanvas(m.width, m.height)
+			m.drawCommandPalette(c)
+			lines := strings.Split(ansi.Strip(c.render()), "\n")
+			var box []string
+			for _, l := range lines {
+				if t := strings.TrimSpace(l); t != "" {
+					box = append(box, t)
+				}
+			}
+			if len(box) < 8 {
+				t.Fatalf("w=%d: palette box has %d rows", w, len(box))
+			}
+			for i, l := range box {
+				if ansi.StringWidth(l) != ansi.StringWidth(box[0]) {
+					t.Errorf("w=%d scrolled=%v row %d width %d != %d: %q", w, scrolled, i, ansi.StringWidth(l), ansi.StringWidth(box[0]), l)
+				}
 			}
 		}
 	}
