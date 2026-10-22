@@ -96,13 +96,26 @@ func TestSlotContribute(t *testing.T) {
 	for field, params := range map[string]string{
 		"params.slot_id": `{"id":"files","content":"Files"}`,
 		"params.id":      `{"slot_id":"sidebar.item","content":"Files"}`,
-		"params.content": `{"slot_id":"sidebar.item","id":"files"}`,
 	} {
 		t.Run("missing "+field, func(t *testing.T) {
 			reply := Surface{Port: fakes.NewSurfaces(nil)}.Serve(ctx, plugin, req(protocol.MethodSlotContribute, params), nil)
 			wantCode(t, reply, protocol.CodeInvalidParams)
 		})
 	}
+	t.Run("empty content reaches the port", func(t *testing.T) {
+		// D42: content is not a required field; an empty content is how a
+		// contribution gets withdrawn, so the port owns that meaning.
+		rec := fakes.NewRecorder()
+		port := fakes.NewSurfaces(rec)
+		reply := Surface{Port: port}.Serve(ctx, plugin,
+			req(protocol.MethodSlotContribute, `{"slot_id":"sidebar.item","id":"files"}`), nil)
+		if reply.Error != nil {
+			t.Fatalf("error = %+v", reply.Error)
+		}
+		if calls := rec.Calls(); len(calls) != 1 || calls[0].Method != "Surfaces.SlotContribute" {
+			t.Fatalf("calls = %v", calls)
+		}
+	})
 }
 
 func TestToastShow(t *testing.T) {
@@ -118,15 +131,18 @@ func TestToastShow(t *testing.T) {
 			t.Fatalf("args = %v", calls[0].Args)
 		}
 	})
-	t.Run("missing level", func(t *testing.T) {
-		reply := Surface{Port: fakes.NewSurfaces(nil)}.Serve(ctx, plugin,
-			req(protocol.MethodToastShow, `{"title":"t","message":"m"}`), nil)
-		wantCode(t, reply, protocol.CodeInvalidParams)
-	})
-	t.Run("missing title", func(t *testing.T) {
-		reply := Surface{Port: fakes.NewSurfaces(nil)}.Serve(ctx, plugin,
-			req(protocol.MethodToastShow, `{"level":"info","message":"m"}`), nil)
-		wantCode(t, reply, protocol.CodeInvalidParams)
+	t.Run("missing level and title reach the port", func(t *testing.T) {
+		// D42: level and title are not marked required by any spec; the port
+		// owns the defaults, so the adapter passes them through.
+		rec := fakes.NewRecorder()
+		reply := Surface{Port: fakes.NewSurfaces(rec)}.Serve(ctx, plugin,
+			req(protocol.MethodToastShow, `{"message":"m"}`), nil)
+		if reply.Error != nil {
+			t.Fatalf("error = %+v", reply.Error)
+		}
+		if calls := rec.Calls(); len(calls) != 1 || calls[0].Method != "Surfaces.ToastShow" {
+			t.Fatalf("calls = %v", calls)
+		}
 	})
 }
 
