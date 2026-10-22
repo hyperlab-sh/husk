@@ -166,7 +166,7 @@ func (s *Store) Patch(name DocName, layer Layer, profile string, patch Doc) erro
 // Safe for concurrent use: the loop declares while a reload reads.
 // Two names exist in v1:
 // "plugins" (per-plugin catalog: actions, surfaces, subscriptions, hooks,
-// secret requests, settings schema) and "keymap" (focus-local bindings).
+// secret requests, settings schema) and "focus-keymap" (focus-local bindings).
 // source is the plugin id. Never persisted, never merged into layers.
 func (s *Store) Declare(name DocName, source string, d Doc)
 func (s *Store) Undeclare(source string)
@@ -348,8 +348,16 @@ Slice file envelope:
 ```json
 {"husk_store": 1, "namespace": "example.notes.state", "scope": "instance",
  "instance": "notes", "written_at": "2026-10-22T06:00:00Z",
+ "retention": {"policy": "keep-latest"},
  "value": {"open_tabs": 3}}
 ```
+
+The optional `retention` object contains `policy`, `n` and `ttl` (TTL is a
+Go duration encoded as integer nanoseconds). It lets startup GC enforce a known
+policy before owners register, without bumping `husk_store` above 1. A file
+without it has unknown policy: startup GC skips it until a registration supplies
+the policy. An optional `registered_at` timestamp records the latest registration
+for the 90-day orphan report; legacy files fall back to `written_at` or mtime.
 
 Scope rules:
 
@@ -361,8 +369,11 @@ Scope rules:
   name like `instance` scope and persisted only for named instances. The
   difference from `instance` scope is how Store writes it: every workspace
   slice of the instance is written and restored together as one overwritten
-  snapshot directory, never appended to ([State](state.md) decision 18). Two
-  instances never share a workspace; sharing is an application's concern.
+  snapshot directory, never appended to ([State](state.md) decision 18). In v1,
+  "together" means one batch from one State snapshot, with per-file atomic
+  overwrites in the directory layout below; there is no cross-file atomicity
+  guarantee. Transactional directory publication is a possible later version.
+  Two instances never share a workspace; sharing is an application's concern.
 
 ### Directory tree
 
@@ -443,6 +454,7 @@ Today's per-run `mkdtemp` directory is replaced by that check.
 | Slice caps | State's: 64 KiB core, 256 KiB plugin, 1 MiB workspace and hard ceiling | [State](state.md) refuses the write; Store re-checks the encoded size at persist and never writes a larger file |
 | `keep-last-n` maximum N | 20 | Bounds disk use per slice to 20 times its cap |
 | Config file maximum size | 1 MiB | A larger hand-edited file is a mistake, not config |
+| Secret value / namespace plaintext JSON | 64 KiB per value / 64 MiB per namespace | Bounds decryption memory; ciphertext reads allow additional age framing overhead, so every accepted write can be read back |
 | Merge maximum depth | 64 | Stops pathological documents before recursion cost matters |
 | GC interval | at start, then every 1 h | Off the loop; cheap directory listings |
 | Stale temp file age | 10 min | Older `.tmp-` files are leftovers of a crash |
@@ -470,6 +482,14 @@ last 50 diagnostics, the quarantined files of this run, and whether the
 keyring fallback is active. Store's goroutines never write it directly; they
 hand the write to the loop through `Options.Post`. That makes Store's health
 visible to `husk state get husk.store` and to any subscriber of its change event.
+
+A core slice write must never fail because of a recoverable condition. Store
+keeps the last 50 diagnostics internally, but bounds its published health JSON
+to State's 64 KiB core cap. Only when it exceeds that cap, the summary removes
+oldest quarantine paths first, then oldest diagnostics, and shortens an oversized
+final diagnostic if needed. It marks such a summary `truncated: true`; `Check`
+remains the full file inventory. Trimming a published summary never deletes
+files or discards the internal diagnostic history.
 
 ### Exposed to the CLI
 
@@ -553,7 +573,8 @@ visible to `husk state get husk.store` and to any subscriber of its change event
 7. Plugin logs move to the state directory, per instance, retained 14 days.
 8. Anonymous instances persist no instance-scope and no workspace-scope slices.
 9. Workspace scope is keyed by the instance name and written as one
-   overwritten snapshot directory; no root hash, no sharing between instances.
+   overwritten snapshot-directory batch, with per-file atomicity only in v1;
+   no root hash, no sharing between instances.
 10. Instance layer has two parts: a per-named-instance file, then flags.
 11. Manifest-derived documents (catalog, focus-local bindings) are in-memory
     "declared" documents in Store, not a fifth layer.
