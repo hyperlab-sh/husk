@@ -28,10 +28,10 @@ func (h Calls) Serve(ctx context.Context, c contracts.Caller, req protocol.Messa
 	switch req.Method {
 	case protocol.MethodActionInvoke:
 		var p invokeParams
-		if bad := decodeParams(req, &p); bad != nil {
+		if bad := handlers.DecodeParams(req, &p); bad != nil {
 			return *bad
 		}
-		if bad := requireString(req, "params.action", p.Action); bad != nil {
+		if bad := handlers.RequireString(req, "params.action", p.Action); bad != nil {
 			return *bad
 		}
 		args, bad := rawObject(req, "params.args", p.Args, false)

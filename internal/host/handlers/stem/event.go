@@ -34,10 +34,10 @@ func (h Event) Serve(ctx context.Context, c contracts.Caller, req protocol.Messa
 	switch req.Method {
 	case protocol.MethodEventEmit:
 		var p emitParams
-		if bad := decodeParams(req, &p); bad != nil {
+		if bad := handlers.DecodeParams(req, &p); bad != nil {
 			return *bad
 		}
-		if bad := requireString(req, "params.name", p.Name); bad != nil {
+		if bad := handlers.RequireString(req, "params.name", p.Name); bad != nil {
 			return *bad
 		}
 		data, bad := rawObject(req, "params.data", p.Data, false)
@@ -50,10 +50,10 @@ func (h Event) Serve(ctx context.Context, c contracts.Caller, req protocol.Messa
 		return handlers.Reply(req, nil)
 	case protocol.MethodEventWatch:
 		var p eventWatchParams
-		if bad := decodeParams(req, &p); bad != nil {
+		if bad := handlers.DecodeParams(req, &p); bad != nil {
 			return *bad
 		}
-		if bad := requireString(req, "params.pattern", p.Pattern); bad != nil {
+		if bad := handlers.RequireString(req, "params.pattern", p.Pattern); bad != nil {
 			return *bad
 		}
 		if err := h.Port.Watch(ctx, c, p.Pattern, n); err != nil {
