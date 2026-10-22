@@ -425,7 +425,6 @@ func (m *WorkbenchModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// show: stop, and let main print the cause once the terminal is
 			// restored.
 			m.hostErr = msg.err
-			m.logf("host stopped: %v", msg.err)
 			return m, m.quitCmd()
 		}
 		return m, nil

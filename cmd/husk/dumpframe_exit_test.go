@@ -68,6 +68,22 @@ func TestDumpFrameMainExitsNonZeroWhenHostStops(t *testing.T) {
 	}
 }
 
+// The cause of a stopped host reaches stderr once: the model's log and the
+// run's error must not both print it.
+func TestDumpFrameMainReportsAStoppedHostOnce(t *testing.T) {
+	m, prog := dumpModel()
+	var out, errOut bytes.Buffer
+	m.logOut = &errOut
+	h := planHost{stepHost: stepHost{fe: withFE(m)}, planned: 1, runErr: errors.New("start server: socket path is 116 bytes")}
+	m.attach(h, nil)
+	if code := dumpFrameMain(m, h, prog, "", &out, &errOut); code != 1 {
+		t.Fatalf("exit code = %d, want 1", code)
+	}
+	if n := strings.Count(errOut.String(), "socket path is 116 bytes"); n != 1 {
+		t.Errorf("the cause printed %d times, want once: %q", n, errOut.String())
+	}
+}
+
 func TestDumpFrameMainExitsZeroOnSuccess(t *testing.T) {
 	m, prog := dumpModel()
 	var out, errOut bytes.Buffer
