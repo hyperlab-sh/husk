@@ -78,6 +78,42 @@ func privateExistingDir(path string) error {
 	return nil
 }
 
+// Runtime roots follow instance's ownership/no-group-or-other-bits rule;
+// data/config directories retain the stricter 0700 creation/storage contract.
+func privateRuntimeDir(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !info.IsDir() || info.Mode().Perm()&0077 != 0 || !ok || int(stat.Uid) != os.Getuid() {
+		return fmt.Errorf("store: runtime directory %s is not private", path)
+	}
+	return nil
+}
+
+// os.CreateTemp appends a decimal uint32 suffix to Store's reserved prefix.
+// Similar hidden filenames are user data, not evidence of a crashed write.
+func isStoreTemp(name string) bool {
+	if !strings.HasPrefix(name, ".") {
+		return false
+	}
+	i := strings.LastIndex(name, ".tmp-")
+	if i < 2 || !safeSegment(name[1:i]) {
+		return false
+	}
+	suffix := name[i+len(".tmp-"):]
+	if len(suffix) == 0 || len(suffix) > 10 {
+		return false
+	}
+	for _, c := range suffix {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 func safeSegment(s string) bool {
 	return s != "" && s != "." && s != ".." && !strings.ContainsAny(s, "/\\\x00") && filepath.Base(s) == s
 }
@@ -291,6 +327,9 @@ func (s *LocalSource) List(ctx context.Context, prefix Key) ([]Entry, error) {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		if errors.Is(walkErr, fs.ErrNotExist) {
+			return nil
+		}
 		if walkErr != nil {
 			return walkErr
 		}
@@ -298,12 +337,19 @@ func (s *LocalSource) List(ctx context.Context, prefix Key) ([]Entry, error) {
 			return fmt.Errorf("store: symlink %s", path)
 		}
 		if d.IsDir() {
-			return privateExistingDir(path)
+			err := privateExistingDir(path)
+			if errors.Is(err, fs.ErrNotExist) {
+				return fs.SkipDir
+			}
+			return err
 		}
-		if strings.Contains(d.Name(), ".tmp-") {
+		if isStoreTemp(d.Name()) {
 			return nil
 		}
 		info, err := d.Info()
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
 		if err != nil {
 			return err
 		}

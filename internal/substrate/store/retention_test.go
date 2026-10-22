@@ -139,7 +139,7 @@ func TestScopeIsolationAnonymousAndWorkspaceBatch(t *testing.T) {
 	if string(stored(t, a, ast.Snapshot().Slices[ah.Namespace()].Spec, "current.json").Value) != `{"owner":"one"}` || string(stored(t, b, bst.Snapshot().Slices[bh.Namespace()].Spec, "current.json").Value) != `{"owner":"two"}` {
 		t.Fatal("workspace collision")
 	}
-	// A second workspace slice is included when the first one changes.
+	// Workspace batching preserves an unchanged peer without rewriting it.
 	core, err := ast.Register(state.Spec{Namespace: "husk.workspace", Owner: "husk", Scope: state.ScopeWorkspace, Persistent: true, Retention: state.Retention{Policy: state.KeepLatest}, Initial: []byte(`{"core":true}`)})
 	if err != nil {
 		t.Fatal(err)
@@ -149,15 +149,20 @@ func TestScopeIsolationAnonymousAndWorkspaceBatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	coreSpec := ast.Snapshot().Slices[core.Namespace()].Spec
-	if err = a.source.Delete(context.Background(), a.sliceKey(coreSpec, "current.json")); err != nil {
+	_, coreBefore, err := a.source.Get(context.Background(), a.sliceKey(coreSpec, "current.json"))
+	if err != nil {
 		t.Fatal(err)
 	}
+	e.clock.Advance(time.Second)
 	set(t, ah, `{"owner":"one-new"}`)
 	ast.Flush()
 	if err = a.flushNow(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	_ = stored(t, a, coreSpec, "current.json")
+	_, coreAfter, err := a.source.Get(context.Background(), a.sliceKey(coreSpec, "current.json"))
+	if err != nil || !coreAfter.Modified.Equal(coreBefore.Modified) {
+		t.Fatal("unchanged workspace peer rewritten", err)
+	}
 	anonymous := e.open(t, "4242", false, nil)
 	anonState := attach(t, anonymous)
 	ih := slice(t, anonState, state.ScopeInstance, state.Retention{Policy: state.Manual})
@@ -234,7 +239,7 @@ func TestCorruptFutureAndUnknownRetentionSafety(t *testing.T) {
 		})
 	}
 }
-func TestClearUninstallAndUnregistrationDoNotResurrect(t *testing.T) {
+func TestClearUninstallAndUnregistrationRespectPersistence(t *testing.T) {
 	e := fixture(t)
 	s := e.open(t, "notes", true, nil)
 	st := attach(t, s)
@@ -268,8 +273,8 @@ func TestClearUninstallAndUnregistrationDoNotResurrect(t *testing.T) {
 	if err := s.flushNow(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if string(stored(t, s, spec, "current.json").Value) != "{}" {
-		t.Fatal("unregistered slice persisted")
+	if string(stored(t, s, spec, "current.json").Value) != `{"pending":true}` {
+		t.Fatal("unregistration dropped a pending committed value")
 	}
 	if err := s.RemovePlugin("plugin"); err != nil {
 		t.Fatal(err)

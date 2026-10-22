@@ -24,7 +24,9 @@ func TestGCStaleTempsQuarantineLimitsAndCheckOrphans(t *testing.T) {
 	}
 	path, _ := s.source.path(key, false)
 	dir := filepath.Dir(path)
-	names := []string{".current.json.tmp-old", ".current.json.tmp-new"}
+	const oldTemp = ".current.json.tmp-1000000000"
+	const freshTemp = ".current.json.tmp-1000000001"
+	names := []string{oldTemp, freshTemp}
 	for i := 0; i < 4; i++ {
 		names = append(names, "current.json.corrupt-"+e.clock.Now().Add(time.Duration(i)).UTC().Format("20060102T150405.000000000Z"))
 	}
@@ -33,7 +35,7 @@ func TestGCStaleTempsQuarantineLimitsAndCheckOrphans(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	os.Chtimes(filepath.Join(dir, ".current.json.tmp-old"), old, old)
+	os.Chtimes(filepath.Join(dir, oldTemp), old, old)
 	// New temps and quarantines are in injected-clock time, not wall-clock time.
 	for _, name := range names[1:] {
 		os.Chtimes(filepath.Join(dir, name), e.clock.Now(), e.clock.Now())
@@ -42,7 +44,7 @@ func TestGCStaleTempsQuarantineLimitsAndCheckOrphans(t *testing.T) {
 	if err != nil || len(before.Orphans) != 1 || len(before.Quarantined) != 4 {
 		t.Fatal(before, err)
 	}
-	if _, err = os.Stat(filepath.Join(dir, ".current.json.tmp-old")); err != nil {
+	if _, err = os.Stat(filepath.Join(dir, oldTemp)); err != nil {
 		t.Fatal("Check deleted files", err)
 	}
 	report, err := s.GC(context.Background())
@@ -59,7 +61,7 @@ func TestGCStaleTempsQuarantineLimitsAndCheckOrphans(t *testing.T) {
 	if _, err = os.Stat(path); err != nil {
 		t.Fatal("unknown retention removed legacy value", err)
 	}
-	if _, err = os.Stat(filepath.Join(dir, ".current.json.tmp-new")); err != nil {
+	if _, err = os.Stat(filepath.Join(dir, freshTemp)); err != nil {
 		t.Fatal("removed fresh temp", err)
 	}
 }

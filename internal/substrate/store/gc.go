@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hyperlab-sh/husk/internal/instance"
 	"github.com/hyperlab-sh/husk/internal/substrate/state"
 )
 
@@ -124,7 +125,7 @@ func quarantineOriginal(name string) (string, bool) {
 		return "", false
 	}
 	original := name[:i+5]
-	if original != "current.json" && !strings.HasPrefix(original, "gen-") {
+	if original != "current.json" && original != "meta.json" && !strings.HasPrefix(original, "gen-") {
 		return "", false
 	}
 	stamp := name[i+len(".json.corrupt-"):]
@@ -150,9 +151,12 @@ func quarantineOriginal(name string) (string, bool) {
 
 func (s *Store) collectAux(ctx context.Context, root string, report *GCReport) error {
 	quarantines := map[string][]string{}
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+	err := s.walkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
 		if err := ctx.Err(); err != nil {
 			return err
+		}
+		if errors.Is(walkErr, fs.ErrNotExist) {
+			return nil
 		}
 		if walkErr != nil {
 			return walkErr
@@ -169,10 +173,13 @@ func (s *Store) collectAux(ctx context.Context, root string, report *GCReport) e
 			return nil
 		}
 		info, err := d.Info()
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
 		if err != nil {
 			return err
 		}
-		if strings.HasPrefix(d.Name(), ".") && strings.Contains(d.Name(), ".tmp-") && s.clock.Now().Sub(info.ModTime()) > 10*time.Minute {
+		if isStoreTemp(d.Name()) && s.clock.Now().Sub(info.ModTime()) > 10*time.Minute {
 			if err = os.Remove(path); err == nil {
 				report.Removed = append(report.Removed, path)
 			} else {
@@ -211,6 +218,15 @@ func (s *Store) collectLogs(ctx context.Context, report *GCReport) {
 	if privateExistingDir(root) != nil {
 		return
 	}
+	statuses, err := instance.Survey(s.paths.Runtime, s.opts.InstanceDeps)
+	if err != nil {
+		report.Problems = append(report.Problems, Problem{Code: "unavailable", File: s.paths.Runtime, Message: "log GC skipped: instance liveness unavailable"})
+		return // Fail closed: uncertainty must not destroy another instance's logs.
+	}
+	protected := map[string]bool{s.opts.Instance.ID: true}
+	for _, status := range statuses {
+		protected[status.Entry.ID] = true
+	} // Live and unresponsive are both protected.
 	dirs, err := os.ReadDir(root)
 	if err != nil {
 		return
@@ -219,12 +235,17 @@ func (s *Store) collectLogs(ctx context.Context, report *GCReport) {
 		path     string
 		modified time.Time
 	}
-	var candidates []logDir
+	var empty []logDir
+	count := 0
 	for _, dir := range dirs {
 		if ctx.Err() != nil {
 			return
 		}
 		if !dir.IsDir() {
+			continue
+		}
+		count++
+		if protected[dir.Name()] {
 			continue
 		}
 		p := filepath.Join(root, dir.Name())
@@ -235,7 +256,10 @@ func (s *Store) collectLogs(ctx context.Context, report *GCReport) {
 		if err != nil {
 			continue
 		}
-		files, _ := os.ReadDir(p)
+		files, err := os.ReadDir(p)
+		if err != nil {
+			continue
+		}
 		for _, file := range files {
 			if file.Type()&os.ModeSymlink != 0 || file.IsDir() {
 				continue
@@ -244,29 +268,28 @@ func (s *Store) collectLogs(ctx context.Context, report *GCReport) {
 			if err != nil {
 				continue
 			}
-			if fi.ModTime().After(info.ModTime()) {
-				info = fi
+			if !fi.Mode().IsRegular() || s.clock.Now().Sub(fi.ModTime()) <= 14*24*time.Hour {
+				continue
 			}
-			if (fi.Size() == 0 || s.clock.Now().Sub(fi.ModTime()) > 14*24*time.Hour) && dir.Name() != s.opts.Instance.ID {
-				path := filepath.Join(p, file.Name())
-				if os.Remove(path) == nil {
-					report.Removed = append(report.Removed, path)
-				}
+			path := filepath.Join(p, file.Name())
+			if os.Remove(path) == nil {
+				report.Removed = append(report.Removed, path)
 			}
 		}
-		if dir.Name() != s.opts.Instance.ID {
-			candidates = append(candidates, logDir{p, info.ModTime()})
+		remaining, err := os.ReadDir(p)
+		if err == nil && len(remaining) == 0 {
+			empty = append(empty, logDir{p, info.ModTime()})
 		}
 	}
-	sort.Slice(candidates, func(i, j int) bool { return candidates[i].modified.After(candidates[j].modified) })
-	limit := 20
-	if _, err := os.Stat(filepath.Join(root, s.opts.Instance.ID)); err == nil {
-		limit--
-	}
-	for i, c := range candidates {
-		if i >= limit || s.clock.Now().Sub(c.modified) > 14*24*time.Hour {
-			if os.RemoveAll(c.path) == nil {
-				report.Removed = append(report.Removed, c.path)
+	// The 20-directory target is soft while logs are recent or instances live.
+	// Remove only empty directories, oldest first; Remove (not RemoveAll) also
+	// protects a new file created after our directory scan.
+	sort.Slice(empty, func(i, j int) bool { return empty[i].modified.Before(empty[j].modified) })
+	for _, candidate := range empty {
+		if count > 20 || s.clock.Now().Sub(candidate.modified) > 14*24*time.Hour {
+			if os.Remove(candidate.path) == nil {
+				count--
+				report.Removed = append(report.Removed, candidate.path)
 			}
 		}
 	}
@@ -325,9 +348,12 @@ func (s *Store) Check(ctx context.Context) (CheckReport, error) {
 	}
 	sort.Strings(report.Orphans)
 	for _, root := range []string{s.paths.Config, s.paths.State} {
-		err = filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+		err = s.walkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
+			}
+			if errors.Is(walkErr, fs.ErrNotExist) {
+				return nil
 			}
 			if walkErr != nil {
 				return walkErr

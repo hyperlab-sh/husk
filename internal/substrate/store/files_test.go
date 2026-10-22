@@ -28,8 +28,14 @@ func TestLocalSourceAtomicPrivateAndCrashTemp(t *testing.T) {
 		t.Fatal(info, err)
 	}
 	// Simulated power loss before rename: only the previous committed record is visible.
-	tmp := filepath.Join(filepath.Dir(path), ".current.json.tmp-crashed")
-	if err = os.WriteFile(tmp, []byte("partial"), 0600); err != nil {
+	partial, err := os.CreateTemp(filepath.Dir(path), ".current.json.tmp-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = partial.Write([]byte("partial")); err != nil {
+		t.Fatal(err)
+	}
+	if err = partial.Close(); err != nil {
 		t.Fatal(err)
 	}
 	records, err := source.List(ctx, Key{Scope: key.Scope, Instance: key.Instance})

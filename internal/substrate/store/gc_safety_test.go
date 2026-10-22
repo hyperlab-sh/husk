@@ -62,7 +62,8 @@ func TestGCLogAgeAndDirectoryCap(t *testing.T) {
 		t.Fatal(err)
 	}
 	dirs, err := os.ReadDir(filepath.Join(s.paths.State, "logs"))
-	if err != nil || len(dirs) > 20 {
+	// Twenty is a target, not permission to remove recent or active logs.
+	if err != nil || len(dirs) != 22 {
 		t.Fatal(len(dirs), err)
 	}
 	if _, err = os.Stat(active.Name()); err != nil {

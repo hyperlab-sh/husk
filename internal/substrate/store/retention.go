@@ -120,11 +120,16 @@ func (s *Store) preload() error {
 			continue
 		}
 		id := storageID(entry.Key, ns)
-		data, _, readErr := s.source.Get(context.Background(), entry.Key)
-		env, parseErr := parseEnvelope(data, entry.Key)
-		if readErr != nil {
-			parseErr = readErr
+		data, metadata, readErr := s.source.Get(context.Background(), entry.Key)
+		if errors.Is(readErr, ErrNotFound) {
+			continue
 		}
+		if readErr != nil {
+			s.blocked[id] = true
+			s.diagnostic(Problem{Code: "unavailable", Path: ns, Message: fmt.Sprintf("%v: %v; persistence disabled this run", ErrUnavailable, readErr)}, "")
+			continue
+		}
+		env, parseErr := parseEnvelope(data, entry.Key)
 		if parseErr != nil {
 			if err = s.quarantine(entry, ns, parseErr); err != nil {
 				s.blocked[id] = true
@@ -136,13 +141,28 @@ func (s *Store) preload() error {
 			s.diagnostic(Problem{Code: "newer_store", Path: ns, Message: "written by a newer Husk; persistence disabled this run"}, "")
 			continue
 		}
-		s.cacheRecord(id, savedRecord{env: env, key: entry.Key, modified: entry.Modified})
+		normalized, err := normalizeSliceJSON(env.Value)
+		if err != nil {
+			return err
+		}
+		env.Value = normalized
+		s.cacheRecord(id, savedRecord{env: env, key: entry.Key, modified: metadata.Modified})
 		if parts := strings.Split(entry.Key.Path[len(entry.Key.Path)-1], "-"); len(parts) > 2 && parts[0] == "gen" {
 			nanos, _ := strconv.ParseInt(parts[1], 10, 64)
 			s.lastGeneration = max(s.lastGeneration, nanos)
 		}
 	}
 	return nil
+}
+
+func normalizeSliceJSON(value json.RawMessage) (json.RawMessage, error) {
+	decoder := json.NewDecoder(bytes.NewReader(value))
+	decoder.UseNumber()
+	var object map[string]any
+	if err := decoder.Decode(&object); err != nil {
+		return nil, err
+	}
+	return json.Marshal(object)
 }
 
 // cacheRecord retains only the latest current and generation values, not N full
@@ -161,6 +181,9 @@ func (s *Store) cacheRecord(id string, record savedRecord) {
 	s.loaded[id] = append(s.loaded[id], record)
 }
 func (s *Store) quarantine(entry Entry, namespace string, cause error) error {
+	return s.quarantineFile(entry, namespace, "slice_reset", cause)
+}
+func (s *Store) quarantineFile(entry Entry, label, code string, cause error) error {
 	p, err := s.source.path(entry.Key, false)
 	if err != nil {
 		return err
@@ -170,14 +193,20 @@ func (s *Store) quarantine(entry Entry, namespace string, cause error) error {
 	for n := 0; ; n++ {
 		if _, err = os.Lstat(target); errors.Is(err, fs.ErrNotExist) {
 			break
+		} else if err != nil {
+			return err
 		}
 		target = p + fmt.Sprintf(".corrupt-%s-%d", s.clock.Now().UTC().Format("20060102T150405.000000000Z"), n)
 	}
-	if err = os.Rename(p, target); err != nil {
-		s.diagnostic(Problem{Code: "quarantine_failed", Path: namespace, Message: err.Error()}, "")
+	if err = os.Rename(p, target); err == nil {
+		now := s.clock.Now()
+		err = os.Chtimes(target, now, now)
+	}
+	if err != nil {
+		s.diagnostic(Problem{Code: "quarantine_failed", Path: label, Message: err.Error()}, "")
 		return err
 	}
-	s.diagnostic(Problem{Code: "slice_reset", Path: namespace, Message: "Slice reset: " + namespace + ": " + cause.Error()}, target)
+	s.diagnostic(Problem{Code: code, Path: label, Message: label + " reset: " + cause.Error()}, target)
 	return nil
 }
 
@@ -195,11 +224,15 @@ func (s *Store) Hydrate(spec state.Spec) (json.RawMessage, bool) {
 	if s.blocked[id] {
 		return nil, false
 	}
+	if pending, ok := s.dirty[id]; ok && pending.unregistered {
+		return bytes.Clone(pending.entry.Value), true
+	}
 	for _, record := range s.loaded[id] {
 		file := record.key.Path[len(record.key.Path)-1]
 		if spec.Retention.Policy == state.KeepLastN && !strings.HasPrefix(file, "gen-") || spec.Retention.Policy != state.KeepLastN && file != "current.json" {
 			continue
 		}
+		s.baseline[id] = bytes.Clone(record.env.Value)
 		if spec.Retention.Policy == state.TTL && !s.clock.Now().Before(record.modified.Add(spec.Retention.TTL)) {
 			return nil, false
 		}
@@ -216,7 +249,13 @@ func (s *Store) onFlush(changes []state.Change, snap *state.Snapshot) {
 	}
 	for _, change := range changes {
 		if change.Removed {
-			delete(s.dirty, change.Namespace)
+			for id, pending := range s.dirty {
+				if pending.entry.Namespace == change.Namespace && pending.entry.Revision <= change.Revision {
+					pending.unregistered = true
+					pending.failed = false
+					s.dirty[id] = pending
+				}
+			}
 			delete(s.registered, change.Namespace)
 			continue
 		}
@@ -233,15 +272,20 @@ func (s *Store) onFlush(changes []state.Change, snap *state.Snapshot) {
 		if s.blocked[id] {
 			continue
 		}
-		pending, exists := s.dirty[entry.Namespace]
+		if baseline, ok := s.baseline[id]; ok && bytes.Equal(baseline, entry.Value) && !s.inflight[id] {
+			delete(s.dirty, id)
+			continue
+		}
+		pending, exists := s.dirty[id]
 		if !exists {
 			pending.first = now
 		}
 		pending.last = now
 		pending.entry = entry
 		pending.epoch = s.epochs[entry.Namespace]
+		pending.registeredAt = s.registered[entry.Namespace]
 		pending.failed = false
-		s.dirty[entry.Namespace] = pending
+		s.dirty[id] = pending
 	}
 	s.mu.Unlock()
 	s.signal()
@@ -262,6 +306,9 @@ func (s *Store) nextDelay() time.Duration {
 	for _, p := range s.dirty {
 		if p.failed {
 			continue
+		}
+		if p.unregistered {
+			return 0
 		}
 		delay := deadline(p).Sub(now)
 		if delay < d {
@@ -311,46 +358,63 @@ func (s *Store) flushDue(ctx context.Context, force bool) error {
 	work := map[string]pendingWrite{}
 	now := s.clock.Now()
 	workspaceDue := false
-	for ns, p := range s.dirty {
-		if force || !p.failed && !now.Before(deadline(p)) {
-			work[ns] = p
-			if p.entry.Scope == state.ScopeWorkspace {
-				workspaceDue = true
+	for id, p := range s.dirty {
+		if force || !p.failed && (p.unregistered || !now.Before(deadline(p))) {
+			work[id] = p
+			workspaceDue = workspaceDue || p.entry.Scope == state.ScopeWorkspace
+		}
+	}
+	// One snapshot supplies each workspace batch, but unchanged values do not
+	// count as writes or touch mtimes. Removed owners keep their pending value.
+	if workspaceDue && s.st != nil {
+		for ns, entry := range s.st.Snapshot().Slices {
+			if entry.Persistent && entry.Scope == state.ScopeWorkspace {
+				id := storageID(s.sliceKey(entry.Spec, ""), ns)
+				pending, exists := s.dirty[id]
+				if !exists {
+					pending = pendingWrite{epoch: s.epochs[ns], first: now, last: now, registeredAt: s.registered[ns]}
+				}
+				pending.entry = entry
+				work[id] = pending
 			}
 		}
 	}
-	// A workspace flush uses one snapshot for all registered persistent workspace
-	// entries. Each file is atomic; the batch is intentionally not a transaction.
-	if workspaceDue && s.st != nil {
-		snap := s.st.Snapshot()
-		for ns, entry := range snap.Slices {
-			if entry.Persistent && entry.Scope == state.ScopeWorkspace {
-				work[ns] = pendingWrite{entry: entry, epoch: s.epochs[ns], first: now, last: now}
+	for id, p := range work {
+		if baseline, ok := s.baseline[id]; ok && bytes.Equal(baseline, p.entry.Value) {
+			if current, exists := s.dirty[id]; exists && current.entry.Revision == p.entry.Revision && current.epoch == p.epoch {
+				delete(s.dirty, id)
 			}
+			delete(work, id)
+			continue
 		}
+		s.inflight[id] = true
 	}
 	s.mu.Unlock()
 	keys := make([]string, 0, len(work))
-	for ns := range work {
-		keys = append(keys, ns)
+	for id := range work {
+		keys = append(keys, id)
 	}
 	sort.Strings(keys)
 	var errs []error
-	for _, ns := range keys {
+	for _, id := range keys {
+		p := work[id]
+		ns := p.entry.Namespace
 		if err := ctx.Err(); err != nil {
+			s.mu.Lock()
+			delete(s.inflight, id)
+			s.mu.Unlock()
 			errs = append(errs, fmt.Errorf("store: unflushed %s: %w", ns, err))
 			continue
 		}
-		p := work[ns]
 		s.ioMu.Lock()
 		s.mu.Lock()
 		st := s.st
 		stale := s.epochs[ns] != p.epoch
-		id := storageID(s.sliceKey(p.entry.Spec, ""), ns)
 		blocked := s.blocked[id]
-		registeredAt := s.registered[ns]
+		current, exists := s.dirty[id]
+		retired := p.unregistered || exists && current.unregistered && current.entry.Revision == p.entry.Revision
 		s.mu.Unlock()
-		if st != nil {
+		if st != nil && !retired {
 			entry, exists := st.Snapshot().Slices[ns]
 			if !exists || !entry.Persistent || entry.Scope != p.entry.Scope {
 				stale = true
@@ -358,16 +422,21 @@ func (s *Store) flushDue(ctx context.Context, force bool) error {
 		}
 		var err error
 		if !stale && !blocked {
-			err = s.persist(ctx, p.entry, registeredAt)
+			err = s.persist(ctx, p.entry, p.registeredAt)
 		}
 		s.ioMu.Unlock()
 		s.mu.Lock()
-		current, exists := s.dirty[ns]
-		if err == nil && exists && current.entry.Revision == p.entry.Revision && current.epoch == p.epoch {
-			delete(s.dirty, ns)
-		} else if err != nil && exists {
-			current.failed = true
-			s.dirty[ns] = current
+		delete(s.inflight, id)
+		current, exists = s.dirty[id]
+		// Completion and failure belong to this exact revision and clear epoch,
+		// never to a newer value queued while the filesystem operation ran.
+		if exists && current.entry.Revision == p.entry.Revision && current.epoch == p.epoch {
+			if err == nil {
+				delete(s.dirty, id)
+			} else {
+				current.failed = true
+				s.dirty[id] = current
+			}
 		}
 		s.mu.Unlock()
 		if err != nil {
@@ -403,7 +472,7 @@ func (s *Store) persist(ctx context.Context, entry state.Entry, registered time.
 		filename = fmt.Sprintf("gen-%020d-%s.json", s.lastGeneration, s.opts.Instance.ID)
 	}
 	k := s.sliceKey(entry.Spec, filename)
-	if err = s.source.Put(ctx, k, b); err != nil {
+	if err = s.writeSource.Put(ctx, k, b); err != nil {
 		return err
 	}
 	path, err := s.source.path(k, false)
@@ -416,6 +485,7 @@ func (s *Store) persist(ctx context.Context, entry state.Entry, registered time.
 	s.mu.Lock()
 	id := storageID(k, entry.Namespace)
 	saved := savedRecord{env: env, key: k, modified: modified}
+	s.baseline[id] = bytes.Clone(entry.Value)
 	s.cacheRecord(id, saved)
 	s.mu.Unlock()
 	// Bound generations immediately as well as during periodic GC.
@@ -425,10 +495,12 @@ func (s *Store) persist(ctx context.Context, entry state.Entry, registered time.
 	return err
 }
 
-// ClearSlice deletes every persisted scope's copies and pending pre-clear writes.
-// Call it off the loop, then post State.Clear. Epochs prevent a queued old write
-// from resurrecting the deleted value after the delete finishes.
-func (s *Store) ClearSlice(namespace string) error {
+// ClearSlice deletes the shared user copy and this instance's instance/workspace
+// copies only. Call it off the loop, then post State.Clear. Epochs prevent old
+// queued writes from resurrecting deleted values. Other instances are untouched.
+func (s *Store) ClearSlice(namespace string) error { return s.clearSlice(namespace, false) }
+
+func (s *Store) clearSlice(namespace string, all bool) error {
 	if !state.ValidNamespace(namespace) {
 		return ErrInvalidPath
 	}
@@ -436,7 +508,16 @@ func (s *Store) ClearSlice(namespace string) error {
 	defer s.ioMu.Unlock()
 	s.mu.Lock()
 	s.epochs[namespace]++
-	delete(s.dirty, namespace)
+	for id, pending := range s.dirty {
+		if pending.entry.Namespace == namespace {
+			delete(s.dirty, id)
+		}
+	}
+	for id := range s.baseline {
+		if strings.HasSuffix(id, "/"+namespace) {
+			delete(s.baseline, id)
+		}
+	}
 	for id, records := range s.loaded {
 		if len(records) > 0 && records[0].env.Namespace == namespace {
 			delete(s.loaded, id)
@@ -448,7 +529,7 @@ func (s *Store) ClearSlice(namespace string) error {
 		}
 	}
 	s.mu.Unlock()
-	prefixes, err := s.prefixes(true)
+	prefixes, err := s.prefixes(all)
 	if err != nil {
 		return err
 	}
@@ -480,5 +561,5 @@ func (s *Store) RemovePlugin(pluginID string) error {
 	if !validID(pluginID) {
 		return ErrInvalidPath
 	}
-	return s.ClearSlice(pluginID + ".state")
+	return s.clearSlice(pluginID+".state", true)
 }
