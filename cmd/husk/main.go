@@ -140,6 +140,9 @@ type programRef struct {
 	gate   chan struct{}
 	once   sync.Once
 	closed atomic.Bool
+	// waiting counts posts that reached the wait for set or the gate; tests
+	// use it to know a post is parked without sleeping.
+	waiting atomic.Int32
 }
 
 func newProgramRef() *programRef {
@@ -167,6 +170,8 @@ func (r *programRef) post(msg any) bool {
 	if r.closed.Load() {
 		return false
 	}
+	r.waiting.Add(1)
+	defer r.waiting.Add(-1)
 	select {
 	case <-r.ready:
 	case <-r.gate:
