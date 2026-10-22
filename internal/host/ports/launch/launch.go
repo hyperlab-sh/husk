@@ -200,19 +200,29 @@ var _ contracts.Reloader = Reloader{}
 // Reload blocks until the reload has completed (failed and timed-out reloads
 // included) and translates reports into host problems.
 func (r Reloader) Reload(ctx context.Context) (bool, []contracts.Problem) {
-	reports, err := r.Coordinator.Reload(ctx, services.ReasonPlugin)
-	if err != nil {
-		return false, []contracts.Problem{{Severity: "error", Layer: "services", Message: err.Error()}}
-	}
-	applied := true
+	return reloadProblems(r.Coordinator.Reload(ctx, services.ReasonPlugin))
+}
+
+// reloadProblems translates the Coordinator's reports into host problems. The
+// Coordinator returns its reports together with the aggregate "incomplete"
+// error, so a failing service is named here (its own problems, or a note that
+// it was not applied) rather than hidden behind the aggregate.
+func reloadProblems(reports []services.Report, err error) (bool, []contracts.Problem) {
+	applied := err == nil
 	var problems []contracts.Problem
 	for _, report := range reports {
 		if !report.Applied {
 			applied = false
 		}
 		for _, p := range report.Problems {
-			problems = append(problems, contracts.Problem{Severity: p.Severity, Layer: p.Layer, Key: p.Key, Message: p.Message})
+			problems = append(problems, contracts.Problem{Severity: p.Severity, Layer: p.Layer, Key: p.Key, Message: report.Service + ": " + p.Message})
 		}
+		if !report.Applied && len(report.Problems) == 0 {
+			problems = append(problems, contracts.Problem{Severity: "error", Layer: "services", Message: report.Service + ": not applied"})
+		}
+	}
+	if err != nil {
+		problems = append(problems, contracts.Problem{Severity: "error", Layer: "services", Message: err.Error()})
 	}
 	return applied, problems
 }
