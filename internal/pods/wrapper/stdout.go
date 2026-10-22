@@ -64,12 +64,10 @@ type rejectionBudget struct {
 	count, suppressed int
 }
 
-func (w *Wrapper) reject(b *rejectionBudget, code protocol.Code, message, method string, data json.RawMessage, notify bool) {
+func (w *Wrapper) reject(b *rejectionBudget, code protocol.Code, message, method string, data json.RawMessage, notify bool, logText string) {
 	now := w.opts.Clock.Now()
 	if !b.initialized || now.Sub(b.start) >= time.Second {
-		if b.suppressed > 0 {
-			w.log("warn", fmt.Sprintf("husk: protocol error from %s: %d rejections suppressed", w.spec.ID, b.suppressed))
-		}
+		w.flushRejections(b)
 		b.initialized = true
 		b.start = now
 		b.count = 0
@@ -80,7 +78,10 @@ func (w *Wrapper) reject(b *rejectionBudget, code protocol.Code, message, method
 		return
 	}
 	b.count++
-	w.log("warn", fmt.Sprintf("husk: protocol error from %s: %s: %s", w.spec.ID, code, message))
+	if logText == "" {
+		logText = fmt.Sprintf("husk: protocol error from %s: %s: %s", w.spec.ID, code, message)
+	}
+	w.log("warn", logText)
 	if !notify {
 		return
 	}
@@ -95,11 +96,19 @@ func (w *Wrapper) reject(b *rejectionBudget, code protocol.Code, message, method
 	}
 }
 
+func (w *Wrapper) flushRejections(b *rejectionBudget) {
+	if b.suppressed > 0 {
+		w.log("warn", fmt.Sprintf("husk: protocol error from %s: %d rejections suppressed", w.spec.ID, b.suppressed))
+		b.suppressed = 0
+	}
+}
+
 func (w *Wrapper) readStdout(r io.Reader) {
 	defer close(w.readDone)
 	probe := &firstLineReader{r: r}
 	var legacy sync.Once
 	var budget rejectionBudget
+	defer w.flushRejections(&budget)
 	err := protocol.ReadLoop(probe, func(m protocol.Message) {
 		if probe.legacy {
 			legacy.Do(w.legacyHello)
@@ -112,7 +121,7 @@ func (w *Wrapper) readStdout(r io.Reader) {
 			}
 			return
 		}
-		w.reject(&budget, protocol.CodeInvalidMessage, "stdout carries replies only", m.Method, nil, m.Method != protocol.MethodProtocolError)
+		w.reject(&budget, protocol.CodeInvalidMessage, "stdout carries replies only", m.Method, nil, m.Method != protocol.MethodProtocolError, fmt.Sprintf("plugin %s sent a non-reply on stdout", w.spec.ID))
 	}, func(e *protocol.LineError) {
 		if probe.legacy {
 			legacy.Do(w.legacyHello)
@@ -122,14 +131,16 @@ func (w *Wrapper) readStdout(r io.Reader) {
 			if w.opts.Replies != nil {
 				w.opts.Replies.Reply(w.spec.ID, protocol.Message{ID: e.ID})
 			}
-			w.reject(&budget, e.Code, lineMessage(e.Err), "", nil, false)
+			w.reject(&budget, e.Code, lineMessage(e.Err), "", nil, false, "")
 			return
 		}
 		var data json.RawMessage
 		if e.Code == protocol.CodeLineTooLong {
-			data = json.RawMessage(`{"limit":4194304}`)
+			data, _ = json.Marshal(struct {
+				Limit int `json:"limit"`
+			}{protocol.MaxLineBytes})
 		}
-		w.reject(&budget, e.Code, lineMessage(e.Err), e.Method, data, e.Method != protocol.MethodProtocolError)
+		w.reject(&budget, e.Code, lineMessage(e.Err), e.Method, data, e.Method != protocol.MethodProtocolError, "")
 	})
 	if err != nil {
 		w.fail(fmt.Errorf("read stdout: %w", err))

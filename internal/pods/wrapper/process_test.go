@@ -5,6 +5,7 @@ package wrapper
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/hyperlab-sh/husk/internal/pods/internal/testclock"
@@ -147,16 +149,26 @@ type replyNotice struct {
 	id    string
 	reply protocol.Message
 }
-type fixtureSink struct{ events chan tea.Msg }
+type fixtureSink struct {
+	events chan tea.Msg
+	ctx    context.Context
+}
 
-func (s fixtureSink) Reply(id string, m protocol.Message) { s.events <- replyNotice{id, m} }
-func (s fixtureSink) Closed(id string, err error)         { s.events <- ClosedMsg{PluginID: id, Reason: err} }
+func (s fixtureSink) post(m tea.Msg) {
+	select {
+	case s.events <- m:
+	case <-s.ctx.Done():
+	}
+}
+func (s fixtureSink) Reply(id string, m protocol.Message) { s.post(replyNotice{id, m}) }
+func (s fixtureSink) Closed(id string, err error)         { s.post(ClosedMsg{PluginID: id, Reason: err}) }
 
 type fixture struct {
 	w       *Wrapper
 	clock   *testclock.Clock
 	events  chan tea.Msg
 	notices []tea.Msg
+	ctx     context.Context
 }
 
 func newFixture(t *testing.T, mode string, alter func(*Options)) *fixture {
@@ -164,7 +176,9 @@ func newFixture(t *testing.T, mode string, alter func(*Options)) *fixture {
 	clock := testclock.New()
 	events := make(chan tea.Msg, 1024)
 	dir := t.TempDir()
-	opts := Options{Clock: clock, Post: func(m tea.Msg) { events <- m }, Replies: fixtureSink{events}, LogPath: func(string) (string, error) { return filepath.Join(dir, "fake.log"), nil }, BaseEnv: []string{"PATH=" + os.Getenv("PATH"), "GORACE=atexit_sleep_ms=0", "HUSK_FAKE_PLUGIN=drop", "HUSK_DEBUG=drop", "HUSK_PLUGIN_TOKEN=drop", "CUSTOM_KEEP=present"}, SocketPath: filepath.Join(dir, "instance.sock"), InstanceID: "instance", BinPath: os.Args[0]}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	sink := fixtureSink{events: events, ctx: ctx}
+	opts := Options{Clock: clock, Post: sink.post, Replies: sink, LogPath: func(string) (string, error) { return filepath.Join(dir, "fake.log"), nil }, BaseEnv: []string{"PATH=" + os.Getenv("PATH"), "GORACE=atexit_sleep_ms=0", "HUSK_FAKE_PLUGIN=drop", "HUSK_DEBUG=drop", "HUSK_PLUGIN_TOKEN=drop", "CUSTOM_KEEP=present"}, SocketPath: filepath.Join(dir, "instance.sock"), InstanceID: "instance", BinPath: os.Args[0]}
 	if alter != nil {
 		alter(&opts)
 	}
@@ -172,8 +186,9 @@ func newFixture(t *testing.T, mode string, alter func(*Options)) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &fixture{w: w, clock: clock, events: events}
+	f := &fixture{w: w, clock: clock, events: events, ctx: ctx}
 	t.Cleanup(func() {
+		defer cancel()
 		w.mu.Lock()
 		started := w.started
 		w.mu.Unlock()
@@ -185,7 +200,7 @@ func newFixture(t *testing.T, mode string, alter func(*Options)) *fixture {
 		w.CloseStdin()
 		_ = w.Terminate()
 		_ = w.Kill()
-		<-w.Done()
+		testclock.Receive(t, w.Done())
 	})
 	return f
 }
@@ -202,7 +217,12 @@ func (f *fixture) start(t *testing.T) {
 func awaitNotice[T any](t *testing.T, f *fixture) T {
 	t.Helper()
 	for {
-		m := <-f.events
+		var m tea.Msg
+		select {
+		case m = <-f.events:
+		case <-f.ctx.Done():
+			t.Fatalf("await notice: %v", f.ctx.Err())
+		}
 		f.notices = append(f.notices, m)
 		if v, ok := m.(T); ok {
 			return v
@@ -306,7 +326,7 @@ func TestStdoutEOFFailsOnlyAfterInjectedReapGrace(t *testing.T) {
 	f := newFixture(t, "eof", nil)
 	f.start(t)
 	awaitReply(t, f, "9000")
-	f.clock.Await(EOFReapGrace)
+	f.clock.Await(t, EOFReapGrace)
 	f.clock.Advance(EOFReapGrace - 1)
 	select {
 	case <-f.w.Done():
@@ -328,6 +348,16 @@ func TestCleanAndCrashExitsRouteClosedBeforeLiveness(t *testing.T) {
 			exit := awaitNotice[ExitMsg](t, f)
 			if closedCount(f) != 1 {
 				t.Fatal("Closed was not posted exactly once before Exit")
+			}
+			for _, notice := range f.notices {
+				if closed, ok := notice.(ClosedMsg); ok {
+					if mode == "clean" && closed.Reason.Error() != "exited" {
+						t.Fatal("clean reason:", closed.Reason)
+					}
+					if mode == "crash" && !strings.Contains(closed.Reason.Error(), "crashed (exit status 7)") {
+						t.Fatal("crash reason:", closed.Reason)
+					}
+				}
 			}
 			if mode == "clean" && exit.Info.Status != Exited {
 				t.Fatal(exit)
@@ -366,11 +396,11 @@ func TestStdinOverflowAndTimeoutAreFatal(t *testing.T) {
 				if err := f.w.Send(big); err != nil {
 					t.Fatal(err)
 				}
-				f.clock.Await(WriteTimeout)
+				f.clock.Await(t, WriteTimeout)
 				f.clock.Advance(WriteTimeout)
 			}
 			awaitNotice[ClosedMsg](t, f)
-			f.clock.Await(StopGrace)
+			f.clock.Await(t, StopGrace)
 			f.clock.Advance(StopGrace)
 			exit := awaitNotice[ExitMsg](t, f)
 			if exit.Info.Status != Failed {
@@ -380,7 +410,7 @@ func TestStdinOverflowAndTimeoutAreFatal(t *testing.T) {
 			if mode == "timeout" {
 				want = "write timed out"
 			}
-			if !strings.Contains(exit.Info.LastError, want) {
+			if !strings.HasPrefix(exit.Info.LastError, "stopped reading: ") || !strings.Contains(exit.Info.LastError, want) {
 				t.Fatal(exit.Info.LastError)
 			}
 		})
@@ -409,8 +439,11 @@ func TestClosedStdinReapsBeforeTreatingSurvivorAsFatal(t *testing.T) {
 	if err := f.w.Send(large); err != nil {
 		t.Fatal(err)
 	}
-	awaitNotice[ClosedMsg](t, f) // immediate cancellation before the reap timer
-	f.clock.Await(EOFReapGrace)
+	awaitNotice[ChannelClosedMsg](t, f) // credentials revoke before final Calls reason
+	if closedCount(f) != 0 {
+		t.Fatal("Calls cancelled before the final reason was known")
+	}
+	f.clock.Await(t, EOFReapGrace)
 	f.clock.Advance(EOFReapGrace)
 	exit := awaitNotice[ExitMsg](t, f)
 	if exit.Info.Status != Failed || !errors.Is(exit.Err, syscall.EPIPE) {
@@ -472,7 +505,7 @@ func TestExitedLeaderDoesNotAbandonSIGTERMResistantChild(t *testing.T) {
 	if err != nil || group != f.w.Info().PID {
 		t.Fatal("child escaped the managed group", err)
 	}
-	f.clock.Await(StopGrace)
+	f.clock.Await(t, StopGrace)
 	select {
 	case <-f.w.Done():
 		t.Fatal("leader exit abandoned a live child")

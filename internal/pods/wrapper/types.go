@@ -91,6 +91,10 @@ type LaunchFailedMsg struct {
 // stdout drain. It does not cancel Calls; ClosedMsg follows drained replies.
 type ReapedMsg struct{ PluginID string }
 
+// ChannelClosedMsg revokes authentication immediately on pipe closure. Calls
+// cleanup waits for ClosedMsg with the final exit or reap-grace failure reason.
+type ChannelClosedMsg struct{ PluginID string }
+
 // ClosedMsg tells the loop to fail pending calls before applying exit liveness.
 type ClosedMsg struct {
 	PluginID string

@@ -19,6 +19,9 @@ type LaunchFailedMsg = wrapper.LaunchFailedMsg
 // ReapedMsg is the credential-revocation precursor to drained exit notices.
 type ReapedMsg = wrapper.ReapedMsg
 
+// ChannelClosedMsg revokes a closed pipe's credential before the reap grace.
+type ChannelClosedMsg = wrapper.ChannelClosedMsg
+
 // ClosedMsg must be handled by the loop with Calls.DropPlugin before applying
 // later exit liveness. Host.Handle deliberately does not consume this message.
 type ClosedMsg = wrapper.ClosedMsg
