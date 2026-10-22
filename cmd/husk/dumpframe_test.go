@@ -303,6 +303,17 @@ func TestDumpFrameAllPodsFailedIsAnError(t *testing.T) {
 	}
 }
 
+// A planned plugin the Pods layer refused never gets a Pod; the run reports
+// that instead of a bare timeout.
+func TestDumpFrameReportsPlannedPluginsWithoutAPod(t *testing.T) {
+	m, prog := dumpModel()
+	feed(prog, starting(m, "alpha"))
+	_, err := runDumpFrame(m, dumpFrameOptions{Program: prog, Launched: 2, Quiet: 20 * time.Millisecond, Timeout: 300 * time.Millisecond})
+	if err == nil || !strings.Contains(err.Error(), "1 of 2 planned plugins never got a Pod") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 // One live plugin among failed ones is a usable workbench.
 func TestDumpFramePartialFailureStillSettles(t *testing.T) {
 	m, prog := dumpModel()
