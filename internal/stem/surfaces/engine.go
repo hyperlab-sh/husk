@@ -279,6 +279,17 @@ func (e *Engine) Flush() {
 		e.resolvePlugin(plugin, e.declsCache[plugin], next[plugin], &res, changedSlots)
 	}
 
+	// A published slot whose publisher is no longer registered leaves the
+	// resolution with all its entries, whatever the contributors declare:
+	// the host's catalog drops the slot when the publisher's Pod is torn
+	// down, and that teardown's declaration change triggers this pass.
+	for slot := range res.Contributions {
+		if _, ok := e.pubs.Owner(slot); !ok {
+			delete(res.Contributions, slot)
+			changedSlots[slot] = true
+		}
+	}
+
 	if err := e.slice.Update(func(v *Surfaces) { *v = res }); err != nil {
 		e.log.Printf("surfaces: husk.surfaces commit failed: %v", err)
 	}
