@@ -219,3 +219,111 @@ func TestFirstConverterClaimWinsWithoutFallback(t *testing.T) {
 		t.Fatal(s, a, b, err)
 	}
 }
+
+const railBase = `"manifest_version":2,"protocol":2,"id":"p","name":"P","version":"1","command":["plugin"],"surfaces":[{"id":"main-stage"}]`
+
+func TestRailItemsAreDeclaredValidatedAndCataloged(t *testing.T) {
+	raw := `{` + railBase + `,"actions":[{"id":"p.open","title":"Open"}],
+	  "rail_items":[
+	    {"id":"p.panel","icon":"P","label":"Panel","placement":"modal","badge":"2","description":"the panel","frame":{"border":true,"label":"Panel","close":true}},
+	    {"id":"p.full","icon":"F","label":"Full","placement":"full-canvas"},
+	    {"id":"p.stage","icon":"S","label":"Stage","placement":"stage","shortcut":"f4"}]}`
+	s, warns, err := convertBytes(t, raw, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.RailItems) != 3 {
+		t.Fatalf("rail items = %+v", s.RailItems)
+	}
+	first := s.RailItems[0]
+	if first.ID != "p.panel" || first.Icon != "P" || first.Label != "Panel" || first.Placement != PlacementModal || first.Badge != "2" ||
+		first.Description != "the panel" || first.Frame == nil || !first.Frame.Border || !first.Frame.Close || first.Frame.Label != "Panel" {
+		t.Errorf("first = %+v", first)
+	}
+	if s.RailItems[1].Frame != nil || s.RailItems[1].Placement != PlacementFullCanvas || s.RailItems[2].Placement != PlacementStage {
+		t.Errorf("rail items = %+v", s.RailItems)
+	}
+
+	// A shortcut is a suggestion only: warned, recorded for keys --problems,
+	// never part of the declaration.
+	if len(warns) != 1 || warns[0].Code != "suggestion_ignored" || warns[0].Field != "rail_items" || warns[0].Index != 2 {
+		t.Errorf("warnings = %+v", warns)
+	}
+	if len(s.Suggestions) != 1 || s.Suggestions[0].Key != "f4" || s.Suggestions[0].Action != "p.stage" {
+		t.Errorf("suggestions = %+v", s.Suggestions)
+	}
+	if data, _ := json.Marshal(s.RailItems); bytes.Contains(data, []byte("shortcut")) || bytes.Contains(data, []byte("f4")) {
+		t.Errorf("the declaration carries the shortcut: %s", data)
+	}
+
+	// The catalog document (what Store declares and the frontend reads) has it.
+	data, err := s.CatalogJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		RailItems []RailItemDecl `json:"rail_items"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.RailItems) != 3 || doc.RailItems[0].Frame == nil || doc.RailItems[2].ID != "p.stage" {
+		t.Errorf("catalog rail_items = %+v", doc.RailItems)
+	}
+
+	// Clone detaches the frame pointer and the slice.
+	c := s.Clone()
+	c.RailItems[0].Frame.Label = "mutated"
+	c.RailItems[1].ID = "mutated"
+	if s.RailItems[0].Frame.Label == "mutated" || s.RailItems[1].ID == "mutated" {
+		t.Error("Clone aliased the rail items")
+	}
+}
+
+func TestRailItemsAbsentLeavesTheCatalogUnchanged(t *testing.T) {
+	s, _, err := convertBytes(t, `{`+railBase+`}`, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ := s.CatalogJSON()
+	if bytes.Contains(data, []byte("rail_items")) {
+		t.Errorf("an empty rail list leaked into the catalog: %s", data)
+	}
+}
+
+func TestRailItemValidation(t *testing.T) {
+	for _, tc := range []struct{ name, items string }{
+		{"foreign id", `[{"id":"other.panel","icon":"P","label":"L","placement":"modal"}]`},
+		{"unqualified id", `[{"id":"panel","icon":"P","label":"L","placement":"modal"}]`},
+		{"empty id", `[{"id":"","icon":"P","label":"L","placement":"modal"}]`},
+		{"bad placement", `[{"id":"p.panel","icon":"P","label":"L","placement":"floating"}]`},
+		{"missing placement", `[{"id":"p.panel","icon":"P","label":"L"}]`},
+		{"missing label", `[{"id":"p.panel","icon":"P","placement":"modal"}]`},
+		{"missing icon", `[{"id":"p.panel","label":"L","placement":"modal"}]`},
+		{"duplicate rail id", `[{"id":"p.panel","icon":"P","label":"L","placement":"modal"},{"id":"p.panel","icon":"Q","label":"M","placement":"stage"}]`},
+		{"not an array", `{"id":"p.panel"}`},
+		{"mistyped field", `[{"id":"p.panel","icon":"P","label":"L","placement":"modal","badge":3}]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if s, _, err := convertBytes(t, `{`+railBase+`,"rail_items":`+tc.items+`}`, true); err == nil {
+				t.Fatalf("accepted: %+v", s.RailItems)
+			}
+		})
+	}
+	t.Run("collides with an action id", func(t *testing.T) {
+		raw := `{` + railBase + `,"actions":[{"id":"p.panel","title":"x"}],"rail_items":[{"id":"p.panel","icon":"P","label":"L","placement":"modal"}]}`
+		if _, _, err := convertBytes(t, raw, true); err == nil {
+			t.Fatal("a rail item and an action share an id and both were accepted")
+		}
+	})
+	t.Run("v1 manifests carry no rail items", func(t *testing.T) {
+		raw := `{"id":"p","name":"P","version":"1","command":["plugin"],"slots":["main-stage"],"rail_items":[{"id":"p.panel","icon":"P","label":"L","placement":"modal"}]}`
+		s, _, err := convertBytes(t, raw, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(s.RailItems) != 0 {
+			t.Fatalf("v1 converter read rail_items: %+v", s.RailItems)
+		}
+	})
+}

@@ -24,6 +24,7 @@ type Spec struct {
 	WorkDir           string             `json:"work_dir"`
 	Actions           []ActionDecl       `json:"actions,omitempty"`
 	Surfaces          []SurfaceDecl      `json:"surfaces,omitempty"`
+	RailItems         []RailItemDecl     `json:"rail_items,omitempty"`
 	FocusBindings     []FocusBinding     `json:"focus_bindings,omitempty"`
 	Subscriptions     []string           `json:"subscriptions,omitempty"`
 	EventsDeclared    []EventDecl        `json:"events_declared,omitempty"`

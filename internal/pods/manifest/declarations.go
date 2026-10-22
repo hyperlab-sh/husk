@@ -20,6 +20,42 @@ type SurfaceDecl struct {
 	Frame *protocol.FrameSpec `json:"frame,omitempty"`
 }
 
+// RailPlacement is how a rail item opens its surface.
+type RailPlacement string
+
+const (
+	// PlacementModal opens the surface as a modal overlay.
+	PlacementModal RailPlacement = "modal"
+	// PlacementFullCanvas replaces the whole canvas with the surface.
+	PlacementFullCanvas RailPlacement = "full-canvas"
+	// PlacementStage opens the surface in the main stage.
+	PlacementStage RailPlacement = "stage"
+)
+
+// Valid reports whether p is a placement the frontend knows how to open.
+func (p RailPlacement) Valid() bool {
+	switch p {
+	case PlacementModal, PlacementFullCanvas, PlacementStage:
+		return true
+	}
+	return false
+}
+
+// RailItemDecl declares one activity-rail item of the plugin. The shape is the
+// legacy rail item minus its shortcut (a key is a keymap binding, never a
+// declaration, see keybindings.md). The id is "<plugin_id>.<name>" and doubles
+// as the action id that activates the item. Frame is the chrome drawn around
+// the surface the item opens; absent means a blank canvas.
+type RailItemDecl struct {
+	ID          string              `json:"id"`
+	Icon        string              `json:"icon"`
+	Badge       string              `json:"badge,omitempty"`
+	Label       string              `json:"label"`
+	Placement   RailPlacement       `json:"placement"`
+	Description string              `json:"description,omitempty"`
+	Frame       *protocol.FrameSpec `json:"frame,omitempty"`
+}
+
 // FocusBinding is a focus-local suggestion; Services alone parses key spelling.
 type FocusBinding struct {
 	Key    string          `json:"key,omitempty"`

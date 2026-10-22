@@ -156,6 +156,20 @@ func convert(src Source, modern bool) (*Spec, []Warning, error) {
 				s.HookRegistrations = append(s.HookRegistrations, HookRegistration{ID: id})
 			}
 		}
+		var rails []struct {
+			RailItemDecl
+			Shortcut string `json:"shortcut"`
+		}
+		if err := decodeField(fields, "rail_items", &rails); err != nil {
+			return nil, nil, fmt.Errorf("rail_items: %w", err)
+		}
+		for i, r := range rails {
+			s.RailItems = append(s.RailItems, r.RailItemDecl)
+			if r.Shortcut != "" {
+				s.Suggestions = append(s.Suggestions, Suggestion{Key: r.Shortcut, Action: r.ID})
+				warnings = append(warnings, Warning{Code: "suggestion_ignored", Field: "rail_items", Index: i, Message: "rail item shortcut is a suggestion only; bind a key in a keymap layer"})
+			}
+		}
 		var bindings []struct {
 			FocusBinding
 			Plugin  json.RawMessage `json:"plugin"`
@@ -267,6 +281,19 @@ func validateDeclarations(s *Spec) error {
 		}
 		if a.ArgsSchema != nil && !object(a.ArgsSchema) {
 			return errors.New("args_schema must be an object")
+		}
+	}
+	for _, item := range s.RailItems {
+		// A rail item is addressable as an action by its id, so it shares the
+		// action id space.
+		if err := check("action", item.ID); err != nil {
+			return fmt.Errorf("rail item: %w", err)
+		}
+		if item.Label == "" || item.Icon == "" {
+			return fmt.Errorf("rail item %q needs an icon and a label", item.ID)
+		}
+		if !item.Placement.Valid() {
+			return fmt.Errorf("rail item %q: unknown placement %q (want modal|full-canvas|stage)", item.ID, item.Placement)
 		}
 	}
 	for _, e := range s.EventsDeclared {
