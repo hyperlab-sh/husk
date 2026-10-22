@@ -100,6 +100,7 @@ type Entry struct {
 
 func ValidName(s string) error
 func RuntimeDir() (string, error)             // resolves and verifies, creates 0700
+func CheckRuntimeDir(dir string) error        // same private-directory rule, no fallback
 func SocketPath(dir, id string) string
 func Register(dir string, e Entry) error      // atomic: write temp, rename
 func Unregister(dir, id string) error         // removes entry then socket; ENOENT is not an error
@@ -121,7 +122,7 @@ func Resolve(opts ResolveOptions) (Resolved, error) // implements the order belo
 
 1. Validate the name, if given. Resolve and verify the runtime directory.
 2. `bind` the socket at `<id>.sock`. `bind` is the atomic claim.
-   - On `EADDRINUSE`: dial the existing socket and send `session.ping`. If it answers, fail with `instance name taken`. If the dial fails with `ECONNREFUSED`, unlink the stale socket and bind again once.
+   - On `EADDRINUSE`: dial the existing socket and send `session.ping`. If it answers, fail with `instance name taken`. If the dial fails with `ECONNREFUSED`, take an advisory flock on the existing runtime-directory FD, re-probe under the lock, then unlink the still-refused stale socket and bind again once before unlocking. A live replacement is never unlinked. The first bind remains lock-free, and no lock file is created.
 3. `chmod 0600` the socket and start listening. The peer-uid check on accept is unchanged from today.
 4. Write `<id>.json` with `Register`. An entry exists only once the socket listens, so a registered entry means ready.
 5. Hand the socket path and id to the Wrapper for plugin environments.
@@ -281,7 +282,7 @@ A plugin script can branch on 3, 4 and 5 without parsing text.
 | Name held by a dead instance | Server at `bind` | Stale socket unlinked, start continues | Nothing |
 | Runtime directory unsafe (wrong owner, group-writable, symlink) | `instance.RuntimeDir` | Instance refuses to start; CLI refuses to read | `husk: runtime dir <path> is not private to uid <uid>` |
 | Socket path too long | Server before `bind` | Start aborts | Message names the length, the limit and the directory used |
-| Registration write fails | Server | Instance stays up unregistered if started with plugins from `--plugin`; logs and toasts a warning, since flag and env resolution still work through `--socket` | Toast `not discoverable: <error>` |
+| Registration write fails | Server | `Start` fails, closes and removes its newly bound socket, and returns the error; no listening-but-undiscoverable instance is kept up | Startup error naming the registration failure |
 | Zero instances (discovery) | CLI | Exit 3 | `husk: no instance is running` |
 | Several live instances (discovery) | CLI | Exit 4, prints the list | The list above |
 | Entry stale (`ECONNREFUSED`, `ENOENT`) | CLI | Entry file removed, socket left alone, entry skipped; exit 3 if explicitly targeted | `husk: instance "notes" is not running (stale entry removed)` |

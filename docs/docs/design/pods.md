@@ -71,12 +71,12 @@ const (
     CallerPlugin                       // valid plugin token
 )
 
-// Handler serves one method family. It runs on the connection's goroutine and
+// Handler serves one method family. It runs on connection workers and
 // must not block the Bubble Tea loop; it posts to the loop and waits on ctx.
 // ctx is cancelled when the connection closes. Both values are
 // protocol.Message: a request in, a reply out.
 type Handler interface {
-    Serve(ctx context.Context, c Caller, req protocol.Message) protocol.Message
+    Serve(ctx context.Context, c Caller, req protocol.Message, notifier Notifier) protocol.Message
 }
 
 // Notifier lets a handler push notifications on the caller's connection
@@ -91,6 +91,7 @@ type Config struct {
     Entry      instance.Entry // what Start registers once the socket listens
     Tokens     TokenResolver // Pods' token table
     Post       func(any) bool // posts a host notice to the loop; false after shutdown
+    Clock      protocol.Clock // queue watchdogs, diagnostic windows and uptime; nil is system time
 }
 
 type TokenResolver interface {
@@ -114,8 +115,8 @@ type Server interface {
 - Socket: `<base>/<instance-id>.sock`, mode `0600` (chmod after bind, as `listenPrivate` does today).
 - Logs: `$XDG_STATE_HOME/husk/logs/<instance-id>/<plugin-id>.log`, one per launch, mode `0600`, opened with `O_EXCL` as today, through `Store.OpenPluginLog` ([Store](store.md)); the runtime directory holds sockets and entries only.
 - Instance id: the pid by default, or the `--instance` name, validated by `instance.ValidName` (`[a-z0-9][a-z0-9-]*`, at most 32 bytes, never all digits, so a name never collides with a pid entry).
-- Claim: `bind` at `<base>/<instance-id>.sock`. On `EADDRINUSE` the Server dials the socket and sends `session.ping` with a 500 ms deadline. A reply means the name is in use: start fails with `instance "<id>" is already running`. `ECONNREFUSED` means a stale socket: the Server unlinks it and binds once more.
-- Registration: once listening, the Server writes `<base>/<instance-id>.json` with `instance.Register` (the entry shape is in [Instances](instances.md)). An entry therefore always means ready.
+- Claim: `bind` at `<base>/<instance-id>.sock`. On `EADDRINUSE` the Server dials the socket and sends `session.ping` with a 500 ms deadline. A reply means the name is in use: start fails with `instance "<id>" is already running`. `ECONNREFUSED` starts stale recovery: take an advisory flock on the existing runtime-directory FD, re-probe under that lock, and unlink/rebind once only if it is still refused. A newly live socket is never unlinked. The normal first bind stays lock-free; recovery creates no lock file. `gofrs/flock` opens the directory read-only on Linux/macOS.
+- Registration: once listening, the Server writes `<base>/<instance-id>.json` with `instance.Register` (the entry shape is in [Instances](instances.md)). An entry therefore always means ready. A registration failure is fatal: `Start` removes its newly claimed socket, closes the listener and returns the error; it never keeps an undiscoverable listener up.
 - On `Close` the Server calls `instance.Unregister`, which removes the entry and the socket. The base directory is never removed.
 
 #### What is served
@@ -160,8 +161,8 @@ Scope of the guarantee: identity is attribution for permission policy between pl
 
 1. Every accepted connection passes the peer uid check (`SO_PEERCRED` on Linux, `LOCAL_PEERCRED` on macOS) before a byte is read; unreadable credentials or a foreign uid close it. Platforms without a credential API refuse every connection.
 2. The Server never calls a handler on the loop goroutine and never writes a socket from the loop. Replies go through the bounded queued writer (`protocol.NewQueuedWriter`, today's `huskipc.NewQueuedConnWriter`, capacity 1,024, 5 s write timeout).
-3. Requests on one connection may be pipelined; replies carry the request id and may arrive out of order.
-4. Every request gets exactly one reply, unless the connection closes first. Closing the connection cancels the `ctx` of its in-flight handlers.
+3. Requests on one connection may be pipelined; replies carry the request id and may arrive out of order. At most 64 request handlers run per connection. The reader never waits on admission: a request arriving while all slots are taken receives `busy` with `data.reason: "too_many_in_flight"` immediately, so peer EOF can still be read.
+4. Every request gets exactly one reply (including an admission refusal), unless the connection closes first. Closing the connection cancels the `ctx` of every in-flight handler. Notifications on one connection are handled in order by a separate worker; they do not consume request slots. Its independent 64-message cap includes the active notification. Overflow sends `protocol.error` with `busy` / `too_many_in_flight`, never blocks the reader, and disconnect cancels its context.
 5. A malformed or oversized line is answered as [Protocol](protocol.md) rules: an error reply when the request `id` was readable, otherwise a `protocol.error` notification. The connection stays open.
 6. The Server knows method prefixes, not method semantics.
 
@@ -175,6 +176,7 @@ type Source struct {
     Path  string // the manifest file, or "" for an implicit plugin
     Dir   string // absolute directory the plugin lives in
     Bytes []byte // file contents, nil for an implicit plugin
+    Command []string // implicit argv; nil when Path names a manifest
 }
 
 // Converter adapts one manifest format to Husk's Spec.
@@ -228,7 +230,7 @@ Conversion rules:
 3. Plugin ids match `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`. Every declared id (action, event, hook, published slot) is `<plugin-id>.<name>`, validated as today.
 4. A plugin whose `Protocol` major differs from the host's fails conversion with `plugin speaks protocol N, host speaks M`. v1 manifests count as the current major only if the plugin passes the launch; they cannot state a version, so the v1 converter sets the host's major.
 5. Conversion errors fail that plugin only. Warnings go to the log.
-6. Focus-local bindings may only target this plugin's own actions. A binding to another plugin's action is dropped with a warning. Global bindings do not exist in any manifest format.
+6. Focus-local bindings may target this plugin's own actions or `husk.*` host actions. A binding to another plugin's action is dropped with a warning (`foreign_action`); an unscoped or foreign-surface binding is dropped (`global_not_allowed`). `Spec.FocusBindings` and the `focus-keymap` document's `bind` hold only bindings that pass these conversion checks. The document is `{version: 1, bind: [...]}` with optional `problems: [{index, code, message}]`; Services imports conversion problems under `plugin:<id>`. Key spellings pass through unchanged: only Services parses and reports unparsable keys. Global bindings do not exist in any manifest format.
 
 What the Pod does with a `Spec`, in order, on launch:
 
@@ -274,7 +276,7 @@ type Preparation struct {
 
 `Host.Stop` marks shutdown on the loop and returns a worker command. The caller closes Calls and the Server first; that command closes stdin queues, cancels the shared process context, signals groups, and uses one absolute stop deadline plus one absolute kill-wait deadline across the whole set. Providers must keep `Post` callable, or make it return without delivery, after the UI stops; a blocked posting callback must not prevent process cleanup.
 
-The initial `pods/manifest.Spec` contains only ID, name, version, description, protocol, argv and work directory. The converter task extends it with declarations. Explicit relative executable paths resolve against the absolute manifest directory; later relative arguments resolve through `cmd.Dir`, and bare executable names retain PATH lookup.
+`pods/manifest.Spec` contains process fields and every plain declaration type above. `Spec.Clone` detaches all mutable declaration data. `CatalogJSON` produces the normalized `plugins` document (identity/display and declaration fields, no protocol/argv/work directory); `FocusKeymapJSON` produces the `focus-keymap` document. These methods are the serialization seam for `Loop.Prepare`; this package does not implement Store/Services/State preparation itself. Setting keys normalize once to `plugins.<exact-plugin-id>.<local-key>`: plugin ids are never case-folded; only the local key follows lowercase settings grammar. Explicit relative executable paths resolve against the absolute manifest directory; later relative arguments resolve through `cmd.Dir`, and bare executable names retain PATH lookup.
 
 ### Wrapper
 
@@ -418,7 +420,8 @@ Decoration takes one surface's content (the cells or lines the plugin supplied t
 | Stdin queue | 1,024 messages | unchanged; a slow plugin falls this far behind before it is killed |
 | Stdin and reply write timeout | 5 s | unchanged; a stalled reader is detected without freezing the loop |
 | Reply queue per socket connection | 1,024 messages | same writer, same reasoning |
-| In-flight requests per socket connection | 64 | stops one client from flooding the loop; the 65th waits for a slot |
+| In-flight requests per socket connection | 64 | Reader never blocks on admission; the 65th receives `busy` / `too_many_in_flight`, leaving EOF detection able to cancel all handlers |
+| Pending notifications per socket connection | 64, including the active notification | One ordered worker, reader never blocks; excess gets `protocol.error` / `busy` / `too_many_in_flight` |
 | Concurrent socket connections | 256 | above any real count of plugins plus CLI calls; past it, accept closes the newest |
 | Stale-instance ping | 500 ms | a live instance answers `session.ping` without touching the loop |
 | Stop grace (SIGTERM to SIGKILL) | 2 s | unchanged |
