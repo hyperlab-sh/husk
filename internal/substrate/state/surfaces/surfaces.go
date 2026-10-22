@@ -1,146 +1,310 @@
-// Package surfaces defines the Pod-owned State slices for surface occupancy
-// and published-slot contributions: the State side of the registry split in
-// docs/docs/design/state.md, "Level 2: Migration from today".
+// Package surfaces defines the State slices of the Surfaces area: the
+// per-plugin occupancy and contribution declarations and the husk.surfaces
+// resolution the host renders from (docs/docs/design/state.md, "Level 2:
+// Migration from today").
 //
-// Each Pod registers one occupants slice and one contributions slice for its
-// plugin, at launch and before the plugin starts, the same way it registers
-// <plugin_id>.state. The Pod holds the write capability; the host and every
-// reader else read the snapshots. A Pod teardown unregisters its slices, so
-// a crashed or removed plugin's occupancy and contributions disappear through
-// the normal owner-cleanup path.
+// The declaration slices <plugin_id>.occupants and <plugin_id>.contributions
+// are written only by the owning Pod — never by the plugin, whose requests
+// the Server refuses on those namespaces — one slice per plugin, registered
+// at launch next to <plugin_id>.state. Their value types are aliases of the
+// frozen internal/host/contracts shapes. A Pod teardown unregisters them, so
+// a crashed or removed plugin's declarations disappear through the normal
+// owner-cleanup path.
 //
-// The value shapes are the ones state.md gives for husk.surfaces occupancy
-// and published-slot contributions; if a later unit needs different fields it
-// changes internal/host/contracts, not this package.
+// husk.surfaces is the resolution: one occupant per surface (first claim
+// wins, conflicts refused), the combined per-slot contribution order across
+// plugins in arrival order, entries of a removed owner's slots dropped, plus
+// visibility, the active placement and overlays. Only the Surfaces engine
+// writes it, and the host renders only from it; the engine itself is the
+// stem-surfaces unit's to build — this package defines the slice and its
+// value shape.
 package surfaces
 
 import (
+	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
+	"github.com/hyperlab-sh/husk/internal/host/contracts"
 	"github.com/hyperlab-sh/husk/internal/substrate/state"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
-// Occupant is the plugin id occupying one surface. The occupants slice value
-// is a JSON object mapping a surface name to its Occupant, exactly the
-// "occupants" shape in state.md:
-//
-//	{"sidebar-list":"example.files","main-stage":"example.editor"}
-type Occupant string
+// Occupant is one surface a plugin claims for itself, the frozen contracts
+// shape.
+type Occupant = contracts.Occupant
 
-// Occupants is the value shape of an occupants slice: the owning plugin's
-// claims, surface name by occupant. A pod only ever records its own claims,
-// so every value names the slice's owner (Validate).
-type Occupants map[string]Occupant
+// Contribution is one entry a plugin puts in a published slot, the frozen
+// contracts shape.
+type Contribution = contracts.Contribution
 
-// Contribution is one entry in a published slot's contribution list, the
-// shape state.md gives:
-//
-//	{"id":"example.git.branch","plugin":"example.git","label":"main"}
-type Contribution struct {
-	// ID is the contribution's id, "<plugin_id>.<name>" like today's
-	// contribute payloads.
-	ID string `json:"id"`
-	// Plugin is the contributing plugin; within one slice always the owner.
-	Plugin string `json:"plugin"`
-	// Label is the short text the host surface shows.
-	Label string `json:"label"`
-}
+// Occupants is the value shape of an occupants declaration slice: the
+// owning plugin's claims, one Occupant per claimed surface, keyed by
+// surface. A surface key with its own Occupant.Surface repeats by design,
+// keeping the frozen contracts shape as the entry type.
+type Occupants map[protocol.SurfaceID]Occupant
 
-// Contributions is the value shape of a contributions slice: the owning
-// plugin's contributions, grouped by the id of the published slot they
-// target. Each list keeps arrival order; Upsert replaces in place.
+// Contributions is the value shape of a contributions declaration slice:
+// the owning plugin's entries grouped by target slot, arrival order within
+// each slot, exactly the list today's registry keeps per slot for one
+// plugin. A repeated contribution id replaces the earlier entry of its slot
+// in place; ids are unique per slot, so a foreign plugin's id cannot
+// collide inside one slice.
 type Contributions map[string][]Contribution
 
-// OccupantsNamespace returns the occupants slice namespace of pluginID:
+// SurfacesNamespace is the namespace of the resolution slice the host
+// renders from.
+const SurfacesNamespace = "husk.surfaces"
+
+// Surfaces is the value shape of husk.surfaces, the Stem-owned resolution
+// slice. Only the Surfaces engine writes it; every other module and every
+// plugin reads snapshots.
+type Surfaces struct {
+	// Occupants maps each occupied surface to its one occupant: the first
+	// claim wins and conflicting later claims are refused.
+	Occupants map[protocol.SurfaceID]Occupant `json:"occupants"`
+	// Contributions maps each published slot to its entries in arrival
+	// order across plugins; a removed owner's slot entries are dropped.
+	Contributions map[string][]Contribution `json:"contributions"`
+	// Visible lists the surfaces the layout currently shows.
+	Visible []protocol.SurfaceID `json:"visible"`
+	// Placement is the active placement.
+	Placement Placement `json:"placement"`
+	// Overlays are the active host overlays.
+	Overlays Overlays `json:"overlays"`
+}
+
+// Placement is the active placement, the shape state.md's example gives.
+type Placement struct {
+	RailItem string `json:"rail_item"`
+	Kind     string `json:"kind"`
+}
+
+// Overlays are the active host overlays.
+type Overlays struct {
+	Modal        ModalOverlay `json:"modal"`
+	Palette      bool         `json:"palette"`
+	SlotExplorer bool         `json:"slot_explorer"`
+}
+
+// ModalOverlay is the modal overlay: which plugin's rail item is open.
+type ModalOverlay struct {
+	Plugin   string `json:"plugin"`
+	RailItem string `json:"rail_item"`
+}
+
+// OccupantsNamespace returns the occupants declaration namespace of pluginID:
 // "<plugin_id>.occupants". The plugin id is the namespace owner, so the Pod
 // that registers it is its sole writer.
 func OccupantsNamespace(pluginID string) string {
 	return pluginID + ".occupants"
 }
 
-// ContributionsNamespace returns the contributions slice namespace of
+// ContributionsNamespace returns the contributions declaration namespace of
 // pluginID: "<plugin_id>.contributions".
 func ContributionsNamespace(pluginID string) string {
 	return pluginID + ".contributions"
 }
 
-// RegisterOccupants registers pluginID's occupants slice: instance scope, not
-// persistent, initial {}. The caller (the Pod) keeps the returned slice
-// private and applies its plugin's claim requests through it. Registration
+// RegisterOccupants registers pluginID's occupants declaration slice:
+// instance scope, not persistent, initial {}. The Pod keeps the returned
+// wrapper private and applies its plugin's claim requests through it; there
+// is no way to write the slice without owner-parity validation. Registration
 // fails with state.ErrInvalidSpec for the reserved core owner "husk" and
 // otherwise defers to state.Register's spec validation.
-func RegisterOccupants(s *state.State, pluginID string) (*state.Slice[Occupants], error) {
+func RegisterOccupants(s *state.State, pluginID string) (*OccupantsSlice, error) {
 	if pluginID == state.OwnerHusk {
 		return nil, fmt.Errorf("%w: occupants: %q is the reserved core owner", state.ErrInvalidSpec, pluginID)
 	}
-	return state.Register(s, state.Spec{
+	slice, err := state.Register(s, state.Spec{
 		Namespace: OccupantsNamespace(pluginID),
 		Owner:     pluginID,
 		Scope:     state.ScopeInstance,
 	}, Occupants{})
+	if err != nil {
+		return nil, err
+	}
+	return &OccupantsSlice{slice: slice, pluginID: pluginID}, nil
 }
 
-// RegisterContributions registers pluginID's contributions slice: instance
-// scope, not persistent, initial {}. The same ownership rules as
-// RegisterOccupants apply.
-func RegisterContributions(s *state.State, pluginID string) (*state.Slice[Contributions], error) {
+// RegisterContributions registers pluginID's contributions declaration
+// slice: instance scope, not persistent, initial {}. The same ownership
+// rules as RegisterOccupants apply.
+func RegisterContributions(s *state.State, pluginID string) (*ContributionsSlice, error) {
 	if pluginID == state.OwnerHusk {
 		return nil, fmt.Errorf("%w: contributions: %q is the reserved core owner", state.ErrInvalidSpec, pluginID)
 	}
-	return state.Register(s, state.Spec{
+	slice, err := state.Register(s, state.Spec{
 		Namespace: ContributionsNamespace(pluginID),
 		Owner:     pluginID,
 		Scope:     state.ScopeInstance,
 	}, Contributions{})
+	if err != nil {
+		return nil, err
+	}
+	return &ContributionsSlice{slice: slice, pluginID: pluginID}, nil
 }
 
-// Upsert replaces c's earlier entry with the same ID in place, or appends c
-// at the end of publication's list, and reports whether the value changed.
-// Replacement in place is today's contribute behaviour: a repeated
-// contribution id from the same plugin updates its entry without moving it,
-// so arrival order is stable. Upsert mutates cs; use it inside
-// Slice[Contributions].Update, which commits only changed encodings.
-func (cs Contributions) Upsert(publication string, c Contribution) bool {
-	list := cs[publication]
-	for i, old := range list {
+// RegisterSurfaces registers the husk.surfaces resolution slice: owner husk,
+// instance scope, not persistent, initial {}. Only the Surfaces engine
+// (stem-surfaces) holds the returned slice and writes it; this registration
+// is part of the engine's setup, and no plugin or Pod ever receives it.
+func RegisterSurfaces(s *state.State) (*state.Slice[Surfaces], error) {
+	return state.Register(s, state.Spec{
+		Namespace: SurfacesNamespace,
+		Owner:     state.OwnerHusk,
+		Scope:     state.ScopeInstance,
+	}, Surfaces{})
+}
+
+// OccupantsSlice is the Pod's write handle to its occupants declaration
+// slice. Every write runs Validate first, so nothing outside the owning
+// plugin's authority can commit; reads are snapshot reads. No raw
+// *state.Slice escapes this package.
+type OccupantsSlice struct {
+	slice    *state.Slice[Occupants]
+	pluginID string
+}
+
+// Namespace returns the slice's namespace, also after unregistration. The
+// Pod's request check compares a plugin's requested namespace against it,
+// never the owner string: a plugin has no namespace it may write here.
+func (s *OccupantsSlice) Namespace() string {
+	return s.slice.Namespace()
+}
+
+// Get returns an independently decoded current value. Callers treat it as
+// read-only.
+func (s *OccupantsSlice) Get() Occupants {
+	return s.slice.Get()
+}
+
+// Set validates occupants against the owning plugin and commits them. An
+// invalid value is refused with no effect on value, revision or snapshot.
+func (s *OccupantsSlice) Set(occupants Occupants) error {
+	if err := occupants.Validate(s.pluginID); err != nil {
+		return err
+	}
+	return s.slice.Set(occupants)
+}
+
+// Unregister removes the slice, keeping the last revision as a tombstone.
+// Repeated calls are harmless. This is the owner-cleanup path: the Pod tears
+// its plugin's declarations down with it.
+func (s *OccupantsSlice) Unregister() {
+	s.slice.Unregister()
+}
+
+// ContributionsSlice is the Pod's write handle to its contributions
+// declaration slice, with the same validated-write rules as OccupantsSlice.
+type ContributionsSlice struct {
+	slice    *state.Slice[Contributions]
+	pluginID string
+}
+
+// Namespace returns the slice's namespace, also after unregistration; the
+// Pod's request check compares against it, never the owner string.
+func (s *ContributionsSlice) Namespace() string {
+	return s.slice.Namespace()
+}
+
+// Get returns an independently decoded current value. Callers treat it as
+// read-only.
+func (s *ContributionsSlice) Get() Contributions {
+	return s.slice.Get()
+}
+
+// Set validates contributions against the owning plugin and commits them.
+// An invalid value is refused with no effect on value, revision or snapshot.
+func (s *ContributionsSlice) Set(contributions Contributions) error {
+	if err := contributions.Validate(s.pluginID); err != nil {
+		return err
+	}
+	return s.slice.Set(contributions)
+}
+
+// Upsert validates c against the owning plugin and replaces its earlier
+// entry with the same ID in c's slot in place, or appends it to that slot's
+// list, today's contribute behaviour for one plugin's own lists. An
+// identical entry commits nothing; an invalid one is refused with no effect.
+// Mutations run on the loop goroutine, so read-modify-write is race-free.
+func (s *ContributionsSlice) Upsert(slot string, c Contribution) error {
+	v := s.Get()
+	if v == nil {
+		v = Contributions{}
+	}
+	if !v.Upsert(slot, c) {
+		return nil
+	}
+	return s.Set(v)
+}
+
+// Unregister removes the slice, keeping the last revision as a tombstone.
+// Repeated calls are harmless.
+func (s *ContributionsSlice) Unregister() {
+	s.slice.Unregister()
+}
+
+// Upsert replaces c's earlier entry with the same ID in c's slot in place,
+// or appends c to that slot's list, and reports whether the value changed.
+// Replacement in place keeps arrival order stable, mirroring today's
+// contribute for one plugin's own list; ids stay scoped to their slot, as in
+// the registry.
+func (cs *Contributions) Upsert(slot string, c Contribution) bool {
+	for i, old := range (*cs)[slot] {
 		if old.ID == c.ID {
 			if old == c {
 				return false
 			}
-			list[i] = c
+			(*cs)[slot][i] = c
 			return true
 		}
 	}
-	cs[publication] = append(list, c)
+	(*cs)[slot] = append((*cs)[slot], c)
 	return true
 }
 
-// Validate checks the slice's owner-parity invariants: every recorded
-// occupant is pluginID itself, since a pod records only its own claims. An
-// occupant naming another plugin would mean a pod wrote past its authority.
+// Validate checks the slice's owner-parity invariants: every declaration
+// names the owning plugin and a defined host layout surface. Anything else
+// would mean the Pod wrote past its authority or accepted an unknown
+// surface, which today's claimSurface refuses. Surfaces are visited in
+// sorted order, so the same invalid value refuses with the same message.
 func (o Occupants) Validate(pluginID string) error {
-	for surface, occ := range o {
-		if occ != Occupant(pluginID) {
-			return fmt.Errorf("surfaces: occupant of %q is %q, not the owner %q", surface, occ, pluginID)
+	for _, surface := range slices.Sorted(maps.Keys(o)) {
+		occ := o[surface]
+		if occ.Plugin != pluginID {
+			return fmt.Errorf("surfaces: occupant of %q is %q, not the owner %q", surface, occ.Plugin, pluginID)
+		}
+		if !occ.Surface.Valid() {
+			return fmt.Errorf("surfaces: occupant names %q, not a defined host layout surface", occ.Surface)
 		}
 	}
 	return nil
 }
 
-// Validate checks the slice's owner-parity invariants: every contribution's
-// Plugin is pluginID, and its ID is that plugin's own "<plugin_id>.<name>"
-// with a non-empty dot-free name — the same rule today's contribute enforces
-// with ownID. A foreign plugin or id would mean a pod wrote past its
-// authority.
+// Validate checks the slice's owner-parity invariants: every entry names the
+// owning plugin, its ID and OnClick are that plugin's own
+// "<plugin_id>.<name>" with a non-empty dot-free name (the rule today's
+// contribute enforces with ownID), and no entry targets an empty slot. The
+// remaining registry checks — the slot must exist and must not be the
+// plugin's own — need the declaration catalog and stay Pod-side (see
+// state.md, "Pod responsibilities").
 func (cs Contributions) Validate(pluginID string) error {
-	for publication, list := range cs {
-		for _, c := range list {
+	for _, slot := range slices.Sorted(maps.Keys(cs)) {
+		for _, c := range cs[slot] {
 			if c.Plugin != pluginID {
-				return fmt.Errorf("surfaces: contribution %q in %q names plugin %q, not the owner %q", c.ID, publication, c.Plugin, pluginID)
+				return fmt.Errorf("surfaces: contribution %q names plugin %q, not the owner %q", c.ID, c.Plugin, pluginID)
 			}
 			if !ownName(pluginID, c.ID) {
 				return fmt.Errorf("surfaces: contribution id %q must use %s.<name> with a non-empty dot-free name", c.ID, pluginID)
+			}
+			if c.OnClick != "" && !ownName(pluginID, c.OnClick) {
+				return fmt.Errorf("surfaces: contribution on_click %q must be %s.<name>, the plugin's own action", c.OnClick, pluginID)
+			}
+			if c.Slot == "" {
+				return errors.New("surfaces: contribution names no slot")
 			}
 		}
 	}

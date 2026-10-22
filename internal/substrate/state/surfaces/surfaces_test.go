@@ -3,10 +3,21 @@ package surfaces_test
 import (
 	"encoding/json"
 	"errors"
+	"reflect"
+	"strings"
 	"testing"
 
+	"github.com/hyperlab-sh/husk/internal/host/contracts"
 	"github.com/hyperlab-sh/husk/internal/substrate/state"
 	"github.com/hyperlab-sh/husk/internal/substrate/state/surfaces"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
+)
+
+// The declaration value types are the frozen contracts shapes: identical by
+// definition, so an adapter can hand one to the other without conversion.
+var (
+	_ contracts.Occupant     = surfaces.Occupant{}
+	_ contracts.Contribution = surfaces.Contribution{}
 )
 
 const (
@@ -15,7 +26,7 @@ const (
 	pluginGit    = "example.git"
 )
 
-func registerBoth(t *testing.T, s *state.State, pluginID string) (*state.Slice[surfaces.Occupants], *state.Slice[surfaces.Contributions]) {
+func registerBoth(t *testing.T, s *state.State, pluginID string) (*surfaces.OccupantsSlice, *surfaces.ContributionsSlice) {
 	t.Helper()
 	occ, err := surfaces.RegisterOccupants(s, pluginID)
 	if err != nil {
@@ -49,33 +60,58 @@ func TestRegistrationShapesAndNamespaces(t *testing.T) {
 		entry.Persistent || entry.Hydrated || string(entry.Value) != "{}" {
 		t.Fatalf("occupants entry: %+v", entry)
 	}
-	// The shapes state.md gives, verbatim, both round-trip as JSON objects.
-	specOccupants := surfaces.Occupants{"sidebar-list": "example.files", "main-stage": pluginEditor}
-	if err := occ.Set(specOccupants); err != nil {
+
+	// The contracts shapes, verbatim: a claim names its surface and its
+	// plugin; a contribution names slot, id, plugin and, when set, label and
+	// on_click.
+	if err := occ.Set(surfaces.Occupants{
+		protocol.SurfaceSidebarList: {Surface: protocol.SurfaceSidebarList, Plugin: pluginEditor},
+		protocol.SurfaceMainStage:   {Surface: protocol.SurfaceMainStage, Plugin: pluginEditor},
+	}); err != nil {
 		t.Fatalf("Set occupants: %v", err)
 	}
 	raw, err := json.Marshal(occ.Get())
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"main-stage":"example.editor","sidebar-list":"example.files"}`
+	want := `{"main-stage":{"surface":"main-stage","plugin":"example.editor"},` +
+		`"sidebar-list":{"surface":"sidebar-list","plugin":"example.editor"}}`
 	if string(raw) != want {
-		t.Fatalf("occupants shape = %s, want %s", raw, want)
+		t.Fatalf("occupants value = %s, want %s", raw, want)
 	}
 
-	specContributions := surfaces.Contributions{
-		"example.editor.toolbar": {{ID: "example.git.branch", Plugin: pluginGit, Label: "main"}},
-	}
-	if err := con.Set(specContributions); err != nil {
+	if err := con.Set(surfaces.Contributions{
+		"example.editor.toolbar": {{
+			Slot:    "example.editor.toolbar",
+			ID:      "example.editor.branch",
+			Plugin:  pluginEditor,
+			Label:   "main",
+			OnClick: "example.editor.checkout",
+		}},
+	}); err != nil {
 		t.Fatalf("Set contributions: %v", err)
 	}
 	raw, err = json.Marshal(con.Get())
 	if err != nil {
 		t.Fatal(err)
 	}
-	want = `{"example.editor.toolbar":[{"id":"example.git.branch","plugin":"example.git","label":"main"}]}`
+	want = `{"example.editor.toolbar":[{"slot":"example.editor.toolbar","id":"example.editor.branch","plugin":"example.editor","label":"main","on_click":"example.editor.checkout"}]}`
 	if string(raw) != want {
-		t.Fatalf("contributions shape = %s, want %s", raw, want)
+		t.Fatalf("contributions value = %s, want %s", raw, want)
+	}
+
+	// label and on_click are omitted when empty, as contracts declares.
+	if err := con.Set(surfaces.Contributions{
+		"example.editor.status": {{Slot: "example.editor.status", ID: "example.editor.count", Plugin: pluginEditor}},
+	}); err != nil {
+		t.Fatalf("Set bare contribution: %v", err)
+	}
+	raw, err = json.Marshal(con.Get())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(raw); got != `{"example.editor.status":[{"slot":"example.editor.status","id":"example.editor.count","plugin":"example.editor"}]}` {
+		t.Fatalf("bare contribution = %s, want label and on_click omitted", got)
 	}
 }
 
@@ -87,81 +123,94 @@ func TestRegistrationRefusesReservedCoreOwner(t *testing.T) {
 	if _, err := surfaces.RegisterContributions(s, state.OwnerHusk); !errors.Is(err, state.ErrInvalidSpec) {
 		t.Fatalf("RegisterContributions(husk) = %v, want ErrInvalidSpec", err)
 	}
-	if _, err := surfaces.RegisterOccupants(s, "bad id"); !errors.Is(err, state.ErrInvalidSpec) {
-		t.Fatalf("RegisterOccupants(bad id) = %v, want ErrInvalidSpec", err)
+
+	occ, _ := registerBoth(t, s, pluginFiles)
+	if _, err := surfaces.RegisterSurfaces(s); err != nil {
+		t.Fatalf("RegisterSurfaces: %v", err)
 	}
-	if _, err := surfaces.RegisterOccupants(s, pluginEditor); err != nil {
-		t.Fatal(err)
+	if _, err := surfaces.RegisterSurfaces(s); !errors.Is(err, state.ErrDuplicate) {
+		t.Fatalf("second RegisterSurfaces = %v, want ErrDuplicate", err)
 	}
-	if _, err := surfaces.RegisterOccupants(s, pluginEditor); !errors.Is(err, state.ErrDuplicate) {
-		t.Fatalf("duplicate = %v, want ErrDuplicate", err)
+	if _, err := surfaces.RegisterOccupants(s, pluginFiles); !errors.Is(err, state.ErrDuplicate) {
+		t.Fatalf("duplicate occupants = %v, want ErrDuplicate", err)
+	}
+	if _, ok := s.Get(occ.Namespace()); !ok {
+		t.Fatal("failed registration removed the existing slice")
 	}
 }
 
-// TestOwnerCheckedWrites pins the authority model: a Pod's slice handles are
-// namespace-bound, so one Pod's writes can never land in another Pod's
-// occupant slice, and a crashed Pod's unregister leaves the other Pod's
-// slices intact.
-func TestOwnerCheckedWrites(t *testing.T) {
+// TestValidatedWrites pins the validated-write rule: the wrappers are the
+// only write path, every write runs owner-parity validation, and a refused
+// write leaves value, revision and snapshot untouched. This is also the
+// plugin-request denial path: a plugin cannot write .occupants or
+// .contributions, and its Pod's check compares the requested namespace
+// against these wrappers' Namespace(), never an owner string.
+func TestValidatedWrites(t *testing.T) {
 	s := state.New(state.Options{})
-	filesOcc, filesCon := registerBoth(t, s, pluginFiles)
-	editorOcc, _ := registerBoth(t, s, pluginEditor)
+	occ, con := registerBoth(t, s, pluginFiles)
 
-	if err := filesOcc.Set(surfaces.Occupants{"sidebar-list": pluginFiles}); err != nil {
-		t.Fatal(err)
+	refusals := []struct {
+		name  string
+		write func() error
+	}{
+		{"occupant of another plugin", func() error {
+			return occ.Set(surfaces.Occupants{protocol.SurfaceMainStage: {Surface: protocol.SurfaceMainStage, Plugin: pluginEditor}})
+		}},
+		{"occupant of an unknown surface", func() error {
+			return occ.Set(surfaces.Occupants{"not-a-surface": {Surface: "not-a-surface", Plugin: pluginFiles}})
+		}},
+		{"contribution of another plugin", func() error {
+			return con.Upsert("example.editor.toolbar", surfaces.Contribution{Slot: "example.editor.toolbar", ID: "example.files.count", Plugin: pluginEditor})
+		}},
+		{"contribution id outside the plugin", func() error {
+			return con.Upsert("example.editor.toolbar", surfaces.Contribution{Slot: "example.editor.toolbar", ID: "example.editor.count", Plugin: pluginFiles})
+		}},
+		{"contribution on_click outside the plugin", func() error {
+			return con.Upsert("example.editor.toolbar", surfaces.Contribution{Slot: "example.editor.toolbar", ID: "example.files.count", Plugin: pluginFiles, OnClick: "example.editor.open"})
+		}},
+		{"contribution without a slot field", func() error {
+			return con.Set(surfaces.Contributions{"example.editor.toolbar": {{ID: "example.files.count", Plugin: pluginFiles}}})
+		}},
 	}
-	if err := editorOcc.Set(surfaces.Occupants{"main-stage": pluginEditor}); err != nil {
-		t.Fatal(err)
+	for _, tc := range refusals {
+		t.Run(tc.name, func(t *testing.T) {
+			before, _ := s.Get(occ.Namespace())
+			if err := tc.write(); err == nil {
+				t.Fatal("write accepted, want refusal")
+			}
+			after, _ := s.Get(occ.Namespace())
+			if after.Revision != before.Revision || string(after.Value) != string(before.Value) {
+				t.Fatalf("refused write committed: revision %d -> %d, value %s -> %s",
+					before.Revision, after.Revision, before.Value, after.Value)
+			}
+		})
 	}
 
-	// The value one Pod wrote names only itself; the other Pod's slice kept
-	// its own value and revision.
-	entry, _ := s.Get(editorOcc.Namespace())
-	if string(entry.Value) != `{"main-stage":"example.editor"}` || entry.Revision != 2 {
-		t.Fatalf("editor occupants after files' write: %+v", entry)
+	// A valid claim and a valid contribution commit.
+	if err := occ.Set(surfaces.Occupants{protocol.SurfaceSidebarList: {Surface: protocol.SurfaceSidebarList, Plugin: pluginFiles}}); err != nil {
+		t.Fatalf("valid claim refused: %v", err)
 	}
-	// The denial path a Server implements: a plugin asking to write another
-	// pod's slice is refused by exact namespace comparison before any handle
-	// is consulted.
-	requested := surfaces.OccupantsNamespace(pluginEditor)
-	if requested == filesOcc.Namespace() {
-		t.Fatal("files's request for the editor's slice would not be refused by namespace comparison")
+	if err := con.Upsert("example.editor.status", surfaces.Contribution{
+		Slot:    "example.editor.status",
+		ID:      "example.files.count",
+		Plugin:  pluginFiles,
+		Label:   "12 files",
+		OnClick: "example.files.open",
+	}); err != nil {
+		t.Fatalf("valid contribution refused: %v", err)
 	}
-
-	// Crash cleanup: the owner-cleanup path unregisters the crashed Pod's
-	// slices; the survivor keeps its value and revision.
-	filesOcc.Unregister()
-	filesCon.Unregister()
-	if _, ok := s.Get(filesOcc.Namespace()); ok {
-		t.Fatal("crashed pod's occupants slice survived unregister")
-	}
-	if _, ok := s.Get(surfaces.ContributionsNamespace(pluginFiles)); ok {
-		t.Fatal("crashed pod's contributions slice survived unregister")
-	}
-	entry, _ = s.Get(editorOcc.Namespace())
-	if entry.Revision != 2 || string(entry.Value) != `{"main-stage":"example.editor"}` {
-		t.Fatalf("editor occupants after files teardown: %+v", entry)
-	}
-
-	// Re-registration continues above the tombstone revision.
-	again, err := surfaces.RegisterOccupants(s, pluginFiles)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if entry, _ = s.Get(again.Namespace()); entry.Revision != 3 {
-		t.Fatalf("re-registered revision = %d, want 3", entry.Revision)
+	if got := con.Get()["example.editor.status"]; len(got) != 1 || got[0].Label != "12 files" {
+		t.Fatalf("contribution not stored: %+v", got)
 	}
 }
 
-// TestSnapshotIsolation pins that a committed write publishes a new snapshot
-// and never touches snapshots a reader already holds.
 func TestSnapshotIsolation(t *testing.T) {
 	s := state.New(state.Options{})
-	occ, _ := registerBoth(t, s, pluginFiles)
+	occ, _ := registerBoth(t, s, pluginEditor)
 
 	before := s.Snapshot()
-	if err := occ.Set(surfaces.Occupants{"sidebar-list": pluginFiles}); err != nil {
-		t.Fatal(err)
+	if err := occ.Set(surfaces.Occupants{protocol.SurfaceMainStage: {Surface: protocol.SurfaceMainStage, Plugin: pluginEditor}}); err != nil {
+		t.Fatalf("Set: %v", err)
 	}
 	after := s.Snapshot()
 	if before == after {
@@ -172,124 +221,225 @@ func TestSnapshotIsolation(t *testing.T) {
 		t.Fatalf("held snapshot changed: %+v", oldEntry)
 	}
 	newEntry := after.Slices[occ.Namespace()]
-	if newEntry.Revision != 2 || string(newEntry.Value) != `{"sidebar-list":"example.files"}` {
+	if newEntry.Revision != 2 || !strings.Contains(string(newEntry.Value), "main-stage") {
 		t.Fatalf("new snapshot wrong: %+v", newEntry)
 	}
-	// Another pod's registration is likewise absent from the held snapshot.
-	if _, err := surfaces.RegisterOccupants(s, pluginEditor); err != nil {
-		t.Fatal(err)
+	if got := occ.Get(); len(got) != 1 || got[protocol.SurfaceMainStage].Plugin != pluginEditor {
+		t.Fatalf("Get after Set: %+v", got)
 	}
-	if _, ok := before.Slices[surfaces.OccupantsNamespace(pluginEditor)]; ok {
-		t.Fatal("held snapshot grew after a later registration")
+	// Get decodes fresh: mutating the decoded value cannot touch the slice.
+	decoded := occ.Get()
+	decoded[protocol.SurfaceMainStage] = surfaces.Occupant{Surface: protocol.SurfaceMainStage, Plugin: "tampered"}
+	if got := occ.Get(); got[protocol.SurfaceMainStage].Plugin != pluginEditor {
+		t.Fatalf("Get returned shared storage: %+v", got)
 	}
 }
 
-// TestContributionsOrdering pins the ordering state.md's array shape implies
-// and today's contribute implements: arrival order, with a repeated id
-// replaced in place, and an identical re-contribute committing nothing.
+// TestContributionsOrdering pins the ordering the registry keeps per slot
+// for one plugin: arrival order within the slot, a repeated id replaced in
+// place, ids scoped to their slot, and an identical re-contribute committing
+// nothing. The combined order across plugins is a different slice's job: the
+// Surfaces engine resolves the per-plugin declarations into husk.surfaces in
+// arrival order, and this package only carries the declarations.
 func TestContributionsOrdering(t *testing.T) {
 	s := state.New(state.Options{})
 	_, con := registerBoth(t, s, pluginGit)
 
-	ids := func(publication string) []string {
-		var out []string
-		for _, c := range con.Get()[publication] {
-			out = append(out, c.ID)
-		}
-		return out
+	status, toolbar := "example.editor.status", "example.editor.toolbar"
+	branch := surfaces.Contribution{Slot: status, ID: "example.git.branch", Plugin: pluginGit, Label: "main"}
+	commit := surfaces.Contribution{Slot: toolbar, ID: "example.git.commit", Plugin: pluginGit, Label: "head"}
+	if err := con.Upsert(status, branch); err != nil {
+		t.Fatalf("Upsert branch: %v", err)
 	}
-	pub := "example.editor.toolbar"
-	statusbar := "example.editor.statusbar"
-	want := []string(nil)
-	check := func(publication, step string) {
-		t.Helper()
-		got := ids(publication)
-		if len(got) != len(want) {
-			t.Fatalf("%s: ids = %v, want %v", step, got, want)
-		}
-		for i := range want {
-			if got[i] != want[i] {
-				t.Fatalf("%s: ids = %v, want %v", step, got, want)
-			}
-		}
+	if err := con.Upsert(toolbar, commit); err != nil {
+		t.Fatalf("Upsert commit: %v", err)
 	}
 
-	// Arrival order across three upserts, including two publications.
-	err := con.Update(func(v *surfaces.Contributions) {
-		v.Upsert(pub, surfaces.Contribution{ID: "example.git.branch", Plugin: pluginGit, Label: "main"})
-	})
-	if err != nil {
-		t.Fatal(err)
+	// Replacing branch with the same id keeps its arrival position in its
+	// slot, as today's contribute does.
+	replaced := branch
+	replaced.Label = "topic"
+	if err := con.Upsert(status, replaced); err != nil {
+		t.Fatalf("Upsert replacement: %v", err)
 	}
-	want = []string{"example.git.branch"}
-	check(pub, "first upsert")
-
-	err = con.Update(func(v *surfaces.Contributions) {
-		v.Upsert(statusbar, surfaces.Contribution{ID: "example.git.mode", Plugin: pluginGit, Label: "branch"})
-		v.Upsert(pub, surfaces.Contribution{ID: "example.git.ahead", Plugin: pluginGit, Label: "0"})
-	})
-	if err != nil {
-		t.Fatal(err)
+	got := con.Get()
+	if ids := slotIDs(got[status]); len(ids) != 1 || ids[0] != "example.git.branch" {
+		t.Fatalf("status ids = %v, want [branch]", ids)
 	}
-	want = []string{"example.git.branch", "example.git.ahead"}
-	check(pub, "second and third upserts")
-	want = []string{"example.git.mode"}
-	check(statusbar, "statusbar upsert")
-
-	// Same id, new label: replaced in place, order kept.
-	err = con.Update(func(v *surfaces.Contributions) {
-		v.Upsert(pub, surfaces.Contribution{ID: "example.git.branch", Plugin: pluginGit, Label: "feature"})
-	})
-	if err != nil {
-		t.Fatal(err)
+	if got[status][0].Label != "topic" {
+		t.Fatalf("replacement not applied in place: %+v", got[status][0])
 	}
-	want = []string{"example.git.branch", "example.git.ahead"}
-	check(pub, "in-place replacement")
-	want = []string{"example.git.mode"}
-	check(statusbar, "in-place replacement leaves statusbar")
-	got := con.Get()[pub]
-	if got[0].Label != "feature" {
-		t.Fatalf("replacement label = %q, want feature", got[0].Label)
+	if ids := slotIDs(got[toolbar]); len(ids) != 1 || ids[0] != "example.git.commit" {
+		t.Fatalf("toolbar ids = %v, want [commit]", ids)
 	}
 
-	// An identical re-contribute changes the encoding, so State commits
-	// nothing: the revision does not move.
-	revision := func() uint64 { e, _ := s.Get(con.Namespace()); return e.Revision }
-	before := revision()
-	err = con.Update(func(v *surfaces.Contributions) {
-		v.Upsert(pub, surfaces.Contribution{ID: "example.git.branch", Plugin: pluginGit, Label: "feature"})
-	})
-	if err != nil {
-		t.Fatal(err)
+	// Ids stay scoped to their slot: the same id may live in two slots, as
+	// in the registry's independent per-slot lists.
+	branchInToolbar := branch
+	branchInToolbar.Slot = toolbar
+	if err := con.Upsert(toolbar, branchInToolbar); err != nil {
+		t.Fatalf("Upsert same id into another slot: %v", err)
 	}
-	if after := revision(); after != before {
-		t.Fatalf("no-op upsert moved revision %d -> %d", before, after)
+	got = con.Get()
+	if ids := slotIDs(got[toolbar]); len(ids) != 2 || ids[0] != "example.git.commit" || ids[1] != "example.git.branch" {
+		t.Fatalf("toolbar ids = %v, want [commit branch]", ids)
+	}
+	if ids := slotIDs(got[status]); len(ids) != 1 {
+		t.Fatalf("status ids = %v, want [branch]", ids)
+	}
+
+	// An identical entry changes nothing.
+	rev, _ := s.Get(con.Namespace())
+	if err := con.Upsert(status, replaced); err != nil {
+		t.Fatalf("Upsert no-op: %v", err)
+	}
+	if after, _ := s.Get(con.Namespace()); after.Revision != rev.Revision {
+		t.Fatalf("no-op Upsert bumped revision %d -> %d", rev.Revision, after.Revision)
 	}
 }
 
-func TestValidateOwnerParity(t *testing.T) {
-	occ := surfaces.Occupants{"sidebar-list": pluginFiles}
-	if err := occ.Validate(pluginFiles); err != nil {
-		t.Fatalf("own occupancy rejected: %v", err)
+func slotIDs(entries []surfaces.Contribution) []string {
+	ids := make([]string, 0, len(entries))
+	for _, c := range entries {
+		ids = append(ids, c.ID)
 	}
-	err := occ.Validate(pluginEditor)
-	if err == nil {
-		t.Fatal("foreign occupant accepted")
+	return ids
+}
+
+func TestValidateOwnerParity(t *testing.T) {
+	valid := surfaces.Contributions{
+		"example.editor.status": {{
+			Slot:    "example.editor.status",
+			ID:      "example.git.branch",
+			Plugin:  pluginGit,
+			OnClick: "example.git.checkout",
+		}},
+	}
+	if err := valid.Validate(pluginGit); err != nil {
+		t.Fatalf("Validate own entries: %v", err)
+	}
+	if err := valid.Validate(pluginEditor); err == nil {
+		t.Fatal("foreign owner accepted")
 	}
 
-	good := surfaces.Contributions{"pub": []surfaces.Contribution{{ID: pluginGit + ".branch", Plugin: pluginGit, Label: "main"}}}
-	if err := good.Validate(pluginGit); err != nil {
-		t.Fatalf("own contribution rejected: %v", err)
+	cases := []struct {
+		name         string
+		contribution surfaces.Contribution
+		want         string
+	}{
+		{"foreign id", surfaces.Contribution{Slot: "s", ID: "example.editor.x", Plugin: pluginGit}, "must use example.git.<name>"},
+		{"dotted name", surfaces.Contribution{Slot: "s", ID: "example.git.a.b", Plugin: pluginGit}, "must use example.git.<name>"},
+		{"empty name", surfaces.Contribution{Slot: "s", ID: "example.git.", Plugin: pluginGit}, "must use example.git.<name>"},
+		{"foreign on_click", surfaces.Contribution{Slot: "s", ID: "example.git.x", Plugin: pluginGit, OnClick: "example.editor.open"}, "own action"},
+		{"empty slot", surfaces.Contribution{ID: "example.git.x", Plugin: pluginGit}, "names no slot"},
 	}
-	for name, bad := range map[string]surfaces.Contributions{
-		"foreign plugin": {"pub": []surfaces.Contribution{{ID: pluginGit + ".branch", Plugin: pluginEditor}}},
-		"foreign id":     {"pub": []surfaces.Contribution{{ID: pluginEditor + ".branch", Plugin: pluginGit}}},
-		"bare id":        {"pub": []surfaces.Contribution{{ID: "branch", Plugin: pluginGit}}},
-		"empty name":     {"pub": []surfaces.Contribution{{ID: pluginGit + ".", Plugin: pluginGit}}},
-		"dotted name":    {"pub": []surfaces.Contribution{{ID: pluginGit + ".a.b", Plugin: pluginGit}}},
-	} {
-		if err := bad.Validate(pluginGit); err == nil {
-			t.Fatalf("%s: accepted", name)
-		}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := surfaces.Contributions{"s": {tc.contribution}}.Validate(pluginGit)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Validate = %v, want it to mention %q", err, tc.want)
+			}
+		})
+	}
+
+	occupants := surfaces.Occupants{protocol.SurfaceModal: {Surface: protocol.SurfaceModal, Plugin: pluginGit}}
+	if err := occupants.Validate(pluginGit); err != nil {
+		t.Fatalf("Validate own claim: %v", err)
+	}
+	if err := occupants.Validate(pluginFiles); err == nil {
+		t.Fatal("foreign claim accepted")
+	}
+	err := (surfaces.Occupants{"made-up": {Surface: "made-up", Plugin: pluginGit}}).Validate(pluginGit)
+	if err == nil || !strings.Contains(err.Error(), "defined host layout surface") {
+		t.Fatalf("unknown surface = %v, want a defined-surface refusal", err)
+	}
+}
+
+// TestUnregisterTearsDeclarationsDown pins the owner-cleanup path: a Pod
+// teardown unregisters its plugin's declarations, the sibling slice stays,
+// and re-registration continues from the tombstone revision instead of
+// restarting at 1.
+func TestUnregisterTearsDeclarationsDown(t *testing.T) {
+	s := state.New(state.Options{})
+	occ, con := registerBoth(t, s, pluginFiles)
+	if err := occ.Set(surfaces.Occupants{protocol.SurfaceSidebarList: {Surface: protocol.SurfaceSidebarList, Plugin: pluginFiles}}); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	lastEntry, _ := s.Get(occ.Namespace())
+	last := lastEntry.Revision
+
+	occ.Unregister()
+	occ.Unregister() // idempotent
+
+	if _, ok := s.Get(occ.Namespace()); ok {
+		t.Fatal("unregistered occupants still readable")
+	}
+	if got := con.Get(); len(got) != 0 {
+		t.Fatalf("sibling contributions affected: %+v", got)
+	}
+	// Re-registering continues from the tombstone revision.
+	again, err := surfaces.RegisterOccupants(s, pluginFiles)
+	if err != nil {
+		t.Fatalf("re-register: %v", err)
+	}
+	entry, ok := s.Get(again.Namespace())
+	if !ok || entry.Revision != last+1 || string(entry.Value) != "{}" {
+		t.Fatalf("re-registered entry: %+v, want revision %d", entry, last+1)
+	}
+}
+
+// TestSurfacesResolutionSlice pins the husk.surfaces resolution slice: owner
+// husk, instance scope, not persistent, initial revision 1 holding the empty
+// resolution, and a value shape whose marshalled form is exactly the shape
+// state.md documents. The Surfaces engine (stem-surfaces) is its only
+// writer; this package only defines the slice.
+func TestSurfacesResolutionSlice(t *testing.T) {
+	s := state.New(state.Options{})
+	slice, err := surfaces.RegisterSurfaces(s)
+	if err != nil {
+		t.Fatalf("RegisterSurfaces: %v", err)
+	}
+	if got := slice.Namespace(); got != "husk.surfaces" {
+		t.Fatalf("namespace = %q", got)
+	}
+	entry, ok := s.Get("husk.surfaces")
+	if !ok || entry.Owner != state.OwnerHusk || entry.Scope != state.ScopeInstance ||
+		entry.Persistent || entry.Hydrated || entry.Revision != 1 {
+		t.Fatalf("initial entry: %+v", entry)
+	}
+	var empty surfaces.Surfaces
+	if err := json.Unmarshal(entry.Value, &empty); err != nil {
+		t.Fatalf("initial value not a resolution object: %v", err)
+	}
+	if !reflect.DeepEqual(empty, surfaces.Surfaces{}) {
+		t.Fatalf("initial value = %+v, want the empty resolution", empty)
+	}
+
+	if err := slice.Set(surfaces.Surfaces{
+		Occupants: map[protocol.SurfaceID]surfaces.Occupant{
+			protocol.SurfaceMainStage: {Surface: protocol.SurfaceMainStage, Plugin: pluginEditor},
+		},
+		Contributions: map[string][]surfaces.Contribution{
+			"example.editor.toolbar": {
+				{Slot: "example.editor.toolbar", ID: "example.git.branch", Plugin: pluginGit, Label: "main"},
+			},
+		},
+		Visible:   []protocol.SurfaceID{protocol.SurfaceActivityRail, protocol.SurfaceSidebarList, protocol.SurfaceMainHeader, protocol.SurfaceMainStage},
+		Placement: surfaces.Placement{RailItem: "", Kind: ""},
+		Overlays:  surfaces.Overlays{},
+	}); err != nil {
+		t.Fatalf("Set resolution: %v", err)
+	}
+	raw, err := json.Marshal(slice.Get())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"occupants":{"main-stage":{"surface":"main-stage","plugin":"example.editor"}},` +
+		`"contributions":{"example.editor.toolbar":[{"slot":"example.editor.toolbar","id":"example.git.branch","plugin":"example.git","label":"main"}]},` +
+		`"visible":["activity-rail","sidebar-list","main-header","main-stage"],` +
+		`"placement":{"rail_item":"","kind":""},` +
+		`"overlays":{"modal":{"plugin":"","rail_item":""},"palette":false,"slot_explorer":false}}`
+	if string(raw) != want {
+		t.Fatalf("resolution value =\n%s\nwant\n%s", raw, want)
 	}
 }
