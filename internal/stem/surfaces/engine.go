@@ -153,6 +153,9 @@ type Engine struct {
 	// decls cache: plugin id -> last resolved declarations.
 	declsCache map[string]*pluginDecl
 	dirty      bool
+	// liveDirty marks a pass that must re-check occupants and standing
+	// claims against liveness: a Pod entered or left `live` (D70).
+	liveDirty bool
 
 	// lastRev is the resolution slice's revision as last committed by the
 	// engine. A mismatch seen at the next pass means a foreign write.
@@ -231,10 +234,22 @@ func New(st *state.State, opts Options) (*Engine, error) {
 		}
 	})
 	e.dirty = true
+	e.liveDirty = true
 	if ent, ok := st.Snapshot().Slices[state.SurfacesNamespace]; ok {
 		e.lastRev = ent.Revision
 	}
 	return e, nil
+}
+
+// LivenessChanged marks the engine dirty: a plugin's liveness moved since
+// the last pass. A claim holds a surface only while its Pod is live, so the
+// next pass vacates the surfaces of occupants that left `live` and hands
+// every free surface to its first live claimant in declaration order. The
+// engine does not poll Liveness; the host calls this on the loop whenever
+// husk.pods changes, like CatalogChanged.
+func (e *Engine) LivenessChanged() {
+	e.dirty = true
+	e.liveDirty = true
 }
 
 // CatalogChanged marks the engine dirty: the published-slot catalog
@@ -259,6 +274,8 @@ func (e *Engine) Flush() {
 		return
 	}
 	e.dirty = false
+	liveDirty := e.liveDirty
+	e.liveDirty = false
 	snap := e.st.Snapshot()
 
 	// A foreign write to the resolution — state.Clear, the only handle-less
@@ -340,6 +357,18 @@ func (e *Engine) Flush() {
 		return plugins[i]+"."+contributionsSuffix < plugins[j]+"."+contributionsSuffix
 	})
 
+	// A claim holds its surface only while its Pod is live: an occupant that
+	// left `live` gives the surface up here, and the freed pass below hands
+	// it to the next live claimant. Its declaration stays (the Pod owns it).
+	if liveDirty {
+		for _, surface := range sortedOccupied(res.Occupants) {
+			if plugin := res.Occupants[surface].Plugin; !e.live.Live(plugin) {
+				delete(res.Occupants, surface)
+				e.log.Printf("surfaces: %s left live; %s released", plugin, surface)
+			}
+		}
+	}
+
 	for _, plugin := range plugins {
 		e.resolvePlugin(plugin, e.declsCache[plugin], next[plugin], &res, changedSlots)
 	}
@@ -366,12 +395,32 @@ func (e *Engine) Flush() {
 	for _, surface := range freed {
 		for _, plugin := range plugins {
 			d, ok := next[plugin]
-			if !ok || d.claims[surface].Plugin != plugin {
+			if !ok || d.claims[surface].Plugin != plugin || !e.live.Live(plugin) {
 				continue
 			}
 			res.Occupants[surface] = Occupant{Surface: surface, Plugin: plugin}
 			e.log.Printf("surfaces: %s freed; standing claim by %s resolves", surface, plugin)
 			break
+		}
+	}
+
+	// A claim declared before its Pod went live took nothing; when liveness
+	// moves, every surface still free goes to its first live claimant in
+	// declaration order. An occupant that is live stays: a later claimant
+	// never preempts it.
+	if liveDirty {
+		for _, plugin := range plugins {
+			d, ok := next[plugin]
+			if !ok || !e.live.Live(plugin) {
+				continue
+			}
+			for _, surface := range sortedClaims(d.claims) {
+				if d.claims[surface].Plugin != plugin || res.Occupants[surface].Plugin != "" {
+					continue
+				}
+				res.Occupants[surface] = Occupant{Surface: surface, Plugin: plugin}
+				e.log.Printf("surfaces: %s free; live claim by %s resolves", surface, plugin)
+			}
 		}
 	}
 
@@ -424,7 +473,11 @@ func (e *Engine) resolvePlugin(plugin string, old, cur *pluginDecl, res *Surface
 		}
 		switch occupant := res.Occupants[surface].Plugin; occupant {
 		case "":
-			res.Occupants[surface] = Occupant{Surface: surface, Plugin: plugin} // first claim wins
+			// First live claim wins; a claim from a Pod that is not live
+			// stands in its declaration and resolves when the Pod goes live.
+			if e.live.Live(plugin) {
+				res.Occupants[surface] = Occupant{Surface: surface, Plugin: plugin}
+			}
 		case plugin:
 			// Still ours from a release the Pod has not re-declared; no-op.
 		default:
@@ -520,6 +573,19 @@ func (e *Engine) resolvePlugin(plugin string, old, cur *pluginDecl, res *Surface
 		delete(e.declsCache, plugin)
 	}
 }
+
+// sortedOccupied lists the occupied surfaces in a stable order.
+func sortedOccupied(occ Occupants) []protocol.SurfaceID {
+	out := make([]protocol.SurfaceID, 0, len(occ))
+	for surface := range occ {
+		out = append(out, surface)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
+
+// sortedClaims lists a declaration's claimed surfaces in a stable order.
+func sortedClaims(claims Occupants) []protocol.SurfaceID { return sortedOccupied(claims) }
 
 // hasID reports whether id is among entries.
 func hasID(entries []Contribution, id string) bool {

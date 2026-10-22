@@ -1256,3 +1256,110 @@ func TestUpdateViewDoesNotAbsorbAForeignWrite(t *testing.T) {
 		t.Fatalf("the view write was lost: %+v", res)
 	}
 }
+
+// occupantOf is the resolved occupant of main-stage.
+func occupantOf(t *testing.T, st *state.State) string {
+	t.Helper()
+	return resolution(t, st).Occupants[protocol.SurfaceMainStage].Plugin
+}
+
+// D70: a claim holds a surface only while its Pod is live.
+func TestClaimFromPodThatIsNotLiveHoldsNothing(t *testing.T) {
+	live := liveness{dead: map[string]bool{"alpha.broken": true}}
+	st, eng, pods := newEngine(t, Options{Liveness: live})
+	pods.launch("alpha.broken")
+	pods.launch("beta.reference")
+	pods.claim("alpha.broken", string(protocol.SurfaceMainStage))
+	pods.claim("beta.reference", string(protocol.SurfaceMainStage))
+	settle(st, eng)
+
+	if got := occupantOf(t, st); got != "beta.reference" {
+		t.Fatalf("occupant = %q, want beta.reference (the first claimant never went live)", got)
+	}
+	if err := eng.SurfaceUpdate("alpha.broken", protocol.SurfaceUpdateParams{Surface: protocol.SurfaceMainStage}); err == nil {
+		t.Fatal("a claimant that is not live may render")
+	}
+	if got := pods.decl("alpha.broken").occ.Get()[protocol.SurfaceMainStage].Plugin; got != "alpha.broken" {
+		t.Fatalf("the engine rewrote the Pod's declaration: %q", got)
+	}
+}
+
+func TestClaimDeclaredBeforePodGoesLiveResolvesWhenItDoes(t *testing.T) {
+	live := liveness{dead: map[string]bool{"alpha.files": true}}
+	st, eng, pods := newEngine(t, Options{Liveness: live})
+	pods.launch("alpha.files")
+	pods.claim("alpha.files", string(protocol.SurfaceMainStage))
+	settle(st, eng)
+	if got := occupantOf(t, st); got != "" {
+		t.Fatalf("a Pod that is still starting holds %q", got)
+	}
+
+	delete(live.dead, "alpha.files")
+	eng.LivenessChanged()
+	settle(st, eng)
+	if got := occupantOf(t, st); got != "alpha.files" {
+		t.Fatalf("occupant after the Pod went live = %q, want alpha.files", got)
+	}
+}
+
+func TestOccupantLeavingLiveHandsSurfaceToNextClaimant(t *testing.T) {
+	live := liveness{dead: map[string]bool{}}
+	st, eng, pods := newEngine(t, Options{Liveness: live})
+	pods.launch("alpha.files")
+	pods.launch("beta.notes")
+	pods.launch("gamma.logs")
+	for _, p := range []string{"alpha.files", "beta.notes", "gamma.logs"} {
+		pods.claim(p, string(protocol.SurfaceMainStage))
+	}
+	settle(st, eng)
+	if got := occupantOf(t, st); got != "alpha.files" {
+		t.Fatalf("occupant = %q, want alpha.files", got)
+	}
+
+	live.dead["alpha.files"] = true
+	eng.LivenessChanged()
+	settle(st, eng)
+	if got := occupantOf(t, st); got != "beta.notes" {
+		t.Fatalf("occupant after alpha left live = %q, want beta.notes (next claimant in declaration order)", got)
+	}
+	if err := eng.SurfaceUpdate("beta.notes", protocol.SurfaceUpdateParams{Surface: protocol.SurfaceMainStage}); err != nil {
+		t.Fatalf("new occupant update: %v", err)
+	}
+	if got := pods.decl("alpha.files").occ.Get()[protocol.SurfaceMainStage].Plugin; got != "alpha.files" {
+		t.Fatalf("alpha's declaration was dropped: %q", got)
+	}
+
+	// The chain continues, and when nobody is live the surface is empty.
+	live.dead["beta.notes"] = true
+	eng.LivenessChanged()
+	settle(st, eng)
+	if got := occupantOf(t, st); got != "gamma.logs" {
+		t.Fatalf("occupant after beta left live = %q, want gamma.logs", got)
+	}
+	live.dead["gamma.logs"] = true
+	eng.LivenessChanged()
+	settle(st, eng)
+	if got := occupantOf(t, st); got != "" {
+		t.Fatalf("occupant with no live claimant = %q, want none", got)
+	}
+}
+
+func TestLiveOccupantIsNotPreemptedWhenEarlierClaimantComesBack(t *testing.T) {
+	live := liveness{dead: map[string]bool{"alpha.files": true}}
+	st, eng, pods := newEngine(t, Options{Liveness: live})
+	pods.launch("alpha.files")
+	pods.launch("beta.notes")
+	pods.claim("alpha.files", string(protocol.SurfaceMainStage))
+	pods.claim("beta.notes", string(protocol.SurfaceMainStage))
+	settle(st, eng)
+	if got := occupantOf(t, st); got != "beta.notes" {
+		t.Fatalf("occupant = %q, want beta.notes", got)
+	}
+
+	delete(live.dead, "alpha.files")
+	eng.LivenessChanged()
+	settle(st, eng)
+	if got := occupantOf(t, st); got != "beta.notes" {
+		t.Fatalf("a live occupant was preempted: %q", got)
+	}
+}
