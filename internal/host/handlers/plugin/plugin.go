@@ -10,7 +10,9 @@ import (
 )
 
 // Plugin adapts contracts.PluginPort for plugin.list and plugin.log. Both are
-// CLI methods; a plugin caller is denied before the port is touched.
+// CLI methods; a plugin caller is denied before the port is touched. The
+// params and result shapes are specified in docs/docs/design/pods.md, section
+// "plugin.* wire shapes".
 type Plugin struct {
 	Port contracts.PluginPort
 }

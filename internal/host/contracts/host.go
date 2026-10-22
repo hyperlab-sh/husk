@@ -39,7 +39,8 @@ type Config struct {
 	PluginDirs []string
 	// Post posts a notice to the loop from any goroutine; false after shutdown.
 	Post func(any) bool
-	// Clock drives every deadline; nil is system time. protocol.Clock is used
+	// Clock drives every host deadline (Calls, Surfaces, the Server, the
+	// wrappers, Store and Services); nil is system time. protocol.Clock is used
 	// so it can also be handed to the Server.
 	Clock protocol.Clock
 }

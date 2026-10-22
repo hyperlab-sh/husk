@@ -15,6 +15,7 @@ require (
 	github.com/gofrs/flock v0.12.1
 	github.com/tailscale/hujson v0.0.0-20260727124030-b80ff77dac4f
 	github.com/zalando/go-keyring v0.2.6
+	go.uber.org/goleak v1.3.0
 	golang.org/x/sys v0.47.0
 )
 

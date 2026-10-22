@@ -2,6 +2,7 @@ package host
 
 import (
 	"sync/atomic"
+	"time"
 
 	"github.com/hyperlab-sh/husk/internal/pods"
 	"github.com/hyperlab-sh/husk/internal/pods/server"
@@ -23,6 +24,15 @@ type options struct {
 	newServer  func(server.Config) server.Server
 	afterStage func(stage string) error
 	onClose    func(step string)
+	loopWait   time.Duration // overrides the package loopWait when set
+	afterFail  func(*Root)   // called with the partial root after New's cleanup
+}
+
+func (o *options) loopWaitOr(d time.Duration) time.Duration {
+	if o.loopWait > 0 {
+		return o.loopWait
+	}
+	return d
 }
 
 // WithVersion sets the build version the Server registers and session.ping

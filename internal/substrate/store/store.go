@@ -219,6 +219,9 @@ func (s *Store) Attach(st *state.State) error {
 // Paths returns the resolved bases, never mutable Store internals.
 func (s *Store) Paths() Paths { return s.paths }
 
+// Done is closed once the worker has exited, after Close.
+func (s *Store) Done() <-chan struct{} { return s.done }
+
 // RuntimeDir returns the verified directory resolved by the instance package.
 func (s *Store) RuntimeDir() string { return s.paths.Runtime }
 

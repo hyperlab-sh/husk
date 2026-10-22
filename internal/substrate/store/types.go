@@ -101,7 +101,8 @@ type Env struct {
 	// HomeDir defaults to os.UserHomeDir.
 	HomeDir func() (string, error)
 	// RuntimeDir overrides instance.RuntimeDir only for injected environments.
-	// Production callers leave it nil to use the shared instance directory rule.
+	// Callers that already resolved the directory through instance.RuntimeDir
+	// (the host root, from its Config) may pass it here; nil resolves it.
 	RuntimeDir func() (string, error)
 }
 

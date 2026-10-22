@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -32,8 +33,10 @@ import (
 // storeCloseTimeout bounds the final Store flush at shutdown.
 const storeCloseTimeout = 10 * time.Second
 
-// loopWait bounds how long Close waits for a loop that accepted a closure but
-// never ran it (a wedged loop); past it the closure runs on Close's goroutine.
+// loopWait bounds how long Close waits for the loop to run a loop-confined
+// shutdown step. A loop that does not run it in time is wedged: the step is
+// skipped and Close reports it, because running loop-confined work on Close's
+// goroutine while the loop may still be alive would be a data race.
 const loopWait = 5 * time.Second
 
 // Root is the composition root New returns. It implements contracts.Host and
@@ -66,14 +69,14 @@ type Root struct {
 	instStart time.Time
 
 	// Lifecycle.
-	live       atomicBool // New returned: the loop may be running
-	mu         sync.Mutex
-	running    bool
-	srvStarted bool
-	closeOnce  sync.Once
-	closeErr   error
-	done       chan struct{} // closed when Close finishes
-	trace      []string      // shutdown steps in the order they ran (tests)
+	live      atomicBool   // New returned: the loop may be running
+	loopGID   atomic.Int64 // goroutine id of the loop, learned on its first Update
+	mu        sync.Mutex   // guards running and closing
+	running   bool
+	closing   bool // shutdown began: spawn refuses new workers
+	closeOnce sync.Once
+	closeErr  error
+	done      chan struct{} // closed when Close finishes
 }
 
 var (
@@ -88,7 +91,7 @@ var (
 type Looped interface {
 	contracts.Host
 	// Update applies one posted message and reports whether the host owned
-	// it. It is loop-only.
+	// it. It is loop-only. Close may be called from Update (see Root.Close).
 	Update(msg any) bool
 }
 
@@ -131,6 +134,9 @@ func build(cfg contracts.Config, optFns []Option) (_ *Root, err error) {
 	defer func() {
 		if err != nil {
 			_ = r.shutdown()
+			if r.opts.afterFail != nil {
+				r.opts.afterFail(r)
+			}
 		}
 	}()
 
@@ -228,6 +234,7 @@ func (r *Root) buildStore() error {
 	s, err := store.Open(store.Options{
 		Instance: store.InstanceRef{ID: r.cfg.InstanceID, Named: instance.ValidName(r.cfg.InstanceID) == nil},
 		Env:      store.Env{RuntimeDir: func() (string, error) { return r.cfg.RuntimeDir, nil }},
+		Clock:    storeClock{r.clock},
 		Post:     r.post,
 	})
 	if err != nil {
@@ -252,12 +259,14 @@ func (r *Root) buildServices() error {
 		// No dialog is wired: a grant prompt is refused, never granted.
 		prompt = denyPrompt
 	}
+	// Not wired yet (cutover follow-ups): ProfileFlag (--profile) and Audit
+	// (secrets auditing). Both are Config additions for the cmd/husk unit.
 	rt, err := services.New(services.RuntimeOptions{
 		Store:     r.store,
 		State:     r.st,
 		Post:      r.post,
 		Publisher: publisher{r},
-		Clock:     realClock{},
+		Clock:     storeClock{r.clock},
 		Crypto:    secretsDoc,
 		Prompt:    prompt,
 		Schema:    settings.Builtins(),
@@ -395,9 +404,6 @@ func (r *Root) Run(ctx context.Context) error {
 		_ = r.Close()
 		return fmt.Errorf("host: start server: %w", err)
 	}
-	r.mu.Lock()
-	r.srvStarted = true
-	r.mu.Unlock()
 	if err := r.launchPlugins(ctx); err != nil {
 		_ = r.Close()
 		return err
@@ -443,7 +449,15 @@ func (r *Root) launchPlugins(ctx context.Context) error {
 // spawn runs a Bubble Tea style command on a host-owned worker and posts its
 // message to the loop.
 func (r *Root) spawn(cmd tea.Cmd) {
+	r.mu.Lock()
+	if r.closing {
+		// Shutdown is waiting on (or past) wg: a late worker would race
+		// Wait and run against a closed Runtime and a cancelled ctx.
+		r.mu.Unlock()
+		return
+	}
 	r.wg.Add(1)
+	r.mu.Unlock()
 	go func() {
 		defer r.wg.Done()
 		if msg := cmd(); msg != nil {
@@ -457,6 +471,15 @@ func (r *Root) spawn(cmd tea.Cmd) {
 // accepting, unregisters the instance), the plugin processes, then the final
 // State flush and the Store flush. Concurrent and repeated calls share one
 // shutdown and its result.
+//
+// Close may be called from any goroutine, including the loop's own (from
+// Update): loop-confined steps run directly when the caller is the loop
+// goroutine and are posted to the loop otherwise. If the loop is alive but
+// does not run a posted step within loopWait it is wedged; Close then skips
+// the step and returns an error saying so (plugin processes may outlive the
+// host in that case), rather than racing the loop. Stopping the loop before
+// Close is also fine: nothing else touches the modules then, so the steps run
+// inline.
 func (r *Root) Close() error {
 	r.closeOnce.Do(func() {
 		r.closeErr = r.shutdown()
@@ -470,10 +493,10 @@ func (r *Root) Close() error {
 // built, so New's failure path and Close share it.
 func (r *Root) shutdown() error {
 	var errs []error
+	r.mu.Lock()
+	r.closing = true
+	r.mu.Unlock()
 	note := func(step string) {
-		r.mu.Lock()
-		r.trace = append(r.trace, step)
-		r.mu.Unlock()
 		if r.opts.onClose != nil {
 			r.opts.onClose(step)
 		}
@@ -481,14 +504,16 @@ func (r *Root) shutdown() error {
 
 	var stop tea.Cmd
 	if r.table != nil || r.pods != nil {
-		r.exec(func() {
+		if err := r.exec(func() {
 			if r.table != nil {
 				r.complete(r.table.Close())
 			}
 			if r.pods != nil {
 				stop = r.pods.Stop()
 			}
-		})
+		}); err != nil {
+			errs = append(errs, fmt.Errorf("calls and pods not stopped: %w", err))
+		}
 		note("calls")
 	}
 	if r.srv != nil {
@@ -504,7 +529,9 @@ func (r *Root) shutdown() error {
 		note("pods")
 	}
 	if r.st != nil {
-		r.exec(r.tick) // final flush: Store sees the last writes before it closes
+		if err := r.exec(r.tick); err != nil { // final flush: Store sees the last writes before it closes
+			errs = append(errs, fmt.Errorf("final state flush skipped: %w", err))
+		}
 	}
 	r.cancel()
 	if r.rt != nil {
