@@ -84,8 +84,8 @@ type pod struct {
 type podDecl struct {
 	occHandle *state.Handle
 	conHandle *state.Handle
-	claims    map[string]string
-	contribs  map[string][]Contribution
+	claims    Occupants
+	contribs  Contributions
 }
 
 func newPod(t *testing.T, st *state.State) *pod {
@@ -113,7 +113,7 @@ func mustJSON(t *testing.T, v any) json.RawMessage {
 // launch registers both declaration slices, as the Pod does for a live plugin.
 func (p *pod) launch(plugin string) {
 	p.t.Helper()
-	d := &podDecl{claims: map[string]string{}, contribs: map[string][]Contribution{}}
+	d := &podDecl{claims: Occupants{}, contribs: Contributions{}}
 	var err error
 	d.occHandle, err = p.st.Register(state.Spec{
 		Namespace: plugin + ".occupants", Owner: plugin, Scope: state.ScopeInstance,
@@ -133,7 +133,8 @@ func (p *pod) launch(plugin string) {
 func (p *pod) claim(plugin, surface string) {
 	p.t.Helper()
 	d := p.decl(plugin)
-	d.claims[surface] = plugin
+	id := protocol.SurfaceID(surface)
+	d.claims[id] = Occupant{Surface: id, Plugin: plugin}
 	if _, err := d.occHandle.Set(mustJSON(p.t, d.claims)); err != nil {
 		p.t.Fatalf("claim %s: %v", surface, err)
 	}
@@ -142,7 +143,7 @@ func (p *pod) claim(plugin, surface string) {
 func (p *pod) unclaim(plugin, surface string) {
 	p.t.Helper()
 	d := p.decl(plugin)
-	delete(d.claims, surface)
+	delete(d.claims, protocol.SurfaceID(surface))
 	if _, err := d.occHandle.Set(mustJSON(p.t, d.claims)); err != nil {
 		p.t.Fatalf("unclaim %s: %v", surface, err)
 	}
@@ -152,16 +153,10 @@ func (p *pod) unclaim(plugin, surface string) {
 func (p *pod) Contribute(plugin, slot string, entry Contribution) error {
 	d := p.decl(plugin)
 	list := d.contribs[slot]
-	for i := range list {
-		if list[i].ID == entry.ID {
-			list[i] = entry
-			break
-		}
-	}
-	if !hasID(list, entry.Plugin, entry.ID) {
+	if !hasID(list, entry.ID) {
 		list = append(list, entry)
+		d.contribs[slot] = list
 	}
-	d.contribs[slot] = list
 	_, err := d.conHandle.Set(mustJSON(p.t, d.contribs))
 	return err
 }
@@ -170,6 +165,9 @@ func (p *pod) Contribute(plugin, slot string, entry Contribution) error {
 func (p *pod) declare(plugin, slot string, entries ...Contribution) {
 	p.t.Helper()
 	d := p.decl(plugin)
+	for i := range entries {
+		entries[i].Slot = slot
+	}
 	d.contribs[slot] = entries
 	if _, err := d.conHandle.Set(mustJSON(p.t, d.contribs)); err != nil {
 		p.t.Fatalf("declare: %v", err)
@@ -204,7 +202,7 @@ func resolution(t *testing.T, st *state.State) Surfaces {
 	return res
 }
 
-func entryIDs(entries []Entry) []string {
+func entryIDs(entries []Contribution) []string {
 	ids := make([]string, len(entries))
 	for i, e := range entries {
 		ids[i] = e.ID
@@ -253,7 +251,7 @@ func TestOccupancyFirstWinsAndConflictRefused(t *testing.T) {
 	settle(st, eng)
 
 	res := resolution(t, st)
-	if got := res.Occupants[string(protocol.SurfaceMainStage)]; got != "alpha.files" {
+	if got := res.Occupants[protocol.SurfaceMainStage].Plugin; got != "alpha.files" {
 		t.Fatalf("occupant = %q, want alpha.files (first claim wins)", got)
 	}
 	if got := eng.Stats().RefusedClaims; got != 1 {
@@ -312,14 +310,14 @@ func TestReleaseOnCloseAndReclaim(t *testing.T) {
 	if err := eng.SurfaceClose("alpha.files", protocol.SurfaceCloseParams{Surface: protocol.SurfaceModal}); err != nil {
 		t.Fatalf("occupant close: %v", err)
 	}
-	if _, occupied := resolution(t, st).Occupants[string(protocol.SurfaceModal)]; occupied {
+	if _, occupied := resolution(t, st).Occupants[protocol.SurfaceModal]; occupied {
 		t.Fatal("occupancy survived close")
 	}
 
 	// The released surface is free for the next arriving claim.
 	pods.claim("beta.notes", string(protocol.SurfaceModal))
 	settle(st, eng)
-	if got := resolution(t, st).Occupants[string(protocol.SurfaceModal)]; got != "beta.notes" {
+	if got := resolution(t, st).Occupants[protocol.SurfaceModal].Plugin; got != "beta.notes" {
 		t.Fatalf("post-release occupant = %q, want beta.notes", got)
 	}
 
@@ -327,7 +325,7 @@ func TestReleaseOnCloseAndReclaim(t *testing.T) {
 	if err := eng.CloseSurface(protocol.SurfaceModal); err != nil {
 		t.Fatalf("host close: %v", err)
 	}
-	if _, occupied := resolution(t, st).Occupants[string(protocol.SurfaceModal)]; occupied {
+	if _, occupied := resolution(t, st).Occupants[protocol.SurfaceModal]; occupied {
 		t.Fatal("occupancy survived host close")
 	}
 }
@@ -344,7 +342,7 @@ func TestReleaseOnOwnerDeathViaOwnerCleanup(t *testing.T) {
 	settle(st, eng)
 
 	res := resolution(t, st)
-	if got := res.Occupants[string(protocol.SurfaceMainStage)]; got != "alpha.files" {
+	if got := res.Occupants[protocol.SurfaceMainStage].Plugin; got != "alpha.files" {
 		t.Fatalf("occupant = %q", got)
 	}
 	if got := entryIDs(res.Contributions["publisher.list"]); len(got) != 1 || got[0] != "alpha.files.item" {
@@ -357,13 +355,13 @@ func TestReleaseOnOwnerDeathViaOwnerCleanup(t *testing.T) {
 	settle(st, eng)
 
 	res = resolution(t, st)
-	if _, occupied := res.Occupants[string(protocol.SurfaceMainStage)]; occupied {
+	if _, occupied := res.Occupants[protocol.SurfaceMainStage]; occupied {
 		t.Fatal("dead owner still occupies")
 	}
 	if _, has := res.Contributions["publisher.list"]; has {
 		t.Fatal("dead owner's contribution survived")
 	}
-	if got := res.Occupants[string(protocol.SurfaceSidebarList)]; got != "beta.notes" {
+	if got := res.Occupants[protocol.SurfaceSidebarList].Plugin; got != "beta.notes" {
 		t.Fatalf("survivor lost its surface: %q", got)
 	}
 
@@ -374,7 +372,7 @@ func TestReleaseOnOwnerDeathViaOwnerCleanup(t *testing.T) {
 	settle(st, eng)
 
 	res = resolution(t, st)
-	if got := res.Occupants[string(protocol.SurfaceMainStage)]; got != "alpha.files" {
+	if got := res.Occupants[protocol.SurfaceMainStage].Plugin; got != "alpha.files" {
 		t.Fatalf("re-registered occupant = %q", got)
 	}
 	if got := entryIDs(res.Contributions["publisher.list"]); len(got) != 1 || got[0] != "alpha.files.item" {
@@ -408,7 +406,8 @@ func TestContributionOrderAndReplace(t *testing.T) {
 		t.Fatalf("order = %v, want %v (arrival order across plugins)", got, want)
 	}
 
-	// Replace in place: the same id re-declared keeps its position.
+	// Replace in place: the same id re-declared keeps its position and the
+	// resolution carries the new content.
 	pods.declare("alpha.files", "publisher.list",
 		Contribution{ID: "alpha.files.a2", Plugin: "alpha.files", Label: "third!"},
 		Contribution{ID: "alpha.files.a1", Plugin: "alpha.files", Label: "first"})
@@ -416,6 +415,9 @@ func TestContributionOrderAndReplace(t *testing.T) {
 	res = resolution(t, st)
 	if got := entryIDs(res.Contributions["publisher.list"]); !equalStrings(got, want) {
 		t.Fatalf("replace-in-place reordered: %v, want %v", got, want)
+	}
+	if got := res.Contributions["publisher.list"][2].Label; got != "third!" {
+		t.Fatalf("replaced label = %q, want third!", got)
 	}
 
 	// Only the changed slot's watchers were notified.
@@ -432,6 +434,58 @@ func TestContributionOrderAndReplace(t *testing.T) {
 	}
 	if len(other.msgs) != 0 {
 		t.Fatalf("unrelated slot watcher notified: %d", len(other.msgs))
+	}
+}
+
+func TestContributionOrderWithinOneFlush(t *testing.T) {
+	st, eng, pods := newEngine(t, Options{})
+	pods.launch("beta.notes")
+	pods.launch("alpha.files")
+
+	// Both plugins declare new entries between flushes: within the one
+	// tick, new entries order by namespace (alpha before beta), each group
+	// in its declared array order — the declaration lists carry no
+	// cross-plugin order.
+	pods.declare("beta.notes", "publisher.list",
+		Contribution{ID: "beta.notes.b1", Plugin: "beta.notes", Label: "b1"},
+		Contribution{ID: "beta.notes.b2", Plugin: "beta.notes", Label: "b2"})
+	pods.declare("alpha.files", "publisher.list",
+		Contribution{ID: "alpha.files.a1", Plugin: "alpha.files", Label: "a1"})
+	settle(st, eng)
+
+	want := []string{"alpha.files.a1", "beta.notes.b1", "beta.notes.b2"}
+	if got := entryIDs(resolution(t, st).Contributions["publisher.list"]); !equalStrings(got, want) {
+		t.Fatalf("order = %v, want %v (namespace order within one tick)", got, want)
+	}
+}
+
+func TestRemovedEntryLeavesSequence(t *testing.T) {
+	st, eng, pods := newEngine(t, Options{})
+	pods.launch("alpha.files")
+	pods.launch("beta.notes")
+	pods.declare("alpha.files", "publisher.list",
+		Contribution{ID: "alpha.files.a1", Plugin: "alpha.files", Label: "one"})
+	pods.declare("beta.notes", "publisher.list",
+		Contribution{ID: "beta.notes.b1", Plugin: "beta.notes", Label: "two"})
+	settle(st, eng)
+	if got := entryIDs(resolution(t, st).Contributions["publisher.list"]); !equalStrings(got, []string{"alpha.files.a1", "beta.notes.b1"}) {
+		t.Fatalf("initial order = %v", got)
+	}
+
+	// A removed entry leaves the sequence.
+	pods.declare("alpha.files", "publisher.list")
+	settle(st, eng)
+	if got := entryIDs(resolution(t, st).Contributions["publisher.list"]); !equalStrings(got, []string{"beta.notes.b1"}) {
+		t.Fatalf("after removal = %v", got)
+	}
+
+	// Observing it again appends anew — first-observed order, not the old
+	// position.
+	pods.declare("alpha.files", "publisher.list",
+		Contribution{ID: "alpha.files.a1", Plugin: "alpha.files", Label: "one"})
+	settle(st, eng)
+	if got := entryIDs(resolution(t, st).Contributions["publisher.list"]); !equalStrings(got, []string{"beta.notes.b1", "alpha.files.a1"}) {
+		t.Fatalf("after re-add = %v, want re-observed at the end", got)
 	}
 }
 
@@ -600,7 +654,7 @@ func TestInitialSweepResolvesPreRegisteredDeclarations(t *testing.T) {
 	}
 	eng.Flush()
 
-	if got := resolution(t, st).Occupants[string(protocol.SurfaceMainStage)]; got != "alpha.files" {
+	if got := resolution(t, st).Occupants[protocol.SurfaceMainStage].Plugin; got != "alpha.files" {
 		t.Fatalf("occupant = %q, want alpha.files (initial sweep)", got)
 	}
 }
@@ -636,7 +690,7 @@ func TestDroppedClaimReleasesOccupancy(t *testing.T) {
 	pods.unclaim("alpha.files", string(protocol.SurfaceSidebarFooter))
 	settle(st, eng)
 
-	if _, occupied := resolution(t, st).Occupants[string(protocol.SurfaceSidebarFooter)]; occupied {
+	if _, occupied := resolution(t, st).Occupants[protocol.SurfaceSidebarFooter]; occupied {
 		t.Fatal("occupancy survived a dropped claim")
 	}
 }
