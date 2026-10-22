@@ -92,8 +92,9 @@ type SettingEntry struct {
 }
 
 // SettingsPort serves settings.get, settings.list, settings.schema and
-// settings.validate. Only get is open to plugins; the others are CLI methods
-// and answer denied to a plugin caller.
+// settings.validate. Only get is open to plugins; list, schema and validate are
+// CLI methods and answer denied to a plugin caller (plugins read their own keys
+// with get).
 //
 // A plugin caller sees exactly the keys its own manifest declared (owner
 // "plugin:<id>") plus public husk.* keys, never an arbitrary prefix subtree
@@ -103,7 +104,7 @@ type SettingEntry struct {
 type SettingsPort interface {
 	// Get returns the effective value and the layer it came from.
 	Get(ctx context.Context, c Caller, key string) (value any, source string, err error)
-	// List returns the visible keys with their effective values.
+	// List returns every key with its effective value (CLI only).
 	List(ctx context.Context, c Caller) (map[string]any, error)
 	// Schema serves settings.schema. owner "" means every owner.
 	Schema(ctx context.Context, c Caller, owner string) ([]SettingEntry, error)
