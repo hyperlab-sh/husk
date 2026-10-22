@@ -208,6 +208,32 @@ func (m *WorkbenchModel) builtinCommands() []paletteCommand {
 	return rows
 }
 
+// paletteVisibleRows is how many results the palette draws at once.
+const paletteVisibleRows = 12
+
+// paletteWindowTop returns the first drawn row for a list of n results so
+// that the cursor is inside the window, moving it as little as possible from
+// top. It is pure: View calls it too, so a stale top never hides the cursor.
+func paletteWindowTop(top, cursor, n int) int {
+	if n <= paletteVisibleRows {
+		return 0
+	}
+	if cursor < top {
+		top = cursor
+	}
+	if cursor >= top+paletteVisibleRows {
+		top = cursor - paletteVisibleRows + 1
+	}
+	return max(0, min(top, n-paletteVisibleRows))
+}
+
+// movePaletteCursor moves the cursor by delta over n results, wrapping at both
+// ends, and scrolls the window to keep it visible.
+func (m *WorkbenchModel) movePaletteCursor(delta, n int) {
+	m.paletteCursor = ((m.paletteCursor+delta)%n + n) % n
+	m.paletteTop = paletteWindowTop(m.paletteTop, m.paletteCursor, n)
+}
+
 func (m *WorkbenchModel) filteredCommands() []paletteCommand {
 	all := m.allCommands()
 	q := strings.ToLower(strings.TrimSpace(m.paletteQuery))

@@ -180,6 +180,7 @@ type WorkbenchModel struct {
 	showPalette    bool
 	paletteQuery   string
 	paletteCursor  int
+	paletteTop     int // first result row drawn; follows the cursor (movePaletteCursor)
 	activeToast    *contracts.Toast
 	engineToast    bool // activeToast came from the engine queue
 	toastPollOn    bool
@@ -1050,7 +1051,7 @@ func (m *WorkbenchModel) hostActionTable() map[string]contracts.HostActionHandle
 func (m *WorkbenchModel) openPalette() {
 	m.showPalette = true
 	m.paletteQuery = ""
-	m.paletteCursor = 0
+	m.paletteCursor, m.paletteTop = 0, 0
 }
 
 // focusNext moves focus to the next shown surface in tab order. Slots with no

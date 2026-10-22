@@ -237,13 +237,13 @@ func (m *WorkbenchModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case "up", "ctrl+k":
 			cmds := m.filteredCommands()
 			if len(cmds) > 0 {
-				m.paletteCursor = (m.paletteCursor - 1 + len(cmds)) % len(cmds)
+				m.movePaletteCursor(-1, len(cmds))
 			}
 			return m, nil
 		case "down", "ctrl+j", "tab":
 			cmds := m.filteredCommands()
 			if len(cmds) > 0 {
-				m.paletteCursor = (m.paletteCursor + 1) % len(cmds)
+				m.movePaletteCursor(1, len(cmds))
 			}
 			return m, nil
 		case "enter":
@@ -259,13 +259,13 @@ func (m *WorkbenchModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if len(m.paletteQuery) > 0 {
 				_, size := utf8.DecodeLastRuneInString(m.paletteQuery)
 				m.paletteQuery = m.paletteQuery[:len(m.paletteQuery)-size]
-				m.paletteCursor = 0
+				m.paletteCursor, m.paletteTop = 0, 0
 			}
 			return m, nil
 		default:
 			if paletteTextFor(msg, key) {
 				m.paletteQuery += key
-				m.paletteCursor = 0
+				m.paletteCursor, m.paletteTop = 0, 0
 			}
 			return m, nil
 		}
@@ -349,7 +349,7 @@ func (m *WorkbenchModel) pastePalette(content string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.paletteQuery += clean
-	m.paletteCursor = 0
+	m.paletteCursor, m.paletteTop = 0, 0
 	return m, nil
 }
 
@@ -588,7 +588,7 @@ func (m *WorkbenchModel) handleMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 				case "palette":
 					m.showPalette = true
 					m.paletteQuery = ""
-					m.paletteCursor = 0
+					m.paletteCursor, m.paletteTop = 0, 0
 					return m, nil
 				}
 			}
