@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
+	"github.com/hyperlab-sh/husk/internal/stem/dispatcher"
 	"github.com/hyperlab-sh/husk/internal/stem/hooks"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
@@ -39,9 +40,21 @@ func (p *Hooks) HookCall(ctx context.Context, c contracts.Caller, hook string, d
 	if !ok {
 		return nil, coded(protocol.CodeDenied, "unknown caller")
 	}
-	// The kind enums are laid out identically (input, plugin, cli, host), so
-	// the mapping above — including Stem as Host — stays callerOf's.
-	caller := hooks.Caller{Kind: hooks.CallerKind(d.Kind), PluginID: d.PluginID}
+	// The mapping rules stay callerOf's (Stem is a Host caller); the kind
+	// itself is translated explicitly so nothing assumes the two enums'
+	// layouts match.
+	var caller hooks.Caller
+	switch d.Kind {
+	case dispatcher.CallerCLI:
+		caller.Kind = hooks.CallerCLI
+	case dispatcher.CallerHost:
+		caller.Kind = hooks.CallerHost
+	case dispatcher.CallerPlugin:
+		caller.Kind = hooks.CallerPlugin
+	default:
+		return nil, coded(protocol.CodeDenied, "unknown caller")
+	}
+	caller.PluginID = d.PluginID
 	payload, err := parseObject(data, "hook data")
 	if err != nil {
 		return nil, err
