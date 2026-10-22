@@ -77,6 +77,21 @@ type Frontend interface {
 	// again after such a tick. Any goroutine.
 	RailItems() []RailItem
 
+	// PublishedSlots lists every published extension point the declared
+	// plugins documents carry (kind inline or region, with the region's rect),
+	// sorted by plugin id, then in manifest order. Any goroutine.
+	PublishedSlots() []PublishedSlot
+
+	// SurfaceFrames lists the frame each plugin declared for a surface it
+	// claims (manifest surfaces[].frame), keyed by plugin id and surface; a
+	// surface without a declared frame is absent. Any goroutine.
+	SurfaceFrames() map[string]map[protocol.SurfaceID]protocol.FrameSpec
+
+	// ActiveToast expires stale toasts on the host clock and returns the
+	// oldest live one (plugin and CLI toast.show calls queue there); false when
+	// none is showing. Loop only.
+	ActiveToast() (Toast, bool)
+
 	// OwnSlices registers the frontend's owner handles (husk.layout,
 	// husk.geometry, husk.focus). It may be called once, before the loop
 	// runs or on it after Run has started (a persistent husk.layout hydrates
@@ -88,6 +103,34 @@ type Frontend interface {
 	// husk.surfaces (visibility, placement, overlays) and commits it; the
 	// engine keeps writing occupants and contributions. Loop only.
 	UpdateSurfaceView(fn func(*SurfaceView)) error
+}
+
+// PublishedSlot is one published extension point a plugin declared in its
+// manifest. Kind is "inline" or "region"; Rect is set for a region.
+type PublishedSlot struct {
+	Plugin string         `json:"plugin"`
+	ID     string         `json:"id"`
+	Kind   string         `json:"kind"`
+	Rect   *PublishedRect `json:"rect,omitempty"`
+}
+
+// PublishedRect places a region inside a claimed host surface, in the
+// surface's content cells.
+type PublishedRect struct {
+	Surface protocol.SurfaceID `json:"surface"`
+	X       int                `json:"x"`
+	Y       int                `json:"y"`
+	Width   int                `json:"width"`
+	Height  int                `json:"height"`
+}
+
+// Toast is one transient notice: a plugin's or the CLI's toast.show. Plugin
+// is empty for a notice the host attributes to itself.
+type Toast struct {
+	Plugin  string
+	Level   string
+	Title   string
+	Message string
 }
 
 // HostActionHandler serves one host action on the loop. args is the
