@@ -8,12 +8,15 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"os"
+	"os/exec"
 	"sort"
 	"strings"
 	"syscall"
 
 	"filippo.io/age"
+	"github.com/godbus/dbus/v5"
 	"github.com/gofrs/flock"
 	"github.com/zalando/go-keyring"
 )
@@ -73,6 +76,44 @@ func withFileLock(path string, f func() error) error {
 	defer lock.Close()
 	return f()
 }
+
+// keyringAbsent accepts only evidence that no identity/backend/session bus is
+// available. In particular, a locked collection, NoReply or an arbitrary process
+// exit does not prove absence and must not replace a potentially existing key.
+func keyringAbsent(err error) bool {
+	if errors.Is(err, keyring.ErrNotFound) || errors.Is(err, keyring.ErrUnsupportedPlatform) {
+		return true
+	}
+	serviceAbsent := func(name string) bool {
+		return name == "org.freedesktop.DBus.Error.ServiceUnknown" || name == "org.freedesktop.DBus.Error.NameHasNoOwner"
+	}
+	var value dbus.Error
+	if errors.As(err, &value) {
+		return serviceAbsent(value.Name)
+	}
+	var pointer *dbus.Error
+	if errors.As(err, &pointer) && pointer != nil {
+		return serviceAbsent(pointer.Name)
+	}
+	// These are the concrete discovery failures returned by godbus: no bus
+	// address, no autolaunch executable, or an absent configured Unix socket.
+	// Do not equate permission errors or connection refusal with absence.
+	var launcher *exec.Error
+	if errors.As(err, &launcher) && launcher.Name == "dbus-launch" && errors.Is(launcher.Err, exec.ErrNotFound) {
+		return true
+	}
+	var dial *net.OpError
+	if errors.As(err, &dial) && dial.Op == "dial" && dial.Net == "unix" && errors.Is(dial.Err, fs.ErrNotExist) {
+		return true
+	}
+	for cause := err; cause != nil; cause = errors.Unwrap(cause) {
+		if cause.Error() == "dbus: couldn't determine address of session bus" {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Store) identity(create bool) (Sealer, error) {
 	if s.sealer != nil {
 		return s.sealer, nil
@@ -106,7 +147,7 @@ func (s *Store) identity(create bool) (Sealer, error) {
 				return nil, fmt.Errorf("store: invalid keyring identity; reset-secrets required")
 			}
 		} else {
-			if !errors.Is(ringErr, keyring.ErrNotFound) {
+			if !keyringAbsent(ringErr) {
 				s.diagnostic(Problem{Code: "unavailable", Message: "OS keyring could not be read; no new identity was created"}, "")
 				return nil, fmt.Errorf("%w: OS keyring could not be read", ErrUnavailable)
 			}
