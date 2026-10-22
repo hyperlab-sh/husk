@@ -17,8 +17,8 @@ type Ports struct {
 	Keys     contracts.KeybindingPort
 	Config   contracts.ConfigPort
 	// Limiter is the shared settings.get/secrets.get budget applied per
-	// plugin id. Pass nil to disable the cap; the composition root normally
-	// passes NewWindowLimiter(clock, contracts.RateLimitPerSecond).
+	// plugin id (services.md, Limits — the cap is spec, not an option),
+	// normally NewWindowLimiter(clock, contracts.RateLimitPerSecond).
 	Limiter contracts.Limiter
 }
 
@@ -31,6 +31,9 @@ func Register(m *handlers.Mux, p Ports) {
 	}
 	if p.Settings == nil || p.Secrets == nil || p.Profile == nil || p.Theme == nil || p.Keys == nil || p.Config == nil {
 		panic("services: Register requires every Services port")
+	}
+	if p.Limiter == nil {
+		panic("services: Register requires a rate limiter (services.md Limits)")
 	}
 	m.Register("settings", Settings{Port: p.Settings, Limiter: p.Limiter})
 	m.Register("secrets", Secrets{Port: p.Secrets, Limiter: p.Limiter})

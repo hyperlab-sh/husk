@@ -38,9 +38,10 @@ func rateLimited(req protocol.Message) protocol.Message {
 }
 
 // admitRateLimited applies limiter to one plugin caller's request and returns
-// the refusal reply when the budget is exhausted. CLI and Stem callers and a
-// nil limiter (the composition root opted out) always pass; the key is the
-// verified plugin id, never a params value.
+// the refusal reply when the budget is exhausted. CLI and Stem callers always
+// pass; the key is the verified plugin id, never a params value. Register
+// guarantees a non-nil limiter; the nil check only defends a hand-built
+// adapter struct.
 func admitRateLimited(req protocol.Message, c contracts.Caller, limiter contracts.Limiter) *protocol.Message {
 	if c.Kind != contracts.CallerPlugin || limiter == nil {
 		return nil
