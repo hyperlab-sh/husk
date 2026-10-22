@@ -458,3 +458,45 @@ func TestFailuresInOneSettleAllReachTheUser(t *testing.T) {
 		}
 	}
 }
+
+// At runtime failures arrive in different Updates: refusals at boot, launch
+// failures later. A later failure joins the toast that is up; it must not
+// replace it.
+func TestFailuresInLaterSettlesJoinTheShowingToast(t *testing.T) {
+	m := goldenModel()
+	fe := withFE(m)
+	fe.pods, fe.occ, fe.podErr = map[string]string{}, map[protocol.SurfaceID]string{}, map[string]string{}
+	fe.Refused = []contracts.PluginRefusal{{Plugin: "dup", Reason: "duplicate plugin id"}}
+	m.settle() // boot: the refusal
+	if tt := m.activeToast; tt == nil || tt.Message != "dup: duplicate plugin id" {
+		t.Fatalf("boot toast = %+v", tt)
+	}
+
+	fe.pods["bad"], fe.podErr["bad"] = "failed", "start: no such file"
+	fe.publish()
+	m.settle() // a later Update: a launch failure
+	tt := m.activeToast
+	if tt == nil || tt.Title != "2 plugins failed" || !strings.Contains(tt.Message, "dup: duplicate plugin id") || !strings.Contains(tt.Message, "bad: start: no such file") {
+		t.Fatalf("toast after the launch failure = %+v, want both lines", tt)
+	}
+
+	fe.pods["worse"], fe.podErr["worse"] = "failed", "crashed (exit status 2)"
+	fe.publish()
+	m.settle() // a third, in its own settle
+	tt = m.activeToast
+	if tt == nil || tt.Title != "3 plugins failed" || !strings.Contains(tt.Message, "worse: crashed (exit status 2)") || !strings.Contains(tt.Message, "dup: ") {
+		t.Fatalf("toast after the third failure = %+v", tt)
+	}
+
+	// Once the toast expires, the next failure starts a fresh one.
+	m.Update(toastExpireMsg{id: m.toastSeq})
+	if m.activeToast != nil {
+		t.Fatalf("toast still up after its expiry: %+v", m.activeToast)
+	}
+	fe.pods["late"], fe.podErr["late"] = "failed", "boom"
+	fe.publish()
+	m.settle()
+	if tt := m.activeToast; tt == nil || tt.Title != "Plugin failed" || tt.Message != "late: boom" {
+		t.Fatalf("fresh toast = %+v, want only the new failure", tt)
+	}
+}
