@@ -48,6 +48,16 @@ func Register(dir string, e Entry) error {
 
 	path := EntryPath(dir, e.ID)
 
+	// Clear this id's own leftover temp files — a crashed Register left
+	// them — before writing a new one. Temp files of other ids are not
+	// ours to touch. The id is a valid id, so it carries no glob
+	// metacharacters.
+	if leftovers, err := filepath.Glob(filepath.Join(dir, "."+e.ID+".json.tmp-*")); err == nil {
+		for _, l := range leftovers {
+			_ = os.Remove(l)
+		}
+	}
+
 	if e.StartedAt.IsZero() {
 		e.StartedAt = time.Now().UTC()
 	}
@@ -77,6 +87,15 @@ func Register(dir string, e Entry) error {
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		return fail("rename", err)
+	}
+	// fsync the directory so the rename survives a crash: the entry is
+	// the durable record of a running instance. Best effort — the rename
+	// already happened, and failing the registration over a directory
+	// fsync would leave the entry on disk while telling the server it
+	// failed.
+	if df, err := os.Open(dir); err == nil {
+		_ = df.Sync()
+		_ = df.Close()
 	}
 	return nil
 }

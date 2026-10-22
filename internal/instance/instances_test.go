@@ -447,6 +447,28 @@ func TestUnregisterRemovesSocketWithoutEntry(t *testing.T) {
 	}
 }
 
+func TestRegisterCleansOwnTempLeftovers(t *testing.T) {
+	// A crashed Register leaves ".<id>.json.tmp-*" behind; the next
+	// Register for the same id sweeps them. Other ids' temps are not ours
+	// to touch.
+	dir := runDir(t)
+	for _, f := range []string{".notes.json.tmp-old", ".other.json.tmp-x"} {
+		if err := os.WriteFile(filepath.Join(dir, f), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e := Entry{ID: "notes", Name: "notes", PID: 5120, Socket: SocketPath(dir, "notes"), StartedAt: fixedTime(), ProtocolVersion: "2.0"}
+	if err := Register(dir, e); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(dir, ".notes.json.tmp-old")); err == nil {
+		t.Error("the id's own leftover temp should be gone")
+	}
+	if _, err := os.Lstat(filepath.Join(dir, ".other.json.tmp-x")); err != nil {
+		t.Error("another id's leftover temp must be left alone")
+	}
+}
+
 func TestRemoveIfStale(t *testing.T) {
 	dir := t.TempDir()
 	base := func(pid int, at time.Time) Entry {
