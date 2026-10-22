@@ -119,8 +119,8 @@ type WorkbenchModel struct {
 	actions map[string]contracts.HostActionHandler
 	cmds    []tea.Cmd // commands host-action handlers queued during this Update
 
-	plugins     map[string]bool   // live plugins
-	podStatus   map[string]string // every Pod's status, for --dump-frame
+	plugins     map[string]bool                // live plugins
+	podStatus   map[string]contracts.PodStatus // every Pod's status, for --dump-frame
 	railItems   []contracts.RailItem
 	slotUpdates map[protocol.SurfaceID]*protocol.SurfaceUpdateParams
 	slotRects   map[protocol.SurfaceID]SlotRect
@@ -197,7 +197,7 @@ func newWorkbenchModel() *WorkbenchModel {
 		keys:         defaultKeys{},
 		registered:   map[string]bool{},
 		plugins:      make(map[string]bool),
-		podStatus:    make(map[string]string),
+		podStatus:    make(map[string]contracts.PodStatus),
 		slotUpdates:  make(map[protocol.SurfaceID]*protocol.SurfaceUpdateParams),
 		slotRects:    make(map[protocol.SurfaceID]SlotRect),
 		width:        144,
@@ -634,7 +634,7 @@ func (m *WorkbenchModel) applyLayout(raw json.RawMessage) {
 // podsDoc is the part of husk.pods the model reads.
 type podsDoc struct {
 	Plugins map[string]struct {
-		Status string `json:"status"`
+		Status contracts.PodStatus `json:"status"`
 	} `json:"plugins"`
 }
 
@@ -669,10 +669,10 @@ func (m *WorkbenchModel) refresh() bool {
 		_ = json.Unmarshal(e.Value, &pods)
 	}
 	live := map[string]bool{}
-	status := map[string]string{}
+	status := map[string]contracts.PodStatus{}
 	for id, p := range pods.Plugins {
 		status[id] = p.Status
-		if p.Status == "live" {
+		if p.Status == contracts.PodLive {
 			live[id] = true
 		}
 	}

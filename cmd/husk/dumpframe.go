@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -33,10 +35,11 @@ const dumpFrameMaxSettle = time.Second
 
 // dumpFrameOptions describes what --dump-frame waits for.
 type dumpFrameOptions struct {
-	// Launched is the number of --plugin/--plugin-dir arguments given. Zero
-	// means no plugin is awaited; otherwise the frame is taken once the host
-	// reported at least one Pod, none is still starting, and a live plugin
-	// published.
+	// Launched is the number of plugins the host will launch (its plan, not
+	// the number of arguments: an empty directory plans none). Zero means no
+	// plugin is awaited; otherwise the frame is taken once the host reported
+	// every Pod, none is still starting, and a live plugin published. When
+	// every Pod ended without going live the run fails, naming them.
 	Launched int
 	// RailMode opens the first rail item with this placement (modal,
 	// full-canvas, stage) once every launched plugin has registered, and waits
@@ -77,6 +80,7 @@ type dumpFrameDriver struct {
 	capArmed     bool
 	settled      bool
 	traffic      string // fingerprint of the last seen plugin traffic
+	failed       bool   // every launched Pod ended without going live
 }
 
 // activity fingerprints what a plugin can change: its Pod status and the
@@ -107,6 +111,9 @@ func (d *dumpFrameDriver) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	_, cmd := d.WorkbenchModel.Update(msg)
 	d.advance()
+	if d.failed {
+		return d, tea.Batch(cmd, tea.Quit)
+	}
 	if d.traffic != d.activity() {
 		// Pod or content traffic restarts the quiet window.
 		d.traffic = d.activity()
@@ -152,13 +159,21 @@ func (d *dumpFrameDriver) advance() {
 	m := d.WorkbenchModel
 	d.ready = false
 	if d.opt.Launched > 0 {
-		if len(m.podStatus) == 0 {
+		if len(m.podStatus) < d.opt.Launched {
 			return
 		}
+		live := false
 		for _, st := range m.podStatus {
-			if st == "starting" {
+			switch st {
+			case contracts.PodStarting:
 				return
+			case contracts.PodLive:
+				live = true
 			}
+		}
+		if !live {
+			d.failed = true
+			return
 		}
 	}
 	if !d.railTriggers {
@@ -230,6 +245,8 @@ func runDumpFrame(m *WorkbenchModel, opt dumpFrameOptions) (string, error) {
 	_, err := p.Run()
 	frame := m.View().Content
 	switch {
+	case d.failed:
+		return frame, fmt.Errorf("no plugin went live: %s", failedPods(m.podStatus))
 	case d.settled:
 		return frame, nil
 	case errors.Is(err, tea.ErrProgramPanic):
@@ -245,4 +262,18 @@ func runDumpFrame(m *WorkbenchModel, opt dumpFrameOptions) (string, error) {
 		return frame, err
 	}
 	return frame, nil
+}
+
+// failedPods lists the Pods and their statuses for an error message.
+func failedPods(status map[string]contracts.PodStatus) string {
+	ids := make([]string, 0, len(status))
+	for id := range status {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	out := make([]string, len(ids))
+	for i, id := range ids {
+		out[i] = fmt.Sprintf("plugin %s %s", id, status[id])
+	}
+	return strings.Join(out, ", ")
 }

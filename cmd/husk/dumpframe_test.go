@@ -28,6 +28,7 @@ func (h stepHost) Run(ctx context.Context) error { <-ctx.Done(); return nil }
 func (h stepHost) Close() error                  { return nil }
 func (h stepHost) Frontend() contracts.Frontend  { return h.fe }
 func (h stepHost) Tick()                         {}
+func (h stepHost) Planned() int                  { return 0 }
 func (h stepHost) Update(msg any) bool {
 	st, ok := msg.(hostStep)
 	if ok {
@@ -272,5 +273,48 @@ func TestDumpFramePanicIsNotReportedAsTimeout(t *testing.T) {
 	_, err := runDumpFrame(m, dumpFrameOptions{Program: prog, Launched: 1, Timeout: 10 * time.Second})
 	if err == nil || strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("err = %v, want a panic error, not a timeout", err)
+	}
+}
+
+// A broken plugin must not pass as an empty workbench: when every launched Pod
+// ended without going live the run fails at once, naming them, with the frame.
+func TestDumpFrameAllPodsFailedIsAnError(t *testing.T) {
+	m, prog := dumpModel()
+	fe := withFE(m)
+	feed(prog,
+		starting(m, "alpha"), starting(m, "beta"),
+		func() { fe.pods["alpha"], fe.pods["beta"] = "exited", "failed"; fe.publish() },
+	)
+	start := time.Now()
+	frame, err := runDumpFrame(m, dumpFrameOptions{Program: prog, Launched: 2, Quiet: 20 * time.Millisecond, Timeout: 30 * time.Second})
+	if err == nil {
+		t.Fatal("a run with no live plugin succeeded")
+	}
+	for _, want := range []string{"plugin alpha exited", "plugin beta failed"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q lacks %q", err, want)
+		}
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Fatal("the failure waited for the deadline")
+	}
+	if got := len(strings.Split(frame, "\n")); got != goldenH {
+		t.Fatalf("failed run must still return a full frame, got %d rows", got)
+	}
+}
+
+// One live plugin among failed ones is a usable workbench.
+func TestDumpFramePartialFailureStillSettles(t *testing.T) {
+	m, prog := dumpModel()
+	fe := withFE(m)
+	feed(prog,
+		starting(m, "alpha"), starting(m, "beta"),
+		func() { fe.pods["beta"] = "failed"; fe.publish() },
+		register(m, "alpha", []protocol.SurfaceID{protocol.SurfaceMainStage}),
+		slotMsg(m, "alpha", protocol.SurfaceMainStage, "ALIVE"),
+	)
+	frame, err := runDumpFrame(m, dumpFrameOptions{Program: prog, Launched: 2, Quiet: 20 * time.Millisecond, Timeout: 30 * time.Second})
+	if err != nil || !strings.Contains(ansi.Strip(frame), "ALIVE") {
+		t.Fatalf("err=%v frame has ALIVE=%v", err, strings.Contains(ansi.Strip(frame), "ALIVE"))
 	}
 }
