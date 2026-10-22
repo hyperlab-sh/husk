@@ -437,7 +437,15 @@ the value is only a tiebreaker for the engine, below.
 `husk.surfaces` is the resolution the declarations feed. The Surfaces engine
 holds its only handle, and it is the only slice the host renders from. The
 engine keeps the registry's invariants: one occupant per surface, first
-claim wins, conflicting later claims refused, known host surfaces only. It
+live claim wins, conflicting later claims refused, known host surfaces only.
+A claim counts only while its Pod is `live` in `husk.pods`: a claim from a
+Pod that is starting, failed or exited holds nothing, stays in its
+declaration, and resolves if the Pod is live at a later pass. When a Pod
+leaves `live` the engine vacates its surfaces and hands each to the first
+live claimant in namespace order; a live occupant is never preempted by a
+claimant that goes live later. The host marks the engine on every
+`husk.pods` write (`Engine.LivenessChanged`), so the hand-over lands in the
+same tick, and the new occupant is told its size like any new occupant. It
 also records the cross-plugin contribution order itself, since the
 declarations carry no sequence: each slot's combined list follows a
 per-slot sequence of `(plugin, id)` pairs in the order the engine first
@@ -457,7 +465,7 @@ be re-occupied by its own stale declaration, and a freed surface resolves
 its standing refused claims in namespace order. A refused claim stays
 recorded in the declaration, the occupant is unchanged, and the refusal is
 counted; a returning plugin's re-registered declarations resolve again,
-first claim wins among the claims that arrive after the re-registration.
+first live claim wins among the claims that arrive after the re-registration.
 
 #### Frontend-owned slices
 
