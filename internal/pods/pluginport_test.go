@@ -49,6 +49,11 @@ func TestPluginPortListAndLog(t *testing.T) {
 	if _, err := port.Log(context.Background(), contracts.Caller{Kind: contracts.CallerCLI}, "missing"); contracts.CodeOf(err) != string(protocol.CodeNotFound) {
 		t.Fatal("unknown plugin log code", err)
 	}
+	// A known Pod whose Wrapper never opened a log answers not_found too,
+	// rather than an empty path (round-1 note).
+	if _, err := port.Log(context.Background(), contracts.Caller{Kind: contracts.CallerCLI}, "b"); contracts.CodeOf(err) != string(protocol.CodeNotFound) {
+		t.Fatal("logless plugin log code", err)
+	}
 }
 
 // plugin.list and plugin.log are the user's own: a plugin caller is denied,

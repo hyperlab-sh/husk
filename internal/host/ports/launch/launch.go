@@ -35,6 +35,20 @@ type PodRegistry struct {
 
 var _ contracts.PodRegistry = (*PodRegistry)(nil)
 
+// New assembles the composed host: pods.New over the Loop, with the two
+// registry seams required to agree. Options.Registry answers Add's duplicate
+// question while Loop.Registry receives the liveness writes; two different
+// registries would reserve an id in one place and record its liveness in
+// another, so New fails on that mismatch instead of launching a host that
+// double-tracks ids (round-1 note). Either seam may be unwired (tests run
+// with only one, or none); only a disagreement is an error.
+func New(l Loop, opts pods.Options) (*pods.Host, error) {
+	if opts.Registry != nil && l.Registry != nil && opts.Registry != l.Registry {
+		return nil, errors.New("launch: Options.Registry and Loop.Registry must be the same PodRegistry")
+	}
+	return pods.New(l, opts)
+}
+
 // NewPodRegistry registers husk.pods (owner husk, instance scope, not
 // persisted) and returns its registry. Call it on the loop.
 func NewPodRegistry(st *state.State) (*PodRegistry, error) {
