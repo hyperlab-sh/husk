@@ -199,6 +199,55 @@ func TestUnauthenticatedPluginCallerDenied(t *testing.T) {
 	}
 }
 
+// TestZeroAndUnknownCallerKindsDenied pins S5: a zero-value or unlisted
+// CallerKind is not any method's home, so all four methods deny it — and
+// the denial names the kind, never panics.
+func TestZeroAndUnknownCallerKindsDenied(t *testing.T) {
+	port, _, _, _, _ := newPort(t)
+	ctx := context.Background()
+	for name, c := range map[string]contracts.Caller{
+		"zero kind": {},
+		"kind 9":    {Kind: contracts.CallerKind(9)},
+	} {
+		calls := map[string]func() error{
+			"surface.update": func() error {
+				return port.SurfaceUpdate(ctx, c, protocol.SurfaceUpdateParams{Surface: protocol.SurfaceMainStage})
+			},
+			"surface.close": func() error {
+				return port.SurfaceClose(ctx, c, protocol.SurfaceCloseParams{Surface: protocol.SurfaceMainStage})
+			},
+			"slot.contribute": func() error {
+				return port.SlotContribute(ctx, c, protocol.SlotContributeParams{SlotID: "s", ID: "p.x"})
+			},
+			"toast.show": func() error {
+				return port.ToastShow(ctx, c, protocol.ToastShowParams{Level: "info", Title: "t"})
+			},
+		}
+		for method, call := range calls {
+			if code := contracts.CodeOf(call()); code != "denied" {
+				t.Fatalf("%s on %s: code = %q, want denied", name, method, code)
+			}
+		}
+	}
+}
+
+// TestBadContributionIdIsInvalidParams pins the id rule's wire codes through
+// the port: a malformed id is invalid_params, another plugin's namespace is
+// denied — never unavailable, which only the loop-down path answers.
+func TestBadContributionIdIsInvalidParams(t *testing.T) {
+	port, _, _, _, _ := newPort(t)
+	plugin := contracts.Caller{Kind: contracts.CallerPlugin, PluginID: "alpha.files"}
+	ctx := context.Background()
+	malformed := port.SlotContribute(ctx, plugin, protocol.SlotContributeParams{SlotID: "s", ID: "no-dot"})
+	if code := contracts.CodeOf(malformed); code != "invalid_params" {
+		t.Fatalf("malformed id code = %q, want invalid_params", code)
+	}
+	foreign := port.SlotContribute(ctx, plugin, protocol.SlotContributeParams{SlotID: "s", ID: "beta.notes.x"})
+	if code := contracts.CodeOf(foreign); code != "denied" {
+		t.Fatalf("foreign-namespace id code = %q, want denied", code)
+	}
+}
+
 // TestEngineCallsRunOnTheLoop pins the seam: a port call made off the loop
 // still runs its engine body on the loop goroutine, observed where the
 // engine's own clock tick runs.
