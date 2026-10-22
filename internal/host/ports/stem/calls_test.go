@@ -96,7 +96,8 @@ func newRig(t *testing.T) *rig {
 	t.Helper()
 	r := &rig{loop: newLoop(t), out: &outbox{sent: make(chan protocol.Message, 8)}, clk: &clock{t: time.Unix(1000, 0)}}
 	r.table = calls.New(r.out, calls.TableOptions{Clock: r.clk})
-	r.disp = dispatcher.New(dispatcher.Options{
+	var err error
+	r.disp, err = dispatcher.New(dispatcher.Options{
 		Catalog: catalog{
 			"notes.new":   {ID: "notes.new", Owner: "notes"},
 			"notes.pub":   {ID: "notes.pub", Owner: "notes", Public: true},
@@ -108,6 +109,9 @@ func newRig(t *testing.T) *rig {
 		Focus:    focus{},
 		Calls:    r.table,
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	r.disp.RegisterHost("husk.quit", func(req dispatcher.ActionRequest) dispatcher.ActionReply {
 		r.hostRan.Store(r.loop.inLoop.Load())
 		return dispatcher.ActionReply{Result: map[string]any{"args": req.Args}}
@@ -200,8 +204,7 @@ func invoke(r *rig, c contracts.Caller, action string, args string) (json.RawMes
 	return r.port.ActionInvoke(context.Background(), c, action, json.RawMessage(args))
 }
 
-// A Stem caller over the port carries no focus snapshot of its own, so the
-// owner sees an empty focus: Input calls the Dispatcher directly to pass one.
+// A Stem caller is a Host caller: it gets State's focus, not Input's.
 func TestOwnerRoundTrip(t *testing.T) {
 	r := newRig(t)
 	type res struct {
@@ -227,7 +230,7 @@ func TestOwnerRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(req.Params, &p); err != nil {
 		t.Fatal(err)
 	}
-	if req.Method != "action.invoke" || p.Action != "notes.new" || p.Args["title"] != "Todo" || p.Caller["kind"] != "input" || p.Focus["surface"] != "" {
+	if req.Method != "action.invoke" || p.Action != "notes.new" || p.Args["title"] != "Todo" || p.Caller["kind"] != "host" || p.Focus["surface"] != "s" {
 		t.Fatalf("owner saw %s %+v", req.Method, p)
 	}
 }
@@ -355,9 +358,15 @@ func TestListWaitHonoursContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err := r.port.ActionList(ctx, cli)
-	close(block)
 	if contracts.CodeOf(err) != "cancelled" {
 		t.Fatalf("%v", err)
+	}
+	dctx, dcancel := context.WithDeadline(context.Background(), time.Unix(1, 0))
+	defer dcancel()
+	_, err = r.port.ActionList(dctx, cli)
+	close(block)
+	if contracts.CodeOf(err) != "timeout" {
+		t.Fatalf("list deadline: %v", err)
 	}
 }
 

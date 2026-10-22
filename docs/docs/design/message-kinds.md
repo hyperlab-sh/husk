@@ -270,9 +270,9 @@ Notes fixed by the implementation (`internal/stem/dispatcher`):
   Host see every entry, a plugin sees its own and the public ones. `live` is
   true for host actions. The `--owner` filter of `husk action list` is applied
   by the CLI, since the method has no parameters.
-- `CallerStem` arriving over the `CallsPort` is mapped to Input and carries no
-  focus snapshot (the owner sees an empty focus); Input in the loop calls the
-  Dispatcher directly to pass its own.
+- A Stem caller arriving over the `CallsPort` is a Host caller, not Input: it
+  gets State's focus like every caller except Input.
+- A host handler that panics yields one `internal` reply and a log line.
 
 Default is deny. A plugin marks an action public in its manifest
 (`"actions": [{"id": "notes.new", "title": "New note", "public": true}]`). The
@@ -295,7 +295,8 @@ from the [Protocol](protocol.md) registry, `failed` for an application failure):
 ```
 
 Caller identity in `params.caller` is `{"kind":"plugin","plugin_id":"other"}`
-for plugin callers, `{"kind":"cli"}` or `{"kind":"input"}` otherwise.
+for plugin callers, `{"kind":"cli"}`, `{"kind":"input"}` or `{"kind":"host"}`
+otherwise.
 
 Request from a plugin or the CLI over the socket (the Server sets the Caller
 from the request's `token`, see [Pods](pods.md), then calls `Invoke`):
