@@ -377,7 +377,7 @@ Error codes come from the [Protocol](protocol.md) registry:
 
 | Namespace | Owner module | Scope | Persistent | Retention | Contents |
 |---|---|---|---|---|---|
-| `husk.surfaces` | Stem: Surfaces | instance | no | | Occupancy, visibility, the active placement, overlays, published-slot contributions. |
+| `husk.surfaces` | Stem: Surfaces | instance | no | | Visibility, the active placement, overlays. |
 | `husk.focus` | Stem: Surfaces | instance | no | | Focused surface, its fallback, terminal focus. |
 | `husk.layout` | Stem: Surfaces | instance | yes | keep-latest | Dock preferences the user set: shown flags and sizes. |
 | `husk.geometry` | Stem: Surfaces | instance | no | | Terminal size, too-small flag, computed surface rects. |
@@ -386,17 +386,21 @@ Error codes come from the [Protocol](protocol.md) registry:
 | `husk.grants` | Services: Secrets | user | yes | manual | Secret grants: `(plugin, name, digest, at)`; never a value ([Services](services.md)). |
 | `husk.store` | Store | instance | no | | Store's own health: last 50 diagnostics, quarantined files, keyring fallback flag ([Store](store.md)). |
 | `<plugin_id>.state` | that plugin's Pod | instance, or user if the manifest asks | per manifest | per manifest | Plugin-defined. Registered at launch, before the plugin starts. |
+| `<plugin_id>.occupants` | that plugin's Pod | instance | no | | The surfaces the plugin occupies: surface name to its own plugin id. Registered at launch with `<plugin_id>.state`. |
+| `<plugin_id>.contributions` | that plugin's Pod | instance | no | | The plugin's published-slot contributions, by target publication id. |
 | `<owner>.workspace` | the workspace owner the distribution names | workspace | yes, named instances only | keep-latest | Application-defined workspace content. |
 
 Value shapes:
 
 ```json
 {"slice":"husk.surfaces","value":{
-  "occupants":{"sidebar-list":"example.files","main-stage":"example.editor"},
   "visible":["activity-rail","sidebar-list","main-header","main-stage"],
   "placement":{"rail_item":"","kind":""},
-  "overlays":{"modal":{"plugin":"","rail_item":""},"palette":false,"slot_explorer":false},
-  "contributions":{"example.editor.toolbar":[{"id":"example.git.branch","plugin":"example.git","label":"main"}]}
+  "overlays":{"modal":{"plugin":"","rail_item":""},"palette":false,"slot_explorer":false}
+}}
+{"slice":"example.files.occupants","value":{"sidebar-list":"example.files"}}
+{"slice":"example.git.contributions","value":{
+  "example.editor.toolbar":[{"id":"example.git.branch","plugin":"example.git","label":"main"}]
 }}
 {"slice":"husk.focus","value":{"surface":"main-stage","fallback":null,"terminal_focused":true}}
 {"slice":"husk.layout","value":{"sidebar":{"shown":true,"width":32,"nav_height":3,"footer_height":2},"side_panel":{"shown":false,"width":40},"main_header_height":3}}
@@ -405,6 +409,14 @@ Value shapes:
 {"slice":"husk.pods","value":{"plugins":{"example.files":{"status":"live","pid":4242,"started_at":"2026-10-22T06:01:02Z","last_error":null,"log":"/home/u/.local/state/husk/logs/4242/example.files.log"}}}}
 {"slice":"husk.profile","value":{"active":"default"}}
 ```
+
+Occupancy and contributions live in the Pod-owned slices, not in
+`husk.surfaces`: a slice holds one plugin's own claims and entries, its Pod
+is the owner and the host reads snapshots. Every recorded occupant names the
+owning plugin, and every contribution id is the owning plugin's own
+`<plugin_id>.<name>`. A contributions list keeps arrival order; a repeated
+contribution id replaces the earlier entry in place, and an identical value
+commits nothing.
 
 `husk.pods` status is one of `starting` (launch begun, process not yet
 started), `live` (process started), `exited` (clean exit, or stopped by Husk
@@ -480,9 +492,11 @@ With one:
     `declareFromManifest`, `validateSlot`, `describe` and `PublicationInfo`,
     `declareSlotFromHello` and `declareNamedFromHello`. `FromManifest` and
     `rollbackHello` disappear: declarations no longer live in runtime state.
-  - State, into `husk.surfaces` through Surfaces: `Occupants` (written by
-    `claimSurface`) and `publishedSlot.Contributions` (written by
-    `contribute`, cleaned by `removePlugin`).
+  - State, as Pod-owned slices: occupancy into `<plugin_id>.occupants` (the
+    Pod writes its plugin's claims where `claimSurface` wrote `Occupants`)
+    and contributions into `<plugin_id>.contributions` (where `contribute`
+    wrote `publishedSlot.Contributions`). A Pod teardown unregisters both,
+    replacing `removePlugin`'s cleanup.
   - Not State: `namedPublication.Subscribers` moves to the Event bus and Hook
     runner; `Pending`, `pendingHook`, `hookTimeout`, `maxPendingHookCalls`,
     `maxPendingPerSubscriber`, `expireHooks` and `pendingFor` move to
@@ -525,7 +539,7 @@ With one:
 - `pkg/manifest`: `Plugin` gains an optional `State` block (`scope`,
   `persistent`, `retention`, `max_bytes`). `Slots` stays: which surfaces a
   plugin claims is declared config; which surface it actually occupies is
-  `husk.surfaces`.
+  `<plugin_id>.occupants`.
 
 ## Decisions made here
 
@@ -564,8 +578,9 @@ With one:
 13. Layout splits into `husk.layout` (persistent dock preferences) and
     `husk.geometry` (terminal size and rects, not persistent), so a restored
     layout never restores a stale terminal size.
-14. Published-slot contributions and surface occupancy are State in
-    `husk.surfaces`; subscriber lists and pending hook calls are not.
+14. Published-slot contributions and surface occupancy are State as Pod-owned
+    slices (`<plugin_id>.occupants`, `<plugin_id>.contributions`), not fields
+    of `husk.surfaces`; subscriber lists and pending hook calls are not.
 15. Input bookkeeping, render buffers, the palette query and toasts stay out of
     State.
 16. Every plugin gets `<plugin_id>.state`, non-persistent instance scope by
@@ -589,8 +604,11 @@ With one:
    distribution layer, naming a plugin id; Husk passes it as
    `Options.WorkspaceOwner`, and an application embedding Husk as a Go library
    may pass its own id.
-3. **More than one slice per plugin.** The notes say one. Recommendation: keep
-   one for v2; a plugin structures its document internally.
+3. **More than one slice per plugin.** The notes say one. Recommendation:
+   `<plugin_id>.state` stays the one plugin-defined slice; the registry split
+   adds `<plugin_id>.occupants` and `<plugin_id>.contributions`, fixed-shape
+   slices the Pod registers, which are not part of the plugin's own document
+   space.
 4. **Anonymous instances and instance scope.** Resolved: [Store](store.md)
    persists instance and workspace scope only for named instances; user scope
    always. A pid instance keeps both in memory only.
