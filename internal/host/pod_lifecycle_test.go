@@ -219,14 +219,19 @@ func TestPluginExitedEventReachesAWatcher(t *testing.T) {
 // runs it: a sibling's launch waited out the whole settle window.
 func TestPluginExitedIsNotPostedFromTheLoop(t *testing.T) {
 	broken := writeFrontendPlugin(t, "alpha", []string{"main-stage"}, nil)
+	good := writeFrontendPlugin(t, "beta", []string{"sidebar-list"}, nil)
+	f := newFakes()
 	factory := func(spec manifest.Spec, o wrapper.Options) (wrapper.Process, error) {
-		return nil, errors.New("exec: no such file or directory")
+		if spec.ID == "alpha" {
+			return nil, errors.New("exec: no such file or directory")
+		}
+		return f.factory(spec, o)
 	}
 	var h *harness
 	var onLoop atomic.Bool
 	hook, ready := readyHook("")
 	h, err := boot(t, func(c *contracts.Config) {
-		c.Plugins = []string{broken}
+		c.Plugins = []string{broken, good}
 		next := c.Post
 		c.Post = func(m any) bool {
 			if g := h.root.loopGID.Load(); g != 0 && g == goroutineID() {
@@ -240,6 +245,7 @@ func TestPluginExitedIsNotPostedFromTheLoop(t *testing.T) {
 		t.Fatal(err)
 	}
 	runHost(t, ready, h)
+	<-f.started // beta launches after alpha failed
 	h.loop(func() {})
 	if got := h.podStatus("alpha"); got != "failed" {
 		t.Fatalf("alpha status = %q, want failed", got)
