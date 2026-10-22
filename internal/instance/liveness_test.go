@@ -90,9 +90,9 @@ func TestVerdictString(t *testing.T) {
 
 func TestSurveyRemovesStaleKeepsOthers(t *testing.T) {
 	dir := t.TempDir()
-	live := Entry{ID: "a", PID: 1, Socket: SocketPath(dir, "a"), StartedAt: startedAt, ProtocolVersion: "2.0"}
-	stale := Entry{ID: "b", PID: 2, Socket: SocketPath(dir, "b"), StartedAt: startedAt, ProtocolVersion: "2.0"}
-	slow := Entry{ID: "c", PID: 3, Socket: SocketPath(dir, "c"), StartedAt: startedAt, ProtocolVersion: "2.0"}
+	live := Entry{ID: "a", PID: 1, Socket: SocketPath(dir, "a"), StartedAt: fixedTime(), ProtocolVersion: "2.0"}
+	stale := Entry{ID: "b", PID: 2, Socket: SocketPath(dir, "b"), StartedAt: fixedTime(), ProtocolVersion: "2.0"}
+	slow := Entry{ID: "c", PID: 3, Socket: SocketPath(dir, "c"), StartedAt: fixedTime(), ProtocolVersion: "2.0"}
 	for _, e := range []Entry{live, stale, slow} {
 		if err := writeEntryFile(dir, e); err != nil {
 			t.Fatal(err)

@@ -54,7 +54,7 @@ func fixture(t *testing.T, build func(dir string) []Entry) (string, *fakeNet) {
 }
 
 func pidEntry(dir, id string, pid int) Entry {
-	return Entry{ID: id, PID: pid, Socket: SocketPath(dir, id), StartedAt: startedAt, ProtocolVersion: "2.0"}
+	return Entry{ID: id, PID: pid, Socket: SocketPath(dir, id), StartedAt: fixedTime(), ProtocolVersion: "2.0"}
 }
 
 func namedEntry(dir, name string, pid int) Entry {
@@ -389,8 +389,8 @@ func TestErrorAmbiguousRendering(t *testing.T) {
 		Candidates: []Status{},
 	}
 	e.Candidates = append(e.Candidates,
-		Status{Entry: Entry{ID: "notes", PID: 5120, StartedAt: startedAt}, Verdict: VerdictLive},
-		Status{Entry: Entry{ID: "4242", PID: 4242, StartedAt: startedAt.Add(2*time.Minute + 11*time.Second)}, Verdict: VerdictLive},
+		Status{Entry: Entry{ID: "notes", PID: 5120, StartedAt: fixedTime()}, Verdict: VerdictLive},
+		Status{Entry: Entry{ID: "4242", PID: 4242, StartedAt: fixedTime().Add(2*time.Minute + 11*time.Second)}, Verdict: VerdictLive},
 	)
 	want := "2 instances are running; choose one with --instance <id>\n" +
 		"  4242   started 2026-10-22T06:02:11Z\n" +

@@ -61,18 +61,21 @@ func Register(dir string, e Entry) error {
 		return fmt.Errorf("instance %s: create entry temp file: %w", e.ID, err)
 	}
 	tmp := f.Name()
-	if _, err := f.Write(data); err == nil {
-		err = f.Sync()
-	}
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err == nil {
-		err = os.Rename(tmp, path)
-	}
-	if err != nil {
+	fail := func(stage string, cause error) error {
 		_ = os.Remove(tmp)
-		return fmt.Errorf("instance %s: write entry: %w", e.ID, err)
+		return fmt.Errorf("instance %s: %s entry: %w", e.ID, stage, cause)
+	}
+	if _, err := f.Write(data); err != nil {
+		return fail("write", err)
+	}
+	if err := f.Sync(); err != nil {
+		return fail("sync", err)
+	}
+	if err := f.Close(); err != nil {
+		return fail("close", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return fail("rename", err)
 	}
 	return nil
 }
