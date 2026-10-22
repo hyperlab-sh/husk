@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -49,25 +50,45 @@ func TestTailLines(t *testing.T) {
 	}
 }
 
-// The tail of a file longer than the read window starts mid-line; the cut
-// line must never be reported as if it were a whole one while whole lines
-// exist.
+// The read window of a long file starts mid-line; the cut fragment must be
+// dropped whenever whole lines follow it.
 func TestTailLinesLargeFileNeverReturnsTheCutLine(t *testing.T) {
 	var b strings.Builder
 	for i := 0; i < 2000; i++ {
 		fmt.Fprintf(&b, "line %04d padding padding\n", i)
 	}
+	whole := regexp.MustCompile(`^line \d{4} padding padding$`)
 	got := tailLines(writeLog(t, b.String()), 1000) // more than the window holds
 	if len(got) == 0 || len(got) >= 1000 {
 		t.Fatalf("got %d lines", len(got))
 	}
-	for i := 1; i < len(got); i++ {
-		if !strings.HasPrefix(got[i], "line ") || !strings.HasSuffix(got[i], " padding padding") {
-			t.Fatalf("line %d is malformed: %q", i, got[i])
+	for i, line := range got {
+		if !whole.MatchString(line) {
+			t.Fatalf("line %d is not whole: %q", i, line)
 		}
 	}
 	if last := got[len(got)-1]; last != "line 1999 padding padding" {
 		t.Fatalf("last = %q", last)
+	}
+}
+
+// With no newline to resync on, the window is the end of one long last line.
+// That end is kept: it is the stderr tail, and dropping it would report
+// nothing for a plugin that died mid-line.
+func TestTailLinesSingleLongLastLineKeepsItsEnd(t *testing.T) {
+	for name, content := range map[string]string{
+		"newline terminated": strings.Repeat("x", 20000) + "\n",
+		"unterminated":       strings.Repeat("x", 20000),
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := tailLines(writeLog(t, content), 3)
+			if len(got) != 1 || got[0] == "" || strings.Trim(got[0], "x") != "" {
+				t.Fatalf("got %d lines %.20q", len(got), got)
+			}
+			if len(got[0]) < 8000 {
+				t.Fatalf("kept %d bytes of the long line", len(got[0]))
+			}
+		})
 	}
 }
 
