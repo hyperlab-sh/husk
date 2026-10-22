@@ -1,20 +1,17 @@
 package main
 
 import (
-	"io"
-	"os"
-	"time"
-
-	"github.com/hyperlab-sh/husk/pkg/huskipc"
+	"github.com/hyperlab-sh/husk/internal/host/contracts"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
 // demoFrameSpecs is the frame declaration used by --demo-frame: a built-in
 // demo plugin asking for border + label + close on every renderable surface.
-var demoFrameSpecs = map[huskipc.SlotID]huskipc.FrameSpec{
-	huskipc.SlotMainStage:      {Border: true, Label: "Demo Frame", Close: true},
-	huskipc.SlotModalSurface:   {Border: true, Label: "Demo Frame", Close: true},
-	huskipc.SlotFullCanvas:     {Border: true, Label: "Demo Frame", Close: true},
-	huskipc.SlotWorkspaceStage: {Border: true, Label: "Demo Frame", Close: true},
+var demoFrameSpecs = map[protocol.SurfaceID]protocol.FrameSpec{
+	protocol.SurfaceMainStage:      {Border: true, Label: "Demo Frame", Close: true},
+	protocol.SurfaceModal:          {Border: true, Label: "Demo Frame", Close: true},
+	protocol.SurfaceFullCanvas:     {Border: true, Label: "Demo Frame", Close: true},
+	protocol.SurfaceWorkspaceStage: {Border: true, Label: "Demo Frame", Close: true},
 }
 
 // setupDemoFrame registers the built-in demo plugin (no external process) and
@@ -27,70 +24,55 @@ func (m *WorkbenchModel) setupDemoFrame(railMode string) {
 		"Husk draws the border, the label, and the ✕ close button.",
 		"Clicking ✕ closes the surface exactly like esc.",
 	}
-	newDemoUpdate := func(slot huskipc.SlotID) *huskipc.SlotUpdatePayload {
-		return &huskipc.SlotUpdatePayload{
+	newDemoUpdate := func(slot protocol.SurfaceID) *protocol.SurfaceUpdateParams {
+		return &protocol.SurfaceUpdateParams{
 			PluginID: "husk.demo-frame",
-			Slot:     slot,
+			Surface:  slot,
 			Title:    "Demo Frame",
 			Lines:    demoLines,
 		}
 	}
 
-	m.plugins["husk.demo-frame"] = &ConnectedPlugin{
-		Info: huskipc.HelloPayload{
-			PluginID:    "husk.demo-frame",
-			Name:        "Demo Frame",
-			Version:     "0.1.0",
-			Language:    "go",
-			PID:         os.Getpid(),
-			Description: "Built-in demo declaring a border+label+close frame",
-			Slots:       []huskipc.SlotID{huskipc.SlotMainStage},
-			Frames:      demoFrameSpecs,
-		},
-		Writer:    huskipc.NewConnWriter(io.Discard),
-		Connected: time.Now(),
-	}
-	m.registry.Occupants[huskipc.SlotMainStage] = "husk.demo-frame"
-	m.slotUpdates[huskipc.SlotMainStage] = newDemoUpdate(huskipc.SlotMainStage)
+	m.plugins["husk.demo-frame"] = true
+	m.catalog.Frames["husk.demo-frame"] = demoFrameSpecs
+	m.catalog.Occupants[protocol.SurfaceMainStage] = "husk.demo-frame"
+	m.slotUpdates[protocol.SurfaceMainStage] = newDemoUpdate(protocol.SurfaceMainStage)
 
 	switch railMode {
 	case "modal":
 		m.openModal("husk.demo-frame", "rail.demo-frame")
-		m.slotUpdates[huskipc.SlotModalSurface] = newDemoUpdate(huskipc.SlotModalSurface)
+		m.slotUpdates[protocol.SurfaceModal] = newDemoUpdate(protocol.SurfaceModal)
 	case "full-canvas":
 		m.activeRailID = "rail.demo-frame"
-		m.activePlacement = huskipc.PlacementFullCanvas
-		m.focusedSlot = huskipc.SlotFullCanvas
-		m.slotUpdates[huskipc.SlotFullCanvas] = newDemoUpdate(huskipc.SlotFullCanvas)
+		m.activePlacement = contracts.PlacementFullCanvas
+		m.focusedSlot = protocol.SurfaceFullCanvas
+		m.slotUpdates[protocol.SurfaceFullCanvas] = newDemoUpdate(protocol.SurfaceFullCanvas)
 	case "stage":
 		m.activeRailID = "rail.demo-frame"
-		m.activePlacement = huskipc.PlacementStage
-		m.focusedSlot = huskipc.SlotWorkspaceStage
-		m.slotUpdates[huskipc.SlotWorkspaceStage] = newDemoUpdate(huskipc.SlotWorkspaceStage)
+		m.activePlacement = contracts.PlacementStage
+		m.focusedSlot = protocol.SurfaceWorkspaceStage
+		m.slotUpdates[protocol.SurfaceWorkspaceStage] = newDemoUpdate(protocol.SurfaceWorkspaceStage)
 	}
 	m.recomputeLayout()
 }
 
-// These fake plugins use the same Hello, IPC routing and rendering paths as
-// external processes, without opening sockets or starting child processes.
+// The pubslots demo fills the catalog directly, the way a refresh from a host
+// would, without sockets or child processes.
 func (m *WorkbenchModel) seedPubslotsDemo() {
-	for _, hello := range []huskipc.HelloPayload{
-		{PluginID: "a", Name: "Row publisher", Slots: []huskipc.SlotID{huskipc.SlotMainStage}, PublishedSlots: []huskipc.SlotDeclarePayload{
-			{ID: "a.agent-line-action", Title: "Row actions", Kind: "inline"},
-			{ID: "a.summary", Title: "Summary region", Kind: "region", Rect: &huskipc.PublishedRect{Surface: huskipc.SlotMainStage, X: 0, Y: 5, Width: 28, Height: 3}},
-		}},
-		{PluginID: "b", Name: "Action contributor"},
-	} {
-		m.Update(pluginRegisteredMsg{&ConnectedPlugin{Info: hello, Writer: huskipc.NewConnWriter(io.Discard)}})
+	m.plugins["a"], m.plugins["b"] = true, true
+	m.catalog.Occupants[protocol.SurfaceMainStage] = "a"
+	m.catalog.Slots["a.agent-line-action"] = &publishedSlot{
+		ID: "a.agent-line-action", Owner: "a", Kind: "inline",
+		Contributions: []contribution{{PluginID: "b", ID: "b.action", Content: "\x1b[32m[Inspect]\x1b[0m", OnClick: "b.inspect"}},
 	}
-	for _, contribution := range []huskipc.SlotContributePayload{
-		{SlotID: "a.agent-line-action", ID: "b.action", Content: "\x1b[32m[Inspect]\x1b[0m", OnClick: "b.inspect"},
-		{SlotID: "a.summary", ID: "b.summary", Content: "Published region from B\nClick Inspect on any row", OnClick: "b.inspect"},
-	} {
-		m.Update(ipcEventMsg{pluginID: "b", env: huskipc.Envelope{Type: "slot_contribute", SlotContribute: &contribution}})
+	m.catalog.Slots["a.summary"] = &publishedSlot{
+		ID: "a.summary", Owner: "a", Kind: "region",
+		Rect:          &contracts.PublishedRect{Surface: protocol.SurfaceMainStage, X: 0, Y: 5, Width: 28, Height: 3},
+		Contributions: []contribution{{PluginID: "b", ID: "b.summary", Content: "Published region from B\nClick Inspect on any row", OnClick: "b.inspect"}},
 	}
-	m.Update(ipcEventMsg{pluginID: "a", env: huskipc.Envelope{Type: "slot_update", SlotUpdate: &huskipc.SlotUpdatePayload{
-		PluginID: "a", Slot: huskipc.SlotMainStage, Title: "Published slots demo",
+	m.slotUpdates[protocol.SurfaceMainStage] = &protocol.SurfaceUpdateParams{
+		PluginID: "a", Surface: protocol.SurfaceMainStage, Title: "Published slots demo",
 		Lines: []string{"Plugin A rows; Plugin B actions", "agent one  \x1b]husk;slot=a.agent-line-action;key=one\x1b\\", "agent two  \x1b]husk;slot=a.agent-line-action;key=two\x1b\\"},
-	}}})
+	}
+	m.recomputeLayout()
 }

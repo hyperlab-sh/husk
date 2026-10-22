@@ -6,7 +6,9 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
-	"github.com/hyperlab-sh/husk/pkg/huskipc"
+
+	"github.com/hyperlab-sh/husk/internal/host/contracts"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
 func anchor(id, key string) string { return "\x1b]husk;slot=" + id + ";key=" + key + "\x1b\\" }
@@ -60,7 +62,7 @@ func TestPublishedAnchorsOwnershipAndMultipleRows(t *testing.T) {
 	mustContribute(t, r, "b", "c.action", "b.foreign", "foreign")
 	source := []string{"X" + anchor("a.action", "one") + "/" + anchor("a.action", "two"), anchor("c.action", "foreign") + anchor("missing.slot", "") + "Z"}
 	copySource := append([]string(nil), source...)
-	rows, hits := r.renderPublished(huskipc.SlotMainStage, "a", source, 10, 3)
+	rows, hits := r.renderPublished(protocol.SurfaceMainStage, "a", source, 10, 3)
 	if rows[0] != "X12/12    " || rows[1] != "Z         " || rows[2] != "          " {
 		t.Fatalf("unexpected rows: %q", rows)
 	}
@@ -85,15 +87,15 @@ func TestPublishedTruncationPreservesContributionOrder(t *testing.T) {
 
 func TestPublishedRegionsStackClipAndOcclude(t *testing.T) {
 	r := newPublicationRegistry()
-	_ = r.claimSurface("a", huskipc.SlotMainStage)
+	_ = r.claimSurface("a", protocol.SurfaceMainStage)
 	mustDeclare(t, r, "a", "a.inline")
 	mustContribute(t, r, "b", "a.inline", "b.inline", "abcdefghij")
-	if err := r.declareSlot("a", huskipc.SlotDeclarePayload{ID: "a.region", Kind: "region", Rect: &huskipc.PublishedRect{Surface: huskipc.SlotMainStage, X: 2, Y: 0, Width: 5, Height: 3}}); err != nil {
+	if err := r.declareSlot("a", slotDecl{ID: "a.region", Kind: "region", Rect: &contracts.PublishedRect{Surface: protocol.SurfaceMainStage, X: 2, Y: 0, Width: 5, Height: 3}}); err != nil {
 		t.Fatal(err)
 	}
 	mustContribute(t, r, "b", "a.region", "b.first", "first-too-long\n界界界")
 	mustContribute(t, r, "c", "a.region", "c.second", "third\nfourth")
-	rows, hits := r.renderPublished(huskipc.SlotMainStage, "a", []string{anchor("a.inline", "row"), "0123456789", "0123456789", "unchanged"}, 10, 3)
+	rows, hits := r.renderPublished(protocol.SurfaceMainStage, "a", []string{anchor("a.inline", "row"), "0123456789", "0123456789", "unchanged"}, 10, 3)
 	want := []string{"abfirsthij", "01界界 789", "01third789"}
 	if !reflect.DeepEqual(rows, want) {
 		t.Fatalf("rows = %q; want %q", rows, want)
@@ -110,7 +112,7 @@ func TestPublishedRegionsStackClipAndOcclude(t *testing.T) {
 		}
 	}
 	// Clip both axes to the resized publisher surface, never spill into neighbors.
-	rows, hits = r.renderPublished(huskipc.SlotMainStage, "a", nil, 4, 1)
+	rows, hits = r.renderPublished(protocol.SurfaceMainStage, "a", nil, 4, 1)
 	if rows[0] != "  fi" || len(hits) != 1 || hits[0].Width != 2 {
 		t.Fatalf("resize clipping failed: %q %+v", rows, hits)
 	}
@@ -120,13 +122,13 @@ func TestPublishedRegionsStackClipAndOcclude(t *testing.T) {
 // glyph: the region clears its cells and the orphaned half is blank.
 func TestPublishedRegionCutsWideGlyphCleanly(t *testing.T) {
 	r := newPublicationRegistry()
-	_ = r.claimSurface("a", huskipc.SlotMainStage)
-	if err := r.declareSlot("a", huskipc.SlotDeclarePayload{ID: "a.region", Kind: "region", Rect: &huskipc.PublishedRect{Surface: huskipc.SlotMainStage, X: 3, Y: 0, Width: 3, Height: 1}}); err != nil {
+	_ = r.claimSurface("a", protocol.SurfaceMainStage)
+	if err := r.declareSlot("a", slotDecl{ID: "a.region", Kind: "region", Rect: &contracts.PublishedRect{Surface: protocol.SurfaceMainStage, X: 3, Y: 0, Width: 3, Height: 1}}); err != nil {
 		t.Fatal(err)
 	}
 	mustContribute(t, r, "b", "a.region", "b.r", "XY界")
 	// 界 at columns 2-3 straddles the left edge, 世 at 5-6 the right edge.
-	rows, _ := r.renderPublished(huskipc.SlotMainStage, "a", []string{"ab界c世hi"}, 9, 1)
+	rows, _ := r.renderPublished(protocol.SurfaceMainStage, "a", []string{"ab界c世hi"}, 9, 1)
 	if want := "ab XY  hi"; len(rows) != 1 || rows[0] != want {
 		t.Fatalf("rows = %q, want %q", rows, want)
 	}
@@ -134,11 +136,11 @@ func TestPublishedRegionCutsWideGlyphCleanly(t *testing.T) {
 
 func TestPublishedEmptyRegionReservesSpace(t *testing.T) {
 	r := newPublicationRegistry()
-	_ = r.claimSurface("a", huskipc.SlotMainStage)
-	if err := r.declareSlot("a", huskipc.SlotDeclarePayload{ID: "a.region", Kind: "region", Rect: &huskipc.PublishedRect{Surface: huskipc.SlotMainStage, X: 1, Y: 0, Width: 3, Height: 2}}); err != nil {
+	_ = r.claimSurface("a", protocol.SurfaceMainStage)
+	if err := r.declareSlot("a", slotDecl{ID: "a.region", Kind: "region", Rect: &contracts.PublishedRect{Surface: protocol.SurfaceMainStage, X: 1, Y: 0, Width: 3, Height: 2}}); err != nil {
 		t.Fatal(err)
 	}
-	rows, hits := r.renderPublished(huskipc.SlotMainStage, "a", []string{"abcdef", "ghijkl"}, 6, 2)
+	rows, hits := r.renderPublished(protocol.SurfaceMainStage, "a", []string{"abcdef", "ghijkl"}, 6, 2)
 	if !reflect.DeepEqual(rows, []string{"a   ef", "g   kl"}) || len(hits) != 0 {
 		t.Fatalf("empty rect not reserved: %q %+v", rows, hits)
 	}
@@ -146,14 +148,14 @@ func TestPublishedEmptyRegionReservesSpace(t *testing.T) {
 
 func TestPublishedUnanchoredLinesKeepLegacyTruncation(t *testing.T) {
 	r := newPublicationRegistry()
-	rows, hits := r.renderPublished(huskipc.SlotMainStage, "a", []string{"abcdefghi"}, 5, 1)
+	rows, hits := r.renderPublished(protocol.SurfaceMainStage, "a", []string{"abcdefghi"}, 5, 1)
 	if rows[0] != fitLineWidth("abcdefghi", 5) || len(hits) != 0 {
 		t.Fatalf("plain surface truncation changed: %q %+v", rows, hits)
 	}
 }
 
 func TestPublishedDemoFrame(t *testing.T) {
-	m := newWorkbenchModel("", nil, t.TempDir())
+	m := newWorkbenchModel()
 	m.recomputeLayout()
 	m.seedPubslotsDemo()
 	frame := ansi.Strip(m.View().Content)

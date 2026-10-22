@@ -2,37 +2,25 @@ package main
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"image"
 	"io"
-	"net"
+	"maps"
 	"os"
-	"strings"
+	"reflect"
+	"slices"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/hyperlab-sh/husk/pkg/huskipc"
-	"github.com/hyperlab-sh/husk/pkg/manifest"
+	"github.com/hyperlab-sh/husk/internal/host"
+	"github.com/hyperlab-sh/husk/internal/host/contracts"
+	"github.com/hyperlab-sh/husk/internal/substrate/state"
+	"github.com/hyperlab-sh/husk/internal/substrate/state/surfaces"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 	"github.com/hyperlab-sh/husk/pkg/theme"
 )
-
-type ConnectedPlugin struct {
-	Info       huskipc.HelloPayload
-	Writer     *huskipc.ConnWriter
-	Closer     io.Closer
-	Connected  time.Time
-	FramesRecv uint64
-	// ExpectedID is the manifest id of the process this stream belongs to,
-	// known only for stdio plugins; empty otherwise.
-	ExpectedID string
-	// PeerPID is the kernel-reported pid of a socket peer, or 0 when unknown.
-	// checkManifest maps it, through its process ancestry, to the launched
-	// process the connection came from (the peer itself or the wrapper that
-	// started it).
-	PeerPID int
-}
 
 // Rect returns the outer rectangle as a half-open image.Rectangle, so point
 // and clip tests can use Point.In, Intersect and Overlaps.
@@ -53,102 +41,96 @@ type SlotRect struct {
 	InnerH int
 }
 
-type ipcEventMsg struct {
-	pluginID   string
-	env        huskipc.Envelope
-	connection *ConnectedPlugin
-}
-
-type pluginRegisteredMsg struct {
-	plugin *ConnectedPlugin
-}
-
-// lineRejectedMsg reports an input line the read loop rejected (malformed or
-// oversized). The protocol_error has already been sent; Update logs it.
-// plugin is nil when the line arrived before a hello.
-type lineRejectedMsg struct {
-	plugin *ConnectedPlugin
-	err    *huskipc.LineError
-}
-
-// connectionClosedMsg reports the end of a connection that never registered
-// (it closed or failed before a hello), so its reason is still logged.
-type connectionClosedMsg struct {
-	reason error
-}
-
-// checkPluginMessage validates a plugin-to-host message that is not a
-// published-slot, hook or event operation (those are checked by
-// routePublication). Every other type, including host-to-plugin types sent
-// the wrong way, is unknown.
-func checkPluginMessage(env huskipc.Envelope) error {
-	missing := false
-	switch env.Type {
-	case "close_modal":
-	case "slot_update":
-		missing = env.SlotUpdate == nil
-	case "workspace_context":
-		missing = env.WorkspaceContext == nil
-	case "toast":
-		missing = env.Toast == nil
-	case "":
-		return fmt.Errorf("message has no type")
-	default:
-		return fmt.Errorf("unknown message type %q", env.Type)
-	}
-	if missing {
-		return fmt.Errorf("%s payload required", env.Type)
-	}
-	return nil
-}
-
-// hostVersion is the host build's version, sent as welcome.host_version. It is
-// informational; compatibility is decided by huskipc.ProtocolVersion.
-var hostVersion = "0.1.0"
+// hostRunEndedMsg reports that host.Run returned. A nil err is a clean stop
+// (the context ended or Close ran).
+type hostRunEndedMsg struct{ err error }
 
 type toastExpireMsg struct {
 	id int
 }
 
+// toastPollMsg re-reads the engine's toast queue: the engine expires toasts on
+// its own clock and posts nothing when one lapses.
+type toastPollMsg struct{}
+
+const toastPollInterval = 500 * time.Millisecond
+
 type modifierTickMsg struct{}
 
-// hookSweepMsg fires while hook calls are pending to expire overdue ones.
-type hookSweepMsg struct{}
+// surfaceCatalog is what the model reads of the host's resolution: who
+// occupies each surface, the frames plugins declared, and the published slots
+// with their contributions. refresh rebuilds it from State and the Frontend;
+// tests set it directly.
+type surfaceCatalog struct {
+	Occupants map[protocol.SurfaceID]string
+	Slots     map[string]*publishedSlot
+	Frames    map[string]map[protocol.SurfaceID]protocol.FrameSpec
+}
 
-const hookSweepInterval = time.Second
+func newSurfaceCatalog() *surfaceCatalog {
+	return &surfaceCatalog{
+		Occupants: map[protocol.SurfaceID]string{},
+		Slots:     map[string]*publishedSlot{},
+		Frames:    map[string]map[protocol.SurfaceID]protocol.FrameSpec{},
+	}
+}
+
+// publishedSlot is one extension point a plugin declared: inline (anchors in
+// the owner's rows) or region (a rectangle of a claimed surface).
+type publishedSlot struct {
+	ID            string
+	Owner         string
+	Kind          string
+	Rect          *contracts.PublishedRect
+	Contributions []contribution
+}
+
+// contribution is one entry another plugin put in a published slot. Content
+// is the rendered text; OnClick is the contributor's action id.
+type contribution struct {
+	PluginID string
+	ID       string
+	Content  string
+	OnClick  string
+}
 
 type WorkbenchModel struct {
-	socketPath string
-	listener   net.Listener
-	subChan    chan tea.Msg
-	procs      []*pluginProcess // launched plugin processes (see lifecycle.go)
-	quit       chan struct{}    // closed when cleanup starts
-	stopGrace  time.Duration    // SIGTERM-to-SIGKILL grace on shutdown
+	// host and fe are nil for the built-in demos and the hermetic tests: the
+	// model then draws from the caches below, which tests fill directly.
+	host      host.Looped
+	fe        contracts.Frontend
+	keys      keySource
+	closeGate func()          // closes the post gate before Host.Close (D62)
+	runCtx    context.Context // ends host.Run
+	stopRun   context.CancelFunc
+	closed    bool // Host.Close ran; no further host calls
 
-	// handoffGrace bounds how long a launcher's manifest declarations wait
-	// for the real plugin's hello; handoffPending holds the ids still waiting.
-	handoffGrace   time.Duration
-	handoffPending map[string]struct{}
+	slices      contracts.FrontendSlices
+	slicesOwned bool
+	lastSeq     uint64
+	lastGeo     []byte
+	lastFocus   []byte
+	lastLayout  []byte
+	lastView    []byte
+	declared    []contracts.RailItem // every declared rail item, live plugin or not
+	registered  map[string]bool      // rail action ids registered with the host
 
-	// pluginCtx parents every plugin process; stopPlugins cancels it.
-	pluginCtx    context.Context
-	pluginCancel context.CancelFunc
+	actions map[string]contracts.HostActionHandler
+	cmds    []tea.Cmd // commands host-action handlers queued during this Update
 
-	plugins     map[string]*ConnectedPlugin
-	manifests   map[string]*manifest.Plugin // launched manifest plugins by id; hellos are checked against them
-	railItems   []huskipc.RailItemSpec
-	slotUpdates map[huskipc.SlotID]*huskipc.SlotUpdatePayload
-	slotRects   map[huskipc.SlotID]SlotRect
+	plugins     map[string]bool   // live plugins
+	podStatus   map[string]string // every Pod's status, for --dump-frame
+	railItems   []contracts.RailItem
+	slotUpdates map[protocol.SurfaceID]*protocol.SurfaceUpdateParams
+	slotRects   map[protocol.SurfaceID]SlotRect
 	modalRect   SlotRect
 	demoFrame   bool
-	registry    *publicationRegistry
-
-	wsContext huskipc.WorkspaceContextPayload
+	catalog     *surfaceCatalog
 
 	width        int
 	height       int
 	palette      theme.Palette
-	focusedSlot  huskipc.SlotID
+	focusedSlot  protocol.SurfaceID
 	showSidebar  bool
 	sidebarWidth int
 	sidebarNavH  int
@@ -163,16 +145,18 @@ type WorkbenchModel struct {
 
 	// focusFallback is the side slot focus was moved off when its column
 	// vanished; it comes back when the column does.
-	focusFallback huskipc.SlotID
+	focusFallback protocol.SurfaceID
 
-	modifiers   huskipc.ModifierState
-	altLatched  bool
-	blurred     bool      // terminal reported focus loss
-	modTickOn   bool      // a modifier tick is in flight
-	hookSweepOn bool      // a hook sweep tick is in flight
-	lastInput   time.Time // last key or mouse event, for tick cadence
-	pollMods    func() (huskipc.ModifierState, bool)
-	heldKeys    map[string]time.Time
+	// pendingKeys is the prefix of a multi-key binding typed so far.
+	pendingKeys []string
+
+	modifiers  protocol.ModifierState
+	altLatched bool
+	blurred    bool      // terminal reported focus loss
+	modTickOn  bool      // a modifier tick is in flight
+	lastInput  time.Time // last key or mouse event, for tick cadence
+	pollMods   func() (protocol.ModifierState, bool)
+	heldKeys   map[string]time.Time
 	// heldAliases maps a held key's key-code name to the text name it was
 	// held under, for presses whose text came from the layout (AltGr+Q held
 	// as "@", a dead key as "é"). Releases carry no associated text, so they
@@ -186,7 +170,7 @@ type WorkbenchModel struct {
 	termMods uint16
 
 	activeRailID    string // "" (Home), or rail item ID
-	activePlacement huskipc.RailPlacement
+	activePlacement contracts.RailPlacement
 	modal           modalState // the one source of truth for the open modal; use modalOwner/openModal/closeModal
 
 	showHotspots   bool
@@ -195,66 +179,30 @@ type WorkbenchModel struct {
 	showPalette    bool
 	paletteQuery   string
 	paletteCursor  int
-	activeToast    *huskipc.ToastPayload
+	activeToast    *contracts.Toast
+	engineToast    bool // activeToast came from the engine queue
+	toastPollOn    bool
 	toastSeq       int
-	totalIPCEvents uint64
+	totalIPCEvents uint64 // surface updates the host routed here
 
-	// Outbound policy for each plugin connection (see handleStream).
-	sendQueueCapacity int
-	writeTimeout      time.Duration
-	logOut            io.Writer // host log lines, such as disconnect reasons
-}
-
-const (
-	pluginSendQueueCapacity = 1024
-	pluginWriteTimeout      = 5 * time.Second
-)
-
-// disconnectReason renders a pluginDisconnectedMsg reason for logs and toasts.
-func disconnectReason(err error) string {
-	switch {
-	case err == nil, errors.Is(err, io.EOF):
-		return "connection closed (EOF)"
-	case errors.Is(err, huskipc.ErrWriteTimeout), errors.Is(err, huskipc.ErrSendQueueFull):
-		return "stopped reading: " + strings.TrimPrefix(err.Error(), "huskipc: ")
-	case errors.Is(err, huskipc.ErrWriterClosed):
-		return "closed by host"
-	case strings.HasPrefix(err.Error(), "huskipc: write: "):
-		return "write error: " + strings.TrimPrefix(err.Error(), "huskipc: write: ")
-	}
-	return "read error: " + err.Error()
-}
-
-func (m *WorkbenchModel) logf(format string, args ...any) {
-	if m.logOut != nil {
-		fmt.Fprintf(m.logOut, "husk: "+format+"\n", args...)
-	}
+	logOut io.Writer // host log lines, such as launch failures
 }
 
 const activityRailWidth = 5
 
-func newWorkbenchModel(socketPath string, listener net.Listener, cwd string) *WorkbenchModel {
-	registry := newPublicationRegistry()
-	pluginCtx, pluginCancel := context.WithCancel(context.Background())
-	return &WorkbenchModel{
-		pluginCtx:    pluginCtx,
-		pluginCancel: pluginCancel,
-		registry:     registry,
-		socketPath:   socketPath,
-		listener:     listener,
-		subChan:      make(chan tea.Msg, 256),
-		quit:         make(chan struct{}),
-		stopGrace:    pluginStopGrace,
-		handoffGrace: pluginHandoffGrace,
-		plugins:      make(map[string]*ConnectedPlugin),
-		manifests:    make(map[string]*manifest.Plugin),
-		slotUpdates:  make(map[huskipc.SlotID]*huskipc.SlotUpdatePayload),
-		slotRects:    make(map[huskipc.SlotID]SlotRect),
-		wsContext:    huskipc.WorkspaceContextPayload{WorkspaceID: "demo", WorkspaceLabel: "Demo", Cwd: cwd},
+func newWorkbenchModel() *WorkbenchModel {
+	m := &WorkbenchModel{
+		catalog:      newSurfaceCatalog(),
+		keys:         defaultKeys{},
+		registered:   map[string]bool{},
+		plugins:      make(map[string]bool),
+		podStatus:    make(map[string]string),
+		slotUpdates:  make(map[protocol.SurfaceID]*protocol.SurfaceUpdateParams),
+		slotRects:    make(map[protocol.SurfaceID]SlotRect),
 		width:        144,
 		height:       40,
 		palette:      theme.Default(),
-		focusedSlot:  huskipc.SlotSidebarList,
+		focusedSlot:  protocol.SurfaceSidebarList,
 		showSidebar:  true,
 		sidebarWidth: 38,
 		sidebarNavH:  4,
@@ -265,19 +213,36 @@ func newWorkbenchModel(socketPath string, listener net.Listener, cwd string) *Wo
 		hoverRailIdx: -1,
 		heldKeys:     make(map[string]time.Time),
 		pollMods:     pollOSModifiers,
-		showHotspots: false,
 		stageMode:    "plugin",
+		logOut:       os.Stderr,
+	}
+	m.actions = m.hostActionTable()
+	return m
+}
 
-		sendQueueCapacity: pluginSendQueueCapacity,
-		writeTimeout:      pluginWriteTimeout,
-		logOut:            os.Stderr,
+func (m *WorkbenchModel) logf(format string, args ...any) {
+	if m.logOut != nil {
+		fmt.Fprintf(m.logOut, "husk: "+format+"\n", args...)
 	}
 }
 
-func waitForIPC(sub chan tea.Msg) tea.Cmd {
-	return func() tea.Msg {
-		return <-sub
-	}
+// attach connects the model to a running-to-be host. It is called once, before
+// the program starts.
+func (m *WorkbenchModel) attach(h host.Looped, closeGate func()) {
+	m.host, m.fe, m.keys = h, h.Frontend(), h.Frontend()
+	m.closeGate = closeGate
+	m.runCtx, m.stopRun = context.WithCancel(context.Background())
+}
+
+// content is the host's content sink: every accepted surface.update arrives
+// here on the loop. The engine already checked occupancy, so the plugin id is
+// the authority and the update's own plugin_id is overwritten.
+func (m *WorkbenchModel) content(plugin string, p protocol.SurfaceUpdateParams) {
+	m.totalIPCEvents++
+	update := p
+	update.PluginID = plugin
+	update.Lines = slices.Clone(p.Lines)
+	m.slotUpdates[p.Surface] = &update
 }
 
 // Modifier polling cadence. The OS modifier poll is the only way to see a bare
@@ -289,16 +254,6 @@ const (
 	modifierTickIdle   = 150 * time.Millisecond
 	modifierActiveFor  = 2 * time.Second
 )
-
-// startHookSweep schedules the next expiry check only while calls are pending,
-// so an idle host runs no extra ticks.
-func (m *WorkbenchModel) startHookSweep() tea.Cmd {
-	if m.hookSweepOn || len(m.registry.Pending) == 0 {
-		return nil
-	}
-	m.hookSweepOn = true
-	return tea.Tick(hookSweepInterval, func(time.Time) tea.Msg { return hookSweepMsg{} })
-}
 
 func waitForModifierTick(d time.Duration) tea.Cmd {
 	return tea.Tick(d, func(time.Time) tea.Msg {
@@ -342,17 +297,35 @@ func (m *WorkbenchModel) startModifierTick() tea.Cmd {
 func (m *WorkbenchModel) handleBlur() {
 	m.blurred = true
 	m.termMods = 0
-	m.syncModifierTransitions(huskipc.ModifierState{Alt: m.altLatched})
+	m.syncModifierTransitions(protocol.ModifierState{Alt: m.altLatched})
 	for k := range m.heldKeys {
 		delete(m.heldKeys, k)
-		m.broadcastKeyState(huskipc.KeyPhaseUp, k, false)
+		m.broadcastKeyState(protocol.KeyPhaseUp, k, false)
 	}
 	clear(m.heldAliases)
 }
 
+// Init attaches the model's State slices, registers the host actions and
+// starts the host. The program goroutine is the loop, so the loop-only
+// Frontend calls are legal here.
 func (m *WorkbenchModel) Init() tea.Cmd {
+	m.attachSlices()
+	m.registerActions()
+	m.refresh()
 	m.recomputeLayout()
-	return tea.Batch(waitForIPC(m.subChan), m.startModifierTick())
+	m.settle()
+	cmds := []tea.Cmd{m.startModifierTick(), tea.Batch(m.cmds...)}
+	m.cmds = nil
+	if m.host != nil {
+		cmds = append(cmds, m.runHost)
+	}
+	return tea.Batch(cmds...)
+}
+
+// runHost runs host.Run until the context ends. It is a command, so it runs
+// on its own goroutine, and its result comes back as a message.
+func (m *WorkbenchModel) runHost() tea.Msg {
+	return hostRunEndedMsg{err: m.host.Run(m.runCtx)}
 }
 
 func (m *WorkbenchModel) currentHeldKeys() []string {
@@ -375,159 +348,82 @@ func (m *WorkbenchModel) currentHeldKeys() []string {
 	return out
 }
 
-func (m *WorkbenchModel) broadcastKeyState(phase huskipc.KeyPhase, key string, held bool) {
-	payload := &huskipc.KeyStatePayload{
+// broadcastKeyState tells every live plugin about a key or modifier
+// transition. Delivery failures (a plugin that just exited) are not errors.
+func (m *WorkbenchModel) broadcastKeyState(phase protocol.KeyPhase, key string, held bool) {
+	if m.fe == nil {
+		return
+	}
+	params := protocol.KeyStateParams{
 		Phase:     phase,
 		Key:       key,
 		Held:      held,
 		Modifiers: m.modifiers,
 		HeldKeys:  m.currentHeldKeys(),
-		Slot:      m.focusedSlot,
+		Surface:   m.focusedSlot,
 	}
-	for _, cp := range m.plugins {
-		_ = cp.Writer.Send(huskipc.Envelope{
-			Type:     "key_state",
-			KeyState: payload,
-		})
+	for _, pid := range slices.Sorted(maps.Keys(m.plugins)) {
+		_ = m.fe.SendKeyState(pid, params)
 	}
 }
 
-func (m *WorkbenchModel) syncModifierTransitions(next huskipc.ModifierState) {
+func (m *WorkbenchModel) syncModifierTransitions(next protocol.ModifierState) {
 	prev := m.modifiers
 	m.modifiers = next
 
-	if prev.Alt != next.Alt {
-		phase := huskipc.KeyPhaseUp
-		if next.Alt {
-			phase = huskipc.KeyPhaseDown
+	phase := func(down bool) protocol.KeyPhase {
+		if down {
+			return protocol.KeyPhaseDown
 		}
-		m.broadcastKeyState(phase, "alt", next.Alt)
+		return protocol.KeyPhaseUp
+	}
+	if prev.Alt != next.Alt {
+		m.broadcastKeyState(phase(next.Alt), "alt", next.Alt)
 	}
 	if prev.Ctrl != next.Ctrl {
-		phase := huskipc.KeyPhaseUp
-		if next.Ctrl {
-			phase = huskipc.KeyPhaseDown
-		}
-		m.broadcastKeyState(phase, "ctrl", next.Ctrl)
+		m.broadcastKeyState(phase(next.Ctrl), "ctrl", next.Ctrl)
 	}
 	if prev.Shift != next.Shift {
-		phase := huskipc.KeyPhaseUp
-		if next.Shift {
-			phase = huskipc.KeyPhaseDown
-		}
-		m.broadcastKeyState(phase, "shift", next.Shift)
+		m.broadcastKeyState(phase(next.Shift), "shift", next.Shift)
 	}
 	if prev.Super != next.Super {
-		phase := huskipc.KeyPhaseUp
-		if next.Super {
-			phase = huskipc.KeyPhaseDown
-		}
-		m.broadcastKeyState(phase, "super", next.Super)
+		m.broadcastKeyState(phase(next.Super), "super", next.Super)
 	}
 }
 
+// Update runs one message, then settles: derived state is re-read from the
+// host, frontend-owned State is written, and the host ticks so those writes
+// flush in this same Update.
 func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	m.cmds = nil
+	next, cmd := m.update(msg)
+	if !m.closed {
+		m.settle()
+	}
+	cmds := append([]tea.Cmd{cmd}, m.cmds...)
+	m.cmds = nil
+	return next, tea.Batch(cmds...)
+}
+
+func (m *WorkbenchModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = max(0, msg.Width)
 		m.height = max(0, msg.Height)
 		if m.tooSmall() {
-			// Keep the last valid layout (and plugin slot sizes); View
+			// Keep the last valid layout (and plugin surface sizes); View
 			// renders the too-small screen until the terminal grows back.
 			return m, nil
 		}
 		m.recomputeLayout()
-		m.broadcastSlotResize()
 		return m, nil
 
-	case pluginExitedMsg, pluginLaunchFailedMsg, hostNoticeMsg, handoffExpiredMsg:
-		toast := m.handleLifecycleMsg(msg)
-		return m, tea.Batch(waitForIPC(m.subChan), toast)
-
-	case pluginDisconnectedMsg:
-		if m.plugins[msg.plugin.Info.PluginID] != msg.plugin {
-			// Rejected at hello, or a stale connection already replaced:
-			// nothing to tear down, but the reason is still logged.
-			m.logf("connection from plugin %q (not registered) closed: %s", msg.plugin.Info.PluginID, disconnectReason(msg.reason))
-			return m, waitForIPC(m.subChan)
+	case hostRunEndedMsg:
+		if msg.err != nil {
+			m.logf("host stopped: %v", msg.err)
+			return m, m.showLocalToast("error", "Host stopped", msg.err.Error())
 		}
-		reason := disconnectReason(msg.reason)
-		m.disconnectPublications(msg.plugin)
-		m.logf("plugin %s disconnected: %s", msg.plugin.Info.PluginID, reason)
-		return m, tea.Batch(
-			waitForIPC(m.subChan),
-			m.showLocalToast("warn", "Plugin disconnected", msg.plugin.Info.PluginID+": "+reason),
-		)
-
-	case connectionClosedMsg:
-		m.logf("connection closed before hello: %s", disconnectReason(msg.reason))
-		return m, waitForIPC(m.subChan)
-
-	case lineRejectedMsg:
-		who := "unregistered connection"
-		if msg.plugin != nil {
-			who = "plugin " + msg.plugin.Info.PluginID
-		}
-		m.logf("protocol error from %s: %s", who, msg.err.Payload().Message)
-		return m, waitForIPC(m.subChan)
-
-	case pluginRegisteredMsg:
-		cp := msg.plugin
-		err := huskipc.CheckProtocolVersion(cp.Info.ProtocolVersion)
-		if err == nil {
-			err = m.checkManifest(cp)
-		}
-		if err == nil {
-			err = m.registerPublications(cp.Info)
-		}
-		if err != nil {
-			m.rejectPublication(cp, "hello", err)
-			m.logf("rejected hello from plugin %q: %v", cp.Info.PluginID, err)
-			// Flush the protocol_error before closing.
-			if cp.Writer.Queued() {
-				_ = cp.Writer.Close()
-			} else if cp.Closer != nil {
-				_ = cp.Closer.Close()
-			}
-			return m, waitForIPC(m.subChan)
-		}
-		m.plugins[cp.Info.PluginID] = cp
-		delete(m.handoffPending, cp.Info.PluginID) // the real plugin claimed the declarations
-		for _, ri := range cp.Info.RailItems {
-			ri.PluginID = cp.Info.PluginID
-			replaced := false
-			for idx := range m.railItems {
-				if m.railItems[idx].ID == ri.ID {
-					m.railItems[idx] = ri
-					replaced = true
-					break
-				}
-			}
-			if !replaced {
-				m.railItems = append(m.railItems, ri)
-			}
-		}
-		m.recomputeLayout()
-		_ = cp.Writer.Send(huskipc.Envelope{
-			Type: "welcome",
-			Welcome: &huskipc.WelcomePayload{
-				ProtocolVersion: huskipc.ProtocolVersion,
-				HostVersion:     hostVersion,
-				Palette:         huskipc.Palette(m.palette),
-				SlotSizes:       m.currentSlotSizes(),
-				FocusedSlot:     m.focusedSlot,
-				Context:         m.wsContext,
-				Modifiers:       m.modifiers,
-			},
-		})
-		// A side column can appear with this plugin: send the plugins that
-		// were already connected their new sizes; the newcomer's welcome
-		// already carries them.
-		m.broadcastSlotResizeExcept(cp.Info.PluginID)
-		// Every slot the plugin owns, not just those in its hello: manifest
-		// declarations may have gathered contributions before it connected.
-		m.deliverPublications(m.registry.ownedSlotDeliveries(cp.Info.PluginID))
-		return m, waitForIPC(m.subChan)
+		return m, nil
 
 	case tea.BlurMsg:
 		m.handleBlur()
@@ -536,11 +432,6 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.FocusMsg:
 		m.blurred = false
 		return m, m.startModifierTick()
-
-	case hookSweepMsg:
-		m.hookSweepOn = false
-		m.deliverPublications(m.registry.expireHooks(m.registry.Clock.Now()))
-		return m, m.startHookSweep()
 
 	case modifierTickMsg:
 		if m.blurred {
@@ -563,7 +454,7 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if now.Sub(ts) > ttl {
 				delete(m.heldKeys, k)
 				m.dropHeldAliases(k)
-				m.broadcastKeyState(huskipc.KeyPhaseUp, k, false)
+				m.broadcastKeyState(protocol.KeyPhaseUp, k, false)
 			}
 		}
 		if !polled && len(m.heldKeys) == 0 {
@@ -574,84 +465,15 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, waitForModifierTick(m.modifierTickInterval(now))
 
-	case ipcEventMsg:
-		cp := m.plugins[msg.pluginID]
-		if cp == nil || (msg.connection != nil && msg.connection != cp) {
-			return m, waitForIPC(m.subChan)
-		}
-		m.totalIPCEvents++
-		cp.FramesRecv++
-		if m.routePublication(msg.pluginID, msg.env) {
-			return m, tea.Batch(waitForIPC(m.subChan), m.startHookSweep())
-		}
-		if msg.env.Type == "protocol_error" {
-			// The plugin rejected a host message. Log it and never answer
-			// with another protocol_error: two strict peers would loop.
-			if pe := msg.env.ProtocolError; pe != nil {
-				m.logf("plugin %s rejected a %q message: %s", msg.pluginID, pe.MessageType, pe.Message)
-			} else {
-				m.logf("plugin %s sent a protocol_error without a payload", msg.pluginID)
-			}
-			return m, waitForIPC(m.subChan)
-		}
-		if err := checkPluginMessage(msg.env); err != nil {
-			m.rejectPublication(cp, msg.env.Type, err)
-			m.logf("protocol error from plugin %s: %v", msg.pluginID, err)
-			return m, waitForIPC(m.subChan)
-		}
-		if msg.env.CloseModal {
-			m.closeModal()
-			if m.activePlacement == huskipc.PlacementFullCanvas {
-				m.activateHomeWorkbench()
-			}
-		}
-		switch msg.env.Type {
-		case "slot_update":
-			if su := msg.env.SlotUpdate; su != nil {
-				if m.surfaceOwner(su.Slot) != msg.pluginID {
-					m.rejectPublication(m.plugins[msg.pluginID], "slot_update", fmt.Errorf("surface is not held by this plugin"))
-					break
-				}
-				update := *su
-				update.PluginID = msg.pluginID
-				m.slotUpdates[su.Slot] = &update
-			}
-		case "workspace_context":
-			if wc := msg.env.WorkspaceContext; wc != nil {
-				changed := wc.WorkspaceID != m.wsContext.WorkspaceID || wc.Cwd != m.wsContext.Cwd
-				m.wsContext = *wc
-				if changed {
-					for pid, cp := range m.plugins {
-						if pid == msg.pluginID {
-							continue
-						}
-						_ = cp.Writer.Send(huskipc.Envelope{
-							Type:             "workspace_context",
-							WorkspaceContext: wc,
-						})
-					}
-				}
-			}
-		case "toast":
-			if t := msg.env.Toast; t != nil {
-				m.toastSeq++
-				seq := m.toastSeq
-				m.activeToast = t
-				return m, tea.Batch(
-					waitForIPC(m.subChan),
-					tea.Tick(3200*time.Millisecond, func(time.Time) tea.Msg {
-						return toastExpireMsg{id: seq}
-					}),
-				)
-			}
-		}
-		return m, waitForIPC(m.subChan)
-
 	case toastExpireMsg:
-		if msg.id == m.toastSeq {
+		if msg.id == m.toastSeq && !m.engineToast {
 			m.activeToast = nil
 		}
 		return m, nil
+
+	case toastPollMsg:
+		m.toastPollOn = false
+		return m, nil // settle re-reads the queue and re-arms the poll
 
 	case tea.MouseMsg:
 		m.lastInput = time.Now()
@@ -694,12 +516,543 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		key := m.releasedHeldKey(legacyKeyString(msg))
 		if _, held := m.heldKeys[key]; held {
 			delete(m.heldKeys, key)
-			m.broadcastKeyState(huskipc.KeyPhaseUp, key, false)
+			m.broadcastKeyState(protocol.KeyPhaseUp, key, false)
 		}
 		return m, nil
 	}
 
+	// Anything else is the host's: its worker results, Calls replies and
+	// sweeps, Pod notices.
+	if m.host != nil && !m.closed {
+		m.host.Update(msg)
+	}
 	return m, nil
+}
+
+// quitCmd stops the host and the program. The post gate closes first so the
+// workers Close waits for never block on a loop that no longer reads (D62).
+func (m *WorkbenchModel) quitCmd() tea.Cmd {
+	m.shutdownHost()
+	return tea.Quit
+}
+
+// shutdownHost closes the post gate, then the host; both are idempotent.
+func (m *WorkbenchModel) shutdownHost() {
+	if m.closeGate != nil {
+		m.closeGate()
+	}
+	if m.stopRun != nil {
+		m.stopRun()
+	}
+	if m.host != nil && !m.closed {
+		m.closed = true
+		if err := m.host.Close(); err != nil {
+			m.logf("closing the host: %v", err)
+		}
+	}
+}
+
+// attachSlices registers the frontend-owned State slices and takes the
+// persisted dock preferences from husk.layout.
+func (m *WorkbenchModel) attachSlices() {
+	if m.fe == nil || m.slicesOwned {
+		return
+	}
+	s, err := m.fe.OwnSlices()
+	if err != nil {
+		m.logf("owning State slices: %v", err)
+		return
+	}
+	m.slices, m.slicesOwned = s, true
+	if snap := m.fe.Snapshot(); snap != nil {
+		if e, ok := snap.Slices[state.LayoutNamespace]; ok && len(e.Value) > 0 {
+			m.applyLayout(e.Value)
+		}
+	}
+	m.lastLayout = m.layoutJSON()
+}
+
+// layoutDoc is the value of husk.layout: the user's dock preferences.
+type layoutDoc struct {
+	Sidebar struct {
+		Shown        bool `json:"shown"`
+		Width        int  `json:"width"`
+		NavHeight    int  `json:"nav_height"`
+		FooterHeight int  `json:"footer_height"`
+	} `json:"sidebar"`
+	SidePanel struct {
+		Shown bool `json:"shown"`
+		Width int  `json:"width"`
+	} `json:"side_panel"`
+	MainHeaderHeight int `json:"main_header_height"`
+}
+
+func (m *WorkbenchModel) layoutJSON() []byte {
+	var d layoutDoc
+	d.Sidebar.Shown, d.Sidebar.Width = m.showSidebar, m.sidebarWidth
+	d.Sidebar.NavHeight, d.Sidebar.FooterHeight = m.sidebarNavH, m.sidebarFootH
+	d.SidePanel.Shown, d.SidePanel.Width = m.showSidePane, m.sidePaneW
+	d.MainHeaderHeight = m.mainHeaderH
+	b, _ := json.Marshal(d)
+	return b
+}
+
+// applyLayout adopts a persisted husk.layout value. A missing or out-of-range
+// field keeps the current default.
+func (m *WorkbenchModel) applyLayout(raw json.RawMessage) {
+	var d layoutDoc
+	d.Sidebar.Shown, d.Sidebar.Width = m.showSidebar, m.sidebarWidth
+	d.Sidebar.NavHeight, d.Sidebar.FooterHeight = m.sidebarNavH, m.sidebarFootH
+	d.SidePanel.Shown, d.SidePanel.Width = m.showSidePane, m.sidePaneW
+	d.MainHeaderHeight = m.mainHeaderH
+	if json.Unmarshal(raw, &d) != nil {
+		return
+	}
+	m.showSidebar, m.showSidePane = d.Sidebar.Shown, d.SidePanel.Shown
+	if d.Sidebar.Width >= 24 {
+		m.sidebarWidth = d.Sidebar.Width
+	}
+	if d.Sidebar.NavHeight >= 3 {
+		m.sidebarNavH = d.Sidebar.NavHeight
+	}
+	if d.Sidebar.FooterHeight >= 3 {
+		m.sidebarFootH = d.Sidebar.FooterHeight
+	}
+	if d.SidePanel.Width >= 24 {
+		m.sidePaneW = d.SidePanel.Width
+	}
+	if d.MainHeaderHeight >= 3 {
+		m.mainHeaderH = d.MainHeaderHeight
+	}
+}
+
+// podsDoc is the part of husk.pods the model reads.
+type podsDoc struct {
+	Plugins map[string]struct {
+		Status string `json:"status"`
+	} `json:"plugins"`
+}
+
+// derived is everything refresh rebuilds from the host; a change in any of it
+// re-lays the workbench out.
+type derived struct {
+	Plugins   map[string]bool
+	RailItems []contracts.RailItem
+	Catalog   *surfaceCatalog
+}
+
+// refresh re-reads Pods, occupancy, rail items, published slots and frames
+// from State and the Frontend when State moved. It reports whether anything
+// the layout or the draw depends on changed, and has already re-laid out then.
+func (m *WorkbenchModel) refresh() bool {
+	if m.fe == nil {
+		return false
+	}
+	changed := false
+	if pal := theme.Palette(m.fe.Palette()); pal != m.palette {
+		m.palette = pal
+		changed = true
+	}
+	snap := m.fe.Snapshot()
+	if snap == nil || snap.Seq == m.lastSeq && m.lastSeq != 0 {
+		return changed
+	}
+	m.lastSeq = snap.Seq
+
+	var pods podsDoc
+	if e, ok := snap.Slices[state.PodsNamespace]; ok {
+		_ = json.Unmarshal(e.Value, &pods)
+	}
+	live := map[string]bool{}
+	status := map[string]string{}
+	for id, p := range pods.Plugins {
+		status[id] = p.Status
+		if p.Status == "live" {
+			live[id] = true
+		}
+	}
+	var res surfaces.Surfaces
+	if e, ok := snap.Slices[state.SurfacesNamespace]; ok {
+		_ = json.Unmarshal(e.Value, &res)
+	}
+
+	cat := newSurfaceCatalog()
+	for id, occ := range res.Occupants {
+		cat.Occupants[id] = occ.Plugin
+	}
+	for plugin, frames := range m.fe.SurfaceFrames() {
+		if live[plugin] {
+			cat.Frames[plugin] = frames
+		}
+	}
+	for _, ps := range m.fe.PublishedSlots() {
+		if live[ps.Plugin] {
+			cat.Slots[ps.ID] = &publishedSlot{ID: ps.ID, Owner: ps.Plugin, Kind: ps.Kind, Rect: ps.Rect}
+		}
+	}
+	for slot, entries := range res.Contributions {
+		if ps := cat.Slots[slot]; ps != nil {
+			for _, c := range entries {
+				ps.Contributions = append(ps.Contributions, contribution{PluginID: c.Plugin, ID: c.ID, Content: c.Label, OnClick: c.OnClick})
+			}
+		}
+	}
+	m.declared = m.fe.RailItems()
+	var rails []contracts.RailItem
+	for _, ri := range m.declared {
+		if live[ri.Plugin] {
+			rails = append(rails, ri)
+		}
+	}
+	m.podStatus = status
+
+	next := derived{Plugins: live, RailItems: rails, Catalog: cat}
+	prev := derived{Plugins: m.plugins, RailItems: m.railItems, Catalog: m.catalog}
+	if reflect.DeepEqual(next, prev) {
+		return changed
+	}
+	m.plugins, m.railItems, m.catalog = live, rails, cat
+	m.registerActions()
+	m.pruneContent()
+	m.dropGoneSurfaces()
+	m.recomputeLayout()
+	return true
+}
+
+// pruneContent forgets the last frame of every surface whose occupant changed
+// or left: a departed plugin's content must not linger.
+func (m *WorkbenchModel) pruneContent() {
+	for s, su := range m.slotUpdates {
+		if m.catalog.Occupants[s] != su.PluginID {
+			delete(m.slotUpdates, s)
+		}
+	}
+}
+
+// dropGoneSurfaces leaves a placement or modal whose plugin is no longer live.
+func (m *WorkbenchModel) dropGoneSurfaces() {
+	if m.modal.PluginID != "" && !m.plugins[m.modal.PluginID] {
+		m.closeModal()
+	}
+	if m.activeRailID != "" {
+		if _, ok := m.railItemByID(m.activeRailID); !ok {
+			m.activateHomeWorkbench()
+		}
+	}
+}
+
+// settle is the end of an Update: derived state is re-read, frontend-owned
+// State is written, and the host ticks so the writes flush now. It repeats
+// while a pass changes something (a new occupant can open a side column),
+// bounded so a flapping host cannot spin the loop.
+func (m *WorkbenchModel) settle() {
+	for range 4 {
+		changed := m.refresh()
+		wrote := m.flushState()
+		if wrote && m.host != nil {
+			m.host.Tick()
+		}
+		m.pollToast()
+		if !changed && !wrote {
+			return
+		}
+	}
+}
+
+// pollToast shows the oldest live engine toast unless a local one is up, and
+// keeps a poll running while one is showing.
+func (m *WorkbenchModel) pollToast() {
+	if m.fe == nil {
+		return
+	}
+	t, ok := m.fe.ActiveToast()
+	switch {
+	case ok && (m.activeToast == nil || m.engineToast):
+		cp := t
+		m.activeToast, m.engineToast = &cp, true
+	case !ok && m.engineToast:
+		m.activeToast, m.engineToast = nil, false
+	}
+	if m.engineToast && !m.toastPollOn {
+		m.toastPollOn = true
+		m.cmds = append(m.cmds, tea.Tick(toastPollInterval, func(time.Time) tea.Msg { return toastPollMsg{} }))
+	}
+}
+
+type geoSize struct {
+	X      int `json:"x"`
+	Y      int `json:"y"`
+	Width  int `json:"width"`
+	Height int `json:"height"`
+}
+
+type geoRect struct {
+	geoSize
+	Inner geoSize `json:"inner"`
+}
+
+func toGeo(r SlotRect) geoRect {
+	return geoRect{
+		geoSize: geoSize{X: r.X, Y: r.Y, Width: r.Width, Height: r.Height},
+		Inner:   geoSize{X: r.InnerX, Y: r.InnerY, Width: r.InnerW, Height: r.InnerH},
+	}
+}
+
+// geometryJSON is the value of husk.geometry: the terminal size and every
+// laid-out rect (the modal's only while it is open).
+func (m *WorkbenchModel) geometryJSON() []byte {
+	rects := make(map[protocol.SurfaceID]geoRect, len(m.slotRects)+1)
+	for id, r := range m.slotRects {
+		rects[id] = toGeo(r)
+	}
+	if m.modalOwner().Open() {
+		rects[protocol.SurfaceModal] = toGeo(m.modalRect)
+	}
+	doc := struct {
+		Terminal struct {
+			Width  int `json:"width"`
+			Height int `json:"height"`
+		} `json:"terminal"`
+		TooSmall bool                           `json:"too_small"`
+		Rects    map[protocol.SurfaceID]geoRect `json:"rects"`
+	}{TooSmall: m.tooSmall(), Rects: rects}
+	doc.Terminal.Width, doc.Terminal.Height = m.width, m.height
+	b, _ := json.Marshal(doc)
+	return b
+}
+
+// focusJSON is the value of husk.focus.
+func (m *WorkbenchModel) focusJSON() []byte {
+	focused := m.focusedSlot
+	if m.modalOwner().Open() {
+		focused = protocol.SurfaceModal
+	}
+	b, _ := json.Marshal(struct {
+		Surface         protocol.SurfaceID `json:"surface"`
+		Fallback        protocol.SurfaceID `json:"fallback"`
+		TerminalFocused bool               `json:"terminal_focused"`
+	}{focused, m.focusFallback, !m.blurred})
+	return b
+}
+
+// surfaceView is the frontend half of husk.surfaces: what the layout shows.
+func (m *WorkbenchModel) surfaceView() contracts.SurfaceView {
+	var v contracts.SurfaceView
+	for id := range m.slotRects {
+		v.Visible = append(v.Visible, id)
+	}
+	if m.modalOwner().Open() {
+		v.Visible = append(v.Visible, protocol.SurfaceModal)
+	}
+	slices.Sort(v.Visible)
+	v.Placement = contracts.Placement{RailItem: m.activeRailID, Kind: string(m.activePlacement)}
+	v.Overlays = contracts.Overlays{
+		Modal:        contracts.ModalOverlay{Plugin: m.modal.PluginID, RailItem: m.modal.RailID},
+		Palette:      m.showPalette,
+		SlotExplorer: m.stageMode == "hotspots",
+	}
+	return v
+}
+
+// flushState writes the frontend-owned State that changed and reports whether
+// it wrote anything. Equal values are not written again, so a quiet frame
+// costs no State revision.
+func (m *WorkbenchModel) flushState() bool {
+	if m.fe == nil || !m.slicesOwned {
+		return false
+	}
+	wrote := false
+	put := func(h *state.Handle, last *[]byte, next []byte) {
+		if string(next) == string(*last) {
+			return
+		}
+		if _, err := h.Set(next); err != nil {
+			m.logf("writing %s: %v", h.Namespace(), err)
+			return
+		}
+		*last, wrote = next, true
+	}
+	put(m.slices.Geometry, &m.lastGeo, m.geometryJSON())
+	put(m.slices.Focus, &m.lastFocus, m.focusJSON())
+	put(m.slices.Layout, &m.lastLayout, m.layoutJSON())
+	view := m.surfaceView()
+	if b, _ := json.Marshal(view); string(b) != string(m.lastView) {
+		if err := m.fe.UpdateSurfaceView(func(v *contracts.SurfaceView) { *v = view }); err != nil {
+			m.logf("writing the surface view: %v", err)
+		} else {
+			m.lastView, wrote = b, true
+		}
+	}
+	return wrote
+}
+
+// run invokes an action as the user: through the host's Dispatcher when one is
+// attached, otherwise directly on the model's own handlers. A refusal toasts.
+func (m *WorkbenchModel) run(action string, args map[string]any) {
+	if m.fe == nil {
+		if h := m.actions[action]; h != nil {
+			_, _ = h(args)
+		} else if ri, ok := m.railItemByID(action); ok {
+			m.activateRailItem(ri)
+		}
+		return
+	}
+	m.fe.InvokeAction(action, args, func(_ map[string]any, err error) {
+		if err == nil {
+			return
+		}
+		m.logf("action %s: %v", action, err)
+		m.cmds = append(m.cmds, m.showLocalToast("warn", "Action failed", action+": "+err.Error()))
+	})
+}
+
+// registerActions binds the model's handlers with the host: the husk.* set
+// once, and one handler per declared rail item, replaced as plugins come and
+// go.
+func (m *WorkbenchModel) registerActions() {
+	if m.fe == nil {
+		return
+	}
+	want := map[string]bool{}
+	for id, h := range m.actions {
+		want[id] = true
+		if !m.registered[id] {
+			if err := m.fe.RegisterHostAction(id, h); err != nil {
+				m.logf("registering %s: %v", id, err)
+				continue
+			}
+			m.registered[id] = true
+		}
+	}
+	for _, ri := range m.declared {
+		want[ri.ID] = true
+		if m.registered[ri.ID] {
+			continue
+		}
+		if err := m.fe.RegisterHostAction(ri.ID, func(map[string]any) (map[string]any, error) {
+			if cur, ok := m.railItemByID(ri.ID); ok {
+				m.activateRailItem(cur)
+			}
+			return nil, nil
+		}); err != nil {
+			m.logf("registering rail item %s: %v", ri.ID, err)
+			continue
+		}
+		m.registered[ri.ID] = true
+	}
+	for id := range m.registered {
+		if !want[id] {
+			_ = m.fe.RegisterHostAction(id, nil)
+			delete(m.registered, id)
+		}
+	}
+}
+
+// hostActionTable is the husk.* action set the model serves.
+func (m *WorkbenchModel) hostActionTable() map[string]contracts.HostActionHandler {
+	do := func(f func()) contracts.HostActionHandler {
+		return func(map[string]any) (map[string]any, error) { f(); return nil, nil }
+	}
+	return map[string]contracts.HostActionHandler{
+		"husk.quit":         do(func() { m.cmds = append(m.cmds, m.quitCmd()) }),
+		"husk.home":         do(m.activateHomeWorkbench),
+		"husk.palette.open": do(m.openPalette),
+		"husk.hotspots.toggle_stage": do(func() {
+			m.activeRailID = ""
+			m.activePlacement = ""
+			if m.stageMode == "plugin" {
+				m.stageMode = "hotspots"
+				m.focusedSlot = protocol.SurfaceMainStage
+			} else {
+				m.stageMode = "plugin"
+				m.focusedSlot = protocol.SurfaceSidebarList
+			}
+			m.recomputeLayout()
+		}),
+		"husk.hotspots.badges": do(func() { m.showHotspots = !m.showHotspots }),
+		"husk.sidebar.toggle": do(func() {
+			m.showSidebar = !m.showSidebar
+			m.recomputeLayout()
+		}),
+		"husk.sidepanel.toggle": do(func() {
+			m.showSidePane = !m.showSidePane
+			m.recomputeLayout()
+		}),
+		"husk.docks.cycle": do(func() {
+			switch {
+			case m.showSidebar && m.showSidePane:
+				m.showSidePane = false
+			case m.showSidebar && !m.showSidePane:
+				m.showSidebar, m.showSidePane = false, true
+			case !m.showSidebar && m.showSidePane:
+				m.showSidePane = false
+			default:
+				m.showSidebar, m.showSidePane = true, true
+			}
+			m.recomputeLayout()
+		}),
+		"husk.layout.reset": do(func() {
+			m.sidebarWidth, m.sidebarNavH, m.sidebarFootH = 38, 4, 4
+			m.mainHeaderH, m.sidePaneW = 4, 36
+			m.recomputeLayout()
+			m.cmds = append(m.cmds, m.showLocalToast("info", "Layout Reset", "Restored default slot dimensions"))
+		}),
+		"husk.sidebar.narrower": do(func() {
+			if m.leftSideShown() && m.sidebarWidth > 26 {
+				m.sidebarWidth -= 2
+				m.recomputeLayout()
+			}
+		}),
+		"husk.sidebar.wider": do(func() {
+			if m.leftSideShown() && m.sidebarWidth < 56 {
+				m.sidebarWidth += 2
+				m.recomputeLayout()
+			}
+		}),
+		"husk.focus.next": do(m.focusNext),
+		"husk.modifiers.toggle_alt_latch": do(func() {
+			m.altLatched = !m.altLatched
+			next := m.modifiers
+			next.Alt = m.altLatched
+			m.syncModifierTransitions(next)
+		}),
+		"husk.modal.close": do(m.closeModal),
+	}
+}
+
+func (m *WorkbenchModel) openPalette() {
+	m.showPalette = true
+	m.paletteQuery = ""
+	m.paletteCursor = 0
+}
+
+// focusNext moves focus to the next surface in tab order.
+func (m *WorkbenchModel) focusNext() {
+	if m.activePlacement == contracts.PlacementStage {
+		if m.focusedSlot == protocol.SurfaceSidebarList {
+			m.focusedSlot = protocol.SurfaceWorkspaceStage
+		} else {
+			m.focusedSlot = protocol.SurfaceSidebarList
+		}
+		return
+	}
+	order := []protocol.SurfaceID{
+		protocol.SurfaceSidebarList,
+		protocol.SurfaceMainStage,
+		protocol.SurfaceSidePanel,
+	}
+	for i, s := range order {
+		if s == m.focusedSlot {
+			m.focusedSlot = order[(i+1)%len(order)]
+			break
+		}
+	}
+}
+
+// homeApplies reports whether "home" has anywhere to go; otherwise the key
+// belongs to the focused occupant.
+func (m *WorkbenchModel) homeApplies() bool {
+	return m.activeRailID != "" || m.stageMode == "hotspots"
 }
 
 func (m *WorkbenchModel) activateHomeWorkbench() {
@@ -707,86 +1060,49 @@ func (m *WorkbenchModel) activateHomeWorkbench() {
 	m.activePlacement = ""
 	m.closeModal()
 	m.stageMode = "plugin"
-	m.focusedSlot = huskipc.SlotSidebarList
+	m.focusedSlot = protocol.SurfaceSidebarList
 	m.recomputeLayout()
-	m.broadcastSlotResize()
 }
 
-func (m *WorkbenchModel) activateRailItem(ri huskipc.RailItemSpec) {
-	cp, ok := m.plugins[ri.PluginID]
-	if !ok {
+// activateRailItem opens (or toggles closed) the surface of a rail item. The
+// occupant learns of it through surface.resized, which the host pushes when
+// the visibility and geometry land in State.
+func (m *WorkbenchModel) activateRailItem(ri contracts.RailItem) {
+	if !m.plugins[ri.Plugin] {
 		return
 	}
 
 	switch ri.Placement {
-	case huskipc.PlacementModal:
+	case contracts.PlacementModal:
 		if m.modalOwner().RailID == ri.ID {
 			m.closeModal()
 			return
 		}
-		m.openModal(ri.PluginID, ri.ID)
+		m.openModal(ri.Plugin, ri.ID)
 		m.recomputeLayout()
-		rect := m.modalRect
-		_ = cp.Writer.Send(huskipc.Envelope{
-			Type: "rail_activated",
-			RailActivated: &huskipc.RailActivatedPayload{
-				RailID:    ri.ID,
-				Placement: huskipc.PlacementModal,
-				Active:    true,
-				Width:     rect.InnerW,
-				Height:    rect.InnerH,
-				Context:   m.wsContext,
-			},
-		})
 
-	case huskipc.PlacementFullCanvas:
-		if m.activeRailID == ri.ID && m.activePlacement == huskipc.PlacementFullCanvas {
+	case contracts.PlacementFullCanvas:
+		if m.activeRailID == ri.ID && m.activePlacement == contracts.PlacementFullCanvas {
 			m.activateHomeWorkbench()
 			return
 		}
 		m.closeModal()
 		m.activeRailID = ri.ID
-		m.activePlacement = huskipc.PlacementFullCanvas
-		m.focusedSlot = huskipc.SlotFullCanvas
+		m.activePlacement = contracts.PlacementFullCanvas
+		m.focusedSlot = protocol.SurfaceFullCanvas
 		m.recomputeLayout()
-		rect := m.slotRects[huskipc.SlotFullCanvas]
-		_ = cp.Writer.Send(huskipc.Envelope{
-			Type: "rail_activated",
-			RailActivated: &huskipc.RailActivatedPayload{
-				RailID:    ri.ID,
-				Placement: huskipc.PlacementFullCanvas,
-				Active:    true,
-				Width:     rect.InnerW,
-				Height:    rect.InnerH,
-				Context:   m.wsContext,
-			},
-		})
 
-	case huskipc.PlacementStage:
-		if m.activeRailID == ri.ID && m.activePlacement == huskipc.PlacementStage {
+	case contracts.PlacementStage:
+		if m.activeRailID == ri.ID && m.activePlacement == contracts.PlacementStage {
 			m.activateHomeWorkbench()
 			return
 		}
 		m.closeModal()
 		m.activeRailID = ri.ID
-		m.activePlacement = huskipc.PlacementStage
-		if !m.showSidebar {
-			m.showSidebar = true
-		}
-		m.focusedSlot = huskipc.SlotWorkspaceStage
+		m.activePlacement = contracts.PlacementStage
+		m.showSidebar = true
+		m.focusedSlot = protocol.SurfaceWorkspaceStage
 		m.recomputeLayout()
-		rect := m.slotRects[huskipc.SlotWorkspaceStage]
-		_ = cp.Writer.Send(huskipc.Envelope{
-			Type: "rail_activated",
-			RailActivated: &huskipc.RailActivatedPayload{
-				RailID:    ri.ID,
-				Placement: huskipc.PlacementStage,
-				Active:    true,
-				Width:     rect.InnerW,
-				Height:    rect.InnerH,
-				Context:   m.wsContext,
-			},
-		})
 	}
 }
 
@@ -813,10 +1129,31 @@ func (m *WorkbenchModel) openModal(pluginID, railID string) {
 // closeModal dismisses the open modal, if any.
 func (m *WorkbenchModel) closeModal() { m.modal = modalState{} }
 
-// surfaceOwner is the plugin that holds slot's claim: the registry occupant
-// ("" when the host draws it). Write authorisation, published-content cleanup
-// and rendering all resolve through the claim, including for the modal surface;
+// surfaceOwner is the plugin that holds slot's claim: the occupant ("" when
+// the host draws it). Write authorisation, published-content cleanup and
+// rendering all resolve through the claim, including for the modal surface;
 // modalOwner only says which modal is open and which rail item opened it.
-func (m *WorkbenchModel) surfaceOwner(slot huskipc.SlotID) string {
-	return m.registry.Occupants[slot]
+func (m *WorkbenchModel) surfaceOwner(slot protocol.SurfaceID) string {
+	return m.catalog.Occupants[slot]
+}
+
+// sendKey delivers a key to a plugin's surface; a plugin that just exited
+// cannot receive it, which is not an error worth a toast.
+func (m *WorkbenchModel) sendKey(plugin string, surface protocol.SurfaceID, key string) {
+	if m.fe == nil || plugin == "" {
+		return
+	}
+	if err := m.fe.SendKey(plugin, protocol.SurfaceKeyParams{Surface: surface, Key: key, Modifiers: m.modifiers}); err != nil {
+		m.logf("key for %s: %v", plugin, err)
+	}
+}
+
+// sendMouse delivers a mouse event to a plugin's surface.
+func (m *WorkbenchModel) sendMouse(plugin string, p protocol.SurfaceMouseParams) {
+	if m.fe == nil || plugin == "" {
+		return
+	}
+	if err := m.fe.SendMouse(plugin, p); err != nil {
+		m.logf("mouse for %s: %v", plugin, err)
+	}
 }

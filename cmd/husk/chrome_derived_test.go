@@ -6,7 +6,8 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/hyperlab-sh/husk/pkg/huskipc"
+	"github.com/hyperlab-sh/husk/internal/host/contracts"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
 func hintKeys(m *WorkbenchModel) []string {
@@ -21,7 +22,7 @@ func hintKeys(m *WorkbenchModel) []string {
 // is Home, the slot lab and the palette, the palette lists only workbench
 // commands, and the footer has no navigation keys of any application.
 func TestZeroPluginsChromeIsHostOnly(t *testing.T) {
-	m := newWorkbenchModel("", nil, t.TempDir())
+	m := newWorkbenchModel()
 	m.width, m.height = 160, 40
 	m.recomputeLayout()
 
@@ -58,21 +59,23 @@ func TestZeroPluginsChromeIsHostOnly(t *testing.T) {
 	}
 }
 
-// Plugin-declared keybindings that carry a description appear in the footer
-// when that plugin owns the focused surface, and vanish on disconnect.
-func TestFooterHintsFollowFocusedPluginBindings(t *testing.T) {
-	m := newWorkbenchModel("", nil, t.TempDir())
+// Hints the host reports for the focused surface appear in the footer when the
+// focus context names that surface's owner, and are capped.
+func TestFooterHintsFollowHostHints(t *testing.T) {
+	m := newWorkbenchModel()
 	m.width, m.height = 200, 40
-	cp, _ := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "side",
-		Keybindings: []huskipc.KeybindSpec{
-			{Key: "n", CommandID: "side.new", Description: "new item"},
-			{Key: "ctrl+r", CommandID: "side.refresh", Description: "refresh"},
-			{Key: "x", CommandID: "side.silent"}, // no description: not advertised
-			{Key: "n", CommandID: "side.dup", Description: "duplicate key"},
-			{Key: "z", CommandID: "side.other", Description: "other slot", WhenSlot: huskipc.SlotSidePanel},
-		}})
-	m.registry.Occupants[huskipc.SlotSidebarList] = "side"
-	m.focusedSlot = huskipc.SlotSidebarList
+	addPublicationTestPlugin(m, hello{PluginID: "side", Slots: []protocol.SurfaceID{protocol.SurfaceSidebarList}})
+	fe := withFE(m)
+	fe.HintsFn = func(ctx contracts.KeyContext) []contracts.KeyHint {
+		if ctx.FocusSurface != string(protocol.SurfaceSidebarList) || ctx.FocusOwner != "side" {
+			return nil
+		}
+		return []contracts.KeyHint{
+			{Keys: []string{"n"}, Action: "side.new", Text: "new item"},
+			{Keys: []string{"ctrl+r"}, Action: "side.refresh", Text: "refresh"},
+		}
+	}
+	m.focusedSlot = protocol.SurfaceSidebarList
 
 	if got, want := strings.Join(hintKeys(m), "|"), "F1|n|Ctrl+r|drag/= |[ ] /|ctrl+p|q"; got != want {
 		t.Fatalf("footer keys = %q, want %q", got, want)
@@ -81,32 +84,25 @@ func TestFooterHintsFollowFocusedPluginBindings(t *testing.T) {
 	if !strings.Contains(bar, "n new item") || !strings.Contains(bar, "Ctrl+r refresh") {
 		t.Fatalf("footer missing plugin hints: %q", bar)
 	}
-	if strings.Contains(bar, "duplicate key") || strings.Contains(bar, "other slot") {
-		t.Fatalf("footer shows shadowed or wrong-slot binding: %q", bar)
-	}
 
-	m.focusedSlot = huskipc.SlotSidePanel // nobody owns it
+	m.focusedSlot = protocol.SurfaceSidePanel // nobody owns it
 	if strings.Contains(strings.Join(hintKeys(m), "|"), "Ctrl+r") {
 		t.Fatal("hints leaked to a surface the plugin does not own")
-	}
-
-	m.focusedSlot = huskipc.SlotSidebarList
-	m.Update(pluginDisconnectedMsg{plugin: cp})
-	if strings.Contains(strings.Join(hintKeys(m), "|"), "Ctrl+r") {
-		t.Fatal("hints survived plugin disconnect")
 	}
 }
 
 // A plugin cannot crowd the footer: at most maxPluginFooterHints are shown.
 func TestFooterHintsCapPluginBindings(t *testing.T) {
-	m := newWorkbenchModel("", nil, t.TempDir())
-	var kb []huskipc.KeybindSpec
-	for _, k := range []string{"a", "b", "c", "d", "e", "f"} {
-		kb = append(kb, huskipc.KeybindSpec{Key: k, CommandID: "p." + k, Description: "do " + k})
+	m := newWorkbenchModel()
+	fe := withFE(m)
+	fe.HintsFn = func(contracts.KeyContext) []contracts.KeyHint {
+		var hs []contracts.KeyHint
+		for _, k := range []string{"a", "b", "c", "d", "e", "f"} {
+			hs = append(hs, contracts.KeyHint{Keys: []string{k}, Action: "p." + k, Text: "do " + k})
+		}
+		return hs
 	}
-	addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "p", Keybindings: kb})
-	m.registry.Occupants[huskipc.SlotSidebarList] = "p"
-	m.focusedSlot = huskipc.SlotSidebarList
+	m.focusedSlot = protocol.SurfaceSidebarList
 	if got, want := len(m.footerHints()), 1+maxPluginFooterHints+4; got != want {
 		t.Fatalf("hint count = %d, want %d", got, want)
 	}
@@ -114,13 +110,13 @@ func TestFooterHintsCapPluginBindings(t *testing.T) {
 
 // The slot map's j/k hint appears only while it is the focused stage.
 func TestFooterHintsSlotMapNav(t *testing.T) {
-	m := newWorkbenchModel("", nil, t.TempDir())
+	m := newWorkbenchModel()
 	m.stageMode = "hotspots"
-	m.focusedSlot = huskipc.SlotMainStage
+	m.focusedSlot = protocol.SurfaceMainStage
 	if !strings.Contains(strings.Join(hintKeys(m), "|"), "j/k") {
 		t.Fatal("slot map focused but no j/k hint")
 	}
-	m.focusedSlot = huskipc.SlotSidebarList
+	m.focusedSlot = protocol.SurfaceSidebarList
 	if strings.Contains(strings.Join(hintKeys(m), "|"), "j/k") {
 		t.Fatal("j/k hint shown while slot map is not focused")
 	}

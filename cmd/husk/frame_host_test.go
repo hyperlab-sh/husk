@@ -1,48 +1,49 @@
 package main
 
 import (
-	"io"
+	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/hyperlab-sh/husk/internal/host/contracts"
 	"github.com/hyperlab-sh/husk/pkg/frame"
-	"github.com/hyperlab-sh/husk/pkg/huskipc"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
-func addTestPlugin(m *WorkbenchModel, id string, frames map[huskipc.SlotID]frame.Spec, items ...huskipc.RailItemSpec) {
-	var wire map[huskipc.SlotID]huskipc.FrameSpec
+func addTestPlugin(m *WorkbenchModel, id string, frames map[protocol.SurfaceID]frame.Spec, items ...contracts.RailItem) {
+	var wire map[protocol.SurfaceID]protocol.FrameSpec
 	if frames != nil {
-		wire = make(map[huskipc.SlotID]huskipc.FrameSpec, len(frames))
+		wire = make(map[protocol.SurfaceID]protocol.FrameSpec, len(frames))
 		for slot, s := range frames {
-			wire[slot] = huskipc.FrameSpec(s)
+			wire[slot] = protocol.FrameSpec(s)
 		}
 	}
-	m.plugins[id] = &ConnectedPlugin{
-		Info:   huskipc.HelloPayload{PluginID: id, Frames: wire},
-		Writer: huskipc.NewConnWriter(io.Discard),
+	m.plugins[id] = true
+	if wire != nil {
+		m.catalog.Frames[id] = wire
 	}
 	for _, ri := range items {
-		ri.PluginID = id
+		ri.Plugin = id
 		m.railItems = append(m.railItems, ri)
 	}
 }
 
-func framedRailItem(id string, spec frame.Spec, placement huskipc.RailPlacement) huskipc.RailItemSpec {
-	wire := huskipc.FrameSpec(spec)
-	return huskipc.RailItemSpec{ID: id, Icon: "i", Label: id, Placement: placement, Frame: &wire}
+func framedRailItem(id string, spec frame.Spec, placement contracts.RailPlacement) contracts.RailItem {
+	wire := protocol.FrameSpec(spec)
+	return contracts.RailItem{ID: id, Icon: "i", Label: id, Placement: placement, Frame: &wire}
 }
 
 // A modal declaring a frame only through its rail item must get its chrome
 // (regression: frameFor used to consult only the canvas/stage rail item).
 func TestFrameForModalRailItemFrameOnly(t *testing.T) {
-	m := newWorkbenchModel("", nil, "")
-	addTestPlugin(m, "p.modal", nil, framedRailItem("r.modal", frame.Spec{Border: true, Label: "L", Close: true}, huskipc.PlacementModal))
+	m := newWorkbenchModel()
+	addTestPlugin(m, "p.modal", nil, framedRailItem("r.modal", frame.Spec{Border: true, Label: "L", Close: true}, contracts.PlacementModal))
 	m.openModal("p.modal", "r.modal")
 	m.recomputeLayout()
 
-	got := m.frameFor(huskipc.SlotModalSurface)
+	got := m.frameFor(protocol.SurfaceModal)
 	if !got.Border || got.Label != "L" || !got.Close {
 		t.Fatalf("modal frame from rail item = %+v, want border+label+close", got)
 	}
@@ -51,81 +52,92 @@ func TestFrameForModalRailItemFrameOnly(t *testing.T) {
 // An unframed modal opened over a framed canvas must not inherit the canvas
 // frame; the framed canvas keeps its own.
 func TestFrameForUnframedModalOverFramedCanvas(t *testing.T) {
-	m := newWorkbenchModel("", nil, "")
-	addTestPlugin(m, "p.canvas", nil, framedRailItem("r.canvas", frame.Spec{Border: true, Close: true}, huskipc.PlacementFullCanvas))
-	addTestPlugin(m, "p.modal", nil, framedRailItem("r.modal2", frame.Spec{}, huskipc.PlacementModal))
+	m := newWorkbenchModel()
+	addTestPlugin(m, "p.canvas", nil, framedRailItem("r.canvas", frame.Spec{Border: true, Close: true}, contracts.PlacementFullCanvas))
+	addTestPlugin(m, "p.modal", nil, framedRailItem("r.modal2", frame.Spec{}, contracts.PlacementModal))
 	m.activeRailID = "r.canvas"
-	m.activePlacement = huskipc.PlacementFullCanvas
+	m.activePlacement = contracts.PlacementFullCanvas
 	m.openModal("p.modal", "r.modal2")
 	m.recomputeLayout()
 
-	if got := (m.frameFor(huskipc.SlotModalSurface)); got.Enabled() {
+	if got := (m.frameFor(protocol.SurfaceModal)); got.Enabled() {
 		t.Fatalf("unframed modal inherited frame %+v from framed canvas", got)
 	}
-	if got := m.frameFor(huskipc.SlotFullCanvas); !got.Border || !got.Close {
+	if got := m.frameFor(protocol.SurfaceFullCanvas); !got.Border || !got.Close {
 		t.Fatalf("canvas frame = %+v, want border+close", got)
 	}
 }
 
 // hello "frames" takes precedence over the rail item's "frame".
 func TestFrameForHelloFramesPrecedence(t *testing.T) {
-	m := newWorkbenchModel("", nil, "")
+	m := newWorkbenchModel()
 	hello := frame.Spec{Border: true, Label: "from-hello"}
-	addTestPlugin(m, "p.modal", map[huskipc.SlotID]frame.Spec{huskipc.SlotModalSurface: hello},
-		framedRailItem("r.modal3", frame.Spec{Label: "from-rail"}, huskipc.PlacementModal))
+	addTestPlugin(m, "p.modal", map[protocol.SurfaceID]frame.Spec{protocol.SurfaceModal: hello},
+		framedRailItem("r.modal3", frame.Spec{Label: "from-rail"}, contracts.PlacementModal))
 	m.openModal("p.modal", "r.modal3")
 	m.recomputeLayout()
 
-	got := m.frameFor(huskipc.SlotModalSurface)
+	got := m.frameFor(protocol.SurfaceModal)
 	if got.Label != "from-hello" || !got.Border {
 		t.Fatalf("frame = %+v, want hello declaration to win", got)
 	}
 }
 
-// A visible modal must appear in currentSlotSizes with its frame-aware inner
+// geometryOf reads one surface's rect from the husk.geometry value the model
+// writes, which is what the host turns into surface.resized.
+func geometryOf(t *testing.T, m *WorkbenchModel, id protocol.SurfaceID) (geoRect, bool) {
+	t.Helper()
+	var doc struct {
+		Rects map[protocol.SurfaceID]geoRect `json:"rects"`
+	}
+	if err := json.Unmarshal(m.geometryJSON(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	r, ok := doc.Rects[id]
+	return r, ok
+}
+
+// A visible modal must appear in husk.geometry with its frame-aware inner
 // size, track terminal resizes, and disappear when closed.
-func TestCurrentSlotSizesModalLifecycle(t *testing.T) {
-	m := newWorkbenchModel("", nil, "")
-	addTestPlugin(m, "p.modal", nil, framedRailItem("r.framed", frame.Spec{Border: true, Close: true}, huskipc.PlacementModal))
+func TestGeometryModalLifecycle(t *testing.T) {
+	m := newWorkbenchModel()
+	addTestPlugin(m, "p.modal", nil, framedRailItem("r.framed", frame.Spec{Border: true, Close: true}, contracts.PlacementModal))
 	m.openModal("p.modal", "r.framed")
 	m.width, m.height = 120, 40
 	m.recomputeLayout()
 
-	sizes := m.currentSlotSizes()
-	sz, ok := sizes[huskipc.SlotModalSurface]
-	if !ok || !sz.Visible {
-		t.Fatalf("open modal missing from slot sizes: %+v", sz)
+	g, ok := geometryOf(t, m, protocol.SurfaceModal)
+	if !ok {
+		t.Fatal("open modal missing from geometry")
 	}
-	if want := m.modalRect.InnerW; sz.Width != want {
-		t.Fatalf("framed modal width = %d, want inner %d", sz.Width, want)
+	if want := m.modalRect.InnerW; g.Inner.Width != want {
+		t.Fatalf("framed modal inner width = %d, want %d", g.Inner.Width, want)
 	}
-	if sz.Width >= m.modalRect.Width {
-		t.Fatalf("framed modal width %d not inset from outer %d", sz.Width, m.modalRect.Width)
+	if g.Inner.Width >= g.Width {
+		t.Fatalf("framed modal inner width %d not inset from outer %d", g.Inner.Width, g.Width)
 	}
 
-	// resize while the modal is active: the size payload must follow
+	// resize while the modal is active: the geometry must follow
 	m.width, m.height = 84, 24
 	m.recomputeLayout()
-	sz = m.currentSlotSizes()[huskipc.SlotModalSurface]
-	if sz.Width != m.modalRect.InnerW || sz.Height != m.modalRect.InnerH {
-		t.Fatalf("modal size after resize = %dx%d, want inner %dx%d",
-			sz.Width, sz.Height, m.modalRect.InnerW, m.modalRect.InnerH)
+	g, _ = geometryOf(t, m, protocol.SurfaceModal)
+	if g.Inner.Width != m.modalRect.InnerW || g.Inner.Height != m.modalRect.InnerH {
+		t.Fatalf("modal inner after resize = %dx%d, want %dx%d", g.Inner.Width, g.Inner.Height, m.modalRect.InnerW, m.modalRect.InnerH)
 	}
 
 	// closed modal is absent
 	m.closeModal()
-	if _, ok := m.currentSlotSizes()[huskipc.SlotModalSurface]; ok {
-		t.Fatal("closed modal still reported in slot sizes")
+	if _, ok := geometryOf(t, m, protocol.SurfaceModal); ok {
+		t.Fatal("closed modal still reported in geometry")
 	}
 
-	// an unframed modal reports the full rect
-	addTestPlugin(m, "p.modal2", nil, framedRailItem("r.plain", frame.Spec{}, huskipc.PlacementModal))
+	// an unframed modal reports the full rect as its inner size
+	addTestPlugin(m, "p.modal2", nil, framedRailItem("r.plain", frame.Spec{}, contracts.PlacementModal))
 	m.openModal("p.modal2", "r.plain")
 	m.recomputeLayout()
-	sz = m.currentSlotSizes()[huskipc.SlotModalSurface]
-	if sz.Width != m.modalRect.Width || sz.Height != m.modalRect.Height {
-		t.Fatalf("unframed modal size = %dx%d, want full %dx%d",
-			sz.Width, sz.Height, m.modalRect.Width, m.modalRect.Height)
+	g, _ = geometryOf(t, m, protocol.SurfaceModal)
+	if g.Inner.Width != m.modalRect.Width || g.Inner.Height != m.modalRect.Height {
+		t.Fatalf("unframed modal inner = %dx%d, want full %dx%d", g.Inner.Width, g.Inner.Height, m.modalRect.Width, m.modalRect.Height)
 	}
 }
 
@@ -133,7 +145,7 @@ func TestCurrentSlotSizesModalLifecycle(t *testing.T) {
 // row keeps the surface width (ANSI- and wide-rune-safe), and the close glyph
 // occupies the rightmost cell, matching closeHitAt.
 func TestRenderFrameBorderlessWidthInvariant(t *testing.T) {
-	m := newWorkbenchModel("", nil, "")
+	m := newWorkbenchModel()
 	cases := []struct {
 		name  string
 		label string
@@ -151,7 +163,7 @@ func TestRenderFrameBorderlessWidthInvariant(t *testing.T) {
 			rect := SlotRect{X: 0, Y: 0, Width: tc.w, Height: 3, InnerX: 0, InnerY: 0, InnerW: tc.w, InnerH: 3}
 			lines := m.surfaceContentLines(nil, tc.w, 3)
 			rows := drawnRect(t, rect, func(c *canvas) {
-				m.drawFrame(c, huskipc.SlotModalSurface, rect, frame.Spec{Label: tc.label, Close: tc.close}, tc.label, lines)
+				m.drawFrame(c, protocol.SurfaceModal, rect, frame.Spec{Label: tc.label, Close: tc.close}, tc.label, lines)
 			})
 			if len(rows) != 3 {
 				t.Fatalf("row count = %d, want 3", len(rows))
@@ -174,11 +186,11 @@ func TestRenderFrameBorderlessWidthInvariant(t *testing.T) {
 // A bordered surface too narrow for the close glyph must omit it rather than
 // overflow the border row.
 func TestRenderFrameBorderedNarrowClose(t *testing.T) {
-	m := newWorkbenchModel("", nil, "")
+	m := newWorkbenchModel()
 	rect := SlotRect{X: 0, Y: 0, Width: 3, Height: 3, InnerX: 1, InnerY: 1, InnerW: 1, InnerH: 1}
 	lines := m.surfaceContentLines(nil, 1, 1)
 	rows := drawnRect(t, rect, func(c *canvas) {
-		m.drawFrame(c, huskipc.SlotMainStage, rect, frame.Spec{Border: true, Label: "Lab", Close: true}, "Lab", lines)
+		m.drawFrame(c, protocol.SurfaceMainStage, rect, frame.Spec{Border: true, Label: "Lab", Close: true}, "Lab", lines)
 	})
 	if len(rows) != 3 {
 		t.Fatalf("row count = %d, want 3", len(rows))
@@ -194,14 +206,14 @@ func TestRenderFrameBorderedNarrowClose(t *testing.T) {
 // without a plugin-declared border on the main stage.
 func TestExplorerFillsMainStageSlot(t *testing.T) {
 	newModel := func() *WorkbenchModel {
-		m := newWorkbenchModel("", nil, "")
+		m := newWorkbenchModel()
 		m.width, m.height = 144, 40
 		m.recomputeLayout()
 		return m
 	}
 	check := func(t *testing.T, m *WorkbenchModel) {
 		t.Helper()
-		rect := m.slotRects[huskipc.SlotMainStage]
+		rect := m.slotRects[protocol.SurfaceMainStage]
 		rows := drawnRect(t, rect, m.drawHotspotArchitectureStage)
 		if len(rows) != rect.Height {
 			t.Fatalf("explorer rows = %d, want slot height %d", len(rows), rect.Height)
@@ -217,8 +229,8 @@ func TestExplorerFillsMainStageSlot(t *testing.T) {
 
 	t.Run("framed main stage", func(t *testing.T) {
 		m := newModel()
-		addTestPlugin(m, "p.stage", map[huskipc.SlotID]frame.Spec{huskipc.SlotMainStage: {Border: true}})
-		m.registry.Occupants[huskipc.SlotMainStage] = "p.stage"
+		addTestPlugin(m, "p.stage", map[protocol.SurfaceID]frame.Spec{protocol.SurfaceMainStage: {Border: true}})
+		m.catalog.Occupants[protocol.SurfaceMainStage] = "p.stage"
 		m.recomputeLayout()
 		check(t, m)
 	})
@@ -227,18 +239,18 @@ func TestExplorerFillsMainStageSlot(t *testing.T) {
 // While a modal is open, close hit testing must not fall through to the
 // underlying canvas/stage close button (esc parity: only the modal goes).
 func TestCloseHitAtTopmostModalOnly(t *testing.T) {
-	m := newWorkbenchModel("", nil, "")
-	addTestPlugin(m, "p.canvas", nil, framedRailItem("r.canvas", frame.Spec{Border: true, Close: true}, huskipc.PlacementFullCanvas))
-	addTestPlugin(m, "p.modal", nil, framedRailItem("r.modalx", frame.Spec{Border: true, Close: true}, huskipc.PlacementModal))
+	m := newWorkbenchModel()
+	addTestPlugin(m, "p.canvas", nil, framedRailItem("r.canvas", frame.Spec{Border: true, Close: true}, contracts.PlacementFullCanvas))
+	addTestPlugin(m, "p.modal", nil, framedRailItem("r.modalx", frame.Spec{Border: true, Close: true}, contracts.PlacementModal))
 	m.activeRailID = "r.canvas"
-	m.activePlacement = huskipc.PlacementFullCanvas
+	m.activePlacement = contracts.PlacementFullCanvas
 	m.width, m.height = 120, 40
 	m.recomputeLayout()
 
 	// without a modal, the canvas close is clickable
-	crect := m.slotRects[huskipc.SlotFullCanvas]
+	crect := m.slotRects[protocol.SurfaceFullCanvas]
 	cx := crect.X + crect.Width - 2
-	if slot, ok := m.closeHitAt(cx, crect.Y); !ok || slot != huskipc.SlotFullCanvas {
+	if slot, ok := m.closeHitAt(cx, crect.Y); !ok || slot != protocol.SurfaceFullCanvas {
 		t.Fatalf("canvas close without modal: slot=%v ok=%v", slot, ok)
 	}
 
@@ -247,7 +259,7 @@ func TestCloseHitAtTopmostModalOnly(t *testing.T) {
 	m.recomputeLayout()
 	mrect := m.modalRect
 	mx := mrect.X + mrect.Width - 2
-	if slot, ok := m.closeHitAt(mx, mrect.Y); !ok || slot != huskipc.SlotModalSurface {
+	if slot, ok := m.closeHitAt(mx, mrect.Y); !ok || slot != protocol.SurfaceModal {
 		t.Fatalf("modal close: slot=%v ok=%v", slot, ok)
 	}
 	if _, ok := m.closeHitAt(cx, crect.Y); ok {
@@ -256,7 +268,7 @@ func TestCloseHitAtTopmostModalOnly(t *testing.T) {
 
 	// an unframed modal blocks fall-through entirely
 	m.railItems = m.railItems[:0]
-	addTestPlugin(m, "p.modal2", nil, framedRailItem("r.modaly", frame.Spec{}, huskipc.PlacementModal))
+	addTestPlugin(m, "p.modal2", nil, framedRailItem("r.modaly", frame.Spec{}, contracts.PlacementModal))
 	m.openModal("p.modal2", "r.modaly")
 	m.recomputeLayout()
 	if _, ok := m.closeHitAt(cx, crect.Y); ok {

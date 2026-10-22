@@ -7,7 +7,8 @@ import (
 
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/hyperlab-sh/husk/pkg/huskipc"
+
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 	"github.com/hyperlab-sh/husk/pkg/theme"
 )
 
@@ -67,10 +68,10 @@ func TestFillDefaultBgClipsToAreaAndCanvas(t *testing.T) {
 // the cells outside the slot keep the styling they had.
 func TestViewPaintsSlotBackgroundUnderPluginContent(t *testing.T) {
 	m := goldenModel()
-	goldenPlugin(m, "p.one", map[huskipc.SlotID][]string{
-		huskipc.SlotMainStage: {"\x1b[41mred\x1b[m plain \x1b[48;2;1;2;3mrgb\x1b[m"},
+	goldenPlugin(m, "p.one", map[protocol.SurfaceID][]string{
+		protocol.SurfaceMainStage: {"\x1b[41mred\x1b[m plain \x1b[48;2;1;2;3mrgb\x1b[m"},
 	})
-	rect := m.slotRects[huskipc.SlotMainStage]
+	rect := m.slotRects[protocol.SurfaceMainStage]
 	if rect.InnerW < 20 || rect.InnerH < 3 {
 		t.Fatalf("main stage inner rect too small: %+v", rect)
 	}
@@ -116,13 +117,13 @@ func TestViewPaintsSlotBackgroundUnderPluginContent(t *testing.T) {
 func TestViewSlotBackgroundSkipsBorderRing(t *testing.T) {
 	m := goldenModel()
 	m.palette.Slot = "#102030"
-	goldenPlugin(m, "p.one", map[huskipc.SlotID][]string{huskipc.SlotMainStage: {"x"}})
-	m.plugins["p.one"].Info.Frames = map[huskipc.SlotID]huskipc.FrameSpec{
-		huskipc.SlotMainStage: {Border: true, Label: "Stage"},
+	goldenPlugin(m, "p.one", map[protocol.SurfaceID][]string{protocol.SurfaceMainStage: {"x"}})
+	m.catalog.Frames["p.one"] = map[protocol.SurfaceID]protocol.FrameSpec{
+		protocol.SurfaceMainStage: {Border: true, Label: "Stage"},
 	}
 	m.recomputeLayout()
-	rect := m.slotRects[huskipc.SlotMainStage]
-	if !m.frameFor(huskipc.SlotMainStage).Border {
+	rect := m.slotRects[protocol.SurfaceMainStage]
+	if !m.frameFor(protocol.SurfaceMainStage).Border {
 		t.Fatal("main stage frame has no border")
 	}
 	slot := lipgloss.Color("#102030")

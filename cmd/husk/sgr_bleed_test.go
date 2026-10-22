@@ -7,7 +7,9 @@ import (
 
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/hyperlab-sh/husk/pkg/huskipc"
+
+	"github.com/hyperlab-sh/husk/internal/host/contracts"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
 // cellSGR is the SGR parameter string that sets a decoded cell's style from
@@ -111,16 +113,16 @@ func TestSpliceOverlayWellFormedBytesUnchanged(t *testing.T) {
 
 func TestRegionCompositorNoSGRBleed(t *testing.T) {
 	r := newPublicationRegistry()
-	if err := r.claimSurface("a", huskipc.SlotMainStage); err != nil {
+	if err := r.claimSurface("a", protocol.SurfaceMainStage); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.declareSlot("a", huskipc.SlotDeclarePayload{ID: "a.region", Kind: "region", Rect: &huskipc.PublishedRect{Surface: huskipc.SlotMainStage, X: 2, Y: 0, Width: 4, Height: 2}}); err != nil {
+	if err := r.declareSlot("a", slotDecl{ID: "a.region", Kind: "region", Rect: &contracts.PublishedRect{Surface: protocol.SurfaceMainStage, X: 2, Y: 0, Width: 4, Height: 2}}); err != nil {
 		t.Fatal(err)
 	}
 	// row 0: the region's text leaves green open; row 1: region text is plain
 	mustContribute(t, r, "b", "a.region", "b.region", "\x1b[42mRR\nPP")
 	source := []string{"\x1b[41mabcdefghij", "abc\x1b[44mdefghij"}
-	rows, _ := r.renderPublished(huskipc.SlotMainStage, "a", source, 10, 3)
+	rows, _ := r.renderPublished(protocol.SurfaceMainStage, "a", source, 10, 3)
 	want := [][]string{
 		{"41", "41", "42", "42", "", "", "41", "41", "41", "41"},
 		{"", "", "", "", "", "", "44", "44", "44", "44"},
@@ -146,7 +148,7 @@ func TestRegionCompositorNoSGRBleed(t *testing.T) {
 // A plugin line that leaves a style open must not paint the padding after it.
 func TestPublishedLineOpenStyleStopsAtContent(t *testing.T) {
 	r := newPublicationRegistry()
-	rows, _ := r.renderPublished(huskipc.SlotMainStage, "a", []string{"\x1b[41mhi", "\x1b[41mtoo-long-line"}, 6, 2)
+	rows, _ := r.renderPublished(protocol.SurfaceMainStage, "a", []string{"\x1b[41mhi", "\x1b[41mtoo-long-line"}, 6, 2)
 	cells := frameCells(strings.Join(rows, "\n"))
 	if got, want := rowSGR(cells[0]), []string{"41", "41", "", "", "", ""}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("padded row styles = %q, want %q", got, want)
@@ -158,8 +160,8 @@ func TestPublishedLineOpenStyleStopsAtContent(t *testing.T) {
 	// Slot content keeps an open style in the line string; blitting it stops
 	// the style at the last content cell, so the rest of the row stays
 	// unstyled.
-	m := newWorkbenchModel("", nil, "")
-	lines := m.surfaceContentLines(&huskipc.SlotUpdatePayload{Lines: []string{"\x1b[41mhi"}}, 4, 1)
+	m := newWorkbenchModel()
+	lines := m.surfaceContentLines(&protocol.SurfaceUpdateParams{Lines: []string{"\x1b[41mhi"}}, 4, 1)
 	c := newCanvas(6, 1)
 	c.blitLines(1, 0, 4, 1, lines)
 	got := rowSGR(frameCells(c.render())[0])
@@ -172,8 +174,8 @@ func TestPublishedLineOpenStyleStopsAtContent(t *testing.T) {
 // surfaceContentLines clips: lines past the height are dropped and wide lines
 // are truncated to the width; nothing wraps or scrolls.
 func TestSurfaceContentLinesClips(t *testing.T) {
-	m := newWorkbenchModel("", nil, "")
-	lines := m.surfaceContentLines(&huskipc.SlotUpdatePayload{Lines: []string{"one", "two-is-long", "three"}}, 5, 2)
+	m := newWorkbenchModel()
+	lines := m.surfaceContentLines(&protocol.SurfaceUpdateParams{Lines: []string{"one", "two-is-long", "three"}}, 5, 2)
 	if want := []string{"one", "two-…"}; !reflect.DeepEqual(lines, want) {
 		t.Fatalf("got %q, want %q", lines, want)
 	}
@@ -184,17 +186,17 @@ func TestSurfaceContentLinesClips(t *testing.T) {
 // side panel. Red may appear only on stage content cells the palette leaves
 // visible.
 func TestCommandPaletteOverStyledStageNoBleed(t *testing.T) {
-	m := newWorkbenchModel("", nil, "")
+	m := newWorkbenchModel()
 	m.width, m.height = 144, 40
-	m.plugins["p.stage"] = &ConnectedPlugin{Info: huskipc.HelloPayload{PluginID: "p.stage"}}
-	m.registry.Occupants[huskipc.SlotMainStage] = "p.stage"
+	m.plugins["p.stage"] = true
+	m.catalog.Occupants[protocol.SurfaceMainStage] = "p.stage"
 	m.recomputeLayout()
-	stage := m.slotRects[huskipc.SlotMainStage]
+	stage := m.slotRects[protocol.SurfaceMainStage]
 	var lines []string
 	for i := 0; i < stage.InnerH; i++ {
 		lines = append(lines, "\x1b[41m"+strings.Repeat("s", stage.InnerW+20))
 	}
-	m.slotUpdates[huskipc.SlotMainStage] = &huskipc.SlotUpdatePayload{PluginID: "p.stage", Slot: huskipc.SlotMainStage, Lines: lines}
+	m.slotUpdates[protocol.SurfaceMainStage] = &protocol.SurfaceUpdateParams{PluginID: "p.stage", Surface: protocol.SurfaceMainStage, Lines: lines}
 	m.showPalette = true
 
 	// Locate the palette box: draw it on an empty canvas and measure the

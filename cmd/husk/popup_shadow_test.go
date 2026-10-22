@@ -8,7 +8,8 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/lucasb-eyer/go-colorful"
 
-	"github.com/hyperlab-sh/husk/pkg/huskipc"
+	"github.com/hyperlab-sh/husk/internal/host/contracts"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
 var (
@@ -209,10 +210,10 @@ func TestShadowNoSGRBleed(t *testing.T) {
 func shadowViewModel(modal, palette bool) *WorkbenchModel {
 	m := pureViewModel("plugin", false)
 	if modal {
-		m.plugins["p.modal"] = &ConnectedPlugin{Info: huskipc.HelloPayload{PluginID: "p.modal"}}
-		m.railItems = append(m.railItems, huskipc.RailItemSpec{ID: "r.modal", PluginID: "p.modal", Icon: "m", Label: "modal", Placement: huskipc.PlacementModal})
+		m.plugins["p.modal"] = true
+		m.railItems = append(m.railItems, contracts.RailItem{ID: "r.modal", Plugin: "p.modal", Icon: "m", Label: "modal", Placement: contracts.PlacementModal})
 		m.openModal("p.modal", "r.modal")
-		m.slotUpdates[huskipc.SlotModalSurface] = &huskipc.SlotUpdatePayload{PluginID: "p.modal", Slot: huskipc.SlotModalSurface, Lines: []string{"modal"}}
+		m.slotUpdates[protocol.SurfaceModal] = &protocol.SurfaceUpdateParams{PluginID: "p.modal", Surface: protocol.SurfaceModal, Lines: []string{"modal"}}
 	}
 	m.showPalette = palette
 	m.paletteQuery = "a"
@@ -346,7 +347,7 @@ func TestViewPaletteOverModalStacksShadows(t *testing.T) {
 func TestViewToastCastsNoShadow(t *testing.T) {
 	m := shadowViewModel(false, false)
 	base := frameCells(m.View().Content)
-	m.activeToast = &huskipc.ToastPayload{Title: "t", Message: "m", Level: "warn"}
+	m.activeToast = &contracts.Toast{Title: "t", Message: "m", Level: "warn"}
 	got := frameCells(m.View().Content)
 	toastW := min(48, m.width-6)
 	x0, y0 := max(2, m.width-toastW-4), 2

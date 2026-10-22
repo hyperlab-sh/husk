@@ -1,20 +1,20 @@
 package main
 
 import (
-	"bytes"
 	"maps"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+
 	"github.com/hyperlab-sh/husk/pkg/frame"
-	"github.com/hyperlab-sh/husk/pkg/huskipc"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
 func sizedModel(t *testing.T, w, h int) *WorkbenchModel {
 	t.Helper()
-	m := newWorkbenchModel("", nil, t.TempDir())
+	m := newWorkbenchModel()
 	m.Update(tea.WindowSizeMsg{Width: w, Height: h})
 	return m
 }
@@ -95,7 +95,7 @@ func TestResizeBelowMinimumKeepsLayoutAndRecovers(t *testing.T) {
 
 func dividerPoint(t *testing.T, m *WorkbenchModel) (int, int) {
 	t.Helper()
-	sb, ok := m.slotRects[huskipc.SlotSidebarList]
+	sb, ok := m.slotRects[protocol.SurfaceSidebarList]
 	if !ok {
 		t.Fatal("no sidebar rect")
 	}
@@ -111,8 +111,8 @@ func dividerPoint(t *testing.T, m *WorkbenchModel) (int, int) {
 func borderedSidebarModel(t *testing.T, w, h int) *WorkbenchModel {
 	t.Helper()
 	m := sizedModel(t, w, h)
-	addTestPlugin(m, "p", map[huskipc.SlotID]frame.Spec{huskipc.SlotSidebarList: {Border: true}})
-	m.registry.Occupants[huskipc.SlotSidebarList] = "p"
+	addTestPlugin(m, "p", map[protocol.SurfaceID]frame.Spec{protocol.SurfaceSidebarList: {Border: true}})
+	m.catalog.Occupants[protocol.SurfaceSidebarList] = "p"
 	m.recomputeLayout()
 	return m
 }
@@ -136,7 +136,7 @@ func TestTooSmallIgnoresMouse(t *testing.T) {
 
 func TestTooSmallFreezesLayoutAndSlotResize(t *testing.T) {
 	m := sizedModel(t, 120, 40)
-	_, buf := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "a", Slots: []huskipc.SlotID{huskipc.SlotSidebarList}})
+	_, buf := addPublicationTestPlugin(m, hello{PluginID: "a", Slots: []protocol.SurfaceID{protocol.SurfaceSidebarList}})
 	m.Update(tea.WindowSizeMsg{Width: 40, Height: 10})
 	rects := maps.Clone(m.slotRects)
 	sidebarW := m.sidebarWidth
@@ -145,13 +145,10 @@ func TestTooSmallFreezesLayoutAndSlotResize(t *testing.T) {
 	for _, k := range []string{"=", "<", ">", "tab", "]", "ctrl+p", "?"} {
 		m.handleKey(keyFor(k))
 	}
-	m.Update(pluginRegisteredMsg{plugin: &ConnectedPlugin{
-		Info:   huskipc.HelloPayload{PluginID: "b", Slots: []huskipc.SlotID{huskipc.SlotMainStage}},
-		Writer: huskipc.NewConnWriter(&bytes.Buffer{}),
-	}})
+	addPublicationTestPlugin(m, hello{PluginID: "b", Slots: []protocol.SurfaceID{protocol.SurfaceMainStage}})
 
 	for _, e := range envelopes(t, buf) {
-		if e.Type == "slot_resize" || e.Type == "key_state" {
+		if e.Type == "key_state" {
 			t.Fatalf("plugin got %q while too small", e.Type)
 		}
 	}
@@ -162,20 +159,17 @@ func TestTooSmallFreezesLayoutAndSlotResize(t *testing.T) {
 		t.Fatal("key input changed UI state while too small")
 	}
 
-	// Regrow: layout recomputes and slot_resize is broadcast again.
+	// Regrow: layout recomputes (the host pushes surface.resized from the
+	// geometry the frontend writes, tested with the engine).
 	m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-	got := false
-	for _, e := range envelopes(t, buf) {
-		got = got || e.Type == "slot_resize"
-	}
-	if !got {
-		t.Fatal("no slot_resize after regrow")
+	if maps.Equal(rects, m.slotRects) || m.tooSmall() {
+		t.Fatal("layout did not recompute after regrow")
 	}
 }
 
 func TestTooSmallStillQuits(t *testing.T) {
 	m := sizedModel(t, 40, 10)
-	if _, cmd := m.handleKey(keyFor("ctrl+c")); cmd == nil {
+	if _, cmd := m.Update(keyFor("ctrl+c")); cmd == nil {
 		t.Fatal("ctrl+c must quit while too small")
 	}
 }

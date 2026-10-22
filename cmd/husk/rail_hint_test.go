@@ -7,7 +7,8 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/hyperlab-sh/husk/pkg/huskipc"
+	"github.com/hyperlab-sh/husk/internal/host/contracts"
+	"github.com/hyperlab-sh/husk/internal/stem/surfaces"
 )
 
 func TestRailShortcutLabel(t *testing.T) {
@@ -32,42 +33,43 @@ func TestRailShortcutLabel(t *testing.T) {
 	}
 }
 
-// A disconnected plugin's rail items leave the rail buttons and the top-bar
-// hint, and its shortcut stops matching.
-func TestDisconnectPrunesRailItems(t *testing.T) {
-	m := newWorkbenchModel("", nil, t.TempDir())
-	cp, _ := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "gone",
-		RailItems: []huskipc.RailItemSpec{{ID: "gone.open", Label: "Gone", Shortcut: "f7", Placement: huskipc.PlacementModal}}})
+// A plugin that leaves takes its rail items out of the rail buttons and the
+// top-bar hint: refresh keeps only live plugins' items.
+func TestDepartedPluginRailItemsArePruned(t *testing.T) {
+	m := newWorkbenchModel()
+	fe := withFE(m)
+	fe.Rails = []contracts.RailItem{{ID: "gone.open", Plugin: "gone", Label: "Gone", Placement: contracts.PlacementModal}}
+	fe.bind("f7", "gone.open")
+	fe.Snap = snapshot(1, map[string]string{"gone": "live"}, surfaces.Surfaces{})
+	m.refresh()
 	m.width = 200
 	if !strings.Contains(ansi.Strip(m.renderTopWorkbenchBar()), "F7 Gone") {
-		t.Fatal("rail hint missing before disconnect")
+		t.Fatal("rail hint missing while the plugin is live")
 	}
-	m.Update(pluginDisconnectedMsg{plugin: cp})
+	fe.Snap = snapshot(2, map[string]string{"gone": "exited"}, surfaces.Surfaces{})
+	m.refresh()
 	for _, b := range m.railButtons() {
-		if b.item.PluginID == "gone" {
-			t.Fatalf("rail button survived disconnect: %+v", b)
+		if b.item.Plugin == "gone" {
+			t.Fatalf("rail button survived the plugin leaving: %+v", b)
 		}
 	}
 	if strings.Contains(ansi.Strip(m.renderTopWorkbenchBar()), "Gone") {
-		t.Fatal("rail hint survived disconnect")
-	}
-	if _, ok := m.railShortcutItem("f7"); ok {
-		t.Fatal("shortcut of a disconnected plugin still matches")
+		t.Fatal("rail hint survived the plugin leaving")
 	}
 }
 
 // Many declared rail shortcuts must not push the theme pill off the top bar:
 // trailing hint entries are dropped and marked with an ellipsis.
 func TestTopBarRailHintFitsWidth(t *testing.T) {
-	m := newWorkbenchModel("", nil, t.TempDir())
-	var items []huskipc.RailItemSpec
+	m := newWorkbenchModel()
+	fe := withFE(m)
 	for i := range 30 {
-		items = append(items, huskipc.RailItemSpec{
-			ID: fmt.Sprintf("p.item%d", i), Label: fmt.Sprintf("Item number %d", i),
-			Shortcut: fmt.Sprintf("ctrl+%c", 'a'+i%26), Placement: huskipc.PlacementModal,
-		})
+		id := fmt.Sprintf("p.item%d", i)
+		fe.Rails = append(fe.Rails, contracts.RailItem{ID: id, Plugin: "p", Label: fmt.Sprintf("Item number %d", i), Placement: contracts.PlacementModal})
+		fe.bind(fmt.Sprintf("ctrl+%c", 'a'+i%26), id)
 	}
-	addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "p", RailItems: items})
+	m.plugins["p"] = true
+	m.railItems = fe.Rails
 	for _, w := range []int{84, 144, 400} {
 		m.width = w
 		bar := ansi.Strip(m.renderTopWorkbenchBar())

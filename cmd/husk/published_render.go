@@ -7,7 +7,7 @@ import (
 
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/hyperlab-sh/husk/pkg/huskipc"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
 var publishedAnchor = regexp.MustCompile("\x1b\\]husk;slot=([^;\x1b]+);key=([^;\x1b]*)\x1b\\\\")
@@ -17,13 +17,13 @@ type contributionHit struct {
 	PluginID, CommandID, SlotID, ContributionID, RowKey string
 }
 
-func contributionLine(c huskipc.SlotContribution) string {
+func contributionLine(c contribution) string {
 	// An inline contribution occupies one row. Region contributions may contain
 	// newlines and are split by the region renderer instead.
 	return strings.SplitN(strings.ReplaceAll(c.Content, "\r", ""), "\n", 2)[0]
 }
 
-func (r *publicationRegistry) replaceAnchors(owner, line string, width, y int) (string, []contributionHit) {
+func (r *surfaceCatalog) replaceAnchors(owner, line string, width, y int) (string, []contributionHit) {
 	matches := publishedAnchor.FindAllStringSubmatchIndex(line, -1)
 	if len(matches) == 0 {
 		return line, nil // preserve the host's existing fitLineWidth behavior
@@ -36,7 +36,7 @@ func (r *publicationRegistry) replaceAnchors(owner, line string, width, y int) (
 		out.WriteString(prefix)
 		x += ansi.StringWidth(prefix)
 		id, key := line[match[2]:match[3]], line[match[4]:match[5]]
-		if slot := r.Slots[id]; slot != nil && slot.Owner == owner && slot.Spec.Kind == "inline" {
+		if slot := r.Slots[id]; slot != nil && slot.Owner == owner && slot.Kind == "inline" {
 			for _, c := range slot.Contributions {
 				text := contributionLine(c)
 				w := ansi.StringWidth(text)
@@ -95,7 +95,7 @@ func (l publishedLayout) draw(c *canvas, x, y int) {
 
 // renderPublished draws the layout on a scratch canvas and returns its rows,
 // each exactly width cells, for callers that want strings.
-func (r *publicationRegistry) renderPublished(surface huskipc.SlotID, owner string, source []string, width, height int) ([]string, []contributionHit) {
+func (r *surfaceCatalog) renderPublished(surface protocol.SurfaceID, owner string, source []string, width, height int) ([]string, []contributionHit) {
 	l := r.layoutPublished(surface, owner, source, width, height)
 	if l.Width <= 0 || l.Height <= 0 {
 		return nil, nil
@@ -112,7 +112,7 @@ func (r *publicationRegistry) renderPublished(surface huskipc.SlotID, owner stri
 
 // layoutPublished is shared by rendering and input routing; coordinates are
 // always relative to the host surface's content, in terminal cells, not bytes.
-func (r *publicationRegistry) layoutPublished(surface huskipc.SlotID, owner string, source []string, width, height int) publishedLayout {
+func (r *surfaceCatalog) layoutPublished(surface protocol.SurfaceID, owner string, source []string, width, height int) publishedLayout {
 	if width <= 0 || height <= 0 {
 		return publishedLayout{}
 	}
@@ -133,14 +133,14 @@ func (r *publicationRegistry) layoutPublished(surface huskipc.SlotID, owner stri
 	}
 	ids := make([]string, 0)
 	for id, s := range r.Slots {
-		if s.Owner == owner && s.Spec.Kind == "region" && s.Spec.Rect != nil && s.Spec.Rect.Surface == surface {
+		if s.Owner == owner && s.Kind == "region" && s.Rect != nil && s.Rect.Surface == surface {
 			ids = append(ids, id)
 		}
 	}
 	slices.Sort(ids) // deterministic stacking if the publisher reserves overlapping rects
 	for _, id := range ids {
 		s := r.Slots[id]
-		rect := s.Spec.Rect
+		rect := s.Rect
 		x, y := rect.X, rect.Y
 		if x >= width || y >= height {
 			continue

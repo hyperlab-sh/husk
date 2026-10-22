@@ -2,6 +2,7 @@ package main
 
 import (
 	"image"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -9,7 +10,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/hyperlab-sh/husk/pkg/huskipc"
+	"github.com/hyperlab-sh/husk/internal/host/contracts"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
 // legacyKeyString preserves v1 wire names for keys decoded by Bubble Tea v2.
@@ -159,15 +161,56 @@ func (m *WorkbenchModel) dropHeldAliases(key string) {
 	}
 }
 
+// keyContext is the focus and overlay state a key resolution depends on.
+func (m *WorkbenchModel) keyContext() contracts.KeyContext {
+	ctx := contracts.KeyContext{Frozen: m.layoutFrozen()}
+	if m.modalOwner().Open() {
+		ctx.ModalOpen = true
+		ctx.ModalAction = m.modalOwner().RailID
+		ctx.FocusSurface = string(protocol.SurfaceModal)
+		ctx.FocusOwner = m.modalOwner().PluginID
+		return ctx
+	}
+	ctx.FocusSurface = string(m.focusedSlot)
+	ctx.FocusOwner = m.keyOwner(m.focusedSlot)
+	return ctx
+}
+
+// resolveKey runs key through the effective keymap, with the prefix typed so
+// far, and reports whether the keymap consumed it (a binding ran, or a longer
+// sequence is pending). A key it did not consume belongs to the focused
+// surface's occupant.
+func (m *WorkbenchModel) resolveKey(key string) bool {
+	if key == "esc" && len(m.pendingKeys) > 0 {
+		m.pendingKeys = nil // esc cancels a pending sequence and is consumed
+		return true
+	}
+	keys := append(slices.Clone(m.pendingKeys), key)
+	res := m.keys.Resolve(m.keyContext(), keys)
+	switch res.Outcome {
+	case contracts.KeyPrefix:
+		m.pendingKeys = keys
+		return true
+	case contracts.KeyMatch:
+		m.pendingKeys = nil
+		b := res.Binding
+		if b.Action == "husk.home" && !m.homeApplies() {
+			return false // nothing to leave: the key is the occupant's
+		}
+		m.run(b.Action, b.Args)
+		return true
+	}
+	m.pendingKeys = nil
+	return false
+}
+
 func (m *WorkbenchModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := legacyKeyString(msg)
 
 	// While the terminal is too small the UI is hidden: only quit is honoured
 	// and nothing is forwarded to plugins.
 	if m.layoutFrozen() {
-		if key == "q" || key == "ctrl+c" {
-			return m, tea.Quit
-		}
+		m.resolveKey(key)
 		return m, nil
 	}
 
@@ -177,9 +220,9 @@ func (m *WorkbenchModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.syncModifierTransitions(next)
 	}
 
-	phase := huskipc.KeyPhaseDown
+	phase := protocol.KeyPhaseDown
 	if _, already := m.heldKeys[key]; already || msg.IsRepeat {
-		phase = huskipc.KeyPhaseRepeat
+		phase = protocol.KeyPhaseRepeat
 	}
 	m.heldKeys[key] = time.Now()
 	m.recordHeldAlias(msg, key)
@@ -228,153 +271,44 @@ func (m *WorkbenchModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	if m.resolveKey(key) {
+		return m, nil
+	}
+
+	// An open modal owns every key the keymap left alone.
 	if m.modalOwner().Open() {
-		closeKey := key == "esc"
-		if ri, ok := m.railItemByID(m.modalOwner().RailID); ok && ri.Shortcut != "" && ri.Shortcut == key {
-			closeKey = true // the item's own shortcut toggles it closed
-		}
-		if closeKey {
-			m.closeModal()
-			return m, nil
-		}
-		if cp, ok := m.plugins[m.modalOwner().PluginID]; ok {
-			_ = cp.Writer.Send(huskipc.Envelope{
-				Type: "slot_key",
-				SlotKey: &huskipc.SlotKeyPayload{
-					Slot: huskipc.SlotModalSurface,
-					Key:  key,
-				},
-			})
-		}
+		m.sendKey(m.modalOwner().PluginID, protocol.SurfaceModal, key)
 		return m, nil
 	}
 
-	switch key {
-	case "q", "ctrl+c":
-		// main stops the plugins once the terminal is restored.
-		return m, tea.Quit
-	case "?":
-		m.altLatched = !m.altLatched
-		next := m.modifiers
-		next.Alt = m.altLatched
-		m.syncModifierTransitions(next)
-		return m, nil
-	case "esc", "f1", "alt+1":
-		if m.activeRailID != "" || m.stageMode == "hotspots" {
-			m.activateHomeWorkbench()
-			return m, nil
-		}
-	case "ctrl+p", ":", "alt+p":
-		m.showPalette = true
-		m.paletteQuery = ""
-		m.paletteCursor = 0
-		return m, nil
-	case "ctrl+i", "v", "alt+v":
-		return m.executeCommand("husk.hotspots.toggle_stage")
-	case "h":
-		return m.executeCommand("husk.hotspots.badges")
-	case "[":
-		return m.executeCommand("husk.sidebar.toggle")
-	case "]":
-		return m.executeCommand("husk.sidepanel.toggle")
-	case "/":
-		return m.executeCommand("husk.docks.cycle")
-	case "=":
-		m.sidebarWidth = 38
-		m.sidebarNavH = 4
-		m.sidebarFootH = 4
-		m.mainHeaderH = 4
-		m.sidePaneW = 36
-		m.recomputeLayout()
-		m.broadcastSlotResize()
-		return m, m.showLocalToast("info", "Layout Reset", "Restored default slot dimensions")
-	case "<", ",":
-		if m.leftSideShown() && m.sidebarWidth > 26 {
-			m.sidebarWidth -= 2
-			m.recomputeLayout()
-			m.broadcastSlotResize()
-		}
-		return m, nil
-	case ">", ".":
-		if m.leftSideShown() && m.sidebarWidth < 56 {
-			m.sidebarWidth += 2
-			m.recomputeLayout()
-			m.broadcastSlotResize()
-		}
-		return m, nil
-	case "tab":
-		if m.activePlacement == huskipc.PlacementStage {
-			if m.focusedSlot == huskipc.SlotSidebarList {
-				m.focusedSlot = huskipc.SlotWorkspaceStage
-			} else {
-				m.focusedSlot = huskipc.SlotSidebarList
-			}
-			m.broadcastSlotResize()
-			return m, nil
-		}
-		order := []huskipc.SlotID{
-			huskipc.SlotSidebarList,
-			huskipc.SlotMainStage,
-			huskipc.SlotSidePanel,
-		}
-		for i, s := range order {
-			if s == m.focusedSlot {
-				m.focusedSlot = order[(i+1)%len(order)]
-				break
-			}
-		}
-		m.broadcastSlotResize()
-		return m, nil
-	}
-
-	if m.stageMode == "hotspots" && m.focusedSlot == huskipc.SlotMainStage {
+	if m.stageMode == "hotspots" && m.focusedSlot == protocol.SurfaceMainStage {
 		if key == "j" || key == "down" {
-			m.hotspotCursor = (m.hotspotCursor + 1) % len(huskipc.AllSlots)
+			m.hotspotCursor = (m.hotspotCursor + 1) % len(allSurfaces)
 			return m, nil
 		}
 		if key == "k" || key == "up" {
-			m.hotspotCursor = (m.hotspotCursor - 1 + len(huskipc.AllSlots)) % len(huskipc.AllSlots)
+			m.hotspotCursor = (m.hotspotCursor - 1 + len(allSurfaces)) % len(allSurfaces)
 			return m, nil
 		}
-	}
-
-	// Rail item shortcuts and plugin key bindings come from what plugins
-	// declared in hello; the host binds no application keys of its own.
-	if ri, ok := m.railShortcutItem(key); ok {
-		m.activateRailItem(ri)
-		return m, nil
-	}
-	targetSlot := m.focusedSlot
-	if pid, kb, ok := m.keyBinding(key, targetSlot); ok {
-		return m.runPluginBinding(pid, kb.CommandID)
 	}
 
 	// Everything else goes to the focused surface's occupant only. An
 	// unoccupied focused surface drops the key.
-	ownerID := m.keyOwner(targetSlot)
-	if cp, ok := m.plugins[ownerID]; ok {
-		_ = cp.Writer.Send(huskipc.Envelope{
-			Type: "slot_key",
-			SlotKey: &huskipc.SlotKeyPayload{
-				Slot: targetSlot,
-				Key:  key,
-			},
-		})
-	}
+	m.sendKey(m.keyOwner(m.focusedSlot), m.focusedSlot, key)
 	return m, nil
 }
 
 // keyOwner is the plugin that receives keys for slot: the surface's occupant,
 // or, for the surface opened by the active full-canvas/stage rail item, the
 // plugin that declared that rail item.
-func (m *WorkbenchModel) keyOwner(slot huskipc.SlotID) string {
+func (m *WorkbenchModel) keyOwner(slot protocol.SurfaceID) string {
 	if owner := m.surfaceOwner(slot); owner != "" {
 		return owner
 	}
 	if ri, ok := m.activeRailItem(); ok {
-		if (ri.Placement == huskipc.PlacementFullCanvas && slot == huskipc.SlotFullCanvas) ||
-			(ri.Placement == huskipc.PlacementStage && slot == huskipc.SlotWorkspaceStage) {
-			return ri.PluginID
+		if (ri.Placement == contracts.PlacementFullCanvas && slot == protocol.SurfaceFullCanvas) ||
+			(ri.Placement == contracts.PlacementStage && slot == protocol.SurfaceWorkspaceStage) {
+			return ri.Plugin
 		}
 	}
 	return ""
@@ -488,17 +422,17 @@ func (m *WorkbenchModel) detectDividerAt(x, y int) string {
 }
 
 func (m *WorkbenchModel) dividerBandAt(x, y int) string {
-	if m.activePlacement == huskipc.PlacementFullCanvas || y < 1 || y >= m.height-1 {
+	if m.activePlacement == contracts.PlacementFullCanvas || y < 1 || y >= m.height-1 {
 		return ""
 	}
 	if m.showSidebar {
-		if sbRect, ok := m.slotRects[huskipc.SlotSidebarList]; ok {
+		if sbRect, ok := m.slotRects[protocol.SurfaceSidebarList]; ok {
 			rightEdge := sbRect.X + sbRect.Width - 1
 			if x == rightEdge || x == rightEdge+1 {
 				return "sidebar-width"
 			}
 		}
-		if navRect, ok := m.slotRects[huskipc.SlotSidebarNavigation]; ok {
+		if navRect, ok := m.slotRects[protocol.SurfaceSidebarNavigation]; ok {
 			if x >= navRect.X+1 && x < navRect.X+navRect.Width-1 {
 				botEdge := navRect.Y + navRect.Height - 1
 				if y == botEdge || y == botEdge+1 {
@@ -506,7 +440,7 @@ func (m *WorkbenchModel) dividerBandAt(x, y int) string {
 				}
 			}
 		}
-		if footRect, ok := m.slotRects[huskipc.SlotSidebarFooter]; ok {
+		if footRect, ok := m.slotRects[protocol.SurfaceSidebarFooter]; ok {
 			if x >= footRect.X+1 && x < footRect.X+footRect.Width-1 {
 				topEdge := footRect.Y
 				if y == topEdge-1 || y == topEdge {
@@ -515,7 +449,7 @@ func (m *WorkbenchModel) dividerBandAt(x, y int) string {
 			}
 		}
 	}
-	if sideRect, ok := m.slotRects[huskipc.SlotSidePanel]; ok {
+	if sideRect, ok := m.slotRects[protocol.SurfaceSidePanel]; ok {
 		// The centre column's right edge sits surfaceGutter cells before the
 		// gutter, so the band spans from that edge to the panel's own left
 		// edge; the blank gutter cell between them is inside it.
@@ -524,7 +458,7 @@ func (m *WorkbenchModel) dividerBandAt(x, y int) string {
 			return "sidepanel-width"
 		}
 	}
-	if hdrRect, ok := m.slotRects[huskipc.SlotMainHeader]; ok {
+	if hdrRect, ok := m.slotRects[protocol.SurfaceMainHeader]; ok {
 		if x >= hdrRect.X+1 && x < hdrRect.X+hdrRect.Width-1 {
 			botEdge := hdrRect.Y + hdrRect.Height - 1
 			if y == botEdge || y == botEdge+1 {
@@ -593,7 +527,6 @@ func (m *WorkbenchModel) handleMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 		if m.activeDrag != "" {
 			if m.applyDragAt(msg.X, msg.Y) {
 				m.recomputeLayout()
-				m.broadcastSlotResize()
 			}
 			return m, nil
 		}
@@ -614,7 +547,7 @@ func (m *WorkbenchModel) handleMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 	if isLeftClick {
 		if slot, ok := m.closeHitAt(msg.X, msg.Y); ok {
-			if slot == huskipc.SlotModalSurface {
+			if slot == protocol.SurfaceModal {
 				m.closeModal()
 			} else {
 				m.activateHomeWorkbench()
@@ -664,13 +597,12 @@ func (m *WorkbenchModel) handleMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 	for _, hit := range m.hitOrder() {
 		slotID, rect := hit.ID, hit.Rect
-		if slotID == huskipc.SlotActivityRail {
+		if slotID == protocol.SurfaceActivityRail {
 			continue
 		}
 		if image.Pt(msg.X, msg.Y).In(rect.Rect()) {
-			if isLeftClick && (slotID == huskipc.SlotSidebarList || slotID == huskipc.SlotMainStage || slotID == huskipc.SlotSidePanel || slotID == huskipc.SlotWorkspaceStage || slotID == huskipc.SlotFullCanvas) {
+			if isLeftClick && (slotID == protocol.SurfaceSidebarList || slotID == protocol.SurfaceMainStage || slotID == protocol.SurfaceSidePanel || slotID == protocol.SurfaceWorkspaceStage || slotID == protocol.SurfaceFullCanvas) {
 				m.focusedSlot = slotID
-				m.broadcastSlotResize()
 			}
 			relX := msg.X - rect.InnerX
 			relY := msg.Y - rect.InnerY
@@ -689,13 +621,7 @@ func (m *WorkbenchModel) handleMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 				btn = "wheel_up"
 			}
 
-			ownerID := m.surfaceOwner(slotID)
-			if cp, ok := m.plugins[ownerID]; ok {
-				_ = cp.Writer.Send(huskipc.Envelope{
-					Type:      "slot_mouse",
-					SlotMouse: m.publisherMousePayload(slotID, relX, relY, btn),
-				})
-			}
+			m.sendMouse(m.surfaceOwner(slotID), m.publisherMousePayload(slotID, relX, relY, btn))
 			return m, nil
 		}
 	}
@@ -705,12 +631,12 @@ func (m *WorkbenchModel) handleMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 // closeHitAt reports the framed surface (modal / full-canvas / stage) whose
 // close button covers (x, y), if that surface declared one.
-func (m *WorkbenchModel) closeHitAt(x, y int) (huskipc.SlotID, bool) {
+func (m *WorkbenchModel) closeHitAt(x, y int) (protocol.SurfaceID, bool) {
 	// While a modal is open it is the topmost surface: clicks never reach a
 	// close button on the underlying canvas/stage (matching esc, which only
 	// dismisses the modal).
 	if m.modalOwner().Open() {
-		spec := m.frameFor(huskipc.SlotModalSurface)
+		spec := m.frameFor(protocol.SurfaceModal)
 		if !spec.Close {
 			return "", false
 		}
@@ -720,14 +646,14 @@ func (m *WorkbenchModel) closeHitAt(x, y int) (huskipc.SlotID, bool) {
 			cx = rect.X + rect.Width - 2
 		}
 		if y == rect.Y && (x == cx || (spec.Border && x == cx-1)) {
-			return huskipc.SlotModalSurface, true
+			return protocol.SurfaceModal, true
 		}
 		return "", false
 	}
-	for _, slot := range []huskipc.SlotID{huskipc.SlotFullCanvas, huskipc.SlotWorkspaceStage} {
+	for _, slot := range []protocol.SurfaceID{protocol.SurfaceFullCanvas, protocol.SurfaceWorkspaceStage} {
 		var rect SlotRect
 		switch slot {
-		case huskipc.SlotModalSurface:
+		case protocol.SurfaceModal:
 			if !m.modalOwner().Open() {
 				continue
 			}

@@ -2,8 +2,8 @@
 
 package main
 
-import "github.com/hyperlab-sh/husk/pkg/huskipc"
+import "github.com/hyperlab-sh/husk/pkg/protocol"
 
-func pollOSModifiers() (huskipc.ModifierState, bool) {
-	return huskipc.ModifierState{}, false
+func pollOSModifiers() (protocol.ModifierState, bool) {
+	return protocol.ModifierState{}, false
 }

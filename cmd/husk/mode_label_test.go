@@ -1,16 +1,15 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
-	"io"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/charmbracelet/x/ansi"
-	"github.com/hyperlab-sh/husk/pkg/huskipc"
+
+	"github.com/hyperlab-sh/husk/internal/host/contracts"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
 // topBarText is the top bar with styling stripped.
@@ -19,9 +18,9 @@ func topBarText(m *WorkbenchModel) string {
 }
 
 func TestWorkbenchModeLabelTracksVisibleSideSurfaces(t *testing.T) {
-	sidebar := map[huskipc.SlotID][]string{huskipc.SlotSidebarList: {"list"}}
-	panel := map[huskipc.SlotID][]string{huskipc.SlotSidePanel: {"panel"}}
-	stage := map[huskipc.SlotID][]string{huskipc.SlotMainStage: {"stage"}}
+	sidebar := map[protocol.SurfaceID][]string{protocol.SurfaceSidebarList: {"list"}}
+	panel := map[protocol.SurfaceID][]string{protocol.SurfaceSidePanel: {"panel"}}
+	stage := map[protocol.SurfaceID][]string{protocol.SurfaceMainStage: {"stage"}}
 
 	cases := []struct {
 		name  string
@@ -37,7 +36,7 @@ func TestWorkbenchModeLabelTracksVisibleSideSurfaces(t *testing.T) {
 			goldenPlugin(m, "p.right", panel)
 		}, " Workbench · Left + Right "},
 		{"any sidebar slot counts as left", func(m *WorkbenchModel) {
-			goldenPlugin(m, "p.foot", map[huskipc.SlotID][]string{huskipc.SlotSidebarFooter: {"foot"}})
+			goldenPlugin(m, "p.foot", map[protocol.SurfaceID][]string{protocol.SurfaceSidebarFooter: {"foot"}})
 		}, " Workbench · Left "},
 		{"sidebar dock hidden", func(m *WorkbenchModel) {
 			goldenPlugin(m, "p.left", sidebar)
@@ -84,19 +83,19 @@ func TestWorkbenchModeLabelTracksVisibleSideSurfaces(t *testing.T) {
 
 func TestWorkbenchModeLabelKeepsOtherPlacementLabels(t *testing.T) {
 	m := goldenModel()
-	goldenPlugin(m, "p.left", map[huskipc.SlotID][]string{huskipc.SlotSidebarList: {"list"}})
-	m.activePlacement = huskipc.PlacementFullCanvas
+	goldenPlugin(m, "p.left", map[protocol.SurfaceID][]string{protocol.SurfaceSidebarList: {"list"}})
+	m.activePlacement = contracts.PlacementFullCanvas
 	if got := topBarText(m); !strings.Contains(got, "Full-Canvas Mode") {
 		t.Errorf("full-canvas label missing: %q", got)
 	}
-	m.activePlacement = huskipc.PlacementStage
+	m.activePlacement = contracts.PlacementStage
 	if got := topBarText(m); !strings.Contains(got, "Stage-minus-Sidebar Mode") {
 		t.Errorf("stage label missing: %q", got)
 	}
 }
 
 func TestHomeCommandTitleHasNoColumnCount(t *testing.T) {
-	for _, c := range builtinCommands() {
+	for _, c := range goldenModel().builtinCommands() {
 		if c.ID == "husk.home" {
 			if c.Title != "Activity Rail (🏠 F1): Return to Default Workbench Layout" {
 				t.Errorf("unexpected home title %q", c.Title)
@@ -109,8 +108,8 @@ func TestHomeCommandTitleHasNoColumnCount(t *testing.T) {
 
 func sideRectCount(m *WorkbenchModel) int {
 	n := 0
-	for _, s := range []huskipc.SlotID{
-		huskipc.SlotSidebarNavigation, huskipc.SlotSidebarList, huskipc.SlotSidebarFooter, huskipc.SlotSidePanel,
+	for _, s := range []protocol.SurfaceID{
+		protocol.SurfaceSidebarNavigation, protocol.SurfaceSidebarList, protocol.SurfaceSidebarFooter, protocol.SurfaceSidePanel,
 	} {
 		if _, ok := m.slotRects[s]; ok {
 			n++
@@ -124,8 +123,8 @@ func TestZeroPluginsLayDownNoSideColumns(t *testing.T) {
 	if n := sideRectCount(m); n != 0 {
 		t.Fatalf("zero plugins laid out %d side rects", n)
 	}
-	stage := m.slotRects[huskipc.SlotMainStage]
-	rail := m.slotRects[huskipc.SlotActivityRail]
+	stage := m.slotRects[protocol.SurfaceMainStage]
+	rail := m.slotRects[protocol.SurfaceActivityRail]
 	if stage.X != rail.Width || stage.X+stage.Width != goldenW {
 		t.Errorf("stage spans x=%d..%d, want the whole width after the rail (%d..%d)",
 			stage.X, stage.X+stage.Width, rail.Width, goldenW)
@@ -134,34 +133,27 @@ func TestZeroPluginsLayDownNoSideColumns(t *testing.T) {
 
 func TestSideColumnAppearsAndGoesWithPlugin(t *testing.T) {
 	m := goldenModel()
-	emptyStageW := m.slotRects[huskipc.SlotMainStage].Width
+	emptyStageW := m.slotRects[protocol.SurfaceMainStage].Width
 
-	cp := &ConnectedPlugin{
-		Info: huskipc.HelloPayload{
-			PluginID: "p.side", Name: "p.side", Version: "0.1.0", Language: "go",
-			Slots: []huskipc.SlotID{huskipc.SlotSidebarList, huskipc.SlotSidePanel},
-		},
-		Writer: huskipc.NewConnWriter(io.Discard),
-	}
-	m.Update(pluginRegisteredMsg{cp})
-	if _, ok := m.slotRects[huskipc.SlotSidebarList]; !ok {
+	hostPlugin(m, "p.side", protocol.SurfaceSidebarList, protocol.SurfaceSidePanel)
+	if _, ok := m.slotRects[protocol.SurfaceSidebarList]; !ok {
 		t.Fatal("sidebar did not appear when a plugin occupied it")
 	}
-	if _, ok := m.slotRects[huskipc.SlotSidePanel]; !ok {
+	if _, ok := m.slotRects[protocol.SurfaceSidePanel]; !ok {
 		t.Fatal("side panel did not appear when a plugin occupied it")
 	}
-	if w := m.slotRects[huskipc.SlotMainStage].Width; w >= emptyStageW {
+	if w := m.slotRects[protocol.SurfaceMainStage].Width; w >= emptyStageW {
 		t.Errorf("stage did not yield space: %d >= %d", w, emptyStageW)
 	}
 	if got := topBarText(m); !strings.Contains(got, " Workbench · Left + Right ") {
 		t.Errorf("label after connect: %q", got)
 	}
 
-	m.Update(pluginDisconnectedMsg{plugin: cp})
+	hostLeave(m, "p.side")
 	if n := sideRectCount(m); n != 0 {
 		t.Errorf("%d side rects survived the plugin exit", n)
 	}
-	if w := m.slotRects[huskipc.SlotMainStage].Width; w != emptyStageW {
+	if w := m.slotRects[protocol.SurfaceMainStage].Width; w != emptyStageW {
 		t.Errorf("stage width %d after exit, want %d", w, emptyStageW)
 	}
 	if got := topBarText(m); strings.Contains(got, "·") {
@@ -169,56 +161,27 @@ func TestSideColumnAppearsAndGoesWithPlugin(t *testing.T) {
 	}
 }
 
-// lastStageWidth is the main-stage width in the newest slot_resize in buf.
-func lastStageWidth(t *testing.T, buf *bytes.Buffer) int {
-	t.Helper()
-	width := -1
-	for _, line := range strings.Split(buf.String(), "\n") {
-		if line == "" {
-			continue
-		}
-		var env huskipc.Envelope
-		if err := json.Unmarshal([]byte(line), &env); err != nil {
-			t.Fatalf("bad line %q: %v", line, err)
-		}
-		if env.Type == "slot_resize" {
-			width = env.SlotResize.SlotSizes[huskipc.SlotMainStage].Width
-		}
-	}
-	return width
-}
-
-func sidePlugin(w io.Writer) *ConnectedPlugin {
-	return &ConnectedPlugin{
-		Info: huskipc.HelloPayload{PluginID: "p.side", Name: "p.side", Version: "0.1.0", Language: "go",
-			Slots: []huskipc.SlotID{huskipc.SlotSidebarList, huskipc.SlotSidePanel}},
-		Writer: huskipc.NewConnWriter(w),
-	}
-}
-
-func TestStagePluginGetsSlotResizeWhenSideColumnsComeAndGo(t *testing.T) {
+// The occupant of the stage learns its size from husk.geometry (the host turns
+// the write into surface.resized): it must follow side columns coming and going.
+func TestStageGeometryFollowsSideColumns(t *testing.T) {
 	m := goldenModel()
-	var stageBuf bytes.Buffer
-	m.Update(pluginRegisteredMsg{&ConnectedPlugin{
-		Info: huskipc.HelloPayload{PluginID: "p.stage", Name: "p.stage", Version: "0.1.0", Language: "go",
-			Slots: []huskipc.SlotID{huskipc.SlotMainStage}},
-		Writer: huskipc.NewConnWriter(&stageBuf),
-	}})
-	wide := m.slotRects[huskipc.SlotMainStage].InnerW
-
-	side := sidePlugin(io.Discard)
-	m.Update(pluginRegisteredMsg{side})
-	narrow := m.slotRects[huskipc.SlotMainStage].InnerW
-	if narrow >= wide {
-		t.Fatalf("stage did not narrow: %d >= %d", narrow, wide)
+	hostPlugin(m, "p.stage", protocol.SurfaceMainStage)
+	stageWidth := func() int {
+		g, ok := geometryOf(t, m, protocol.SurfaceMainStage)
+		if !ok {
+			t.Fatal("stage missing from geometry")
+		}
+		return g.Inner.Width
 	}
-	if got := lastStageWidth(t, &stageBuf); got != narrow {
-		t.Errorf("after side connect the stage plugin was told %d, want %d", got, narrow)
-	}
+	wide := stageWidth()
 
-	m.Update(pluginDisconnectedMsg{plugin: side})
-	if got := lastStageWidth(t, &stageBuf); got != wide {
-		t.Errorf("after side exit the stage plugin was told %d, want %d", got, wide)
+	hostPlugin(m, "p.side", protocol.SurfaceSidebarList, protocol.SurfaceSidePanel)
+	if narrow := stageWidth(); narrow >= wide || narrow != m.slotRects[protocol.SurfaceMainStage].InnerW {
+		t.Fatalf("after side connect geometry says %d (layout %d), want narrower than %d", narrow, m.slotRects[protocol.SurfaceMainStage].InnerW, wide)
+	}
+	hostLeave(m, "p.side")
+	if got := stageWidth(); got != wide {
+		t.Errorf("after side exit geometry says %d, want %d", got, wide)
 	}
 }
 
@@ -226,11 +189,11 @@ func TestStagePluginGetsSlotResizeWhenSideColumnsComeAndGo(t *testing.T) {
 // sidebar plugin that connects has keys from its first frame.
 func TestDefaultFocusSurvivesZeroPluginStartup(t *testing.T) {
 	m := goldenModel()
-	if m.focusedSlot != huskipc.SlotSidebarList {
+	if m.focusedSlot != protocol.SurfaceSidebarList {
 		t.Fatalf("zero-plugin focus moved to %q", m.focusedSlot)
 	}
-	m.Update(pluginRegisteredMsg{sidePlugin(io.Discard)})
-	if m.focusedSlot != huskipc.SlotSidebarList {
+	hostPlugin(m, "p.side", protocol.SurfaceSidebarList, protocol.SurfaceSidePanel)
+	if m.focusedSlot != protocol.SurfaceSidebarList {
 		t.Errorf("focus after sidebar plugin connects = %q, want the sidebar list", m.focusedSlot)
 	}
 }
@@ -238,29 +201,27 @@ func TestDefaultFocusSurvivesZeroPluginStartup(t *testing.T) {
 // Focus pushed off a vanished column comes back when the column does.
 func TestFocusReturnsWhenSideColumnReturns(t *testing.T) {
 	m := goldenModel()
-	side := sidePlugin(io.Discard)
-	m.Update(pluginRegisteredMsg{side})
-	m.Update(pluginDisconnectedMsg{plugin: side})
-	if m.focusedSlot != huskipc.SlotMainStage {
+	hostPlugin(m, "p.side", protocol.SurfaceSidebarList, protocol.SurfaceSidePanel)
+	hostLeave(m, "p.side")
+	if m.focusedSlot != protocol.SurfaceMainStage {
 		t.Fatalf("focus = %q after the column vanished, want the main stage", m.focusedSlot)
 	}
-	m.Update(pluginRegisteredMsg{sidePlugin(io.Discard)})
-	if m.focusedSlot != huskipc.SlotSidebarList {
+	hostPlugin(m, "p.side", protocol.SurfaceSidebarList, protocol.SurfaceSidePanel)
+	if m.focusedSlot != protocol.SurfaceSidebarList {
 		t.Errorf("focus = %q after the column returned, want the sidebar list", m.focusedSlot)
 	}
 }
 
 func TestVanishingSideCancelsDragMovesFocusAndDisablesResizeKeys(t *testing.T) {
 	m := goldenModel()
-	side := sidePlugin(io.Discard)
-	m.Update(pluginRegisteredMsg{side})
+	hostPlugin(m, "p.side", protocol.SurfaceSidebarList, protocol.SurfaceSidePanel)
 	m.activeDrag, m.hoverDivider = "sidepanel-width", "sidepanel-width"
-	m.focusedSlot = huskipc.SlotSidePanel
-	m.Update(pluginDisconnectedMsg{plugin: side})
+	m.focusedSlot = protocol.SurfaceSidePanel
+	hostLeave(m, "p.side")
 	if m.activeDrag != "" || m.hoverDivider != "" {
 		t.Errorf("drag %q / hover %q survived its column", m.activeDrag, m.hoverDivider)
 	}
-	if m.focusedSlot != huskipc.SlotMainStage {
+	if m.focusedSlot != protocol.SurfaceMainStage {
 		t.Errorf("focus stayed on vanished %q", m.focusedSlot)
 	}
 
