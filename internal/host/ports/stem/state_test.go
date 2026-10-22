@@ -343,6 +343,22 @@ func TestStatePortWriteErrors(t *testing.T) {
 			t.Fatalf("data = %+v", de)
 		}
 	})
+	t.Run("size cap keeps the limit when the slice is unregistered mid-write", func(t *testing.T) {
+		// The cap is captured before the write is posted, so a slice
+		// unregistered while the write is in flight still reports the cap it
+		// was checked against.
+		w, _, _ := newPort(t, StatePortOptions{}, specTiny)
+		limit := w.limitFor("tiny.state")
+		if limit != 24 {
+			t.Fatalf("captured limit = %d", limit)
+		}
+		err := w.mapWriteError("tiny.state", 0, limit, state.ErrTooLarge)
+		wantPortCode(t, err, protocol.CodeInvalidParams)
+		var de contracts.DataError
+		if !errors.As(err, &de) || de.Data()["limit"] != 24 {
+			t.Fatalf("data = %+v", de)
+		}
+	})
 	t.Run("non-object value is invalid_params", func(t *testing.T) {
 		w, _, _ := newPort(t, StatePortOptions{}, specAtlas)
 		_, err := w.Set(ctxBG, callerAtlas, "atlas.state", json.RawMessage(`[1,2]`))
