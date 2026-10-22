@@ -52,12 +52,15 @@ type State struct {
 	watchers map[*stateWatch]struct{}
 }
 
-// stateWatch is one registered event.watch: the notifier lives until ctx
-// ends; filter nil means every slice.
+// stateWatch is one registered state.watch: the notifier lives until ctx
+// ends; filter nil means every slice. baseline is the State Seq the reply's
+// baseline snapshot was taken at — flushes at or below it are already in
+// the baseline, so fanOut skips them.
 type stateWatch struct {
-	ctx    context.Context
-	filter map[string]struct{}
-	n      contracts.Notifier
+	ctx      context.Context
+	filter   map[string]struct{}
+	n        contracts.Notifier
+	baseline uint64
 }
 
 // NewStatePort builds the State wrapper and installs the flush listener that
@@ -140,6 +143,11 @@ func (w *State) Snapshot(_ context.Context, _ contracts.Caller, values bool) (co
 // snapshot with values, restricted to the watched slices; afterwards the
 // flush listener pushes one state.changed notification per changed watched
 // slice. Registration lives until ctx ends.
+//
+// The watcher registers before its baseline is taken, carrying the Seq the
+// baseline will read, so no change can fall between the two: a flush at or
+// below that Seq is already in the baseline (fanOut skips it), a later one
+// is delivered.
 func (w *State) Watch(ctx context.Context, _ contracts.Caller, slices []string, n contracts.Notifier) (contracts.StateSnapshotResult, error) {
 	if n == nil {
 		return contracts.StateSnapshotResult{}, contracts.NewError(protocol.CodeInternal, "state.watch needs a notifier", nil)
@@ -151,19 +159,21 @@ func (w *State) Watch(ctx context.Context, _ contracts.Caller, slices []string, 
 			filter[s] = struct{}{}
 		}
 	}
-	res, err := w.snapshot(true, filter)
-	if err != nil {
-		return contracts.StateSnapshotResult{}, err
-	}
-	reg := &stateWatch{ctx: ctx, filter: filter, n: n}
+	reg := &stateWatch{ctx: ctx, filter: filter, n: n, baseline: w.st.Snapshot().Seq}
 	w.mu.Lock()
 	w.watchers[reg] = struct{}{}
 	w.mu.Unlock()
-	context.AfterFunc(ctx, func() {
+	unregister := func() {
 		w.mu.Lock()
 		delete(w.watchers, reg)
 		w.mu.Unlock()
-	})
+	}
+	context.AfterFunc(ctx, unregister)
+	res, err := w.snapshot(true, filter)
+	if err != nil {
+		unregister()
+		return contracts.StateSnapshotResult{}, err
+	}
 	return res, nil
 }
 
@@ -338,6 +348,11 @@ func (w *State) fanOut(changes []state.Change, snap *state.Snapshot) {
 	for reg := range w.watchers {
 		if reg.ctx.Err() != nil {
 			delete(w.watchers, reg)
+			continue
+		}
+		if snap.Seq <= reg.baseline {
+			// The flush raced the watcher's baseline: its changes are
+			// already in the baseline snapshot the reply carries.
 			continue
 		}
 		live = append(live, reg)
