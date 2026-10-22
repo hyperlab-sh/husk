@@ -268,10 +268,12 @@ type Loop interface {
 type Preparation struct {
     Failed map[string]error // fatal declaration/slice failure for this plugin
     ReloadError error      // completed reload report; does not prevent launch
+    Register map[string]func() error // pending State slice writes, marshaled
+                                    // from the worker and applied on the loop
 }
 ```
 
-`Host.Add` rejects duplicates and reports `starting` through `Loop.Liveness`, without starting anything. After adding a batch, `Host.Prepare` returns one command. Its `PreparedMsg` is consumed by `Host.Handle` on the loop: failed plugins stay failed, a reload report error is logged but opens the gate, and surviving wrappers start with `Loop.Opening` queued before `live`. Late or duplicate gate completions never relaunch a Pod; shutdown prevents a pending gate from launching.
+`Host.Add` rejects duplicates and reports `starting` through `Loop.Liveness`, without starting anything. After adding a batch, `Host.Prepare` returns one command. Its `PreparedMsg` is consumed by `Host.Handle` on the loop: failed plugins stay failed, the marshaled `Register` slice writes are applied on the loop first (State writes are loop-only; a write failure fails that plugin like a declaration failure), a reload report error is logged but opens the gate, and surviving wrappers start with `Loop.Opening` queued before `live`. Late or duplicate gate completions never relaunch a Pod; shutdown prevents a pending gate from launching.
 
 `Loop.Liveness` is the explicit seam for writing `husk.pods` and publishing exit events. Workers post typed notices; `Host.Handle` applies them through `Loop.Liveness` and `Loop.Log` on the loop. `ClosedMsg` is handled by the caller with Calls cleanup before a later `ExitMsg` changes liveness. Message types are exported from `pods` (aliases of leaf Wrapper notices avoid an import cycle). Tokens are held in a worker-safe local registry, not State: they are registered before `Start` so even an immediate exit can revoke them. A `ReapedMsg` revokes authentication immediately after Wait; `ChannelClosedMsg` does the same on EOF or a closed stdin pipe, without cancelling Calls. Final stdout replies drain before normal `ClosedMsg` and `ExitMsg`, so a successful reply is not overtaken by process cleanup.
 
