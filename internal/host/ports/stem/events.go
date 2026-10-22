@@ -1,4 +1,3 @@
-// Package stem holds the host ports that front Stem modules.
 package stem
 
 import (

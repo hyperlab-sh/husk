@@ -1,7 +1,3 @@
-// Package stem adapts Stem engines to their host ports. The adapters own no
-// logic: they enforce the caller kinds of contracts.MethodHomes, derive
-// plugin identity from the authenticated caller, and map engine refusals to
-// contracts.CodedError.
 package stem
 
 import (

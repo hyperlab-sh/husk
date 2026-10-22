@@ -1,6 +1,8 @@
 // Package stem adapts Stem modules to the consumer-defined ports in
-// internal/host/contracts. Adapters run off the loop, post onto it, and map
-// failures to contracts.CodedError values carrying the wire code.
+// internal/host/contracts. The adapters own no logic: they enforce the
+// homes' caller kinds, derive plugin identity from the authenticated
+// caller, cross the host Loop seam (loop.go) for loop-confined modules,
+// and map refusals to contracts.CodedError values carrying the wire code.
 package stem
 
 import (
