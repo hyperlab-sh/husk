@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"time"
 
@@ -35,16 +36,20 @@ type Dispatcher struct {
 	pending map[calls.Handle]func(ActionReply)
 }
 
-// New returns a Dispatcher. It panics when a required view is nil.
-func New(opts Options) *Dispatcher {
+// New returns a Dispatcher. It fails when a required view is nil or Timeout is
+// outside what Calls accepts (zero, or calls.MinTimeout..calls.MaxTimeout).
+func New(opts Options) (*Dispatcher, error) {
 	if opts.Catalog == nil || opts.Liveness == nil || opts.Focus == nil || opts.Calls == nil {
-		panic("dispatcher: Catalog, Liveness, Focus and Calls are required")
+		return nil, errors.New("dispatcher: Catalog, Liveness, Focus and Calls are required")
+	}
+	if opts.Timeout != 0 && (opts.Timeout < calls.MinTimeout || opts.Timeout > calls.MaxTimeout) {
+		return nil, fmt.Errorf("dispatcher: timeout %s outside %s..%s", opts.Timeout, calls.MinTimeout, calls.MaxTimeout)
 	}
 	return &Dispatcher{
 		opts:    opts,
 		host:    make(map[string]func(ActionRequest) ActionReply),
 		pending: make(map[calls.Handle]func(ActionReply)),
-	}
+	}, nil
 }
 
 // RegisterHost binds an in-process handler for a husk.* action id or a rail
@@ -123,7 +128,7 @@ func (d *Dispatcher) Invoke(req ActionRequest) {
 		if req.Caller.Kind != CallerInput {
 			req.Focus = d.opts.Focus.Focus()
 		}
-		reply(h(req))
+		reply(d.runHost(h, req))
 		return
 	}
 
@@ -253,4 +258,16 @@ func (d *Dispatcher) List(caller Caller) []Listed {
 		out = append(out, Listed{ActionDef: def, Live: def.Owner == HostOwner || d.opts.Liveness.Live(def.Owner)})
 	}
 	return out
+}
+
+// runHost runs a host handler; a panic becomes an internal error reply so the
+// caller is still answered exactly once.
+func (d *Dispatcher) runHost(h func(ActionRequest) ActionReply, req ActionRequest) (r ActionReply) {
+	defer func() {
+		if p := recover(); p != nil {
+			d.logf("dispatcher: host handler for %q panicked: %v", req.Action, p)
+			r = fail(CodeInternal, "host action failed")
+		}
+	}()
+	return h(req)
 }
