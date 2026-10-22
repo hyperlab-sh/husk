@@ -29,12 +29,17 @@ func NewSurfacePort(eng *surfaces.Engine, loop Loop) *SurfacePort {
 	return &SurfacePort{engine: eng, loop: loop}
 }
 
-// run runs fn, an engine call, on the loop and carries its error back. A Do
-// that cannot run fn — the request context ended or the loop shut down —
-// answers unavailable; the engine call never ran in that case.
+// run runs fn, an engine call, on the loop and carries its error back. A
+// Do that cannot run fn answers by cause, like every port: a request
+// context that ended answers timeout or cancelled, a live context on a
+// loop that no longer runs answers unavailable. The engine call never ran
+// in either case.
 func (p *SurfacePort) run(ctx context.Context, fn func() error) error {
 	var err error
 	if lerr := p.loop.Do(ctx, func() { err = fn() }); lerr != nil {
+		if ctx.Err() != nil {
+			return ctxError(ctx)
+		}
 		return contracts.NewError(protocol.CodeUnavailable, "the host loop no longer runs", nil)
 	}
 	return codedEngine(err)
