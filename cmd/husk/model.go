@@ -185,6 +185,7 @@ type WorkbenchModel struct {
 	engineToast    bool // activeToast came from the engine queue
 	toastPollOn    bool
 	toastSeq       int
+	refusalsShown  int    // host refusals already toasted
 	totalIPCEvents uint64 // surface updates the host routed here
 
 	logOut io.Writer // host log lines, such as launch failures
@@ -660,6 +661,26 @@ func (m *WorkbenchModel) notePodTransition(id string, from, to contracts.PodStat
 	}
 }
 
+// noteRefusals toasts each plugin the host refused before a Pod existed
+// (invalid manifest, duplicate id, protocol mismatch) the way a launch
+// failure is: no husk.pods entry exists to carry the failure, so the host
+// lists them and the model shows each one once.
+func (m *WorkbenchModel) noteRefusals() {
+	if m.fe == nil {
+		return
+	}
+	refused := m.fe.Refusals()
+	for _, r := range refused[min(m.refusalsShown, len(refused)):] {
+		msg := r.Reason
+		if r.Plugin != "" {
+			msg = r.Plugin + ": " + r.Reason
+		}
+		m.logf("plugin refused: %s", msg)
+		m.cmds = append(m.cmds, m.showLocalToast("warn", "Plugin failed", msg))
+	}
+	m.refusalsShown = len(refused)
+}
+
 // derived is everything refresh rebuilds from the host; a change in any of it
 // re-lays the workbench out.
 type derived struct {
@@ -780,6 +801,7 @@ func (m *WorkbenchModel) settle() {
 		if wrote && m.host != nil {
 			m.host.Tick()
 		}
+		m.noteRefusals()
 		m.pollToast()
 		if !changed && !wrote {
 			return

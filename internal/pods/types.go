@@ -105,6 +105,17 @@ type Loop interface {
 	Do(context.Context, func()) error
 }
 
+// Publisher accepts events from the loop. Pods publish `pods.plugin-exited`
+// through it and import nothing from the Stem; the host adapts it to the Event
+// bus. A nil Publisher drops events.
+type Publisher interface {
+	Publish(name string, data any)
+}
+
+// PluginExitedEvent is the name of the event published when a Pod exits or
+// fails; its payload is the Pod's husk.pods entry plus `plugin_id`.
+const PluginExitedEvent = "pods.plugin-exited"
+
 // Factory constructs real or fake process wrappers before token registration.
 type Factory func(manifest.Spec, wrapper.Options) (wrapper.Process, error)
 
@@ -121,6 +132,8 @@ type Options struct {
 	// Starter, when set, starts processes after the launch gate instead of
 	// the built-in Factory/Wrapper path (Host.Start).
 	Starter contracts.WrapperStarter
+	// Publisher receives `pods.plugin-exited` from Handle.
+	Publisher Publisher
 }
 
 var _ contracts.WrapperStarter = (*Host)(nil)

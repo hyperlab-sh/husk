@@ -97,6 +97,13 @@ type Frontend interface {
 	// none is showing. Loop only.
 	ActiveToast() (Toast, bool)
 
+	// Refusals lists the plugins the host refused before a Pod existed
+	// (invalid manifest, duplicate plugin id, protocol major mismatch), in
+	// the order they were refused. The list only grows; a frontend remembers
+	// how many it has shown and reports the rest as the same failure toast a
+	// launch failure gets. Any goroutine.
+	Refusals() []PluginRefusal
+
 	// OwnSlices registers the frontend's owner handles (husk.layout,
 	// husk.geometry, husk.focus). It may be called once, before the loop
 	// runs or on it after Run has started (a persistent husk.layout hydrates
@@ -136,6 +143,14 @@ type Toast struct {
 	Level   string
 	Title   string
 	Message string
+}
+
+// PluginRefusal is one plugin the host refused before a Pod existed, so no
+// husk.pods entry carries the failure. Plugin is empty when the manifest was
+// too broken to name one; Reason then names the manifest.
+type PluginRefusal struct {
+	Plugin string
+	Reason string
 }
 
 // HostActionHandler serves one host action on the loop. args is the

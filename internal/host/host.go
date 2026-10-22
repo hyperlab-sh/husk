@@ -78,6 +78,8 @@ type Root struct {
 	podWatch   map[string]func()                 // cancels each Pod's surface.resized watcher
 	sizesDirty bool                              // geometry, focus or visibility changed this tick
 	lastSizes  map[protocol.SurfaceID]pushedSize // what each surface's occupant was last told
+	refusalsMu sync.Mutex                        // guards refusals
+	refusals   []contracts.PluginRefusal         // plugins refused before a Pod existed
 	declWarnMu sync.Mutex                        // guards declWarned
 	declWarned map[string]bool                   // plugins whose declared document failed to decode
 
@@ -217,6 +219,7 @@ func (r *Root) loadSpecs() error {
 		if spec == nil || seen[spec.ID] {
 			if spec != nil {
 				r.log(pods.LogMsg{PluginID: spec.ID, Level: "warn", Message: "duplicate plugin id ignored; the first loaded wins"})
+				r.refuse(spec.ID, "duplicate plugin id")
 			}
 			return
 		}
@@ -238,6 +241,7 @@ func (r *Root) loadSpecs() error {
 		for _, res := range results {
 			if res.Err != nil {
 				r.log(pods.LogMsg{Level: "warn", Message: fmt.Sprintf("--plugin-dir %q: %v", dir, res.Err)})
+				r.refuse("", res.Err.Error())
 				continue
 			}
 			add(res.Spec, res.Warnings)
@@ -372,8 +376,9 @@ func (r *Root) buildPods() error {
 		r: r,
 	}
 	h, err := pods.New(loop, pods.Options{
-		Registry: registry,
-		Factory:  r.opts.factory,
+		Registry:  registry,
+		Publisher: publisher{r},
+		Factory:   r.opts.factory,
 		Wrapper: wrapper.Options{
 			Context:    r.ctx,
 			Clock:      r.clock,
@@ -453,6 +458,7 @@ func (r *Root) launchPlugins(ctx context.Context) error {
 		for _, spec := range r.specs {
 			if _, err := r.pods.Add(spec); err != nil {
 				r.log(pods.LogMsg{PluginID: spec.ID, Level: "warn", Message: "plugin not added: " + err.Error()})
+				r.refuse(spec.ID, err.Error())
 				continue
 			}
 			r.watchPod(spec.ID)

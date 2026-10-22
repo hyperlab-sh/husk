@@ -1,7 +1,12 @@
 package host
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
@@ -86,4 +91,124 @@ func TestOccupantThatFailsHandsTheStageOverAndIsTold(t *testing.T) {
 			t.Errorf("beta's surface.resized = %+v, want main-stage at 80x20", got)
 		}
 	})
+}
+
+// D71b: a plugin refused before a Pod exists reaches the frontend through
+// Refusals, once per refusal, and the healthy plugin still launches.
+func TestRefusedPluginsAreListedForTheFrontend(t *testing.T) {
+	good := writeFrontendPlugin(t, "good", []string{"main-stage"}, nil)
+	root := t.TempDir()
+	copyDir := func(name, doc string) {
+		dir := filepath.Join(root, name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, manifest.FileName), []byte(doc), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const base = `{"manifest_version":2,"protocol":%d,"id":%q,"name":"n","version":"1","command":["./p"]%s}`
+	copyDir("a-invalid", `{"manifest_version":2,"protocol":2,"id":"invalid","name":"n","command":["./p"]}`) // no version
+	copyDir("b-first", fmt.Sprintf(base, 2, "twin", ""))
+	copyDir("c-second", fmt.Sprintf(base, 2, "twin", ""))
+	copyDir("d-old", fmt.Sprintf(base, 1, "old", ""))
+	copyDir("e-ok", fmt.Sprintf(base, 2, "ok", ""))
+
+	f := newFakes()
+	hook, ready := readyHook("")
+	h, err := boot(t, func(c *contracts.Config) {
+		c.Plugins = []string{good}
+		c.PluginDirs = []string{root}
+	}, withHook(hook), WithFactory(f.factory))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runHost(t, ready, h)
+	for range 3 { // good, twin, ok
+		<-f.started
+	}
+
+	got := h.root.Frontend().Refusals()
+	byPlugin := map[string]string{}
+	var anonymous []string
+	for _, r := range got {
+		if r.Plugin == "" {
+			anonymous = append(anonymous, r.Reason)
+			continue
+		}
+		byPlugin[r.Plugin] = r.Reason
+	}
+	if byPlugin["twin"] != "duplicate plugin id" {
+		t.Errorf("duplicate id: refusals = %+v", got)
+	}
+	if len(anonymous) != 2 {
+		t.Fatalf("manifest refusals = %q, want the invalid manifest and the protocol mismatch (all: %+v)", anonymous, got)
+	}
+	var invalid, mismatch bool
+	for _, reason := range anonymous {
+		invalid = invalid || (strings.Contains(reason, "a-invalid") && strings.Contains(reason, "version"))
+		mismatch = mismatch || (strings.Contains(reason, "d-old") && strings.Contains(reason, "protocol"))
+	}
+	if !invalid || !mismatch {
+		t.Errorf("manifest refusals = %q, want one naming a-invalid's version and one naming d-old's protocol", anonymous)
+	}
+	if len(got) != 3 {
+		t.Errorf("refusals = %+v, want exactly the three", got)
+	}
+}
+
+// D71a: pods.plugin-exited reaches an event watcher when a Pod fails to
+// launch and when it exits.
+func TestPluginExitedEventReachesAWatcher(t *testing.T) {
+	broken := writeFrontendPlugin(t, "alpha", []string{"main-stage"}, nil)
+	good := writeFrontendPlugin(t, "beta", []string{"sidebar-list"}, nil)
+	f := newFakes()
+	factory := func(spec manifest.Spec, o wrapper.Options) (wrapper.Process, error) {
+		if spec.ID == "alpha" {
+			return nil, errors.New("exec: no such file or directory")
+		}
+		return f.factory(spec, o)
+	}
+	hook, ready := readyHook("")
+	h, err := boot(t, func(c *contracts.Config) { c.Plugins = []string{broken, good} }, withHook(hook), WithFactory(factory))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var watcher recNotifier
+	h.loop(func() {
+		if _, err := h.root.bus.Subscribe(&watcher, "pods.plugin-exited"); err != nil {
+			t.Error(err)
+		}
+	})
+	runHost(t, ready, h)
+	<-f.started // beta
+
+	h.root.cfg.Post(wrapper.ExitMsg{Info: wrapper.Info{PluginID: "beta", Status: wrapper.Failed, LastError: "crashed (exit status 3)"}})
+	// The publish is posted from inside the exit's Update, so it runs one
+	// loop turn later, and the bus delivers at the end of that turn.
+	h.loop(func() {})
+	h.loop(func() {})
+
+	watcher.mu.Lock()
+	defer watcher.mu.Unlock()
+	seen := map[string]map[string]any{}
+	for _, m := range watcher.msgs {
+		var p struct {
+			Name string         `json:"name"`
+			Data map[string]any `json:"data"`
+		}
+		if err := json.Unmarshal(m.Params, &p); err != nil {
+			t.Fatal(err)
+		}
+		if p.Name != "pods.plugin-exited" {
+			continue
+		}
+		seen[p.Data["plugin_id"].(string)] = p.Data
+	}
+	if got := seen["alpha"]; got["status"] != "failed" || got["last_error"] != "exec: no such file or directory" {
+		t.Errorf("launch failure event = %+v", got)
+	}
+	if got := seen["beta"]; got["status"] != "failed" || got["last_error"] != "crashed (exit status 3)" {
+		t.Errorf("exit event = %+v", got)
+	}
 }
