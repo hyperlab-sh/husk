@@ -120,10 +120,12 @@ func newRig(t *testing.T) *rig {
 	return r
 }
 
-var (
-	cli    = contracts.Caller{Kind: contracts.CallerCLI}
-	plugin = func(id string) contracts.Caller { return contracts.Caller{Kind: contracts.CallerPlugin, PluginID: id} }
-)
+// cli is shared with events_test.go.
+
+// pluginCaller returns a plugin caller with the given id.
+func pluginCaller(id string) contracts.Caller {
+	return contracts.Caller{Kind: contracts.CallerPlugin, PluginID: id}
+}
 
 func TestArgsMustBeAnObject(t *testing.T) {
 	r := newRig(t)
@@ -148,12 +150,12 @@ func TestRefusalsKeepWireCodes(t *testing.T) {
 	}{
 		{"malformed id", cli, "nodot", "invalid_params"},
 		{"unknown", cli, "notes.nope", "not_found"},
-		{"plugin foreign private", plugin("other"), "notes.new", "denied"},
-		{"plugin on host action", plugin("other"), "husk.quit", "denied"},
+		{"plugin foreign private", pluginCaller("other"), "notes.new", "denied"},
+		{"plugin on host action", pluginCaller("other"), "husk.quit", "denied"},
 		{"owner not live", cli, "gone.act", "unavailable"},
 		{"unknown caller kind", contracts.Caller{}, "notes.new", "denied"},
 		{"plugin caller without id", contracts.Caller{Kind: contracts.CallerPlugin}, "notes.new", "denied"},
-		{"public host action without handler", plugin("other"), "husk.shared", "not_found"},
+		{"public host action without handler", pluginCaller("other"), "husk.shared", "not_found"},
 	}
 	for _, tc := range tests {
 		_, err := r.port.ActionInvoke(context.Background(), tc.caller, tc.action, nil)
@@ -238,7 +240,7 @@ func TestOwnerRoundTrip(t *testing.T) {
 func TestOwnerErrorPassesThrough(t *testing.T) {
 	r := newRig(t)
 	ch := make(chan error, 1)
-	go func() { _, e := invoke(r, plugin("notes"), "notes.new", ""); ch <- e }()
+	go func() { _, e := invoke(r, pluginCaller("notes"), "notes.new", ""); ch <- e }()
 	r.serve(t, `{"error":{"code":"failed","message":"disk full","data":{"why":"quota"}}}`)
 	err := <-ch
 	if contracts.CodeOf(err) != "failed" || err.Error() != "disk full" {
@@ -339,11 +341,11 @@ func TestActionListFiltersPerCaller(t *testing.T) {
 		}
 	}
 	wantOther := []contracts.ActionInfo{all[0], all[2], all[4]}
-	if got := ids(plugin("other")); !reflect.DeepEqual(got, wantOther) {
+	if got := ids(pluginCaller("other")); !reflect.DeepEqual(got, wantOther) {
 		t.Errorf("foreign plugin: %+v", got)
 	}
 	wantOwner := []contracts.ActionInfo{all[0], all[2], all[3], all[4]}
-	if got := ids(plugin("notes")); !reflect.DeepEqual(got, wantOwner) {
+	if got := ids(pluginCaller("notes")); !reflect.DeepEqual(got, wantOwner) {
 		t.Errorf("owner plugin: %+v", got)
 	}
 	if _, err := r.port.ActionList(context.Background(), contracts.Caller{}); contracts.CodeOf(err) != "denied" {
