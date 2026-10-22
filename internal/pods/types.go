@@ -51,7 +51,11 @@ type Preparation struct {
 // requesting the reload, so every registered slice exists when the first
 // reload runs. Applying the closures is a State write: loop-only. A failure
 // is acknowledged and fails only that plugin, like a declaration failure.
+// Gate names the launch gate that owns the batch: an id is accepted only
+// while that gate still holds it, so a registration from a torn-down
+// launch of the same id is refused instead of racing the new one.
 type RegisterSlicesMsg struct {
+	Gate     uint64
 	Register map[string]func() (contracts.SliceHandle, error)
 	Done     chan Registered
 }
@@ -95,7 +99,7 @@ type StoppedMsg struct{ Err error }
 type Loop interface {
 	Post(tea.Msg)
 	Opening(pluginID string) []protocol.Message
-	Prepare(context.Context, []manifest.Spec) Preparation
+	Prepare(context.Context, uint64, []manifest.Spec) Preparation
 	Liveness(LivenessMsg)
 	Log(LogMsg)
 	Do(context.Context, func()) error

@@ -99,11 +99,11 @@ func TestPluginPortUnavailableWithoutLoop(t *testing.T) {
 // no longer runs, so nothing executes.
 type deadLoop struct{}
 
-func (deadLoop) Post(tea.Msg)                                         {}
-func (deadLoop) Opening(string) []protocol.Message                    { return nil }
-func (deadLoop) Liveness(LivenessMsg)                                 {}
-func (deadLoop) Log(LogMsg)                                           {}
-func (deadLoop) Prepare(context.Context, []manifest.Spec) Preparation { return Preparation{} }
+func (deadLoop) Post(tea.Msg)                                                 {}
+func (deadLoop) Opening(string) []protocol.Message                            { return nil }
+func (deadLoop) Liveness(LivenessMsg)                                         {}
+func (deadLoop) Log(LogMsg)                                                   {}
+func (deadLoop) Prepare(context.Context, uint64, []manifest.Spec) Preparation { return Preparation{} }
 func (deadLoop) Do(context.Context, func()) error {
 	return context.Canceled
 }

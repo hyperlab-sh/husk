@@ -21,6 +21,7 @@ type fakeLoop struct {
 	statuses     []LivenessMsg
 	logs         []LogMsg
 	prepareCalls int
+	gates        []uint64
 	prepared     []manifest.Spec
 	result       Preparation
 }
@@ -34,8 +35,9 @@ func (l *fakeLoop) Post(m tea.Msg) {
 func (l *fakeLoop) Opening(string) []protocol.Message {
 	return []protocol.Message{{Method: protocol.MethodThemeChanged}, {Method: protocol.MethodSurfaceResized}, {Method: protocol.MethodInputKeyState}}
 }
-func (l *fakeLoop) Prepare(ctx context.Context, specs []manifest.Spec) Preparation {
+func (l *fakeLoop) Prepare(ctx context.Context, gate uint64, specs []manifest.Spec) Preparation {
 	l.prepareCalls++
+	l.gates = append(l.gates, gate)
 	l.prepared = specs
 	return l.result
 }

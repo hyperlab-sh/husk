@@ -197,6 +197,18 @@ func (f *fakeHandle) Unregister() { f.unregistered = true }
 
 // registerClosures builds one RegisterSlicesMsg worth of closures over fake
 // handles: the good one resolves, the broken one fails.
+// prepareGate runs a Prepare for the added pods and returns its gate
+// number, so a test can post the RegisterSlicesMsg that launch's worker
+// would post.
+func prepareGate(t *testing.T, h *Host) uint64 {
+	t.Helper()
+	before := h.nextGate
+	if h.Prepare() == nil {
+		t.Fatal("no pending preparation for the gate")
+	}
+	return before + 1
+}
+
 func registerClosures(t *testing.T) (map[string]func() (contracts.SliceHandle, error), *fakeHandle) {
 	t.Helper()
 	good := &fakeHandle{namespace: "files.state"}
@@ -217,9 +229,10 @@ func TestRegisterSlicesMsgStoresHandlesAndAcks(t *testing.T) {
 	addPod(t, h, "files")
 	addPod(t, h, "broken")
 	register, good := registerClosures(t)
+	gate := prepareGate(t, h)
 
 	done := make(chan Registered, 1)
-	if !h.Handle(RegisterSlicesMsg{Register: register, Done: done}) {
+	if !h.Handle(RegisterSlicesMsg{Gate: gate, Register: register, Done: done}) {
 		t.Fatal("unhandled register message")
 	}
 	testclock.Receive(t, done) // the ack arrived (buffered, but keep the shape honest)
@@ -236,7 +249,7 @@ func TestRegisterSlicesMsgStoresHandlesAndAcks(t *testing.T) {
 	if good.sets != 0 {
 		t.Fatal("registration already wrote state")
 	}
-	if !h.Handle(RegisterSlicesMsg{Register: register}) {
+	if !h.Handle(RegisterSlicesMsg{Gate: gate, Register: register}) {
 		t.Fatal("nil Done channel not tolerated")
 	}
 	if len(loop.statuses) != 2 { // only the Add liveness of the two pods
@@ -250,7 +263,8 @@ func TestPodSlicesServesOnlyOwnStateNamespace(t *testing.T) {
 	h, _, _, _ := hostFixture(t)
 	addPod(t, h, "files")
 	register, good := registerClosures(t)
-	h.Handle(RegisterSlicesMsg{Register: map[string]func() (contracts.SliceHandle, error){
+	gate := prepareGate(t, h)
+	h.Handle(RegisterSlicesMsg{Gate: gate, Register: map[string]func() (contracts.SliceHandle, error){
 		"files": register["files"],
 	}, Done: make(chan Registered, 1)})
 
@@ -274,7 +288,8 @@ func TestTeardownUnregistersHandleAndReleasesId(t *testing.T) {
 	h, loop, _, _ := hostFixture(t)
 	addPod(t, h, "files")
 	register, good := registerClosures(t)
-	h.Handle(RegisterSlicesMsg{Register: map[string]func() (contracts.SliceHandle, error){
+	gate := prepareGate(t, h)
+	h.Handle(RegisterSlicesMsg{Gate: gate, Register: map[string]func() (contracts.SliceHandle, error){
 		"files": register["files"],
 	}, Done: make(chan Registered, 1)})
 
@@ -319,11 +334,13 @@ func TestLaunchFailedAppliedOnce(t *testing.T) {
 	h, loop, _, _ := hostFixture(t)
 	p := addPod(t, h, "files")
 	err := errors.New("spawn refused")
-	// First report is the Wrapper's async notice, which carries the log
-	// path; the duplicate (the synchronous report) has none and must not
-	// clobber it.
-	h.Handle(LaunchFailedMsg{PluginID: "files", Err: err, LogPath: "/runtime/logs/files/plugin.log"})
+	// First report is the synchronous gate message, which carries no path;
+	// the duplicate (the Wrapper's async notice) carries the log path and
+	// must not merge it into the applied failure: a dropped duplicate never
+	// contributes anything. The path reaches the Pod through Start's copy
+	// instead (see TestStartFailureIsSynchronousAndNeverLive).
 	h.Handle(LaunchFailedMsg{PluginID: "files", Err: err})
+	h.Handle(LaunchFailedMsg{PluginID: "files", Err: err, LogPath: "/runtime/logs/files/plugin.log"})
 
 	var failed int
 	for _, s := range loop.statuses {
@@ -334,8 +351,8 @@ func TestLaunchFailedAppliedOnce(t *testing.T) {
 	if failed != 1 || p.info.Status != wrapper.Failed {
 		t.Fatal("failure applied more than once", failed, p.info.Status)
 	}
-	if p.info.LogPath != "/runtime/logs/files/plugin.log" {
-		t.Fatal("failure lost its log path", p.info.LogPath)
+	if p.info.LogPath != "" {
+		t.Fatal("dropped duplicate merged its log path into the failure", p.info.LogPath)
 	}
 	if len(loop.logs) != 1 || loop.logs[0].Level != "error" {
 		t.Fatal("failure logs", loop.logs)
@@ -486,14 +503,17 @@ func (c *countingStarter) Start(id string, _ []protocol.Message) error {
 	return nil
 }
 
-// A RegisterSlicesMsg that reaches the loop after the Pod was torn down is
-// refused (round-2 finding 2): the closure is a State write that would
-// register a slice nobody owns and leak the handle, so the next Add of the
-// same id would fail as a duplicate. Shutdown refuses the same way: no State
-// writes from a late registration.
+// A RegisterSlicesMsg that reaches the loop after its launch was torn down
+// is refused (round-2 finding 2, gated in round 3): the closure is a State
+// write that would register a slice nobody owns and leak the handle. The
+// gate check subsumes the gone-Pod case — a torn-down launch's gate is
+// empty — and shutdown refuses the same way: no State writes from a late
+// registration.
 func TestRegisterSlicesAfterTeardownRefused(t *testing.T) {
 	h, _, _, _ := hostFixture(t)
 	addPod(t, h, "files")
+	gate := h.nextGate + 1
+	h.Prepare()
 	called := false
 	register := map[string]func() (contracts.SliceHandle, error){
 		"files": func() (contracts.SliceHandle, error) {
@@ -503,7 +523,7 @@ func TestRegisterSlicesAfterTeardownRefused(t *testing.T) {
 	}
 	done := make(chan Registered, 1)
 	h.Handle(TeardownMsg{PluginID: "files"})
-	h.Handle(RegisterSlicesMsg{Register: register, Done: done})
+	h.Handle(RegisterSlicesMsg{Gate: gate, Register: register, Done: done})
 	reg := testclock.Receive(t, done)
 	if called {
 		t.Fatal("registration closure ran for a removed pod")
@@ -515,20 +535,25 @@ func TestRegisterSlicesAfterTeardownRefused(t *testing.T) {
 		t.Fatal("handle leaked for a removed pod")
 	}
 
-	// The refused registration leaves the id launchable again.
+	// The refused registration leaves the id launchable again: the new
+	// launch's gate accepts it.
 	addPod(t, h, "files")
+	gate2 := h.nextGate + 1
+	h.Prepare()
 	done2 := make(chan Registered, 1)
-	h.Handle(RegisterSlicesMsg{Register: register, Done: done2})
+	h.Handle(RegisterSlicesMsg{Gate: gate2, Register: register, Done: done2})
 	if reg := testclock.Receive(t, done2); reg.Failed != nil || reg.Handles["files"] == nil {
 		t.Fatalf("relaunch registration: %+v", reg)
 	}
 
 	// Shutdown refuses late registrations too, without State writes.
 	addPod(t, h, "late")
+	gate3 := h.nextGate + 1
+	h.Prepare()
 	h.closing = true
 	calledLate := false
 	done3 := make(chan Registered, 1)
-	h.Handle(RegisterSlicesMsg{Register: map[string]func() (contracts.SliceHandle, error){
+	h.Handle(RegisterSlicesMsg{Gate: gate3, Register: map[string]func() (contracts.SliceHandle, error){
 		"late": func() (contracts.SliceHandle, error) {
 			calledLate = true
 			return &fakeHandle{namespace: "late.state"}, nil
@@ -536,5 +561,59 @@ func TestRegisterSlicesAfterTeardownRefused(t *testing.T) {
 	}, Done: done3})
 	if reg := testclock.Receive(t, done3); calledLate || reg.Failed["late"] == nil {
 		t.Fatalf("shutdown registration: called=%v failed=%v", calledLate, reg.Failed)
+	}
+}
+
+// S1: the registration's gate, not the Pod's existence, decides acceptance.
+// The same id re-added and re-prepared while a torn-down launch's worker is
+// still in flight: worker1's RegisterSlicesMsg names the dead gate, so it is
+// refused even though a Pod with that id exists; the pending gate's
+// registration still runs. On the pre-gate code the stale closure ran for
+// the new Pod, and the new launch failed its own slice as a duplicate.
+func TestStaleRegistrationFromPriorLaunchRefused(t *testing.T) {
+	h, _, _, _ := hostFixture(t)
+	addPod(t, h, "files")
+	gate1 := h.nextGate + 1
+	h.Prepare() // launch 1: worker1 goes off-loop with gate1
+	h.Handle(TeardownMsg{PluginID: "files"})
+
+	addPod(t, h, "files") // same id, new Pod
+	gate2 := h.nextGate + 1
+	h.Prepare() // launch 2: worker2 pending with gate2
+
+	staleCalled, freshCalled := false, false
+	staleDone := make(chan Registered, 1)
+	h.Handle(RegisterSlicesMsg{Gate: gate1, Register: map[string]func() (contracts.SliceHandle, error){
+		"files": func() (contracts.SliceHandle, error) {
+			staleCalled = true
+			return &fakeHandle{namespace: "files.state"}, nil
+		},
+	}, Done: staleDone})
+	if reg := testclock.Receive(t, staleDone); staleCalled || reg.Failed["files"] == nil {
+		t.Fatalf("stale registration accepted: called=%v failed=%v", staleCalled, reg.Failed)
+	}
+
+	freshDone := make(chan Registered, 1)
+	h.Handle(RegisterSlicesMsg{Gate: gate2, Register: map[string]func() (contracts.SliceHandle, error){
+		"files": func() (contracts.SliceHandle, error) {
+			freshCalled = true
+			return &fakeHandle{namespace: "files.state"}, nil
+		},
+	}, Done: freshDone})
+	reg := testclock.Receive(t, freshDone)
+	if !freshCalled || reg.Failed != nil || reg.Handles["files"] == nil {
+		t.Fatalf("pending-launch registration refused: called=%v failed=%v", freshCalled, reg.Failed)
+	}
+
+	// A late stale retry after the new launch registered changes nothing.
+	staleDone2 := make(chan Registered, 1)
+	h.Handle(RegisterSlicesMsg{Gate: gate1, Register: map[string]func() (contracts.SliceHandle, error){
+		"files": func() (contracts.SliceHandle, error) {
+			staleCalled = true
+			return &fakeHandle{namespace: "files.state"}, nil
+		},
+	}, Done: staleDone2})
+	if reg := testclock.Receive(t, staleDone2); reg.Failed["files"] == nil {
+		t.Fatal("late stale retry accepted")
 	}
 }

@@ -253,8 +253,10 @@ type Preparer struct {
 // Store declarations and the Services reload are off-loop work. State writes
 // are loop-only, so slice registrations are posted to the loop as
 // RegisterSlicesMsg and the worker blocks on the loop's acknowledgment —
-// never executing a State write itself.
-func (p Preparer) Prepare(ctx context.Context, specs []manifest.Spec) pods.Preparation {
+// never executing a State write itself. gate is the launch gate that owns
+// the batch, handed to the loop so it can refuse a registration whose
+// launch was torn down while the worker was in flight.
+func (p Preparer) Prepare(ctx context.Context, gate uint64, specs []manifest.Spec) pods.Preparation {
 	failed := make(map[string]error)
 	register := make(map[string]func() (contracts.SliceHandle, error))
 	for _, spec := range specs {
@@ -294,7 +296,7 @@ func (p Preparer) Prepare(ctx context.Context, specs []manifest.Spec) pods.Prepa
 			}
 		} else {
 			done := make(chan pods.Registered, 1)
-			p.Post(pods.RegisterSlicesMsg{Register: register, Done: done})
+			p.Post(pods.RegisterSlicesMsg{Gate: gate, Register: register, Done: done})
 			select {
 			case res := <-done:
 				maps.Copy(failed, res.Failed)
@@ -394,12 +396,12 @@ func (l Loop) Opening(pluginID string) []protocol.Message {
 
 // Prepare implements pods.Loop.Prepare. The Preparer's Post is wired from
 // the Loop's own delivery function when the composition did not set one.
-func (l Loop) Prepare(ctx context.Context, specs []manifest.Spec) pods.Preparation {
+func (l Loop) Prepare(ctx context.Context, gate uint64, specs []manifest.Spec) pods.Preparation {
 	p := l.Preparer
 	if p.Post == nil {
 		p.Post = l.PostFn
 	}
-	return p.Prepare(ctx, specs)
+	return p.Prepare(ctx, gate, specs)
 }
 
 // Do implements pods.Loop.Do: fn runs on the host loop when a loop is

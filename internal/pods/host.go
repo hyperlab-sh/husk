@@ -128,7 +128,7 @@ func (h *Host) Prepare() tea.Cmd {
 	h.nextGate++
 	gate := h.nextGate
 	h.gates[gate] = ids
-	return func() tea.Msg { return PreparedMsg{Gate: gate, Preparation: h.loop.Prepare(h.ctx, specs)} }
+	return func() tea.Msg { return PreparedMsg{Gate: gate, Preparation: h.loop.Prepare(h.ctx, gate, specs)} }
 }
 
 // Start is launch step 6's built-in WrapperStarter implementation, over the
@@ -237,19 +237,23 @@ func (h *Host) Handle(msg tea.Msg) bool {
 			}
 			registered.Failed[id] = err
 		}
+		gateIDs, gateLive := h.gates[m.Gate]
 		for _, id := range slices.Sorted(maps.Keys(m.Register)) {
 			if h.closing {
 				// Shutdown: no State writes from a late registration.
 				fail(id, errors.New("shut down before slice registration"))
 				continue
 			}
-			if _, ok := h.pods[id]; !ok {
-				// Torn down before the registration reached the loop; running
-				// the closure would register a slice nobody owns and leak the
-				// handle, so the next Add of the same id would fail as a
-				// duplicate. Refuse instead; the worker reports the failure,
-				// and LaunchFailedMsg no-ops for the removed Pod.
-				fail(id, fmt.Errorf("pod %s removed before slice registration", id))
+			if !gateLive || !slices.Contains(gateIDs, id) {
+				// The registration must belong to the launch gate that is still
+				// pending. A Pod id alone proves nothing: the same id can be
+				// re-added and re-prepared while a torn-down launch's worker is
+				// still in flight, and running that stale closure would register
+				// a slice the new launch owns — its own registration would then
+				// fail as a duplicate — or leak a handle when the Pod is gone.
+				// Refuse instead; the worker reports the failure, and the gate
+				// that owns the id answers for it.
+				fail(id, fmt.Errorf("slice registration for %s is not from the pending launch", id))
 				continue
 			}
 			handle, err := m.Register[id]()
