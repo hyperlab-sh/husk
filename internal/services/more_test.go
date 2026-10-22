@@ -430,7 +430,7 @@ func TestKeybindingResolvedCapKeepsStrongestLayers(t *testing.T) {
 	}
 }
 
-// A key problem names the file the Store read the layer from.
+// A key problem names the config-relative file.
 func TestKeybindingProblemsKeepLayerFile(t *testing.T) {
 	kb := keybinding.New()
 	in := input(`{}`)
@@ -445,8 +445,8 @@ func TestKeybindingProblemsKeepLayerFile(t *testing.T) {
 		files[p.Source.Layer] = p.Source.File
 	}
 	want := map[keybinding.Layer]string{
-		keybinding.LayerUser:         "C:/cfg/keymap.json",
-		keybinding.LayerProfile:      "/cfg/profiles/work/keymap.json",
+		keybinding.LayerUser:         "keymap.json",
+		keybinding.LayerProfile:      "profiles/work/keymap.json",
 		keybinding.LayerDistribution: "keymap.json",
 	}
 	for layer, file := range want {
