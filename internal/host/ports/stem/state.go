@@ -187,6 +187,11 @@ func (w *State) Clear(ctx context.Context, c contracts.Caller, namespace string)
 		return contracts.NewError(protocol.CodeDenied, "state.clear clears the user's own data; only the user's CLI may do it", nil)
 	}
 	if w.cleaner != nil {
+		// Persisted copies go first, mirroring store.md's documented clear
+		// sequence — Store.ClearSlice deletes the shared user and instance
+		// copies, then the handler resets State — so both orders agree. A
+		// failed delete aborts with State untouched and the retry is
+		// idempotent.
 		if err := w.cleaner.DeleteSlice(ctx, namespace); err != nil {
 			return contracts.NewError(protocol.CodeInternal, "deleting persisted slice "+namespace+": "+err.Error(), nil)
 		}
@@ -222,9 +227,13 @@ func (w *State) writeHandle(c contracts.Caller, namespace string) (contracts.Sli
 // apply posts f to the loop and waits for its outcome on ctx. A Post that
 // reports the loop no longer running answers unavailable at once; if ctx
 // ends first the reply is cancelled, and the posted closure may still run
-// later. A substrate error is mapped with the namespace's current revision
-// and cap so conflict and size-cap replies carry their data.
+// later. limit is the size cap captured before the write was posted — the
+// cap the substrate checked the value against — so the reply carries it
+// even if the slice is unregistered while the write is in flight. A
+// substrate error is mapped with the namespace's current revision and that
+// cap so conflict and size-cap replies carry their data.
 func (w *State) apply(ctx context.Context, namespace string, f func() (uint64, error)) (uint64, error) {
+	limit := w.limitFor(namespace)
 	type outcome struct {
 		rev uint64
 		err error
@@ -239,7 +248,7 @@ func (w *State) apply(ctx context.Context, namespace string, f func() (uint64, e
 	select {
 	case o := <-done:
 		if o.err != nil {
-			return o.rev, w.mapWriteError(namespace, o.rev, o.err)
+			return o.rev, w.mapWriteError(namespace, o.rev, limit, o.err)
 		}
 		return o.rev, nil
 	case <-ctx.Done():
@@ -249,16 +258,18 @@ func (w *State) apply(ctx context.Context, namespace string, f func() (uint64, e
 
 // mapWriteError maps a substrate write error to the wire codes state.md
 // fixes: conflict carries the current revision, a size-cap breach carries
-// the cap, invalid values and patches are invalid_params. Everything else
-// stays a plain error and the handler adapter reports it as internal.
-func (w *State) mapWriteError(namespace string, current uint64, err error) error {
+// the cap the write was checked against (captured before it was posted, so
+// it survives a mid-write unregistration), invalid values and patches are
+// invalid_params. Everything else stays a plain error and the handler
+// adapter reports it as internal.
+func (w *State) mapWriteError(namespace string, current uint64, limit int, err error) error {
 	switch {
 	case errors.Is(err, state.ErrConflict):
 		return contracts.NewError(protocol.CodeConflict, "if_revision does not match the current revision", map[string]any{"revision": current})
 	case errors.Is(err, state.ErrTooLarge):
 		data := map[string]any{}
-		if cap := w.capFor(namespace); cap > 0 {
-			data["limit"] = cap
+		if limit > 0 {
+			data["limit"] = limit
 		}
 		return contracts.NewError(protocol.CodeInvalidParams, "value exceeds the slice size cap", data)
 	case errors.Is(err, state.ErrInvalidValue):
@@ -266,16 +277,12 @@ func (w *State) mapWriteError(namespace string, current uint64, err error) error
 	case errors.Is(err, state.ErrUnregistered):
 		return contracts.NewError(protocol.CodeNotFound, "slice "+namespace+" is not registered", nil)
 	}
-	var coded contracts.CodedError
-	if errors.As(err, &coded) {
-		return err
-	}
 	return err
 }
 
-// capFor reports the byte cap that applies to namespace: its declared cap,
-// or its class default. Zero when the namespace is not registered.
-func (w *State) capFor(namespace string) int {
+// limitFor reports the byte cap that applies to namespace: its declared
+// cap, or its class default. Zero when the namespace is not registered.
+func (w *State) limitFor(namespace string) int {
 	entry, ok := w.st.Snapshot().Slices[namespace]
 	if !ok {
 		return 0
