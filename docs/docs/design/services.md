@@ -16,7 +16,7 @@ Services are the five modules that know what a configuration key means: Profile,
 "Stateless" means three things:
 
 - A Service owns no file. It never opens, writes or watches one. All persistence goes through Store.
-- A Service holds no truth that cannot be rebuilt. Its only memory is a cache: an immutable snapshot derived from the resolved document, replaced as a whole on `husk config reload` and discarded on failure to rebuild.
+- A Service holds no truth that cannot be rebuilt. Its only memory is a cache: an immutable snapshot derived from the resolved document, replaced as a whole on `husk config reload` and retained on failure to rebuild.
 - The one value a Service writes is its own State slice (Profile writes the active profile; Secrets writes the grant record). Every other module reads State; none writes a Service's slice.
 
 What Services are not: they are not a settings editor (no writes to config layers in this spec), not a plugin host, and not a message router. They do not know about sockets, Pods or the event loop.
@@ -41,7 +41,7 @@ type Reloadable interface {
     // Rebuild derives a new snapshot from in. On error the Service keeps its
     // previous snapshot and returns a Report listing every problem found,
     // not only the first.
-    Rebuild(in ReloadInput) (Report, error)
+    Rebuild(ctx context.Context, in ReloadInput) (Candidate, Report, error)
     Generation() Generation
 }
 
@@ -49,9 +49,15 @@ type Reloadable interface {
 type ReloadInput struct {
     Doc      store.Resolved   // the merged "config" document, from Store.Resolve
     Layers   []store.LayerDoc // Store.Layers("keymap", profile): the unmerged keymap documents, for Keybinding ([Store](store.md))
-    Declared map[store.DocName]map[string]store.Doc // Store.Declared("plugins") and Store.Declared("keymap"): per-plugin catalog (actions, secrets, settings schema) and focus-local bindings, keyed by plugin id ([Store](store.md))
+    Declared map[store.DocName]map[string]store.Doc // Store.Declared("plugins") and Store.Declared("focus-keymap"): normalized per-plugin documents, schema in Store
     Settings settings.Snapshot // set for Theme; zero for the others
+    Profile  *string // coordinator-selected profile, before resolving its layer; nil for standalone preparation
+    ConfigLayers []store.LayerDoc // unmerged config provenance, for distribution contrast opt-out validation
 }
+
+// Candidate owns an unpublished immutable snapshot. Rebuild never publishes.
+// The coordinator applies it at most once, before its shared deadline expires.
+type Candidate interface { Apply() Report }
 
 type Report struct {
     Service  string
@@ -68,7 +74,11 @@ type Problem struct {
 }
 ```
 
-The reload coordinator is a small function in the services package, not a sixth Service. It serializes reloads with a mutex, runs the steps below, and publishes one event.
+The shared types live in the leaf `internal/services/contracts` package. The
+parent Services package re-exports aliases; the Settings snapshot interface is
+also aliased by Settings. This prevents a parent/child import cycle.
+
+The reload coordinator is a small function in the services package, not a sixth Service. It serializes reloads with a mutex, runs the steps below, and publishes one event. Rebuild prepares candidates only. The coordinator owns application; workers cannot publish. Store resolution, which has no context parameter, runs on a worker and a late result is discarded. The shared 2 s deadline covers input gathering and all preparations/applications; an unfinished or late candidate is discarded, reports `applied:false` with "timed out", and cannot change a generation later. Completed earlier steps remain applied.
 
 ```go
 type Reason string // "cli" | "profile" | "plugin"
@@ -97,7 +107,7 @@ Subscribers: the renderer re-renders on a new Theme generation; the Pods host pu
 
 ### Profile
 
-Inputs: the list of profile names Store reports (`Store.Profiles()`, [Store](store.md)), the `--profile` instance flag, and the user setting `profile.default`. Output: the active profile name.
+Inputs: the list of profile names Store reports (`Store.Profiles()`, plus optional `ProfileSources()` provenance, [Store](store.md)), the `--profile` instance flag, and the user setting `profile.default`. Output: the active profile name.
 
 ```go
 type Profile interface {
@@ -106,7 +116,7 @@ type Profile interface {
     List() []ProfileInfo              // sorted by name
     // Use sets the active profile for this instance and writes the State
     // slice. It does not reload; the coordinator does, on the slice change.
-    Use(name string) error            // ErrUnknownProfile if no such layer
+    Use(caller Caller, name string) error // user-only; not_found/unknown_profile if absent; mutation posted to loop
 }
 
 type ProfileInfo struct {
@@ -124,6 +134,8 @@ State slice, registered by Profile at start, named and persisted as [State](stat
 
 Initial value: `--profile` flag if given, else the hydrated value for a named instance, else `profile.default` from the user layer, else `""`. A name that no layer defines is rejected at start with a warning in the report and falls back to `""`.
 
+The coordinator chooses the requested profile from the base user document and the current State snapshot before resolving that profile's layer. `ReloadInput.Profile` carries this selection; standalone preparation may leave it nil. This avoids a one-reload lag after `Profile.Use` or a user `profile.default` at startup. `ConfigLayers` retains unmerged config provenance so a distribution contrast opt-out cannot be hidden by a later layer.
+
 Rebuild after a reload re-validates the active name against the layer list. If the active profile's layer was deleted, Profile reports a warning and posts a reset of the slice to `""` to the loop (invariant 13); Rebuild itself runs off the loop and writes no State.
 
 CLI: `husk profile list`, `husk profile current`, `husk profile use <name>` (this instance only).
@@ -138,7 +150,7 @@ The schema is the only place a settings key is defined. Owners register schema e
 type Type string // "string" | "int" | "bool" | "duration" | "enum" | "strings"
 
 type Entry struct {
-    Key      string   // dotted, lowercase, [a-z0-9_.-]
+    Key      string   // host keys dotted; plugin-local key is one [a-z0-9_-]+ segment; id opaque/exact-case
     Type     Type
     Default  any      // required; zero value is allowed but must be written out
     Enum     []string // for TypeEnum
@@ -169,6 +181,14 @@ type Snapshot interface {
 }
 ```
 
+Plugin keys are `plugins.<exact-plugin-id>.<local-key>`. Plugin ids follow the
+Pod id regex and are never case-folded (uppercase and dots are allowed). The
+local key is exactly one lowercase `[a-z0-9_-]+` segment; dotted local keys are
+rejected by conversion and by Services. Plugin identity is never inferred by
+splitting or case-folding a prefix. Store's normalized
+`settings_declared` schema fixes the boundary; Services derive owner from the
+Store source id, never from plugin-supplied authority.
+
 Validation rules, applied to the whole merged document on every rebuild:
 
 1. Unknown key outside `plugins.<id>.*`: error.
@@ -179,7 +199,7 @@ Validation rules, applied to the whole merged document on every rebuild:
 
 Rebuild is atomic: any error keeps the whole previous snapshot. A bad user value therefore never half-applies.
 
-Plugins reach settings through the Server: `settings.get` returns the plugin's own `plugins.<id>.*` subtree and any `husk.*` key; reading another plugin's subtree is refused. Plugins cannot write settings.
+Plugins reach settings through the Server. `settings.get` and `SnapshotFor(caller)` expose only (1) keys that exact plugin itself declared and (2) the public read-only `husk.*` namespace. Nothing else is exposed. In particular plugin `a` never sees `a.b`'s declarations or another plugin's keys; a textual `plugins.a.*` prefix is not authorization. Trusted Stem callers use unfiltered `Snapshot()`. Raw settings for a plugin with no schema remain available to user diagnostics, not to that plugin. Plugins cannot write settings.
 
 ```json
 {"id":7,"method":"settings.get","params":{"key":"plugins.files.show_hidden"}}
@@ -280,15 +300,20 @@ type Secrets interface {
     // Read returns the value if caller holds a grant. ErrNeedsGrant means the
     // manifest declares the name but the user has not confirmed it.
     Read(caller Caller, name string) ([]byte, error)
-    Names(caller Caller) []SecretInfo   // never values
-    Grant(plugin, name string) error    // user only; Stem confirm dialog or CLI
-    Revoke(plugin, name string) error
-    Grants() []Grant
+    Names(caller Caller) ([]SecretInfo, error) // metadata only; broken storage marked
+    Grant(caller Caller, plugin, name string) error // user only; posted to loop
+    Revoke(caller Caller, plugin, name string) error
+    Grants(caller Caller) ([]Grant, error) // user only
+    Set(caller Caller, name string, value []byte) error // user only
+    Reveal(caller Caller, name string) ([]byte, error) // user only, name-only audit
 }
 
 type Caller struct {
-    PluginID string // "" means the user's own CLI
+    Kind string // "cli", "input", "host" or "plugin"; verified by Server
+    PluginID string // exact plugin identity; a nonempty id is never a user
 }
+// Public exposure/mutation methods check Caller. The accepted-dialog grant
+// uses a private trusted path and rechecks the current declaration digest.
 
 type SecretInfo struct {
     Name     string
@@ -351,16 +376,18 @@ CLI: `husk secrets list` (names, who declares, who is granted, whether set), `hu
 8. Any config-layer entry (`distribution`, `user`, `profile`) beats any manifest-declared entry for the same keys. Rank is `husk` < `focus-local` < `distribution` < `user` < `profile` ([Keybindings](keybindings.md)).
 9. A secret value never appears in State, settings, events, logs, toasts, `husk state` or an error message.
 10. A plugin can never grant, revoke, set or reveal a secret, and can never write settings.
-11. Reloads are serialized. A request that arrives during a reload waits and shares its result.
+11. Reloads are serialized. A request that arrives before input capture shares the running flight; later requests share one queued follow-up flight. Capture starts before Store input gathering. The follow-up reads fresh config and declarations, so a plugin launch gate never accepts an older flight that could not have seen that plugin.
 12. Services do not publish events except `services.reloaded` (coordinator) and `secrets.read` (name, plugin id and outcome, no value).
-13. `Profile.Use`, `Secrets.Grant` and `Secrets.Revoke` write State and therefore run on the loop; a Server handler posts the call there ([State](state.md) invariant 8). Profile's reset of `husk.profile` after a deleted layer, and the grant that follows an accepted confirm dialog, are posted to the loop the same way through the loop-post function injected at construction (the shape of Store's `Options.Post`). Every other Service method, `Rebuild` and the coordinator's `Reload` included, may run on any goroutine and writes no State.
+13. Constructors register `husk.profile` and `husk.grants` on the loop. Public `Profile.Use`, `Secrets.Grant` and `Secrets.Revoke` authorize Caller then enqueue their State writes through the injected loop-post function (the shape of Store's `Options.Post`). Only queued callbacks mutate State. Profile's deleted-layer reset and the private accepted-dialog grant use the same path; dialog grants recheck the current digest at execution. Every other Service method, preparation and coordinator reload included, may run on any goroutine and writes no State.
 
 ### Dependency directions
 
 - Services depend on Store and State interfaces, never on their implementations.
 - Stem depends on Services (Input on Keybinding, renderer on Theme, dispatcher via Keybinding results). Services never import Stem; the confirm dialog and the lookup of the focused surface cross the boundary as plain values (`FocusContext`) and a callback `func(Prompt) <-chan bool` that Stem supplies at construction.
 - Services never import Pods. Plugin identity arrives as `Caller`; plugin declarations arrive as Store's declared documents (`ReloadInput.Declared`).
-- Services do not import each other except Theme importing the Settings snapshot interface, and the coordinator importing all five.
+- Services do not import each other except Theme may use the Settings snapshot interface, and the coordinator imports all five. Shared DTOs/interfaces live in `internal/services/contracts`; children import that leaf, not the parent. Root aliases preserve the public names.
+- Rebuild prepares an unpublished candidate. Only the coordinator applies before the deadline; dry validation and late results never apply.
+- Services read normalized catalog fields `secret_requests`, `settings_declared`, `actions` and `surfaces` from Store's declared-document schema. Pods conversion reports only foreign/unscoped focus-binding problems; key spellings pass through and Keybinding alone parses them. Imported `{index,code,message}` problems retain layer `plugin:<id>`; malformed focus-local keys add `unparsable_key` at that layer.
 
 ### What Services expose
 
@@ -390,7 +417,7 @@ To the CLI, through the Server: `husk profile ...`, `husk settings ...`, `husk t
 | Active profile layer deleted | Profile rebuild | Slice reset to `""`, reload proceeds | Warning toast |
 | Store cannot resolve the document (source error, parse error) | Coordinator | No Service rebuilds; every snapshot stays | Error from `config.reload`; toast on a UI-triggered reload |
 | First load fails | Coordinator at start | Built-in defaults serve | Startup error toast with the first problem |
-| Reload exceeds 2 s | Coordinator | Context cancelled; services that finished keep their new snapshot, the rest keep the old | Report shows `applied:false` with "timed out" |
+| Reload exceeds 2 s | Coordinator | Context cancelled; earlier applied candidates stay, unfinished candidates and late Store results are discarded without publication | Report shows `applied:false` with "timed out" |
 | Plugin reads undeclared secret | Secrets | `not_found`, `data.reason` `not_declared` | Plugin gets the error; nothing shown to the user |
 | Plugin reads declared, ungranted secret | Secrets | `denied`, `data.reason` `needs_grant`, confirm dialog opens | Dialog with plugin, name, purpose; plugin may retry |
 | Grant dialog times out or is dismissed | Stem callback | Denied, not persisted | Plugin gets `denied`, `data.reason` `user_denied` |

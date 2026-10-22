@@ -155,6 +155,9 @@ type LayerDoc struct {
 // Profiles lists the profile names that have a directory in the user or
 // distribution layer. The Profile service validates the active name against it.
 func (s *Store) Profiles() []string
+// ProfileSources returns user/distribution provenance off-loop. User directories
+// override equal distribution names; the returned map is detached.
+func (s *Store) ProfileSources() map[string]Layer
 
 // Invalidate drops every cached layer and resolution. `husk config reload`
 // and a plugin added at runtime call it through Services.
@@ -177,6 +180,72 @@ func (s *Store) Patch(name DocName, layer Layer, profile string, patch Doc) erro
 func (s *Store) Declare(name DocName, source string, d Doc)
 func (s *Store) Undeclare(source string)
 func (s *Store) Declared(name DocName) map[string]Doc // source -> doc
+```
+
+#### Declared-document schema (Services / Pods boundary)
+
+This is the normalized JSON contract, not a manifest file format. Pods publish
+one `plugins` document and one `focus-keymap` document per plugin, keyed by the
+same plugin id passed as `source` to `Declare`. Fields mirror the declaration
+types in [Pods](pods.md)'s `Spec`, in snake_case. Services import no Pod types.
+Pods finish declaring both documents before requesting a `plugin` reload.
+`Undeclare(source)` removes both documents on teardown, not on process exit.
+
+A `plugins` document is an object with these fields. Absent arrays mean empty;
+unknown fields are retained by Store and ignored by Services for forward growth.
+
+| Field | Normalized value |
+| :--- | :--- |
+| `id`, `name`, `version`, `description` | Plugin identity/display strings; `id` equals the Store source id. |
+| `actions` | Array of ActionDecl objects: `id`, `title`, `description`, `args_schema` (object), `public` (bool). IDs are fully qualified. |
+| `surfaces` | Array of SurfaceDecl objects: `id` (surface id), optional `frame` (object). Additional surface declaration fields remain opaque to Services. |
+| `focus_bindings` | Array of FocusBinding objects, identical to `focus-keymap.bind` below. |
+| `subscriptions` | Array of event-pattern strings. |
+| `events_declared`, `hooks_declared`, `hook_registrations`, `published_slots` | Arrays of the corresponding Pod declaration objects, with snake_case field names; opaque to Services. |
+| `slice` | Optional SliceDecl object; opaque to Services. |
+| `secret_requests` | Array of SecretRequest objects: `name` (string), `purpose` (string), `required` (bool, default false). Name/purpose form the grant digest; required does not. |
+| `settings_declared` | Array of SettingDecl objects: `key`, `type`, `default`, optional `enum`, `min`, `max`, `doc`, `apply`. `default` must be present, including false/zero/empty defaults; null is invalid for the supported types. Types and limits follow [Services](services.md). |
+
+Setting keys at this boundary are **fully qualified**: Pods prefix a manifest's
+local key with `plugins.<exact-source>.` once. The plugin-id segment is opaque,
+case-sensitive and follows the Pod id regex (uppercase and dots are allowed).
+The local key is a single lowercase `[a-z0-9_-]+` segment: conversion rejects
+local dots. Settings exposure uses the exact source's declared keys, never a
+textual subtree prefix; the public `husk.*` exception remains read-only. An already-qualified key must match
+that same source; a foreign prefix is rejected. Services derive the owner as
+`plugin:<source>` rather than trusting an owner supplied by a plugin. `apply`
+defaults to `live`; duration values and min/max are integer milliseconds.
+A plugin with no `settings_declared` entries has no schema (unknown keys in its
+own subtree are retained raw with a warning). A malformed declaration produces
+a problem naming its source, never an import of a Pod implementation.
+
+A `focus-keymap` document is `{"version":1,"bind":[...]}`. Entries use exactly
+one of `key` (string) or `keys` (2–4 strings), plus `action`, required `focus`,
+and optional `hint` and scalar-object `args`. The declaring plugin is implicit:
+`plugin` and `disable` are not accepted. Focus ownership is checked against
+`surfaces[].id`; action ownership follows [Keybindings](keybindings.md).
+Focus-local actions may target the declaring plugin's actions or `husk.*`.
+Pods conversion drops foreign/unscoped bindings. It passes key spellings through
+unchanged: Keybinding is the single key parser and drops invalid spellings with
+`unparsable_key` in layer `plugin:<source>`. Optional `problems` is an array of
+`{index,code,message}` objects, where index is the original zero-based manifest
+position and code is `foreign_action` or `global_not_allowed`. Keybinding
+imports these into its problems with layer `plugin:<source>`; conversion
+diagnostics are never lost.
+Ignored legacy shortcut suggestions may be carried as `suggestions` (an array
+of objects with `key` and `action`) for `suggestion_ignored` diagnostics; they
+never enter the key index.
+
+Example (source `files`):
+
+```json
+{"id":"files","name":"Files","actions":[{"id":"files.new","title":"New","public":true}],"surfaces":[{"id":"sidebar-list"}],"focus_bindings":[{"key":"n","action":"files.new","focus":"sidebar-list"}],"secret_requests":[{"name":"git.token","purpose":"Push over HTTPS","required":false}],"settings_declared":[{"key":"plugins.files.show_hidden","type":"bool","default":false,"apply":"live"}]}
+```
+
+The matching `focus-keymap` document:
+
+```json
+{"version":1,"bind":[{"key":"n","action":"files.new","focus":"sidebar-list"}]}
 ```
 
 Merge rules, applied layer by layer from lowest to highest:

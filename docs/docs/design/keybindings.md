@@ -49,7 +49,7 @@ Five sources feed one resolved keymap. Rank 4 is strongest.
 
 Rules:
 
-- **Layer first.** When several bindings match a key press, the highest layer wins. Within one layer, the more specific scope wins (plugin-qualified focus, then focus, then global). Within one layer and one scope, the later entry in the file wins and the loader reports a `duplicate` problem.
+- **Layer first.** When several bindings match a key press, the highest layer wins. Within one layer, the more specific scope wins (plugin-qualified focus, then focus, then global). Within one layer and one scope, the first entry in the file wins and the loader reports each later duplicate as a `duplicate` problem.
 - **Configuration always beats a plugin.** A distribution, user or profile binding beats a focus-local binding on the same key, whatever the scope. A plugin can never take a key a person or an application chose.
 - **The `husk` layer is the weakest default.** A plugin's focus-local binding beats a built-in host key while its surface has focus. A distribution replaces the host keymap by overriding or disabling entries, or by dropping the layer (see `builtin` below).
 - **Disable is exact.** A `disable` entry removes the lower-layer entries with the same `(key, focus, plugin)` triple and nothing else. A global disable of `[` does not remove a plugin's focus-local `[`.
@@ -212,6 +212,7 @@ type KeyContext struct {
 	FocusSurface string // focused surface id; empty when none
 	FocusOwner   string // plugin occupying it; empty when unoccupied
 	ModalOpen    bool   // a modal surface is open
+	ModalAction  string // open modal's rail action id; permits its global toggle to close it
 	Frozen       bool   // terminal too small; only husk.quit may resolve
 }
 
@@ -247,7 +248,7 @@ Candidate selection for a key sequence `K` in context `C`:
 
 1. A binding is a **candidate** if its keys equal or begin with `K` and its scope matches `C`: global, or `Focus == C.FocusSurface` and (`Plugin` empty or `Plugin == C.FocusOwner`).
 2. Tombstones apply: for each `Disable` entry, remove every lower-layer entry with the same `(Keys, Focus, Plugin)`. The disable entry itself stays as a candidate for ranking purposes only and yields `NoMatch` if it wins.
-3. Order the rest by layer rank, then scope specificity, then `Source.Order` descending.
+3. Order the rest by layer rank, then scope specificity, then `Source.Order` ascending (first wins).
 4. If the top candidate's keys equal `K` exactly, return `Match` (or `NoMatch` for a disable). If every candidate is longer than `K`, return `Prefix`.
 5. All other candidates are **shadowed** and listed as such by `Listing`.
 
@@ -414,7 +415,7 @@ JSON output (one document, the reply `result`):
 | Entry has both `key` and `keys`, neither, or a `keys` array outside 2 to 4 entries | Loader | That entry is dropped. | `invalid_entry` problem. |
 | Entry missing `action` without `disable`, or `disable` with an action | Loader | That entry is dropped. | `invalid_entry` problem. |
 | `plugin` given without `focus` | Loader | Entry dropped. | `invalid_entry` problem. |
-| Two entries with the same `(key, focus, plugin)` in one layer | Loader | The later entry wins. | `duplicate` problem naming both lines. |
+| Two entries with the same `(key, focus, plugin)` in one layer | Loader | The first entry wins. | `duplicate` problem naming both lines. |
 | Sequence is a strict prefix of another in the same scope | Loader | The longer binding is dropped. | `unreachable` problem. |
 | Bound action is not in the catalog | `keys.list` handler | The binding stays. Pressing it makes the Dispatcher return `not_found`. | State `unknown_action`; on press, a toast with the action id. |
 | Bound action's owner is not live | Dispatcher (State liveness) | No call is made. | State `unavailable`; on press, a toast "owner not running". |
@@ -429,8 +430,8 @@ JSON output (one document, the reply `result`):
 
 ### Dependency directions
 
-- Services read Store; Store never imports Services. The Keybinding service receives the unmerged layer documents through `Store.Layers("keymap", profile)` and the focus-local layer through `Store.Declared("keymap")`.
-- The Keybinding service reads the `focus-local` layer from the Pod's manifest conversion output (stored as config); Pods never import the Keybinding service.
+- Services read Store; Store never imports Services. The Keybinding service receives the unmerged layer documents through `Store.Layers("keymap", profile)` and the focus-local layer through `Store.Declared("focus-keymap")`.
+- The Keybinding service reads the `focus-local` layer from `Store.Declared("focus-keymap")` using Store's normalized schema. Pods drop foreign/unscoped bindings and attach `{index,code,message}` conversion problems; key spelling is passed through unchanged. Keybinding is the single parser and adds `unparsable_key` for malformed focus-local entries, with layer `plugin:<id>`.
 - Input reads the Keybinding service; the service never imports Input, the Dispatcher, State or the Server.
 - Input sends `Match` results to the Dispatcher as an action id plus params. The Dispatcher does not know a key caused it.
 - The Server's `keys.list` handler imports the Keybinding service, State and the action catalog and joins them. The CLI imports none of them and reaches the keymap only through the Server.
