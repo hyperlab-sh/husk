@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -1039,6 +1040,70 @@ func TestReleaseDetectsForeignWriteInSameUpdate(t *testing.T) {
 	}
 	if got := entryIDs(res.Contributions["publisher.list"]); len(got) != 1 || got[0] != "alpha.files.item" {
 		t.Fatalf("contributions after foreign clear = %v, want the declaration re-resolved", got)
+	}
+}
+
+// flakyPod wraps the pod stand-in so tests can fail Release on demand:
+// the Pod unreachable, its declaration write refused.
+type flakyPod struct {
+	*pod
+	failRelease bool
+}
+
+func (f *flakyPod) Release(plugin string, surface protocol.SurfaceID) error {
+	if f.failRelease {
+		return fmt.Errorf("pod unreachable")
+	}
+	return f.pod.Release(plugin, surface)
+}
+
+// TestReleaseFailureLeavesClaimStanding pins the honest failure path: when
+// the claim retraction fails, the release is not marked freed — no re-award
+// runs off a release that did not complete — and the surface stays empty
+// until a later pass re-resolves the standing claim.
+func TestReleaseFailureLeavesClaimStanding(t *testing.T) {
+	st := state.New(state.Options{})
+	pods := &flakyPod{pod: newPod(t, st)}
+	eng, err := New(st, Options{
+		Clock:        &fakeClock{now: time.Unix(0, 0)},
+		Logger:       testLogger{t: t},
+		Liveness:     liveness{},
+		Publications: publications{owners: map[string]string{}},
+		Declarations: pods,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	pods.launch("alpha.files")
+	pods.claim("alpha.files", string(protocol.SurfaceMainStage))
+	settle(st, eng)
+	if got := resolution(t, st).Occupants[protocol.SurfaceMainStage].Plugin; got != "alpha.files" {
+		t.Fatalf("occupant = %q", got)
+	}
+
+	// The retraction fails: the occupant is released from the resolution,
+	// but the claim declaration still names the surface and the surface is
+	// not marked freed, so no re-award hands it to a standing claim.
+	pods.failRelease = true
+	if err := eng.SurfaceClose("alpha.files", protocol.SurfaceCloseParams{Surface: protocol.SurfaceMainStage}); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	settle(st, eng)
+	res := resolution(t, st)
+	if _, occ := res.Occupants[protocol.SurfaceMainStage]; occ {
+		t.Fatal("freed re-award ran off a failed release")
+	}
+
+	// The claim declaration still names the surface — a foreign write's
+	// full re-resolve honestly re-occupies it from the standing claim.
+	if _, err := st.Clear(state.SurfacesNamespace); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	settle(st, eng)
+	res = resolution(t, st)
+	if got := res.Occupants[protocol.SurfaceMainStage].Plugin; got != "alpha.files" {
+		t.Fatalf("standing claim did not re-resolve: %q", got)
 	}
 }
 

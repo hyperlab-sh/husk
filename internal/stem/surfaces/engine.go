@@ -707,8 +707,12 @@ func (e *Engine) release(surface protocol.SurfaceID, only string) error {
 	// longer names the surface, so a later full pass cannot re-resolve the
 	// released occupancy from the stale declaration. The write runs on
 	// this loop, and the surface re-resolves standing claims next pass.
+	// A failed retraction leaves the claim declaration standing: the
+	// surface is not marked freed, so no re-award runs off a release that
+	// did not complete — the claim re-resolves when a later pass sees it.
 	if err := e.decls.Release(occupant, surface); err != nil {
 		e.log.Printf("surfaces: retracting %s's claim declaration failed: %v", occupant, err)
+		return nil
 	}
 	e.freed[surface] = true
 	return nil
