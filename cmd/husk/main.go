@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -94,19 +95,7 @@ func main() {
 			os.Exit(1)
 		}
 		model.attach(h, prog.closeGate)
-		frame, err := runDumpFrame(model, dumpFrameOptions{
-			Launched: h.Planned(),
-			RailMode: *railMode,
-			Stderr:   os.Stderr,
-			Program:  prog,
-		})
-		prog.closeGate()
-		model.shutdownHost()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "husk: --dump-frame: %v\n", err)
-		}
-		fmt.Println(frame)
-		return
+		os.Exit(dumpFrameMain(model, h, prog, *railMode, os.Stdout, os.Stderr))
 	}
 
 	// The program exists before the host, so a Post from any host worker finds
@@ -131,6 +120,27 @@ func main() {
 		fmt.Fprintf(os.Stderr, "husk: host stopped: %v\n", model.hostErr)
 		os.Exit(1)
 	}
+}
+
+// dumpFrameMain runs --dump-frame on an attached host and returns the process
+// exit code. The frame is printed even on failure so the diagnosis shows next
+// to it, but a failed run (no plugin went live, a timeout, a host that stopped)
+// exits 1 so scripts and CI see it.
+func dumpFrameMain(model *WorkbenchModel, h host.Looped, prog *programRef, railMode string, stdout, stderr io.Writer) int {
+	frame, err := runDumpFrame(model, dumpFrameOptions{
+		Launched: h.Planned(),
+		RailMode: railMode,
+		Stderr:   stderr,
+		Program:  prog,
+	})
+	prog.closeGate()
+	model.shutdownHost()
+	fmt.Fprintln(stdout, frame)
+	if err != nil {
+		fmt.Fprintf(stderr, "husk: --dump-frame: %v\n", err)
+		return 1
+	}
+	return 0
 }
 
 // programRef lets the host's Post reach the tea.Program. The host is built
