@@ -8,19 +8,19 @@ const (
 	// OwnerHusk is reserved for in-process core modules, never a plugin id.
 	OwnerHusk = "husk"
 
-	// SurfacesNamespace holds occupancy, visibility and overlays; owned by Surfaces.
+	// SurfacesNamespace holds occupancy, visibility and overlays; the Surfaces engine holds the handle, the frontend writes the view half through Engine.UpdateView.
 	SurfacesNamespace = "husk.surfaces"
 	// SurfacesOwner is the capability owner of SurfacesNamespace.
 	SurfacesOwner = OwnerHusk
-	// FocusNamespace holds surface and terminal focus; owned by Surfaces.
+	// FocusNamespace holds surface and terminal focus; owned by the frontend.
 	FocusNamespace = "husk.focus"
 	// FocusOwner is the capability owner of FocusNamespace.
 	FocusOwner = OwnerHusk
-	// LayoutNamespace holds persistent dock preferences; owned by Surfaces.
+	// LayoutNamespace holds persistent dock preferences; owned by the frontend.
 	LayoutNamespace = "husk.layout"
 	// LayoutOwner is the capability owner of LayoutNamespace.
 	LayoutOwner = OwnerHusk
-	// GeometryNamespace holds terminal size and computed rectangles; owned by Surfaces.
+	// GeometryNamespace holds terminal size and computed rectangles; owned by the frontend.
 	GeometryNamespace = "husk.geometry"
 	// GeometryOwner is the capability owner of GeometryNamespace.
 	GeometryOwner = OwnerHusk
