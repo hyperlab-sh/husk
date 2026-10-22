@@ -589,10 +589,10 @@ func TestStatePortClear(t *testing.T) {
 			t.Fatalf("after clear = %+v", res)
 		}
 	})
-	t.Run("stem callers clear as the user", func(t *testing.T) {
+	t.Run("stem callers are denied, clear is the user's CLI action", func(t *testing.T) {
 		w, _, _ := newPort(t, StatePortOptions{}, specAtlas)
-		if err := w.Clear(ctxBG, callerStem, "atlas.state"); err != nil {
-			t.Fatal(err)
+		if err := w.Clear(ctxBG, callerStem, "atlas.state"); contracts.CodeOf(err) != string(protocol.CodeDenied) {
+			t.Fatalf("code = %v", err)
 		}
 	})
 	t.Run("plugin callers are denied", func(t *testing.T) {

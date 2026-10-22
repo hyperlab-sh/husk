@@ -177,12 +177,14 @@ func (w *State) Watch(ctx context.Context, _ contracts.Caller, slices []string, 
 	return res, nil
 }
 
-// Clear implements contracts.StatePort.Clear: a user-only reset of one
-// namespace to its initial value. Persisted copies are deleted through the
-// Store seam first; the in-memory clear runs on the loop.
+// Clear implements contracts.StatePort.Clear: a CLI-only reset of one
+// namespace to its initial value (D51: clear is the user's own action,
+// reachable only from the user's CLI; a Stem caller over the port is not
+// the user here). Persisted copies are deleted through the Store seam
+// first; the in-memory clear runs on the loop.
 func (w *State) Clear(ctx context.Context, c contracts.Caller, namespace string) error {
-	if !c.Kind.User() {
-		return contracts.NewError(protocol.CodeDenied, "state.clear clears the user's own data; only a user may do it", nil)
+	if c.Kind != contracts.CallerCLI {
+		return contracts.NewError(protocol.CodeDenied, "state.clear clears the user's own data; only the user's CLI may do it", nil)
 	}
 	if w.cleaner != nil {
 		if err := w.cleaner.DeleteSlice(ctx, namespace); err != nil {
