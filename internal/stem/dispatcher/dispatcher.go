@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"sort"
 	"time"
 
 	"github.com/hyperlab-sh/husk/internal/stem/calls"
@@ -229,4 +230,27 @@ func (d *Dispatcher) logf(format string, args ...any) {
 func quote(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
+}
+
+// Listed is one catalog entry as a caller sees it, with owner liveness.
+type Listed struct {
+	ActionDef
+	// Live is true for host actions and for actions whose owner is live.
+	Live bool
+}
+
+// List returns the catalog entries caller may invoke (the same Permitted rule
+// Invoke applies), sorted by id. Input, CLI and Host callers see every entry;
+// a plugin sees its own actions and the public ones. Loop only.
+func (d *Dispatcher) List(caller Caller) []Listed {
+	defs := d.opts.Catalog.List()
+	sort.Slice(defs, func(i, j int) bool { return defs[i].ID < defs[j].ID })
+	out := make([]Listed, 0, len(defs))
+	for _, def := range defs {
+		if !Permitted(caller, def) {
+			continue
+		}
+		out = append(out, Listed{ActionDef: def, Live: def.Owner == HostOwner || d.opts.Liveness.Live(def.Owner)})
+	}
+	return out
 }
