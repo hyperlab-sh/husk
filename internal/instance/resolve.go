@@ -104,9 +104,11 @@ const (
 	// runtime directory could not be read). The spec's exit 5.
 	KindTransport
 
-	// KindTaken: the instance name is held by a live process, reported by
-	// Register when the Server starts. Not a CLI resolution code;
-	// ExitCode maps it to 1, the generic failure.
+	// KindTaken: the instance name is held by a live process. The Server
+	// reports it when bind finds the socket already bound and the existing
+	// socket answers a ping (spec: dial on EADDRINUSE); Register itself
+	// never probes. Not a CLI resolution code; ExitCode maps it to 1, the
+	// generic failure.
 	KindTaken
 )
 

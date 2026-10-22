@@ -1,7 +1,6 @@
 package instance
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -236,6 +235,9 @@ var startedAt = time.Date(2026, 10, 22, 6, 0, 0, 0, time.UTC)
 
 func TestEntryJSONShape(t *testing.T) {
 	dir := runDir(t)
+	// A zero StartedAt is stamped from the wall clock before writing, so
+	// both fixtures set it explicitly and the shape test below checks the
+	// JSON keys.
 	pidEntry := Entry{
 		ID:              "4242",
 		PID:             4242,
@@ -243,7 +245,7 @@ func TestEntryJSONShape(t *testing.T) {
 		StartedAt:       startedAt,
 		ProtocolVersion: "2.0",
 	}
-	if err := Register(dir, pidEntry, nil); err != nil {
+	if err := Register(dir, pidEntry); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 	fields, err := readJSONFields(EntryPath(dir, "4242"))
@@ -270,7 +272,7 @@ func TestEntryJSONShape(t *testing.T) {
 		ProtocolVersion: "2.0",
 		HuskVersion:     "0.9.0",
 	}
-	if err := Register(dir, named, nil); err != nil {
+	if err := Register(dir, named); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 	fields, err = readJSONFields(EntryPath(dir, "notes"))
@@ -290,7 +292,7 @@ func TestEntryJSONShape(t *testing.T) {
 func TestRegisterEntryModeAndNoTempLeftovers(t *testing.T) {
 	dir := runDir(t)
 	e := Entry{ID: "notes", Name: "notes", PID: 5120, Socket: SocketPath(dir, "notes"), StartedAt: startedAt, ProtocolVersion: "2.0"}
-	if err := Register(dir, e, nil); err != nil {
+	if err := Register(dir, e); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 	st, err := os.Lstat(EntryPath(dir, "notes"))
@@ -313,28 +315,25 @@ func TestRegisterEntryModeAndNoTempLeftovers(t *testing.T) {
 	}
 }
 
-func TestRegisterStampsZeroStartedAtFromClock(t *testing.T) {
+func TestRegisterStampsZeroStartedAt(t *testing.T) {
 	dir := runDir(t)
-	now := time.Date(2026, 10, 22, 12, 30, 0, 0, time.UTC)
-	d := &Deps{Now: func() time.Time { return now }}
 	e := Entry{ID: "notes", PID: 7, Socket: SocketPath(dir, "notes"), ProtocolVersion: "2.0"}
-	if err := Register(dir, e, d); err != nil {
+	if err := Register(dir, e); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 	got, err := readEntry(EntryPath(dir, "notes"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !got.StartedAt.Equal(now) {
-		t.Fatalf("StartedAt = %v, want the injected clock %v", got.StartedAt, now)
+	if got.StartedAt.IsZero() {
+		t.Fatal("zero StartedAt should have been stamped from the clock")
 	}
 }
 
 func TestRegisterKeepsSetStartedAt(t *testing.T) {
 	dir := runDir(t)
-	d := &Deps{Now: func() time.Time { return startedAt.Add(time.Hour) }}
 	e := Entry{ID: "notes", PID: 7, Socket: SocketPath(dir, "notes"), StartedAt: startedAt, ProtocolVersion: "2.0"}
-	if err := Register(dir, e, d); err != nil {
+	if err := Register(dir, e); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 	got, err := readEntry(EntryPath(dir, "notes"))
@@ -349,7 +348,7 @@ func TestRegisterKeepsSetStartedAt(t *testing.T) {
 func TestRegisterCreatesMissingDir(t *testing.T) {
 	dir := t.TempDir() + "/husk"
 	e := Entry{ID: "notes", PID: 7, Socket: SocketPath(dir, "notes"), StartedAt: startedAt, ProtocolVersion: "2.0"}
-	if err := Register(dir, e, nil); err != nil {
+	if err := Register(dir, e); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 	assertPrivateDir(t, dir)
@@ -370,42 +369,23 @@ func TestRegisterValidation(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.label, func(t *testing.T) {
-			if err := Register(dir, tc.e, nil); err == nil {
+			if err := Register(dir, tc.e); err == nil {
 				t.Fatalf("Register(%+v) should fail", tc.e)
 			}
 		})
 	}
 }
 
-func TestRegisterRefusesLiveName(t *testing.T) {
-	dir := runDir(t)
-	live := Entry{ID: "notes", Name: "notes", PID: 111, Socket: SocketPath(dir, "notes"), StartedAt: startedAt, ProtocolVersion: "2.0"}
-	if err := writeEntryFile(dir, live); err != nil {
-		t.Fatal(err)
-	}
-	d := &Deps{Ping: func(string) error { return nil }}
-	err := Register(dir, Entry{ID: "notes", Name: "notes", PID: 222, Socket: SocketPath(dir, "notes"), StartedAt: startedAt, ProtocolVersion: "2.0"}, d)
-	if err == nil {
-		t.Fatal("registering over a live entry must fail")
-	}
-	var e *Error
-	if !errors.As(err, &e) || e.Kind != KindTaken {
-		t.Fatalf("error = %v, want KindTaken", err)
-	}
-	if want := `instance "notes" is already running (pid 111)`; err.Error() != want {
-		t.Fatalf("message = %q, want %q", err.Error(), want)
-	}
-}
-
 func TestRegisterReplacesStaleEntry(t *testing.T) {
+	// Whatever entry is on disk belongs to a dead run — the claim on the
+	// name was made by binding the socket — so Register simply replaces it.
 	dir := runDir(t)
 	stale := Entry{ID: "notes", Name: "notes", PID: 111, Socket: SocketPath(dir, "notes"), StartedAt: startedAt, ProtocolVersion: "1.5"}
 	if err := writeEntryFile(dir, stale); err != nil {
 		t.Fatal(err)
 	}
-	d := &Deps{Ping: func(string) error { return fmt.Errorf("%w: dead", ErrSocketRefused) }}
 	next := Entry{ID: "notes", Name: "notes", PID: 222, Socket: SocketPath(dir, "notes"), ProtocolVersion: "2.0"}
-	if err := Register(dir, next, d); err != nil {
+	if err := Register(dir, next); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 	got, err := readEntry(EntryPath(dir, "notes"))
@@ -422,9 +402,8 @@ func TestRegisterReplacesCorruptEntry(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "notes.json"), []byte("not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	d := &Deps{Ping: func(string) error { return fmt.Errorf("%w: dead", ErrSocketRefused) }}
 	e := Entry{ID: "notes", Name: "notes", PID: 222, Socket: SocketPath(dir, "notes"), StartedAt: startedAt, ProtocolVersion: "2.0"}
-	if err := Register(dir, e, d); err != nil {
+	if err := Register(dir, e); err != nil {
 		t.Fatalf("Register over a corrupt entry: %v", err)
 	}
 	if _, err := readEntry(EntryPath(dir, "notes")); err != nil {
@@ -434,16 +413,15 @@ func TestRegisterReplacesCorruptEntry(t *testing.T) {
 
 func TestRegisterSamePidOverLiveEntryReplaces(t *testing.T) {
 	// The Server's own re-registration: bind made the name ours, so an
-	// entry with our own pid must never read as "already running".
+	// entry with our own pid is replaced without a probe.
 	dir := runDir(t)
 	mine := Entry{ID: "notes", Name: "notes", PID: 222, Socket: SocketPath(dir, "notes"), StartedAt: startedAt, ProtocolVersion: "1.5"}
 	if err := writeEntryFile(dir, mine); err != nil {
 		t.Fatal(err)
 	}
-	d := &Deps{Ping: func(string) error { return nil }}
 	next := mine
 	next.ProtocolVersion = "2.0"
-	if err := Register(dir, next, d); err != nil {
+	if err := Register(dir, next); err != nil {
 		t.Fatalf("Register over own live entry: %v", err)
 	}
 	got, err := readEntry(EntryPath(dir, "notes"))
