@@ -129,3 +129,73 @@ func TestBlurBroadcastsKeyUpToPlugins(t *testing.T) {
 		t.Fatalf("blur broadcast = %+v, want alt up", ks)
 	}
 }
+
+func TestModifierTickIntervalAdapts(t *testing.T) {
+	m, _, _ := tickModel(t)
+	now := time.Now()
+	if d := m.modifierTickInterval(now); d != modifierTickIdle {
+		t.Fatalf("idle interval = %v, want %v", d, modifierTickIdle)
+	}
+	m.lastInput = now.Add(-time.Second)
+	if d := m.modifierTickInterval(now); d != modifierTickActive {
+		t.Fatalf("recent input interval = %v, want %v", d, modifierTickActive)
+	}
+	m.lastInput = now.Add(-modifierActiveFor - time.Millisecond)
+	if d := m.modifierTickInterval(now); d != modifierTickIdle {
+		t.Fatalf("stale input interval = %v, want %v", d, modifierTickIdle)
+	}
+	m.modifiers.Shift = true
+	if d := m.modifierTickInterval(now); d != modifierTickActive {
+		t.Fatalf("held modifier interval = %v, want %v", d, modifierTickActive)
+	}
+	m.modifiers = protocol.ModifierState{}
+	m.heldKeys["a"] = now
+	if d := m.modifierTickInterval(now); d != modifierTickActive {
+		t.Fatalf("held key interval = %v, want %v", d, modifierTickActive)
+	}
+}
+
+func TestViewRequestsFocusReporting(t *testing.T) {
+	m, _, _ := tickModel(t)
+	if !m.View().ReportFocus {
+		t.Fatal("view must enable focus reporting")
+	}
+	m.width, m.height = 10, 5
+	m.recomputeLayout()
+	if !m.View().ReportFocus {
+		t.Fatal("too-small view must keep focus reporting enabled")
+	}
+}
+
+func TestModifierTickLapsesWithoutOSSource(t *testing.T) {
+	m, _, _ := tickModel(t)
+	m.pollMods = func() (protocol.ModifierState, bool) { return protocol.ModifierState{}, false }
+	m.startModifierTick()
+	_, cmd := m.Update(modifierTickMsg{})
+	if cmd != nil || m.modTickOn {
+		t.Fatal("tick with no OS source and no held keys must lapse")
+	}
+}
+
+func TestModifierTickWithoutOSSourceExpiresHeldKeysThenLapses(t *testing.T) {
+	m, _, _ := tickModel(t)
+	m.pollMods = func() (protocol.ModifierState, bool) { return protocol.ModifierState{}, false }
+
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
+	if cmd == nil || !m.modTickOn {
+		t.Fatal("key press that records a held key must restart a lapsed chain")
+	}
+	if len(m.heldKeys) == 0 {
+		t.Fatal("expected a held key")
+	}
+	if _, cmd := m.Update(modifierTickMsg{}); cmd == nil {
+		t.Fatal("chain must keep running while a held key is pending")
+	}
+	m.heldKeys["x"] = time.Now().Add(-time.Second)
+	if _, cmd := m.Update(modifierTickMsg{}); cmd != nil || m.modTickOn {
+		t.Fatal("chain must lapse once the held key expired")
+	}
+	if len(m.heldKeys) != 0 {
+		t.Fatalf("held keys not expired: %v", m.heldKeys)
+	}
+}
