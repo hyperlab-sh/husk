@@ -31,6 +31,20 @@ Frame dumps render without a terminal:
 
 `--dump-frame` always prints the frame on stdout. It exits 0 when the run settled and 1 when no plugin went live, when the wait timed out, when `--rail` names a placement no loaded plugin declares a rail item for, or when the host stopped on its own (the cause is printed once on stderr), so scripts and CI can tell a rendered workbench from an empty one.
 
+## Command line
+
+A first non-flag argument makes `husk` a client of a running instance instead of starting one. Run these from another shell, or from a plugin (`HUSK_SOCKET_PATH` and `HUSK_INSTANCE` select the instance):
+
+```bash
+husk instances                        # list running instances and whether they answer
+husk ping                             # session.ping to the one running instance
+husk rpc session.ping '{}'            # any method, params as a JSON object, raw result
+husk ping --instance 4242             # choose an instance by id (or --socket <path>)
+husk ping --format table --timeout 5s
+```
+
+Every subcommand takes `--instance <id>` or `--socket <path>` (not both), `--format json|table` (default `table` on a terminal, `json` otherwise) and `--timeout <duration>`; the flags may come before or after the arguments. With no flag or environment variable and exactly one live instance, that one is used. Results go to stdout, errors to stderr (one JSON object in JSON mode, `husk: <message>` in table mode). Exit codes: 0 success, 1 the instance replied with an error, 2 usage, 3 no instance, 4 several instances and none chosen, 5 transport (connect failed, timeout, connection dropped), 6 protocol (unreadable reply or a different protocol major). See [Instances and the CLI](docs/docs/design/instances.md).
+
 ## Concepts
 
 The layout has nine fixed slots (`activity-rail`, `sidebar-navigation`, `sidebar-list`, `thread-row-status`, `sidebar-footer`, `main-header`, `main-stage`, `side-panel`, `app-overlay`), modeled on `bb`, plus three placement surfaces (`modal-surface`, `full-canvas`, `workspace-stage`): twelve in all. Plugins mount in one of three placements from the activity rail:
