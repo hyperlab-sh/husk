@@ -1,10 +1,13 @@
 package host
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"runtime"
+	"strconv"
 	"sync/atomic"
 
 	tea "charm.land/bubbletea/v2"
@@ -54,18 +57,45 @@ func (r *Root) do(ctx context.Context, fn func()) error {
 	return nil
 }
 
-// exec runs fn on the loop if one is running, else inline: before New
-// returns nothing consumes the loop, and after the loop ended no one else
-// touches the loop-confined modules.
-func (r *Root) exec(fn func()) {
-	if r.live.Load() {
-		ctx, cancel := context.WithTimeout(context.Background(), loopWait)
-		defer cancel()
-		if r.do(ctx, fn) == nil {
-			return
-		}
+// exec runs loop-confined fn: directly when the caller is the loop goroutine
+// itself (Close called from Update), on the loop otherwise, and inline only
+// when no loop can be running: before New returns nothing consumes the loop,
+// and after the loop ended (Post refuses) no one else touches the modules. A
+// loop that is alive but does not run fn within loopWait is wedged; fn is then
+// not run at all and the error says so.
+func (r *Root) exec(fn func()) error {
+	if !r.live.Load() {
+		fn()
+		return nil
 	}
-	fn()
+	if g := r.loopGID.Load(); g != 0 && g == goroutineID() {
+		fn()
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), r.opts.loopWaitOr(loopWait))
+	defer cancel()
+	err := r.do(ctx, fn)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, errLoopGone):
+		fn()
+		return nil
+	}
+	return fmt.Errorf("the loop is wedged (no run within %v): %w", r.opts.loopWaitOr(loopWait), err)
+}
+
+// goroutineID reads the current goroutine's id from its stack header. It is
+// used only to recognize the loop goroutine in exec, never on a hot path.
+func goroutineID() int64 {
+	var buf [32]byte
+	b := buf[:runtime.Stack(buf[:], false)]
+	b = bytes.TrimPrefix(b, []byte("goroutine "))
+	if i := bytes.IndexByte(b, ' '); i > 0 {
+		id, _ := strconv.ParseInt(string(b[:i]), 10, 64)
+		return id
+	}
+	return 0
 }
 
 // loopSeam is the Loop the Stem ports take (ports/stem.Loop).
@@ -76,6 +106,9 @@ func (l loopSeam) Post(fn func()) bool                     { return l.r.post(fn)
 
 // Update applies one posted message on the loop and runs the tick-end work.
 func (r *Root) Update(msg any) bool {
+	if r.loopGID.Load() == 0 {
+		r.loopGID.Store(goroutineID())
+	}
 	handled := true
 	switch m := msg.(type) {
 	case fnMsg:
@@ -95,8 +128,13 @@ func (r *Root) Update(msg any) bool {
 	case server.Notice:
 		r.log(pods.LogMsg{Level: noticeLevel(m.Level), Message: "server: " + m.Message})
 	case pods.TeardownMsg:
+		// An unknown or already-removed id is a no-op for Pods; it must not
+		// undeclare and reload Services either.
+		_, existed := r.pods.Pod(m.PluginID)
 		r.pods.Handle(m)
-		r.teardownPod(m.PluginID)
+		if existed {
+			r.teardownPod(m.PluginID)
+		}
 	case pods.PreparedMsg, pods.RegisterSlicesMsg:
 		r.pods.Handle(m)
 		r.refreshCatalog()

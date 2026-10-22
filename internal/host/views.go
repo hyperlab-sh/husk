@@ -1,12 +1,13 @@
 package host
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"slices"
 	"sort"
+	"time"
 
-	"context"
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
 	"github.com/hyperlab-sh/husk/internal/host/ports/launch"
 	"github.com/hyperlab-sh/husk/internal/pods"
@@ -68,7 +69,31 @@ func (p publisher) Publish(name string, data any) {
 	})
 }
 
-type realClock = svccontracts.RealClock
+// storeClock adapts the protocol Clock the host is configured with to the
+// Clock Store and Services take (they need timers with a channel), so one
+// injected clock drives every host deadline.
+type storeClock struct{ c protocol.Clock }
+
+func (s storeClock) Now() time.Time { return s.c.Now() }
+
+func (s storeClock) NewTimer(d time.Duration) svccontracts.Timer {
+	ch := make(chan time.Time, 1)
+	t := s.c.AfterFunc(d, func() {
+		select {
+		case ch <- s.c.Now():
+		default:
+		}
+	})
+	return &chanTimer{ch: ch, t: t}
+}
+
+type chanTimer struct {
+	ch <-chan time.Time
+	t  protocol.Timer
+}
+
+func (t *chanTimer) C() <-chan time.Time { return t.ch }
+func (t *chanTimer) Stop() bool          { return t.t.Stop() }
 
 func denyPrompt(secrets.Prompt) <-chan bool {
 	ch := make(chan bool, 1)

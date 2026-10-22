@@ -144,6 +144,20 @@ Method families and their handlers (registered by `internal/host.New`; names and
 
 An unknown prefix gets error code `unknown_method`. Watch methods are the only place the Server pushes notifications to a socket connection; a plugin never needs them, because its subscribed events arrive on stdin.
 
+#### plugin.* wire shapes
+
+`plugin.list` takes no params. Its result is a bare JSON array, sorted by plugin id and `[]` when no Pod exists, of:
+
+```json
+{"id":"alpha","name":"Alpha","version":"1","description":"","status":"live","pid":4242,"started_at":"2026-01-02T03:04:05Z","last_error":"","log":"/run/user/1000/husk/logs/alpha.log"}
+```
+
+`status` is one of `starting`, `live`, `exited`, `failed`. `pid` is 0 and `started_at` the zero time before a process started; `last_error` and `log` are empty strings when unknown.
+
+`plugin.log` takes `{"plugin":"<id>"}` (a missing or empty `plugin` is `invalid_params`) and answers `{"path":"<log file>"}`. An id that names no Pod is `not_found`, and so is a Pod whose Wrapper has not opened a log yet; the result never carries an empty path.
+
+Both methods are the user's own: a CLI caller is served, every other caller kind is `denied`.
+
 #### Caller identity: per-plugin token
 
 The Wrapper generates a token for each launch (32 bytes from `crypto/rand`, hex encoded) and injects it as `HUSK_PLUGIN_TOKEN`. The `husk` CLI reads that variable and puts it in the top-level `token` member of every request it sends; a plugin writing the socket itself does the same. A request with a valid token is `CallerPlugin` for that plugin; a request with no token is `CallerCLI`; a request with an unknown or revoked token is refused with `denied` and never downgraded to the user. The token is registered before process start and revoked immediately when the process is reaped or its channel closes; it never appears in lifecycle snapshots, notices or host logs.

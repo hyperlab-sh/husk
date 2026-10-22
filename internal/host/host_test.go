@@ -13,6 +13,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	tea "charm.land/bubbletea/v2"
+	"go.uber.org/goleak"
 
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
 	"github.com/hyperlab-sh/husk/internal/instance"
@@ -211,6 +215,23 @@ func (p *fakeProc) CloseStdin()           { p.once.Do(func() { close(p.done) }) 
 func (p *fakeProc) Terminate() error      { p.once.Do(func() { close(p.done) }); return nil }
 func (p *fakeProc) Kill() error           { p.once.Do(func() { close(p.done) }); return nil }
 func (p *fakeProc) Done() <-chan struct{} { return p.done }
+
+// openingParams decodes the params of the opening message with method into v.
+func (p *fakeProc) openingParams(t *testing.T, method string, v any) {
+	t.Helper()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, m := range p.opening {
+		if m.Method == method {
+			if err := json.Unmarshal(m.Params, v); err != nil {
+				t.Fatalf("%s params: %v", method, err)
+			}
+			return
+		}
+	}
+	t.Fatalf("opening has no %s", method)
+}
+
 func (p *fakeProc) openingMethods() []string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -390,8 +411,8 @@ func TestEveryInboundMethodIsRegistered(t *testing.T) {
 	if len(prefixes) != len(got)-1 {
 		t.Errorf("duplicate registrations: %v", prefixes)
 	}
-	// And every inbound method reaches an adapter: an unreachable caller kind
-	// is refused by Admit (denied), never by the Mux as unknown_method.
+	// Admission: a caller kind no method allows is refused (denied) before any
+	// adapter runs, for every inbound method.
 	for method, home := range contracts.MethodHomes() {
 		if home.Port == contracts.Outbound || home.Port == contracts.Unrouted {
 			continue
@@ -399,7 +420,28 @@ func TestEveryInboundMethodIsRegistered(t *testing.T) {
 		id := protocol.NewStringID("x")
 		reply := h.root.mux.Serve(t.Context(), contracts.Caller{Kind: contracts.CallerKind(99)}, protocol.Message{ID: &id, Method: method}, nil)
 		if reply.Error == nil || reply.Error.Code != protocol.CodeDenied {
-			t.Errorf("%s: reply = %+v, want denied by its adapter", method, reply.Error)
+			t.Errorf("%s: reply = %+v, want denied for an unknown caller kind", method, reply.Error)
+		}
+	}
+	// Reach: with an allowed caller kind admission passes, so the adapter's own
+	// method switch runs. A method the adapter lacks a case for answers
+	// unknown_method; any other outcome (success, invalid_params, not_found...)
+	// proves the method reaches its adapter.
+	for method, home := range contracts.MethodHomes() {
+		if home.Port == contracts.Outbound || home.Port == contracts.Unrouted {
+			continue
+		}
+		if len(home.Kinds) == 0 {
+			t.Errorf("%s has no allowed caller kind", method)
+			continue
+		}
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		id := protocol.NewStringID("x")
+		caller := contracts.Caller{Kind: home.Kinds[0], PluginID: "probe", ConnID: 1}
+		reply := h.root.mux.Serve(ctx, caller, protocol.Message{ID: &id, Method: method}, nil)
+		cancel()
+		if reply.Error != nil && reply.Error.Code == protocol.CodeUnknownMethod {
+			t.Errorf("%s: the adapter answered unknown_method (%s): no case for it", method, reply.Error.Message)
 		}
 	}
 }
@@ -465,18 +507,46 @@ func (p *fakeProc) stopped() bool {
 	}
 }
 
+// noLeaks fails the test if goroutines started after this call outlive it.
+// Call it before boot: cleanups run last-in first-out, so the harness shuts
+// the host down before the check.
+func noLeaks(t *testing.T) {
+	t.Helper()
+	opt := goleak.IgnoreCurrent()
+	t.Cleanup(func() { goleak.VerifyNone(t, opt) })
+}
+
+// storeStopped reports whether the Store's worker has exited.
+func storeStopped(r *Root) bool {
+	if r.store == nil {
+		return true
+	}
+	select {
+	case <-r.store.Done():
+		return true
+	default:
+		return false
+	}
+}
+
 func TestStartupFailureClosesWhatStarted(t *testing.T) {
 	stages := []string{"manifests", "store", "state", "services", "stem", "pods", "server"}
 	for i, stage := range stages {
 		t.Run(stage, func(t *testing.T) {
+			noLeaks(t)
 			var steps []string
+			var failed *Root
 			hook, _ := readyHook(stage)
-			h, err := boot(t, nil, withHook(hook), withClose(func(s string) { steps = append(steps, s) }))
+			h, err := boot(t, nil, withHook(hook), withClose(func(s string) { steps = append(steps, s) }),
+				func(o *options) { o.afterFail = func(r *Root) { failed = r } })
 			if err == nil || !strings.Contains(err.Error(), "injected "+stage) {
 				t.Fatalf("New err = %v", err)
 			}
 			if h.root != nil {
 				t.Fatal("a failed New must not hand out a host")
+			}
+			if failed == nil || !storeStopped(failed) {
+				t.Fatalf("the Store worker still runs after New failed at %s", stage)
 			}
 			storeBuilt := i >= 1
 			if got := slices.Contains(steps, "store"); got != storeBuilt {
@@ -517,6 +587,7 @@ func (f failStart) Start() error { return f.err }
 
 func TestRunFailureAfterServerStartIsClosed(t *testing.T) {
 	t.Run("server start fails", func(t *testing.T) {
+		noLeaks(t)
 		boom := errors.New("listen refused")
 		var steps []string
 		h, err := boot(t, nil, withClose(func(s string) { steps = append(steps, s) }),
@@ -528,6 +599,10 @@ func TestRunFailureAfterServerStartIsClosed(t *testing.T) {
 		if !errors.Is(runErr, boom) {
 			t.Fatalf("Run = %v", runErr)
 		}
+		if !storeStopped(h.root) {
+			t.Fatal("the Store worker still runs after Run failed")
+		}
+		h.shutdown()
 		if !slices.Equal(steps, []string{"calls", "server", "pods", "store"}) {
 			t.Fatalf("steps = %v", steps)
 		}
@@ -536,6 +611,7 @@ func TestRunFailureAfterServerStartIsClosed(t *testing.T) {
 		}
 	})
 	t.Run("launch fails after the server listens", func(t *testing.T) {
+		noLeaks(t)
 		hook, _ := readyHook("run")
 		h, err := boot(t, nil, withHook(hook))
 		if err != nil {
@@ -546,6 +622,10 @@ func TestRunFailureAfterServerStartIsClosed(t *testing.T) {
 		if runErr == nil || !strings.Contains(runErr.Error(), "injected run") {
 			t.Fatalf("Run = %v", runErr)
 		}
+		if !storeStopped(h.root) {
+			t.Fatal("the Store worker still runs after Run failed")
+		}
+		h.shutdown()
 		if left := h.leftovers(); len(left) != 0 {
 			t.Fatalf("files left: %v", left)
 		}
@@ -589,6 +669,18 @@ func TestLaunchGoesLiveWithOpening(t *testing.T) {
 	}
 	if got := h.podStatus("alpha"); got != "live" {
 		t.Fatalf("husk.pods status = %q", got)
+	}
+	// Host-owned opening content: the claimed surface is listed, and the key
+	// state is the all-up default.
+	var resized protocol.SurfaceResizedParams
+	f.proc("alpha").openingParams(t, protocol.MethodSurfaceResized, &resized)
+	if !slices.ContainsFunc(resized.Surfaces, func(s protocol.SurfaceSize) bool { return s.Surface == "sidebar-list" }) {
+		t.Fatalf("surface.resized = %+v, want sidebar-list listed", resized.Surfaces)
+	}
+	var keys protocol.KeyStateParams
+	f.proc("alpha").openingParams(t, protocol.MethodInputKeyState, &keys)
+	if keys.Phase != protocol.KeyPhaseSync || keys.Modifiers != (protocol.ModifierState{}) {
+		t.Fatalf("input.key_state = %+v, want sync with all modifiers up", keys)
 	}
 	// The plugin's manifest claim reached husk.surfaces through the
 	// occupants declaration slice registered before the first reload.
@@ -671,4 +763,167 @@ func TestTeardownDropsOccupantsAndDeclarations(t *testing.T) {
 			t.Error("catalog document survived teardown")
 		}
 	})
+}
+
+func TestOpeningKeyStatePassesModifiersThrough(t *testing.T) {
+	hook, ready := readyHook("")
+	f := newFakes()
+	want := protocol.ModifierState{Alt: true, Shift: true}
+	h, err := boot(t, func(c *contracts.Config) { c.Plugins = []string{writePlugin(t, "alpha", false)} },
+		withHook(hook), WithFactory(f.factory), WithModifiers(func() protocol.ModifierState { return want }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runHost(t, ready, h)
+	<-f.started
+	var keys protocol.KeyStateParams
+	f.proc("alpha").openingParams(t, protocol.MethodInputKeyState, &keys)
+	if keys.Phase != protocol.KeyPhaseSync || keys.Modifiers != want {
+		t.Fatalf("input.key_state = %+v, want sync with %+v", keys, want)
+	}
+}
+
+func TestSpawnRefusedOnceClosing(t *testing.T) {
+	h, err := boot(t, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.root.Close(); err != nil {
+		t.Fatal(err)
+	}
+	ran := make(chan struct{}, 1)
+	h.root.spawn(func() tea.Msg { ran <- struct{}{}; return nil })
+	h.root.wg.Wait()
+	select {
+	case <-ran:
+		t.Fatal("a worker was spawned after shutdown began")
+	default:
+	}
+}
+
+// TeardownMsg handled while Close waits on the worker group must not Add to
+// it; under -race an unguarded wg.Add against Wait is reported.
+func TestTeardownRacingCloseIsSafe(t *testing.T) {
+	hook, ready := readyHook("")
+	f := newFakes()
+	h, err := boot(t, func(c *contracts.Config) { c.Plugins = []string{writePlugin(t, "alpha", false)} }, withHook(hook), WithFactory(f.factory))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runHost(t, ready, h)
+	<-f.started
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				h.root.cfg.Post(pods.TeardownMsg{PluginID: "alpha"})
+			}
+		}
+	}()
+	if err := h.root.Close(); err != nil {
+		t.Fatal(err)
+	}
+	close(stop)
+	wg.Wait()
+}
+
+func TestTeardownOfUnknownPodLeavesDeclarations(t *testing.T) {
+	h, err := boot(t, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.loop(func() {
+		h.root.store.Declare(store.DeclaredPlugins, "ghost", store.Doc{"id": "ghost"})
+		h.root.Update(pods.TeardownMsg{PluginID: "ghost"})
+		if _, ok := h.root.store.Declared(store.DeclaredPlugins)["ghost"]; !ok {
+			t.Error("teardown of an id with no Pod undeclared it")
+		}
+	})
+}
+
+func TestCloseFromUpdateRunsOnTheLoop(t *testing.T) {
+	var steps []string
+	h, err := boot(t, nil, withClose(func(s string) { steps = append(steps, s) }),
+		func(o *options) { o.loopWait = 20 * time.Millisecond })
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed := make(chan error, 1)
+	h.root.cfg.Post(fnMsg{fn: func() { closed <- h.root.Close() }})
+	if err := <-closed; err != nil {
+		t.Fatalf("Close from Update: %v", err)
+	}
+	if want := []string{"calls", "server", "pods", "store"}; !slices.Equal(steps, want) {
+		t.Fatalf("steps = %v, want %v", steps, want)
+	}
+}
+
+func TestCloseDoesNotRunLoopWorkInlineOnAWedgedLoop(t *testing.T) {
+	h, err := boot(t, nil, func(o *options) { o.loopWait = 20 * time.Millisecond })
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := make(chan struct{})
+	entered := make(chan struct{})
+	h.root.cfg.Post(fnMsg{fn: func() { close(entered); <-release }})
+	<-entered
+	err = h.root.Close()
+	close(release)
+	if err == nil || !strings.Contains(err.Error(), "wedged") {
+		t.Fatalf("Close = %v, want a wedged-loop error", err)
+	}
+}
+
+// manualClock is a protocol.Clock whose timers fire only when the test says.
+type manualClock struct {
+	now     time.Time
+	pending []*manualTimer
+}
+
+type manualTimer struct {
+	fn      func()
+	stopped bool
+}
+
+func (t *manualTimer) Stop() bool { was := !t.stopped; t.stopped = true; return was }
+
+func (c *manualClock) Now() time.Time { return c.now }
+func (c *manualClock) AfterFunc(_ time.Duration, f func()) protocol.Timer {
+	t := &manualTimer{fn: f}
+	c.pending = append(c.pending, t)
+	return t
+}
+
+func TestStoreClockAdaptsAnInjectedClock(t *testing.T) {
+	mc := &manualClock{now: time.Unix(1000, 0)}
+	sc := storeClock{mc}
+	if !sc.Now().Equal(mc.now) {
+		t.Fatalf("Now = %v, want the injected clock's", sc.Now())
+	}
+	timer := sc.NewTimer(time.Hour)
+	select {
+	case <-timer.C():
+		t.Fatal("timer fired before the injected clock did")
+	default:
+	}
+	mc.now = mc.now.Add(time.Hour)
+	mc.pending[0].fn()
+	select {
+	case at := <-timer.C():
+		if !at.Equal(mc.now) {
+			t.Fatalf("fired at %v, want %v", at, mc.now)
+		}
+	default:
+		t.Fatal("timer did not deliver after the injected clock fired it")
+	}
+	stopped := sc.NewTimer(time.Hour)
+	if !stopped.Stop() || !mc.pending[1].stopped {
+		t.Fatal("Stop did not reach the injected timer")
+	}
 }
