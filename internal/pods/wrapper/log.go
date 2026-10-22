@@ -17,16 +17,14 @@ func tailLines(path string, n int) []string {
 	defer f.Close()
 	const window = 8 << 10
 	seeked := false
-	if st, err := f.Stat(); err == nil && st.Size() > window {
-		// One byte before the window tells whether it starts on a line boundary.
+	// A file of window+1 bytes or fewer is read whole from offset 0, which is
+	// a line boundary. Beyond that, start one byte before the window: that
+	// byte says whether the window starts on a boundary.
+	if st, err := f.Stat(); err == nil && st.Size() > window+1 {
 		_, serr := f.Seek(st.Size()-window-1, io.SeekStart)
 		seeked = serr == nil
 	}
-	limit := int64(window)
-	if seeked {
-		limit++
-	}
-	data, _ := io.ReadAll(io.LimitReader(f, limit))
+	data, _ := io.ReadAll(io.LimitReader(f, window+1))
 	if seeked && len(data) > 0 {
 		// The first byte is outside the window. Unless it is a newline the
 		// window starts mid-line: drop the cut fragment. When no whole line

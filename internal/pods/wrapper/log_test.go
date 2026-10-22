@@ -132,3 +132,22 @@ func TestTailLinesLongLineFollowedByEscapeOnlyLines(t *testing.T) {
 		t.Fatalf("got %d lines %.20q", len(got), got)
 	}
 }
+
+// A log of exactly window+1 bytes is read from offset 0, a line boundary: its
+// first line is whole and must be kept, and so must the last byte.
+func TestTailLinesFileOneByteOverWindowKeepsFirstLine(t *testing.T) {
+	const window = 8 << 10
+	first := "first" + strings.Repeat("y", 26) // 31 bytes + newline
+	line := strings.Repeat("z", 31) + "\n"
+	content := first + "\n" + strings.Repeat(line, window/32-1) + "\n"
+	if len(content) != window+1 {
+		t.Fatalf("fixture is %d bytes, want %d", len(content), window+1)
+	}
+	got := tailLines(writeLog(t, content), 1000)
+	if len(got) == 0 || got[0] != first {
+		t.Fatalf("first returned line = %.40q, want %q", got, first)
+	}
+	if want := 1 + window/32 - 1; len(got) != want {
+		t.Fatalf("got %d lines, want %d", len(got), want)
+	}
+}
