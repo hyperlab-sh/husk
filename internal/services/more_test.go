@@ -429,3 +429,29 @@ func TestKeybindingResolvedCapKeepsStrongestLayers(t *testing.T) {
 		t.Errorf("too_many problems = %d, want %d", dropped, 3+total-4096)
 	}
 }
+
+// A key problem names the file the Store read the layer from.
+func TestKeybindingProblemsKeepLayerFile(t *testing.T) {
+	kb := keybinding.New()
+	in := input(`{}`)
+	in.Layers = []store.LayerDoc{
+		{Layer: store.LayerUser, File: `C:\cfg\keymap.json`, Doc: doc(`{"version":1,"bind":[{"key":"ctrl+","action":"husk.home"}]}`)},
+		{Layer: store.LayerProfile, File: "/cfg/profiles/work/keymap.json", Doc: doc(`{"version":1,"bind":[{"action":"husk.home"}]}`)},
+		{Layer: store.LayerDistribution, Doc: doc(`{"version":1,"bind":[{"action":"husk.home"}]}`)},
+	}
+	apply(t, kb, in)
+	files := map[keybinding.Layer]string{}
+	for _, p := range kb.Listing().Problems {
+		files[p.Source.Layer] = p.Source.File
+	}
+	want := map[keybinding.Layer]string{
+		keybinding.LayerUser:         "C:/cfg/keymap.json",
+		keybinding.LayerProfile:      "/cfg/profiles/work/keymap.json",
+		keybinding.LayerDistribution: "keymap.json",
+	}
+	for layer, file := range want {
+		if files[layer] != file {
+			t.Errorf("%s problem file = %q, want %q (all %v)", layer, files[layer], file, files)
+		}
+	}
+}

@@ -482,18 +482,17 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 		if l.Layer == store.LayerInstance {
 			continue
 		}
-		file := "keymap.json"
-		if l.Layer == store.LayerProfile {
-			name := ""
-			if in.Profile != nil {
-				name = *in.Profile
-			}
-			file = "profiles/" + name + "/" + file
-			if in.Profile == nil && l.File != "" {
-				file = strings.ReplaceAll(l.File, "\\", "/")
-				if at := strings.LastIndex(file, "/profiles/"); at >= 0 {
-					file = file[at+1:]
+		// The Store names the file it read; a layer without one (injected
+		// documents) gets the conventional relative name.
+		file := strings.ReplaceAll(l.File, "\\", "/")
+		if file == "" {
+			file = "keymap.json"
+			if l.Layer == store.LayerProfile {
+				name := ""
+				if in.Profile != nil {
+					name = *in.Profile
 				}
+				file = "profiles/" + name + "/" + file
 			}
 		}
 		layers = append(layers, struct {
