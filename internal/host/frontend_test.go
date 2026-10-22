@@ -455,52 +455,70 @@ func TestResizedReachesOnlyTheOccupant(t *testing.T) {
 	})
 }
 
-// D53: a refused claim waits; when the holder closes the surface the waiting
-// plugin takes it in the same tick's resolution pass, and its occupant must
+// D53: a refused claim waits; when the holder lets go the waiting plugin
+// takes the surface in the same tick's resolution pass, and its occupant must
 // hear about it even though the surface's size did not change.
 func TestNewOccupantOfAnUnchangedSurfaceIsTold(t *testing.T) {
-	beta := writeFrontendPlugin(t, "beta", []string{"sidebar-list"}, nil)
-	h, _, fe := bootFrontendWith(t, nil, alphaPlugin(t), beta)
-	var a, b recNotifier
-	h.loop(func() {
-		s, err := fe.OwnSlices()
-		if err != nil {
-			t.Error(err)
-			return
-		}
-		if res, _ := decodeSurfaces(fe.Snapshot()); res.Occupants["sidebar-list"].Plugin != "alpha" {
-			t.Errorf("precondition: alpha must hold sidebar-list, got %+v", res.Occupants)
-			return
-		}
-		h.root.engine.WatchPlugin("alpha", &a)
-		h.root.engine.WatchPlugin("beta", &b)
-		if _, err := s.Geometry.Set(geometryDoc(30, 10)); err != nil {
-			t.Error(err)
-			return
-		}
-	})
-	h.loop(func() {
-		if got := b.resized(t); len(got) != 0 {
-			t.Errorf("beta heard about a surface it does not hold: %+v", got)
-			return
-		}
-		if err := h.root.engine.SurfaceClose("alpha", protocol.SurfaceCloseParams{Surface: "sidebar-list"}); err != nil {
-			t.Error(err)
-			return
-		}
-	})
-	// This fn runs after the tick that followed the close and before the next
-	// tick: the push must already have happened.
-	h.loop(func() {
-		got := b.resized(t)
-		if len(got) != 1 || len(got[0]) != 1 {
-			t.Errorf("beta's pushes = %+v, want one with sidebar-list", got)
-			return
-		}
-		if s := got[0][0]; s.Surface != "sidebar-list" || s.Width != 30 || s.Height != 10 {
-			t.Errorf("beta was told %+v, want sidebar-list at the current 30x10", s)
-		}
-	})
+	for _, tc := range []struct {
+		name    string
+		release func(h *harness)
+	}{
+		// surface.close writes husk.surfaces itself, so State's flush
+		// listener sees the release.
+		{"holder closes the surface", func(h *harness) {
+			h.loop(func() {
+				if err := h.root.engine.SurfaceClose("alpha", protocol.SurfaceCloseParams{Surface: "sidebar-list"}); err != nil {
+					t.Error(err)
+				}
+			})
+		}},
+		// Dropping the holder's declarations changes no husk.surfaces write
+		// before engine.Flush resolves the waiting claim, so only the
+		// revision read around Flush notices.
+		{"holder is torn down", func(h *harness) { h.root.cfg.Post(pods.TeardownMsg{PluginID: "alpha"}) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			beta := writeFrontendPlugin(t, "beta", []string{"sidebar-list"}, nil)
+			h, _, fe := bootFrontendWith(t, nil, alphaPlugin(t), beta)
+			var a, b recNotifier
+			h.loop(func() {
+				s, err := fe.OwnSlices()
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				if res, _ := decodeSurfaces(fe.Snapshot()); res.Occupants["sidebar-list"].Plugin != "alpha" {
+					t.Errorf("precondition: alpha must hold sidebar-list, got %+v", res.Occupants)
+				}
+				h.root.engine.WatchPlugin("alpha", &a)
+				h.root.engine.WatchPlugin("beta", &b)
+				if _, err := s.Geometry.Set(geometryDoc(30, 10)); err != nil {
+					t.Error(err)
+				}
+			})
+			h.loop(func() {
+				if got := b.resized(t); len(got) != 0 {
+					t.Errorf("beta heard about a surface it does not hold: %+v", got)
+				}
+			})
+			tc.release(h)
+			// This fn runs after the tick that followed the release and
+			// before the next tick: the push must already have happened.
+			h.loop(func() {
+				if res, _ := decodeSurfaces(fe.Snapshot()); res.Occupants["sidebar-list"].Plugin != "beta" {
+					t.Errorf("beta did not take sidebar-list: %+v", res.Occupants)
+				}
+				got := b.resized(t)
+				if len(got) != 1 || len(got[0]) != 1 {
+					t.Errorf("beta's pushes = %+v, want one with sidebar-list", got)
+					return
+				}
+				if s := got[0][0]; s.Surface != "sidebar-list" || s.Width != 30 || s.Height != 10 {
+					t.Errorf("beta was told %+v, want sidebar-list at the current 30x10", s)
+				}
+			})
+		})
+	}
 }
 
 func TestUpdateSurfaceViewWritesOnlyTheFrontendHalf(t *testing.T) {
