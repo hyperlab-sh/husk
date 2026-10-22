@@ -7,6 +7,7 @@ import (
 
 	"github.com/hyperlab-sh/husk/internal/host/contracts/fakes"
 	"github.com/hyperlab-sh/husk/internal/substrate/state"
+	statessurfaces "github.com/hyperlab-sh/husk/internal/substrate/state/surfaces"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
@@ -73,8 +74,8 @@ func (s *sink) resizedMsgs(t *testing.T) []protocol.SurfaceResizedParams {
 }
 
 // pod stands in for a plugin's Pod: it owns the plugin's declaration slices
-// and their write capability, and implements the Declarations seam. Values
-// are written as raw JSON through the handle, exactly as a Pod writes.
+// through the same typed wrappers a Pod uses, and implements the
+// Declarations seam.
 type pod struct {
 	t       *testing.T
 	st      *state.State
@@ -82,10 +83,8 @@ type pod struct {
 }
 
 type podDecl struct {
-	occHandle *state.Handle
-	conHandle *state.Handle
-	claims    Occupants
-	contribs  Contributions
+	occ *statessurfaces.OccupantsSlice
+	con *statessurfaces.ContributionsSlice
 }
 
 func newPod(t *testing.T, st *state.State) *pod {
@@ -113,17 +112,13 @@ func mustJSON(t *testing.T, v any) json.RawMessage {
 // launch registers both declaration slices, as the Pod does for a live plugin.
 func (p *pod) launch(plugin string) {
 	p.t.Helper()
-	d := &podDecl{claims: Occupants{}, contribs: Contributions{}}
+	d := &podDecl{}
 	var err error
-	d.occHandle, err = p.st.Register(state.Spec{
-		Namespace: plugin + ".occupants", Owner: plugin, Scope: state.ScopeInstance,
-	})
+	d.occ, err = statessurfaces.RegisterOccupants(p.st, plugin)
 	if err != nil {
 		p.t.Fatalf("register %s.occupants: %v", plugin, err)
 	}
-	d.conHandle, err = p.st.Register(state.Spec{
-		Namespace: plugin + ".contributions", Owner: plugin, Scope: state.ScopeInstance,
-	})
+	d.con, err = statessurfaces.RegisterContributions(p.st, plugin)
 	if err != nil {
 		p.t.Fatalf("register %s.contributions: %v", plugin, err)
 	}
@@ -133,9 +128,10 @@ func (p *pod) launch(plugin string) {
 func (p *pod) claim(plugin, surface string) {
 	p.t.Helper()
 	d := p.decl(plugin)
+	claims := d.occ.Get()
 	id := protocol.SurfaceID(surface)
-	d.claims[id] = Occupant{Surface: id, Plugin: plugin}
-	if _, err := d.occHandle.Set(mustJSON(p.t, d.claims)); err != nil {
+	claims[id] = Occupant{Surface: id, Plugin: plugin}
+	if err := d.occ.Set(claims); err != nil {
 		p.t.Fatalf("claim %s: %v", surface, err)
 	}
 }
@@ -143,33 +139,28 @@ func (p *pod) claim(plugin, surface string) {
 func (p *pod) unclaim(plugin, surface string) {
 	p.t.Helper()
 	d := p.decl(plugin)
-	delete(d.claims, protocol.SurfaceID(surface))
-	if _, err := d.occHandle.Set(mustJSON(p.t, d.claims)); err != nil {
+	claims := d.occ.Get()
+	delete(claims, protocol.SurfaceID(surface))
+	if err := d.occ.Set(claims); err != nil {
 		p.t.Fatalf("unclaim %s: %v", surface, err)
 	}
 }
 
-// Contribute implements the Declarations seam: upsert by id.
+// Contribute implements the Declarations seam: a typed upsert by id.
 func (p *pod) Contribute(plugin, slot string, entry Contribution) error {
-	d := p.decl(plugin)
-	list := d.contribs[slot]
-	if !hasID(list, entry.ID) {
-		list = append(list, entry)
-		d.contribs[slot] = list
-	}
-	_, err := d.conHandle.Set(mustJSON(p.t, d.contribs))
-	return err
+	return p.decl(plugin).con.Upsert(slot, entry)
 }
 
 // declare overwrites one slot's entry list, as a manifest declaration would.
 func (p *pod) declare(plugin, slot string, entries ...Contribution) {
 	p.t.Helper()
 	d := p.decl(plugin)
+	contribs := d.con.Get()
 	for i := range entries {
 		entries[i].Slot = slot
 	}
-	d.contribs[slot] = entries
-	if _, err := d.conHandle.Set(mustJSON(p.t, d.contribs)); err != nil {
+	contribs[slot] = entries
+	if err := d.con.Set(contribs); err != nil {
 		p.t.Fatalf("declare: %v", err)
 	}
 }
@@ -178,8 +169,8 @@ func (p *pod) declare(plugin, slot string, entries ...Contribution) {
 func (p *pod) teardown(plugin string) {
 	p.t.Helper()
 	d := p.decl(plugin)
-	d.occHandle.Unregister()
-	d.conHandle.Unregister()
+	d.occ.Unregister()
+	d.con.Unregister()
 }
 
 // settle runs one loop turn: State flush publishes declaration changes, then
@@ -549,6 +540,30 @@ func TestSlotContribute(t *testing.T) {
 	c := msgs[0].Contributions[0]
 	if c.PluginID != "alpha.files" || c.ID != "alpha.files.item" || c.Content != "hello" {
 		t.Fatalf("notification entry = %+v", c)
+	}
+
+	// A second contribution with the same id replaces the entry in place:
+	// the declaration upserts and the resolution keeps the position.
+	err = eng.SlotContribute("alpha.files", protocol.SlotContributeParams{
+		SlotID: "publisher.list", ID: "alpha.files.item", Content: "second",
+	})
+	if err != nil {
+		t.Fatalf("re-contribute: %v", err)
+	}
+	if err := eng.SlotContribute("alpha.files", protocol.SlotContributeParams{
+		SlotID: "publisher.list", ID: "alpha.files.tail", Content: "third",
+	}); err != nil {
+		t.Fatalf("second entry contribute: %v", err)
+	}
+	settle(st, eng)
+
+	res = resolution(t, st)
+	list := res.Contributions["publisher.list"]
+	if got := entryIDs(list); !equalStrings(got, []string{"alpha.files.item", "alpha.files.tail"}) {
+		t.Fatalf("after replace, contributions = %v", got)
+	}
+	if list[0].Label != "second" {
+		t.Fatalf("replaced label = %q, want %q", list[0].Label, "second")
 	}
 }
 
