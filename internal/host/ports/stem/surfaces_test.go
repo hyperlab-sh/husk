@@ -4,12 +4,42 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
 	"github.com/hyperlab-sh/husk/internal/stem/surfaces"
 	"github.com/hyperlab-sh/husk/internal/substrate/state"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
+
+// portClock, portLiveness, portPublications and portLogger are the minimal
+// seams the port tests inject: the engine takes no defaults.
+type portClock struct{ now time.Time }
+
+func (c *portClock) Now() time.Time { return c.now }
+
+type portLiveness struct{}
+
+func (portLiveness) Live(string) bool { return true }
+
+type portPublications struct{ owners map[string]string }
+
+func (p portPublications) Owner(slot string) (string, bool) {
+	owner, ok := p.owners[slot]
+	return owner, ok
+}
+
+type portLogger struct{ t *testing.T }
+
+func (l portLogger) Printf(format string, v ...any) { l.t.Logf(format, v...) }
+
+// portDeclarations is a no-op Declarations seam: the port tests never
+// exercise slot.contribute retraction, but the engine requires the seam.
+type portDeclarations struct{}
+
+func (portDeclarations) Contribute(string, string, surfaces.Contribution) error { return nil }
+
+func (portDeclarations) Release(string, protocol.SurfaceID) error { return nil }
 
 func newPort(t *testing.T) (*SurfacePort, *state.State) {
 	t.Helper()
@@ -23,7 +53,13 @@ func newPort(t *testing.T) (*SurfacePort, *state.State) {
 	if _, err := occ.Set(json.RawMessage(`{"main-stage":{"surface":"main-stage","plugin":"alpha.files"}}`)); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
-	eng, err := surfaces.New(st, surfaces.Options{})
+	eng, err := surfaces.New(st, surfaces.Options{
+		Clock:        &portClock{now: time.Unix(0, 0)},
+		Logger:       portLogger{t: t},
+		Liveness:     portLiveness{},
+		Publications: portPublications{owners: map[string]string{}},
+		Declarations: portDeclarations{},
+	})
 	if err != nil {
 		t.Fatalf("engine: %v", err)
 	}

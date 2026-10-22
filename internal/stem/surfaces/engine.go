@@ -2,8 +2,9 @@ package surfaces
 
 import (
 	"encoding/json"
-	"log"
+	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
@@ -17,10 +18,6 @@ import (
 type Clock interface {
 	Now() time.Time
 }
-
-type realClock struct{}
-
-func (realClock) Now() time.Time { return time.Now() }
 
 // Liveness reports whether a plugin currently has a live process. The engine
 // consults it before pushing notifications: a watcher whose plugin is not
@@ -54,9 +51,10 @@ type Declarations interface {
 	Release(plugin string, surface protocol.SurfaceID) error
 }
 
-// Options configures the engine. Nil seams take safe defaults: the real
-// clock, all plugins live, no published slots, and declaration writes
-// dropped (so tests can assert refusals without a Pod).
+// Options configures the engine. Every seam is required: New rejects a
+// nil Clock, Logger, Liveness, Publications or Declarations — a missing
+// seam must never silently drop writes or fake liveness. Only the toast
+// bounds are optional, with the defaults below.
 type Options struct {
 	Clock        Clock
 	Liveness     Liveness
@@ -171,20 +169,24 @@ type Engine struct {
 // declarations registered before the engine, so registration order before
 // and after New is equally valid: occupancy is first claim wins either way.
 func New(st *state.State, opts Options) (*Engine, error) {
+	var missing []string
 	if opts.Clock == nil {
-		opts.Clock = realClock{}
+		missing = append(missing, "Clock")
 	}
 	if opts.Logger == nil {
-		opts.Logger = log.New(discard{}, "", 0)
+		missing = append(missing, "Logger")
 	}
 	if opts.Liveness == nil {
-		opts.Liveness = allLive{}
+		missing = append(missing, "Liveness")
 	}
 	if opts.Publications == nil {
-		opts.Publications = noPublications{}
+		missing = append(missing, "Publications")
 	}
 	if opts.Declarations == nil {
-		opts.Declarations = droppedDeclarations{}
+		missing = append(missing, "Declarations")
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("surfaces: Options is missing %s", strings.Join(missing, ", "))
 	}
 	if opts.MaxToasts <= 0 {
 		opts.MaxToasts = DefaultMaxToasts
@@ -229,23 +231,6 @@ func New(st *state.State, opts Options) (*Engine, error) {
 	}
 	return e, nil
 }
-
-type discard struct{}
-
-func (discard) Write(p []byte) (int, error) { return len(p), nil }
-
-type allLive struct{}
-
-func (allLive) Live(string) bool { return true }
-
-type noPublications struct{}
-
-func (noPublications) Owner(string) (string, bool) { return "", false }
-
-type droppedDeclarations struct{}
-
-func (droppedDeclarations) Contribute(string, string, Contribution) error { return nil }
-func (droppedDeclarations) Release(string, protocol.SurfaceID) error     { return nil }
 
 // Flush runs one resolution pass: it diffs the Pod-written declaration
 // slices against the last pass, writes the result to husk.surfaces and
@@ -425,7 +410,7 @@ func (e *Engine) resolvePlugin(plugin string, old, cur *pluginDecl, res *Surface
 			res.Occupants[surface] = Occupant{Surface: surface, Plugin: plugin} // first claim wins
 		case plugin:
 			// Still ours from a release the Pod has not re-declared; no-op.
-	default:
+		default:
 			e.recordRefusal(surface, plugin)
 			e.log.Printf("surfaces: %s occupied by %s; claim by %s refused", surface, occupant, plugin)
 		}
