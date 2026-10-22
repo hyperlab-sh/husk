@@ -123,7 +123,7 @@ Every message is one JSON object on one line (at most 4 MiB, `huskipc.MaxLineByt
 - no object sets `additionalProperties: false`, because minor releases add optional fields: validators must tolerate unknown fields, as the host does (the Dolphin fixtures carry extra palette keys);
 - the envelope `type` is an enum of every message type, and each type requires the payload of the same name (`close_modal` is a boolean, not an object).
 
-This v1 schema is frozen with `pkg/huskipc` and no longer generated (`cmd/genschema` produces the v2 schema); `TestCommittedSchemaIsCurrent` still guards it, and `TestGoMarshaledEnvelopesValidate` and `TestDolphinFixturesValidate` check that what the structs marshal and what the Rust crate's fixtures contain both validate. `pkg/huskipc/schema` holds the small validator the tests use. The schema describes shape only: it does not say which messages a plugin may send (see [Errors](#errors)).
+This v1 schema is frozen with `pkg/huskipc` and no longer generated (`cmd/genschema` produces the v2 schema); `TestCommittedSchemaIsCurrent` still guards it, and `TestGoMarshaledEnvelopesValidate` and the fixture test in `pkg/huskipc/schema` check that what the structs marshal and what the Rust crate's fixtures contain both validate. `pkg/huskipc/schema` holds the small validator the tests use. The schema describes shape only: it does not say which messages a plugin may send (see [Errors](#errors)).
 
 ### Enumerated fields
 
