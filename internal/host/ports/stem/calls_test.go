@@ -58,8 +58,13 @@ func (l *loop) do(fn func()) {
 func (l *loop) Post(fn func()) bool { return l.post(fn) }
 
 // Do satisfies the shared Loop seam: run fn on the loop goroutine and wait
-// for it, answering an error when the loop no longer runs or ctx ends.
+// for it, answering an error when the loop no longer runs or ctx ends. A
+// context that is already dead never enqueues — the loop checks before
+// posting, so the engine body never runs on a dead request.
 func (l *loop) Do(ctx context.Context, fn func()) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	done := make(chan struct{})
 	if !l.post(func() { fn(); close(done) }) {
 		return errors.New("loop no longer runs")

@@ -248,6 +248,33 @@ func TestBadContributionIdIsInvalidParams(t *testing.T) {
 	}
 }
 
+// TestCancelledCtxAnswersByCause pins run's error mapping: a request
+// context that ended answers timeout or cancelled — the codes every port
+// uses — while a live context on a shut-down loop keeps unavailable. In
+// every case the engine call never ran.
+func TestCancelledCtxAnswersByCause(t *testing.T) {
+	port, _, _, _, clk := newPort(t)
+	cli := contracts.Caller{Kind: contracts.CallerCLI}
+	show := func(ctx context.Context) error {
+		return port.ToastShow(ctx, cli, protocol.ToastShowParams{Level: "info", Title: "t"})
+	}
+
+	deadline, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	if code := contracts.CodeOf(show(deadline)); code != string(protocol.CodeTimeout) {
+		t.Fatalf("expired deadline: code = %q, want timeout", code)
+	}
+
+	cancelled, cancel2 := context.WithCancel(context.Background())
+	cancel2()
+	if code := contracts.CodeOf(show(cancelled)); code != string(protocol.CodeCancelled) {
+		t.Fatalf("cancelled: code = %q, want cancelled", code)
+	}
+	if clk.onLoop.Load() {
+		t.Fatal("engine body ran on a dead request context")
+	}
+}
+
 // TestEngineCallsRunOnTheLoop pins the seam: a port call made off the loop
 // still runs its engine body on the loop goroutine, observed where the
 // engine's own clock tick runs.
