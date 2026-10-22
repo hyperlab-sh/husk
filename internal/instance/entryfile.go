@@ -98,12 +98,17 @@ func Unregister(dir, id string) error {
 	return nil
 }
 
-// RemoveIfStale removes e's entry and socket only if the entry file still
-// holds the same pid and the same started timestamp as e. That closes the
-// race where a new instance reuses the name between the failed ping and the
-// unlink: whoever re-registered wrote a different pid or started_at, and
-// this call becomes a no-op. A missing or corrupt file is not an error and
-// is left alone.
+// RemoveIfStale removes e's entry file — only the entry file — if the
+// entry still holds the same pid and the same started timestamp as e.
+// That closes the race where a new instance reuses the name between the
+// failed ping and the unlink: whoever re-registered wrote a different pid
+// or started_at, and this call becomes a no-op. A missing or corrupt file
+// is not an error and is left alone.
+//
+// The socket is never removed here: it belongs to whoever bound it, and
+// after a crash and restart that may be the next instance of the same
+// name. Only an instance removes its own socket, on a clean exit
+// (Unregister).
 func RemoveIfStale(dir string, e Entry) error {
 	cur, err := readEntry(dir, e.ID+".json")
 	if err != nil {
@@ -112,7 +117,10 @@ func RemoveIfStale(dir string, e Entry) error {
 	if cur.PID != e.PID || !cur.StartedAt.Equal(e.StartedAt) {
 		return nil
 	}
-	return Unregister(dir, e.ID)
+	if err := os.Remove(EntryPath(dir, e.ID)); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 // List reads every registration entry in dir, sorted by instance id, with

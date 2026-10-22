@@ -268,8 +268,8 @@ func TestResolveInstanceFlagStaleRemovesEntry(t *testing.T) {
 	if _, serr := os.Lstat(EntryPath(dir, "notes")); serr == nil {
 		t.Error("stale entry should have been removed")
 	}
-	if _, serr := os.Lstat(SocketPath(dir, "notes")); serr == nil {
-		t.Error("stale socket should have been removed")
+	if _, serr := os.Lstat(SocketPath(dir, "notes")); serr != nil {
+		t.Error("stale cleanup must leave the socket alone")
 	}
 }
 

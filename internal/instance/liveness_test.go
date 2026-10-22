@@ -129,8 +129,8 @@ func TestSurveyRemovesStaleKeepsOthers(t *testing.T) {
 	if _, err := os.Lstat(EntryPath(dir, "b")); err == nil {
 		t.Error("stale entry should have been removed")
 	}
-	if _, err := os.Lstat(SocketPath(dir, "b")); err == nil {
-		t.Error("stale socket should have been removed")
+	if _, err := os.Lstat(SocketPath(dir, "b")); err != nil {
+		t.Error("stale cleanup must leave the socket alone")
 	}
 	if _, err := os.Lstat(EntryPath(dir, "c")); err != nil {
 		t.Error("unresponsive entry must be kept")

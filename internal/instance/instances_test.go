@@ -480,10 +480,10 @@ func TestRemoveIfStale(t *testing.T) {
 			if gone != tc.wantGone {
 				t.Fatalf("entry gone = %v, want %v", gone, tc.wantGone)
 			}
-			if gone {
-				if _, err := os.Lstat(SocketPath(dir, "notes")); err == nil {
-					t.Fatal("socket should have been removed with the entry")
-				}
+			// The socket is never removed by stale cleanup: it belongs to
+			// whoever bound it, possibly the next instance of the same name.
+			if _, err := os.Lstat(SocketPath(dir, "notes")); err != nil {
+				t.Fatal("stale cleanup must leave the socket alone")
 			}
 		})
 	}
