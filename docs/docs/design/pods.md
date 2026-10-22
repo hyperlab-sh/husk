@@ -435,9 +435,9 @@ Decoration takes one surface's content (the cells or lines the plugin supplied t
 | Unknown method prefix | Server | Error reply `unknown_method` | CLI prints it |
 | `state.set` on another owner's slice | Server | Error reply `denied` | CLI prints it |
 | Socket client stops reading replies | Reply queue | Connection closed | Client sees EOF |
-| Manifest invalid | Converter | That plugin is not launched; others are | Log; the error toast is not yet produced (husk-nb3) |
-| Duplicate plugin id | Pod | Second plugin not launched | Same toast, `duplicate plugin id` |
-| Protocol major mismatch | Converter | Not launched | Same toast, versions named |
+| Manifest invalid | Converter | That plugin is not launched; others are | Log and a warning toast naming the manifest and the problem. No Pod exists, so there is no `husk.pods` entry: the host lists the refusal (`Frontend.Refusals`) and the frontend toasts it once |
+| Duplicate plugin id | Host (plugin loading) | Second plugin not launched | Log and a warning toast `<id>: duplicate plugin id`, listed like an invalid manifest |
+| Protocol major mismatch | Converter | Not launched | Log and a warning toast naming the manifest and both versions, listed like an invalid manifest |
 | `cmd.Start` fails | Wrapper | Liveness `failed`; the catalog stays declared | Warning toast `<id>: <last_error>` (the frontend toasts on the transition into `failed`) |
 | Plugin exits non-zero or by a foreign signal | Wrapper | Pending calls failed via `Closed`, liveness `failed`, token revoked; the catalog stays declared | Warning toast `<id>: <last_error>`; log has the last 3 stderr lines |
 | Plugin exits 0 | Wrapper | Same cleanup, liveness `exited` | Info-level log line, no toast |
