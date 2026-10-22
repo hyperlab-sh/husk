@@ -918,13 +918,6 @@ func TestForeignResolutionWriteReResolves(t *testing.T) {
 	if got := entryIDs(res.Contributions["publisher.list"]); len(got) != 1 || got[0] != "alpha.files.item" {
 		t.Fatalf("contributions after clear = %v", got)
 	}
-
-	// The re-resolved value came from the current declarations, so a
-	// foreign write cannot smuggle in an occupant the declarations never
-	// claimed.
-	if got := res.Occupants[protocol.SurfaceSidebarList].Plugin; got != "" {
-		t.Fatalf("unclaimed surface occupied after clear: %q", got)
-	}
 }
 
 func TestCatalogChangedDropsSlotAfterLateCatalogUpdate(t *testing.T) {

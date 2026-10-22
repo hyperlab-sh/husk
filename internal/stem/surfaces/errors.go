@@ -21,9 +21,11 @@ func errf(code protocol.Code, format string, args ...any) *Error {
 	return &Error{Code: code, Message: fmt.Sprintf(format, args...)}
 }
 
-// ownName validates that id is "<plugin>.<name>" for the given plugin: a
-// malformed id is invalid_params, an id in another plugin's namespace is
-// denied. Contribution ids are namespaced so one plugin can never replace
+// ownName validates that id is "<plugin>.<name>" for the given plugin with
+// a name free of the separator and control characters today's wire
+// forbids — the same grammar State's ownName enforces. A malformed id is
+// invalid_params, an id in another plugin's namespace is denied.
+// Contribution ids are namespaced so one plugin can never replace
 // another's entry.
 func ownName(plugin, id string) error {
 	if id == "" {
@@ -32,6 +34,9 @@ func ownName(plugin, id string) error {
 	dot := strings.LastIndexByte(id, '.')
 	if dot <= 0 || dot == len(id)-1 {
 		return errf(protocol.CodeInvalidParams, "id %q must be \"<plugin_id>.<name>\"", id)
+	}
+	if name := id[dot+1:]; strings.ContainsAny(name, " \t\r\n\x1b;=\\") {
+		return errf(protocol.CodeInvalidParams, "id %q: name %q carries a forbidden separator or control character", id, name)
 	}
 	if owner := id[:dot]; owner != plugin {
 		return errf(protocol.CodeDenied, "id %q belongs to plugin %q", id, owner)

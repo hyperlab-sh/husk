@@ -75,7 +75,7 @@ type Options struct {
 const (
 	// DefaultMaxToasts is the per-instance toast queue bound.
 	DefaultMaxToasts = 32
-	// DefaultToastTTL matches the v1 toast duration.
+	// DefaultToastTTL is the toast duration 0 selects.
 	DefaultToastTTL = 3200 * time.Millisecond
 )
 
@@ -260,10 +260,11 @@ func (e *Engine) Flush() {
 	e.dirty = false
 	snap := e.st.Snapshot()
 
-	// A foreign write to the resolution — state.clear, hydration, anything
-	// outside the engine — is authoritative: the cached declarations no
-	// longer describe the value, so this pass re-resolves every slot from
-	// the current declarations instead of diffing against a stale view.
+	// A foreign write to the resolution — state.Clear, the only handle-less
+	// write, or anything outside the engine — is authoritative: the cached
+	// declarations no longer describe the value, so this pass re-resolves
+	// every slot from the current declarations instead of diffing against a
+	// stale view.
 	if rev := snap.Slices[state.SurfacesNamespace].Revision; rev != e.lastRev {
 		e.log.Printf("surfaces: husk.surfaces changed outside the engine; re-resolving")
 		e.declsCache = map[string]*pluginDecl{}
