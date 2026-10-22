@@ -25,7 +25,7 @@ The standalone v2 State package is tested with `go test -race ./internal/substra
 
 The standalone v2 Calls package is tested with `go test -race ./internal/stem/calls/...`. Its table is loop-only and knows no message kinds; requesters receive returned results synchronously in the same `Update`, after the table mutation finishes. Configure its clock, logger and caps through `TableOptions`, separate from per-call `Options`. `Sweep()` acknowledges a sweep message; `NextSweep()` claims the single in-flight sweep slot, while `SweepCmd()` is the isolated Bubble Tea scheduling adapter. Unit tests use fake clocks/tick factories, never sleeps or real timers. The current host is not yet wired to Calls. Spec: `docs/docs/design/calls.md`.
 
-Store consumes State's hooks; run `go test -race ./internal/substrate/...` for substrate changes. Store disk methods run off the loop; `Attach`, `Hydrate` and its listener do no I/O, and worker health updates use `Options.Post`. Tests inject a Clock and Keyring: never use sleeps or the real OS keyring. Layer documents (`keymap`) and declared focus-local bindings (`focus-keymap`) are separate APIs.
+Store consumes State's hooks; run `go test -race ./internal/substrate/...` for substrate changes. Store disk methods run off the loop; `Attach`, `Hydrate` and its listener do no I/O, and worker health updates use `Options.Post`. Tests inject a Clock and Keyring, plus `Options.InstanceDeps` for log-GC liveness: never use sleeps, the real OS keyring or real liveness pings. Layer documents (`keymap`) and declared focus-local bindings (`focus-keymap`) are separate APIs.
 
 ## Charm v2
 
