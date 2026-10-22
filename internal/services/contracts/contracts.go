@@ -119,7 +119,7 @@ type Caller struct {
 
 // User reports whether caller may use user-only operations.
 func (c Caller) User() bool {
-	return c.PluginID == "" && (c.Kind == "" || c.Kind == "cli" || c.Kind == "input" || c.Kind == "host")
+	return c.PluginID == "" && (c.Kind == "cli" || c.Kind == "input" || c.Kind == "host")
 }
 
 // RequireUser protects mutation and CLI-only exposure methods.

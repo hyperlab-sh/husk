@@ -48,7 +48,7 @@ func TestSettingsTypesBoundsSnapshotIsolationAndWarnings(t *testing.T) {
 	if snap.Int("dist.n") != 2 || s.Snapshot().Int("dist.n") != 3 {
 		t.Fatal("old snapshot changed")
 	}
-	r, err := s.Validate(context.Background(), Caller{}, input(`{"dist":{"n":1}}`))
+	r, err := s.Validate(context.Background(), Caller{Kind: "cli"}, input(`{"dist":{"n":1}}`))
 	if err != nil || r.Applied || s.Snapshot().Int("dist.n") != 3 {
 		t.Fatal("dry validation applied")
 	}
@@ -286,7 +286,7 @@ func TestRuntimeDefaultsListenerAndSettingsFreeze(t *testing.T) {
 		t.Fatal(err)
 	}
 	<-events
-	if err = runtime.Profile.Use(Caller{}, "work"); err != nil {
+	if err = runtime.Profile.Use(Caller{Kind: "cli"}, "work"); err != nil {
 		t.Fatal(err)
 	}
 	(<-posts)()
@@ -324,20 +324,20 @@ func TestSecretsMissingBrokenMetadataCapsAndPendingDigest(t *testing.T) {
 	apply(t, sec, in)
 	answers <- true
 	(<-posts)()
-	if grants, _ := sec.Grants(Caller{}); len(grants) != 0 {
+	if grants, _ := sec.Grants(Caller{Kind: "cli"}); len(grants) != 0 {
 		t.Fatal("stale dialog grant applied")
 	}
-	if err := sec.Set(Caller{}, "git.token", make([]byte, 64*1024+1)); err == nil {
+	if err := sec.Set(Caller{Kind: "cli"}, "git.token", make([]byte, 64*1024+1)); err == nil {
 		t.Fatal("secret cap")
 	}
-	if err := sec.Set(Caller{}, "Bad Name", nil); err == nil {
+	if err := sec.Set(Caller{Kind: "cli"}, "Bad Name", nil); err == nil {
 		t.Fatal("secret name")
 	}
-	if _, err := sec.Read(Caller{}, "git.token"); err == nil {
+	if _, err := sec.Read(Caller{Kind: "cli"}, "git.token"); err == nil {
 		t.Fatal("unset secret")
 	}
 	crypto.err = errors.New("sensitive failure payload")
-	infos, err := sec.Names(Caller{})
+	infos, err := sec.Names(Caller{Kind: "cli"})
 	if err == nil || len(infos) != 1 || !infos[0].Broken || strings.Contains(err.Error(), "sensitive") {
 		t.Fatal("broken metadata", infos, err)
 	}

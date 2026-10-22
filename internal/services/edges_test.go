@@ -64,7 +64,7 @@ func TestAcceptedDialogRemainsPendingUntilLoopRuns(t *testing.T) {
 		t.Fatal("duplicate dialog while accepted grant awaits loop")
 	}
 	queued()
-	if grants, _ := sec.Grants(Caller{}); len(grants) != 1 {
+	if grants, _ := sec.Grants(Caller{Kind: "cli"}); len(grants) != 1 {
 		t.Fatal("queued grant lost")
 	}
 }
@@ -78,12 +78,12 @@ func TestUserExposureDryPreviewAndNoGenerationChange(t *testing.T) {
 	if _, err := co.ReloadFor(context.Background(), Caller{Kind: "plugin"}); err == nil {
 		t.Fatal("plugin reload")
 	}
-	in, err := co.Inputs(context.Background(), Caller{})
+	in, err := co.Inputs(context.Background(), Caller{Kind: "cli"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	s := settings.New(settings.Options{})
-	preview, r, err := s.Preview(context.Background(), Caller{}, in)
+	preview, r, err := s.Preview(context.Background(), Caller{Kind: "cli"}, in)
 	if err != nil || r.Applied || s.Generation() != 0 || preview.String("theme.name") != "Preview" || s.Snapshot().String("theme.name") == "Preview" {
 		t.Fatal("preview mutated live cache", r, err)
 	}
