@@ -2,17 +2,21 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/hyperlab-sh/husk/internal/cli"
 	"github.com/hyperlab-sh/husk/internal/host"
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
 	"github.com/hyperlab-sh/husk/internal/instance"
@@ -37,6 +41,14 @@ func repeatable(name, usage string) *stringFlag {
 }
 
 func main() {
+	// A first non-flag argument is a subcommand: a socket client of a
+	// running instance. Everything else starts an instance.
+	if len(os.Args) > 1 && !strings.HasPrefix(os.Args[1], "-") {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		code := cli.Main(ctx, os.Args[1:], cli.OSEnv())
+		stop()
+		os.Exit(code)
+	}
 	dumpFrame := flag.Bool("dump-frame", false, "Render one live frame after plugin sync and exit")
 	demoFrame := flag.Bool("demo-frame", false, "Render one frame from a built-in demo plugin that declares a border+label+close frame and exit")
 	railMode := flag.String("rail", "", "Activate rail mode on startup: modal | full-canvas | stage")
