@@ -577,8 +577,8 @@ With one:
    for publications; core owner is `husk`; the plugin slice is
    `<plugin_id>.state`.
 3. Write authority is a Go capability (`Handle`), not a string check: only the
-   holder writes. Owner strings exist for display and for the Pod's check of
-   plugin requests.
+   holder writes. Owner strings exist for display; whether a plugin may write
+   a declaration is decided by comparing namespaces, never owners.
 4. Every value is a JSON object, so merge patches and pointers are uniform.
 5. Plugin patches use RFC 7396 JSON Merge Patch, with optional `if_revision`
    compare-and-set.
