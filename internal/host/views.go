@@ -53,7 +53,8 @@ type printfLog struct{ r *Root }
 
 func (p printfLog) Printf(format string, v ...any) { p.r.logf(format, v...) }
 
-// publisher lets Services publish events from any goroutine.
+// publisher lets Services publish events from any goroutine, and Pods from
+// the loop.
 type publisher struct{ r *Root }
 
 func (p publisher) Publish(name string, data any) {
@@ -70,9 +71,16 @@ func (p publisher) Publish(name string, data any) {
 	if name == pods.PluginExitedEvent {
 		key, _ = obj["plugin_id"].(string)
 	}
-	p.r.post(func() {
+	publish := func() {
 		p.r.bus.Publish(eventbus.Event{Name: name, Key: key, Source: eventbus.SourceHost, Data: obj})
-	})
+	}
+	// Pods publish pods.plugin-exited from inside Update, where a blocking
+	// Post would wait on the loop it runs on; publish inline there.
+	if g := p.r.loopGID.Load(); g != 0 && g == goroutineID() {
+		publish()
+		return
+	}
+	p.r.post(publish)
 }
 
 // storeClock adapts the protocol Clock the host is configured with to the

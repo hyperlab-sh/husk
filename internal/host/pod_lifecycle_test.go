@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
@@ -210,5 +211,40 @@ func TestPluginExitedEventReachesAWatcher(t *testing.T) {
 	}
 	if got := seen["beta"]; got["status"] != "failed" || got["last_error"] != "crashed (exit status 3)" {
 		t.Errorf("exit event = %+v", got)
+	}
+}
+
+// A real Post (tea.Program.Send) blocks until the loop reads, so publishing
+// pods.plugin-exited from inside Update through Post stalls the loop that
+// runs it: a sibling's launch waited out the whole settle window.
+func TestPluginExitedIsNotPostedFromTheLoop(t *testing.T) {
+	broken := writeFrontendPlugin(t, "alpha", []string{"main-stage"}, nil)
+	factory := func(spec manifest.Spec, o wrapper.Options) (wrapper.Process, error) {
+		return nil, errors.New("exec: no such file or directory")
+	}
+	var h *harness
+	var onLoop atomic.Bool
+	hook, ready := readyHook("")
+	h, err := boot(t, func(c *contracts.Config) {
+		c.Plugins = []string{broken}
+		next := c.Post
+		c.Post = func(m any) bool {
+			if g := h.root.loopGID.Load(); g != 0 && g == goroutineID() {
+				onLoop.Store(true)
+				return false
+			}
+			return next(m)
+		}
+	}, withHook(hook), WithFactory(factory))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runHost(t, ready, h)
+	h.loop(func() {})
+	if got := h.podStatus("alpha"); got != "failed" {
+		t.Fatalf("alpha status = %q, want failed", got)
+	}
+	if onLoop.Load() {
+		t.Error("Post was called from the loop goroutine")
 	}
 }
