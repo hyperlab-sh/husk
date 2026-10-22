@@ -185,8 +185,9 @@ type ActionReply struct {
 }
 
 type ActionError struct {
-    Code    string // see failure table
+    Code    string         // see failure table
     Message string
+    Data    map[string]any // the wire error's data member, nil when none; e.g. {"reason":"plugin_exited"}
 }
 
 type Dispatcher interface {
@@ -196,6 +197,12 @@ type Dispatcher interface {
     // RegisterHost binds an in-process handler for a husk.* action id or a
     // rail item id. Host handlers run synchronously on the loop.
     RegisterHost(action string, h func(ActionRequest) ActionReply)
+    // Complete turns Calls results (Resolve, Expire, DropPlugin, Close) into
+    // the pending Replies. Results of other requesters are ignored.
+    Complete(results ...calls.Result) int
+    // List returns the catalog entries a caller may invoke (the permission
+    // rule below), with owner liveness; it backs action.list.
+    List(caller Caller) []Listed
 }
 
 // Read-only views the Dispatcher is given. It owns neither. ActionCatalog is
@@ -203,6 +210,7 @@ type Dispatcher interface {
 // the host action list, because Stem never imports Store (Store invariant 4).
 type ActionCatalog interface {
     Lookup(action string) (ActionDef, bool) // config, reloadable
+    List() []ActionDef                      // every entry, for action.list
 }
 type ActionDef struct {
     ID     string
@@ -242,6 +250,29 @@ Permission rule. Let X be the caller and Y the owner:
 | Host | always |
 | Plugin X, X == Y | always |
 | Plugin X, X != Y | only if the catalog entry has `Public == true` |
+
+The rule is `Public`-based for host actions too: a plugin may invoke a `husk.*`
+action only when the host's catalog marks it public. A caller of unknown kind,
+or a plugin caller with no plugin id, is denied.
+
+Notes fixed by the implementation (`internal/stem/dispatcher`):
+
+- A well-formed id has at least two non-empty dot-separated segments, no
+  whitespace, `;`, `=` or backslash, and at most 256 bytes. `args` over 1 MiB, or not
+  encodable as a JSON object, is `invalid_params`.
+- Owner result `null` is an empty object; any other non-object result is
+  `internal`. Numbers keep their exact text (`json.Number`).
+- The catalog adapter accepts a plugin document's action only when its id is
+  `<source>.<name>` with a single-segment name, so a document cannot claim
+  another owner's id or `husk.*`.
+- `params.caller.kind` for a host caller is `"host"`.
+- `action.list` returns the entries the caller could invoke: Input, CLI and
+  Host see every entry, a plugin sees its own and the public ones. `live` is
+  true for host actions. The `--owner` filter of `husk action list` is applied
+  by the CLI, since the method has no parameters.
+- `CallerStem` arriving over the `CallsPort` is mapped to Input and carries no
+  focus snapshot (the owner sees an empty focus); Input in the loop calls the
+  Dispatcher directly to pass its own.
 
 Default is deny. A plugin marks an action public in its manifest
 (`"actions": [{"id": "notes.new", "title": "New note", "public": true}]`). The
