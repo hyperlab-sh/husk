@@ -46,6 +46,26 @@ func decode[T any](value json.RawMessage) (T, error) {
 	return v, err
 }
 
+// Namespace returns the slice's namespace, also after unregistration; the
+// empty string for a nil slice. The Pod owning plugin-side slices checks
+// plugin write requests against it before consulting the capability.
+func (s *Slice[T]) Namespace() string {
+	if s == nil {
+		return ""
+	}
+	return s.handle.Namespace()
+}
+
+// Unregister removes the slice, keeping the last revision as a tombstone.
+// Repeated calls are harmless. This is the owner-cleanup path: a Pod tears
+// down its plugin's slices with it.
+func (s *Slice[T]) Unregister() {
+	if s == nil {
+		return
+	}
+	s.handle.Unregister()
+}
+
 // Get returns an independently decoded current value, including user clears.
 // Callers treat it as read-only. After unregistration it returns T's zero value.
 func (s *Slice[T]) Get() T {
