@@ -13,7 +13,7 @@ The slot layout follows the model used by `bb`. Husk is application-agnostic: it
 
 ## Status
 
-Husk is early. The workbench core, the IPC protocol, the activity rail and plugin manifests work. The bundled plugins are a small reference plugin pair (`plugins/reference`) that shows frames, a published slot, a hook and an event. Open work is tracked in beads.
+Husk is early. The workbench core, the wire protocol, the activity rail and plugin manifests work. The bundled plugins are a small reference plugin pair (`plugins/reference`) that shows frames, a published slot, a hook and an event. Open work is tracked in beads.
 
 See [Getting Started](/getting-started/) to run it and [Architecture](/architecture/) for the slot model and protocol.
 

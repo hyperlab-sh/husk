@@ -594,12 +594,12 @@ Hook runner invariants:
 - `cmd/husk/input.go`: key resolution still ends in an action id, now passed
   to `Dispatcher.Invoke` with a continuation. `slot_key` to the focused
   surface is not an action and is outside this spec.
-- `pkg/huskipc`: `CommandInvokePayload`, `HookCallPayload`,
+- `pkg/huskipc` (deleted; the replacements live in `pkg/protocol`): `CommandInvokePayload`, `HookCallPayload`,
   `HookResultPayload`, `EventPayload`, `HookSubscribePayload` and
   `EventSubscribePayload` are replaced by the Protocol request and
-  notification envelopes. They remain for the legacy `type`-keyed envelope
-  until the major bump.
-- `pkg/manifest`: gains `actions[].public`, `events.subscribe`,
+  notification envelopes. The legacy `type`-keyed envelope is gone with the
+  package.
+- `pkg/manifest` (deleted; the converter is `internal/pods/manifest`): gains `actions[].public`, `events.subscribe`,
   `events.publish[].coalesce` and `hooks.subscribe`. Existing `hooks` and
   `events` declaration arrays are read as publish declarations.
 - `docs/docs/architecture.md`: "Hooks" and "Events and lifetime" describe the

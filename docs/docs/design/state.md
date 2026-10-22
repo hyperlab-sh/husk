@@ -630,11 +630,8 @@ With one:
   driven by the geometry writes. `minTermWidth`, `minTermHeight` and
   `surfaceGutter` stay as Surfaces constants. `leftSideShown` and
   `rightSideShown` become reads of `husk.layout` and `husk.surfaces`.
-- `pkg/huskipc`: keeps the existing messages during the transition.
-  `WorkspaceContextPayload` is retired once the workspace slice lands. The
-  `state.*` request and reply shapes are added to the protocol package that
-  replaces it.
-- `pkg/manifest`: `Plugin` gains an optional `State` block (`scope`,
+- `pkg/huskipc`: deleted in the retirement. `WorkspaceContextPayload` is gone with it, and the `state.*` request and reply shapes live in `pkg/protocol`.
+- `pkg/manifest` (deleted; now `internal/pods/manifest`): `Plugin` gains an optional `State` block (`scope`,
   `persistent`, `retention`, `max_bytes`). `Slots` stays: which surfaces a
   plugin claims is declared config; which surface it actually occupies is
   resolved in `husk.surfaces`.

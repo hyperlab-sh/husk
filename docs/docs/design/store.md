@@ -659,9 +659,10 @@ files or discards the internal diagnostic history.
   config. New flags: `--instance <name>`, `--distribution <dir>`,
   `--profile <name>` ([Services](services.md)). `main`
   opens Store before the listener and closes it after `model.cleanup`.
-- `pkg/manifest`: unchanged. It still reads `husk-plugin.json` read-only; the
-  catalog it yields reaches Store through `Declare`, called by Pods.
-- `pkg/huskipc`: becomes `pkg/protocol` ([Protocol](protocol.md)); its
+- `pkg/manifest`: deleted in the retirement; `internal/pods/manifest` reads
+  `husk-plugin.json` read-only, and the catalog it yields reaches Store through
+  `Declare`, called by Pods.
+- `pkg/huskipc`: became `pkg/protocol` ([Protocol](protocol.md)) and was deleted; its
   `MaxLineBytes` is the line limit State's hard ceiling is derived from.
 - New dependencies: `filippo.io/age`, `github.com/zalando/go-keyring`,
   `github.com/tailscale/hujson`.
