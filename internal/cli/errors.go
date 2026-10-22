@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
+	"time"
 
 	"github.com/hyperlab-sh/husk/internal/instance"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
@@ -92,7 +94,21 @@ func resolveErr(err error) *Error {
 		instance.KindTransport:  "transport",
 		instance.KindTaken:      "taken",
 	}[ie.Kind]
-	return &Error{Exit: ie.Kind.ExitCode(), Code: code, Message: ie.Error(), Err: err}
+	out := &Error{Exit: ie.Kind.ExitCode(), Code: code, Message: ie.Error(), Err: err}
+	if ie.Kind == instance.KindAmbiguous {
+		type candidate struct {
+			ID        string    `json:"id"`
+			PID       int       `json:"pid"`
+			StartedAt time.Time `json:"started_at"`
+		}
+		list := make([]candidate, 0, len(ie.Candidates))
+		for _, c := range ie.Candidates {
+			list = append(list, candidate{c.Entry.ID, c.Entry.PID, c.Entry.StartedAt})
+		}
+		sort.Slice(list, func(i, j int) bool { return list[i].ID < list[j].ID })
+		out.Data, _ = json.Marshal(map[string]any{"candidates": list})
+	}
+	return out
 }
 
 // asError wraps any error a command returned. A deadline becomes a transport
@@ -114,4 +130,11 @@ func asError(err error, timeout string) *Error {
 		return transportErr(err, "interrupted")
 	}
 	return &Error{Exit: ExitRemote, Code: "error", Message: err.Error(), Err: err}
+}
+
+// runtimeDirErr is a runtime directory the CLI cannot use (missing, or not
+// private to the uid). It shares exit 5 with a directory that cannot be
+// read during discovery.
+func runtimeDirErr(err error) *Error {
+	return &Error{Exit: ExitTransport, Code: "runtime_dir", Message: err.Error(), Err: err}
 }

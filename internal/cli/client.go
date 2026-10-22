@@ -36,6 +36,10 @@ type Client struct {
 	events chan event
 	done   chan struct{}
 	once   sync.Once
+
+	// cancel ends the command's context when the client closes; nil when
+	// the client has none.
+	cancel context.CancelFunc
 }
 
 // event is one thing the reader goroutine saw: a message, a malformed
@@ -90,6 +94,9 @@ func (c *Client) Close() error {
 	c.once.Do(func() {
 		close(c.done)
 		err = c.conn.Close()
+		if c.cancel != nil {
+			c.cancel()
+		}
 	})
 	return err
 }

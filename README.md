@@ -43,7 +43,7 @@ husk ping --instance 4242             # choose an instance by id (or --socket <p
 husk ping --format table --timeout 5s
 ```
 
-Every subcommand takes `--instance <id>` or `--socket <path>` (not both), `--format json|table` (default `table` on a terminal, `json` otherwise) and `--timeout <duration>`; the flags may come before or after the arguments. With no flag or environment variable and exactly one live instance, that one is used. Results go to stdout, errors to stderr (one JSON object in JSON mode, `husk: <message>` in table mode). Exit codes: 0 success, 1 the instance replied with an error, 2 usage, 3 no instance, 4 several instances and none chosen, 5 transport (connect failed, timeout, connection dropped), 6 protocol (unreadable reply or a different protocol major). See [Instances and the CLI](docs/docs/design/instances.md).
+Global flags follow the subcommand (`husk ping --format json`); before it they would reach the instance's own flag parser. Every subcommand takes `--instance <id>` or `--socket <path>` (not both), `--format json|table` (default `table` on a terminal, `json` otherwise) and `--timeout <duration>`; the flags may come before or after the arguments. With no flag or environment variable and exactly one live instance, that one is used. Results go to stdout, errors to stderr (one JSON object in JSON mode, `husk: <message>` in table mode). Exit codes: 0 success, 1 the instance replied with an error, 2 usage, 3 no instance, 4 several instances and none chosen, 5 transport (connect failed, timeout, connection dropped), 6 protocol (unreadable reply or a different protocol major). See [Instances and the CLI](docs/docs/design/instances.md).
 
 ## Concepts
 

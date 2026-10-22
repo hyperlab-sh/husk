@@ -11,7 +11,7 @@ import (
 // result printed.
 func runRPC(ctx context.Context, inv *Invocation, args []string) error {
 	if len(args) < 1 || len(args) > 2 {
-		return usageErr("usage: husk rpc <method> [params-json]")
+		return usageErr("rpc takes <method> [params-json]")
 	}
 	method := args[0]
 	if err := protocol.ValidateMethod(method); err != nil {
@@ -25,7 +25,7 @@ func runRPC(ctx context.Context, inv *Invocation, args []string) error {
 		}
 		params = json.RawMessage(args[1])
 	}
-	c, _, err := inv.Dial(ctx)
+	c, ctx, _, err := inv.Dial(ctx)
 	if err != nil {
 		return err
 	}
