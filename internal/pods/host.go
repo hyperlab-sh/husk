@@ -157,6 +157,11 @@ func (h *Host) Start(id string, opening []protocol.Message) error {
 	p.process = process
 	h.register(id, process.Token()) // before Start: even an immediate exit revokes it
 	if err := process.Start(opening); err != nil {
+		// The Wrapper opened the stderr log before cmd.Start, so even a
+		// failed start carries its path; keep it for the failure liveness
+		// (the async duplicate LaunchFailedMsg that would carry it is
+		// dropped by the once-only rule).
+		p.info.LogPath = process.Info().LogPath
 		h.revoke(id)
 		return err
 	}
@@ -311,7 +316,12 @@ func (h *Host) Handle(msg tea.Msg) bool {
 		}
 		h.revoke(m.PluginID)
 		p.info.Status = wrapper.Failed
-		p.info.LogPath = m.LogPath
+		if m.LogPath != "" {
+			// Only a notice that actually carries a path overwrites one; the
+			// synchronous failure report has none and must not clobber the
+			// path Start copied from the Wrapper.
+			p.info.LogPath = m.LogPath
+		}
 		p.info.LastError = m.Err.Error()
 		h.loop.Liveness(LivenessMsg{Info: p.Info()})
 		h.loop.Log(LogMsg{PluginID: m.PluginID, Level: "error", Message: fmt.Sprintf("failed to launch plugin %s: %v", m.PluginID, m.Err)})

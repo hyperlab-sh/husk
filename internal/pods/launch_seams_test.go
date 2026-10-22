@@ -319,7 +319,10 @@ func TestLaunchFailedAppliedOnce(t *testing.T) {
 	h, loop, _, _ := hostFixture(t)
 	p := addPod(t, h, "files")
 	err := errors.New("spawn refused")
-	h.Handle(LaunchFailedMsg{PluginID: "files", Err: err})
+	// First report is the Wrapper's async notice, which carries the log
+	// path; the duplicate (the synchronous report) has none and must not
+	// clobber it.
+	h.Handle(LaunchFailedMsg{PluginID: "files", Err: err, LogPath: "/runtime/logs/files/plugin.log"})
 	h.Handle(LaunchFailedMsg{PluginID: "files", Err: err})
 
 	var failed int
@@ -330,6 +333,9 @@ func TestLaunchFailedAppliedOnce(t *testing.T) {
 	}
 	if failed != 1 || p.info.Status != wrapper.Failed {
 		t.Fatal("failure applied more than once", failed, p.info.Status)
+	}
+	if p.info.LogPath != "/runtime/logs/files/plugin.log" {
+		t.Fatal("failure lost its log path", p.info.LogPath)
 	}
 	if len(loop.logs) != 1 || loop.logs[0].Level != "error" {
 		t.Fatal("failure logs", loop.logs)
@@ -380,6 +386,11 @@ func TestStartFailureIsSynchronousAndNeverLive(t *testing.T) {
 	}
 	if pod.info.Status != wrapper.Failed || pod.info.LastError != "spawn refused" {
 		t.Fatalf("pod state %+v", pod.info)
+	}
+	// The Wrapper opened the log before the failed Start; the path survives
+	// the synchronous failure (round-2 finding 3).
+	if pod.info.LogPath != "/runtime/logs/files/plugin.log" {
+		t.Fatal("failed start lost its log path", pod.info.LogPath)
 	}
 	if len(loop.logs) != 1 || loop.logs[0].Level != "error" {
 		t.Fatal("error logs", loop.logs)
