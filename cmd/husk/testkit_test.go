@@ -40,6 +40,7 @@ type fakeFE struct {
 	Snap     *state.Snapshot
 	Rails    []contracts.RailItem
 	PubSlots []contracts.PublishedSlot
+	Acts     []contracts.PluginAction
 	Frames   map[string]map[protocol.SurfaceID]protocol.FrameSpec
 	// HintsFn answers Hints; nil advertises none.
 	HintsFn func(contracts.KeyContext) []contracts.KeyHint
@@ -199,6 +200,7 @@ func (f *fakeFE) SendKeyState(plugin string, p protocol.KeyStateParams) error {
 }
 func (f *fakeFE) RailItems() []contracts.RailItem           { return f.Rails }
 func (f *fakeFE) PublishedSlots() []contracts.PublishedSlot { return f.PubSlots }
+func (f *fakeFE) Actions() []contracts.PluginAction         { return f.Acts }
 func (f *fakeFE) SurfaceFrames() map[string]map[protocol.SurfaceID]protocol.FrameSpec {
 	return f.Frames
 }

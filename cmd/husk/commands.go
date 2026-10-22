@@ -127,7 +127,28 @@ type paletteCommand struct {
 }
 
 func (m *WorkbenchModel) allCommands() []paletteCommand {
-	return m.builtinCommands()
+	rows := m.builtinCommands()
+	if m.fe == nil {
+		return rows
+	}
+	for _, a := range m.fe.Actions() {
+		if !m.plugins[a.Plugin] {
+			continue
+		}
+		title := a.Title
+		if title == "" {
+			title = a.ID
+		}
+		rows = append(rows, paletteCommand{
+			ID:          a.ID,
+			Title:       title,
+			Category:    a.Plugin,
+			Shortcut:    keyHintText(m.keys.KeysFor(a.ID)),
+			Description: a.Description,
+			PluginID:    a.Plugin,
+		})
+	}
+	return rows
 }
 
 // homeTitle is the palette title of husk.home; the key in it is whatever the

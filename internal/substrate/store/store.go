@@ -66,6 +66,7 @@ type Store struct {
 	configMu       sync.Mutex
 	cryptoMu       sync.Mutex
 	declared       map[DocName]map[string]Doc
+	declaredRev    uint64 // bumped by Declare and Undeclare, under mu
 	layerCache     map[docKey]layerLoad
 	resolved       map[docKey]Resolved
 	lastGood       map[docKey]Resolved

@@ -291,3 +291,39 @@ func TestRailAndPaletteFollowTheKeymap(t *testing.T) {
 		t.Fatal("hover pill parentheses")
 	}
 }
+
+// A live plugin's declared actions are palette rows that run through the
+// host with their id; a plugin that is not live contributes none.
+func TestPaletteListsLivePluginActions(t *testing.T) {
+	m := goldenModel()
+	fe := withFE(m)
+	fe.Acts = []contracts.PluginAction{
+		{Plugin: "alpha", ID: "alpha.deploy", Title: "Deploy it", Description: "ships"},
+		{Plugin: "alpha", ID: "alpha.bare"},
+		{Plugin: "ghost", ID: "ghost.boo", Title: "Boo"},
+	}
+	addPlugin(m, "alpha", nil)
+	byID := map[string]paletteCommand{}
+	for _, c := range m.allCommands() {
+		byID[c.ID] = c
+	}
+	d, ok := byID["alpha.deploy"]
+	if !ok || d.Title != "Deploy it" || d.Category != "alpha" || d.PluginID != "alpha" || d.Description != "ships" {
+		t.Fatalf("alpha.deploy row = %+v (ok=%v)", d, ok)
+	}
+	if byID["alpha.bare"].Title != "alpha.bare" {
+		t.Fatalf("untitled action should fall back to its id: %+v", byID["alpha.bare"])
+	}
+	if _, ok := byID["ghost.boo"]; ok {
+		t.Fatal("action of a plugin that is not live was listed")
+	}
+	m.showPalette, m.paletteQuery = true, "deploy"
+	if got := m.filteredCommands(); len(got) != 1 || got[0].ID != "alpha.deploy" {
+		t.Fatalf("filter = %+v", got)
+	}
+	m.paletteCursor = 0
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if len(fe.Invoked) == 0 || fe.Invoked[len(fe.Invoked)-1].Action != "alpha.deploy" {
+		t.Fatalf("enter did not invoke the action: %v", fe.Invoked)
+	}
+}

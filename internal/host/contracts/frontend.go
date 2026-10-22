@@ -82,6 +82,11 @@ type Frontend interface {
 	// sorted by plugin id, then in manifest order. Any goroutine.
 	PublishedSlots() []PublishedSlot
 
+	// Actions lists every action the declared plugins documents carry, sorted
+	// by plugin id, then in manifest order. The caller filters by liveness.
+	// Any goroutine.
+	Actions() []PluginAction
+
 	// SurfaceFrames lists the frame each plugin declared for a surface it
 	// claims (manifest surfaces[].frame), keyed by plugin id and surface; a
 	// surface without a declared frame is absent. Any goroutine.
@@ -251,4 +256,12 @@ type KeyHint struct {
 	Keys   []string `json:"keys"`
 	Action string   `json:"action"`
 	Text   string   `json:"hint"`
+}
+
+// PluginAction is one declared plugin action as the palette lists it.
+type PluginAction struct {
+	Plugin      string
+	ID          string
+	Title       string
+	Description string
 }

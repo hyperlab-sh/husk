@@ -400,6 +400,7 @@ func (s *Store) Declare(name DocName, source string, d Doc) {
 		s.declared[name] = map[string]Doc{}
 	}
 	s.declared[name][source] = copyDoc(d)
+	s.declaredRev++
 }
 
 // Undeclare removes all declared documents belonging to source.
@@ -409,6 +410,15 @@ func (s *Store) Undeclare(source string) {
 	for _, d := range s.declared {
 		delete(d, source)
 	}
+	s.declaredRev++
+}
+
+// DeclaredRevision counts every Declare and Undeclare; a reader that cached
+// something derived from Declared may reuse it while the revision is unchanged.
+func (s *Store) DeclaredRevision() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.declaredRev
 }
 
 // Declared returns independent snapshots, never merged into layered documents.
