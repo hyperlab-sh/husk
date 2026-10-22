@@ -156,7 +156,7 @@ Invariants:
 1. A peer never answers a reply, and never answers a `protocol.error` notification. This keeps two strict peers from looping.
 2. A bad line never closes a channel. Only a major-1 `hello` and transport failures ([Pods](pods.md)) do.
 3. Husk sends at most 10 `protocol.error` notifications per second per channel; excess rejections are counted and logged as one line per second. Reason: a plugin that prints debug text to stdout would otherwise get one notification per line back on stdin.
-4. Every rejection is also logged on Husk's stderr as `husk: protocol error from <caller>: <code>: <message>`, as today.
+4. Rejections are also diagnosed to the host. Stdio uses `husk: protocol error from <caller>: <code>: <message>`, as today. Socket diagnostics are counted and coalesced into at most one per-connection loop notice per second carrying the count and last code ([Pods](pods.md)); the reader never waits on loop logging, and notices may be dropped if the loop is behind. Error replies are never throttled by this diagnostic policy.
 
 ### Versioning
 
