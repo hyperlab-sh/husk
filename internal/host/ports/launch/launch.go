@@ -8,7 +8,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"maps"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -192,26 +194,38 @@ func (s SliceRegistrar) RegisterSlice(spec state.Spec) (contracts.SliceHandle, e
 }
 
 // Preparer composes launch steps 3 to 5 for one batch against the seams: for
-// each spec the catalog and focus-keymap documents are declared atomically and
-// the plugin slice registered, then one shared Services reload is requested
-// and awaited. The reload's completion — applied or not — is the launch gate,
-// so a failed or timed-out reload never blocks the batch; per-plugin
-// declaration or registration failures mark only that plugin failed. It runs
-// in a tea.Cmd worker and may block.
+// each spec the catalog and focus-keymap documents are declared atomically,
+// then the plugin slices are registered — on the loop, before the reload is
+// requested — and one shared Services reload is awaited. The reload's
+// completion — applied or not — is the launch gate, so a failed or timed-out
+// reload never blocks the batch; per-plugin declaration or registration
+// failures mark only that plugin failed. It runs in a tea.Cmd worker and may
+// block.
 type Preparer struct {
 	Catalog contracts.CatalogDeclarer
 	Slices  contracts.SliceRegistrar
 	Reload  contracts.Reloader
+	// Post delivers loop messages from the worker; NewLoop wires it. It is
+	// required when slices must register: the registrations are State writes,
+	// so they run on the loop through RegisterSlicesMsg and the worker waits
+	// for the acknowledgment before requesting the reload (store.md startup
+	// order: slices exist before the first reload reads them).
+	Post func(tea.Msg)
 }
 
 // Prepare implements pods.Loop.Prepare. It runs in a tea.Cmd worker: the
 // Store declarations and the Services reload are off-loop work. State writes
-// are loop-only, so slice registrations are marshaled back as closures the
-// loop applies from Preparation.Register — never executed here.
+// are loop-only, so slice registrations are posted to the loop as
+// RegisterSlicesMsg and the worker blocks on the loop's acknowledgment —
+// never executing a State write itself.
 func (p Preparer) Prepare(ctx context.Context, specs []manifest.Spec) pods.Preparation {
 	failed := make(map[string]error)
-	register := make(map[string]func() error)
+	register := make(map[string]func() (contracts.SliceHandle, error))
 	for _, spec := range specs {
+		if !state.ValidNamespace(spec.ID + ".state") {
+			failed[spec.ID] = fmt.Errorf("launch: plugin id %q cannot own a state slice (namespace %q invalid)", spec.ID, spec.ID+".state")
+			continue
+		}
 		catalog, err := spec.CatalogJSON()
 		if err != nil {
 			failed[spec.ID] = fmt.Errorf("catalog: %w", err)
@@ -230,11 +244,28 @@ func (p Preparer) Prepare(ctx context.Context, specs []manifest.Spec) pods.Prepa
 		}
 		if spec.Slice != nil && p.Slices != nil {
 			slice := sliceSpec(spec.ID, spec.Slice)
-			register[spec.ID] = func() error {
-				if _, err := p.Slices.RegisterSlice(slice); err != nil {
-					return err
+			register[spec.ID] = func() (contracts.SliceHandle, error) {
+				return p.Slices.RegisterSlice(slice)
+			}
+		}
+	}
+	// Step 4 on the loop, acknowledged before the reload is requested: the
+	// first reload must observe every registered slice.
+	if len(register) > 0 {
+		if p.Post == nil {
+			for id := range register {
+				failed[id] = errors.New("launch: Preparer.Post is required to register plugin slices before the reload")
+			}
+		} else {
+			done := make(chan pods.Registered, 1)
+			p.Post(pods.RegisterSlicesMsg{Register: register, Done: done})
+			select {
+			case res := <-done:
+				maps.Copy(failed, res.Failed)
+			case <-ctx.Done():
+				for id := range register {
+					failed[id] = fmt.Errorf("shut down before slice registration: %w", ctx.Err())
 				}
-				return nil
 			}
 		}
 	}
@@ -245,7 +276,7 @@ func (p Preparer) Prepare(ctx context.Context, specs []manifest.Spec) pods.Prepa
 			reloadErr = reloadError{applied: applied, problems: problems}
 		}
 	}
-	return pods.Preparation{Failed: failed, ReloadError: reloadErr, Register: register}
+	return pods.Preparation{Failed: failed, ReloadError: reloadErr}
 }
 
 // reloadError is the non-blocking launch-gate error carried by Preparation.
@@ -321,9 +352,14 @@ func (l Loop) Opening(pluginID string) []protocol.Message {
 	return l.OpeningFn(pluginID)
 }
 
-// Prepare implements pods.Loop.Prepare.
+// Prepare implements pods.Loop.Prepare. The Preparer's Post is wired from
+// the Loop's own delivery function when the composition did not set one.
 func (l Loop) Prepare(ctx context.Context, specs []manifest.Spec) pods.Preparation {
-	return l.Preparer.Prepare(ctx, specs)
+	p := l.Preparer
+	if p.Post == nil {
+		p.Post = l.PostFn
+	}
+	return p.Prepare(ctx, specs)
 }
 
 // Liveness implements pods.Loop.Liveness by writing husk.pods.

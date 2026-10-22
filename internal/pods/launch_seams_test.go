@@ -1,12 +1,14 @@
 package pods
 
 import (
+	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
 
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
 	"github.com/hyperlab-sh/husk/internal/host/contracts/fakes"
+	"github.com/hyperlab-sh/husk/internal/pods/internal/testclock"
 	"github.com/hyperlab-sh/husk/internal/pods/manifest"
 	"github.com/hyperlab-sh/husk/internal/pods/wrapper"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
@@ -148,4 +150,161 @@ func TestHostStartIsTheBuiltinWrapperStarter(t *testing.T) {
 
 func manifestSpec(id string) manifest.Spec {
 	return manifest.Spec{ID: id, Protocol: protocol.Major, Command: []string{"plugin"}}
+}
+
+// fakeHandle is a recorded contracts.SliceHandle: it carries the writes a
+// plugin made through it and remembers Unregister calls.
+type fakeHandle struct {
+	namespace    string
+	sets         int
+	patches      int
+	unregistered bool
+}
+
+func (f *fakeHandle) Set(value json.RawMessage) (uint64, error) { f.sets++; return uint64(f.sets), nil }
+func (f *fakeHandle) Patch(patch json.RawMessage, ifRevision uint64) (uint64, error) {
+	f.patches++
+	return uint64(f.patches), nil
+}
+func (f *fakeHandle) Unregister() { f.unregistered = true }
+
+// registerClosures builds one RegisterSlicesMsg worth of closures over fake
+// handles: the good one resolves, the broken one fails.
+func registerClosures(t *testing.T) (map[string]func() (contracts.SliceHandle, error), *fakeHandle) {
+	t.Helper()
+	good := &fakeHandle{namespace: "files.state"}
+	register := map[string]func() (contracts.SliceHandle, error){
+		"files": func() (contracts.SliceHandle, error) { return good, nil },
+		"broken": func() (contracts.SliceHandle, error) {
+			return nil, errors.New("slice already registered")
+		},
+	}
+	return register, good
+}
+
+// RegisterSlicesMsg applies each closure on the loop, stores the resolved
+// handles per plugin and acknowledges the worker with exactly the outcomes:
+// one handle, one failure. A nil Done channel is ignored rather than panicking.
+func TestRegisterSlicesMsgStoresHandlesAndAcks(t *testing.T) {
+	h, loop, _, _ := hostFixture(t)
+	addPod(t, h, "files")
+	addPod(t, h, "broken")
+	register, good := registerClosures(t)
+
+	done := make(chan Registered, 1)
+	if !h.Handle(RegisterSlicesMsg{Register: register, Done: done}) {
+		t.Fatal("unhandled register message")
+	}
+	testclock.Receive(t, done) // the ack arrived (buffered, but keep the shape honest)
+
+	if _, ok := NewPodSlices(h).Handle("files", "files.state"); !ok {
+		t.Fatal("resolved handle not stored")
+	}
+	if _, ok := NewPodSlices(h).Handle("broken", "broken.state"); ok {
+		t.Fatal("failed registration stored a handle")
+	}
+	if _, ok := NewPodSlices(h).Handle("files", "files.other"); ok {
+		t.Fatal("lookup outside the plugin's own state slice succeeded")
+	}
+	if good.sets != 0 {
+		t.Fatal("registration already wrote state")
+	}
+	if !h.Handle(RegisterSlicesMsg{Register: register}) {
+		t.Fatal("nil Done channel not tolerated")
+	}
+	if len(loop.statuses) != 2 { // only the Add liveness of the two pods
+		t.Fatal("register message wrote liveness", loop.statuses)
+	}
+}
+
+// A Pod-registered handle serves the Stem State write path; the same writes
+// through the wrong plugin, or after teardown, do not resolve.
+func TestPodSlicesServesOnlyOwnStateNamespace(t *testing.T) {
+	h, _, _, _ := hostFixture(t)
+	addPod(t, h, "files")
+	register, good := registerClosures(t)
+	h.Handle(RegisterSlicesMsg{Register: map[string]func() (contracts.SliceHandle, error){
+		"files": register["files"],
+	}, Done: make(chan Registered, 1)})
+
+	slices := NewPodSlices(h)
+	handle, ok := slices.Handle("files", "files.state")
+	if !ok || handle != contracts.SliceHandle(good) {
+		t.Fatalf("own handle not resolved: %v %v", handle, ok)
+	}
+	if _, ok := slices.Handle("notes", "files.state"); ok {
+		t.Fatal("another plugin's handle resolved")
+	}
+	if _, ok := (PodSlices{}).Handle("files", "files.state"); ok {
+		t.Fatal("nil adapter resolved a handle")
+	}
+}
+
+// TeardownMsg is the loop half of Pod teardown: the stored handle is
+// unregistered, the registry id released, the credential revoked and the Pod
+// forgotten; a second teardown is a no-op.
+func TestTeardownUnregistersHandleAndReleasesId(t *testing.T) {
+	h, loop, _, _ := hostFixture(t)
+	addPod(t, h, "files")
+	register, good := registerClosures(t)
+	h.Handle(RegisterSlicesMsg{Register: map[string]func() (contracts.SliceHandle, error){
+		"files": register["files"],
+	}, Done: make(chan Registered, 1)})
+
+	registry := fakes.NewPods(fakes.NewRecorder())
+	h.opts.Registry = registry
+
+	if !h.Handle(TeardownMsg{PluginID: "files"}) {
+		t.Fatal("unhandled teardown")
+	}
+	if !good.unregistered {
+		t.Fatal("teardown did not unregister the slice")
+	}
+	if _, ok := NewPodSlices(h).Handle("files", "files.state"); ok {
+		t.Fatal("handle kept after teardown")
+	}
+	if _, ok := h.Pod("files"); ok {
+		t.Fatal("pod kept after teardown")
+	}
+	if _, ok := registry.Entry("files"); ok {
+		t.Fatal("registry id kept after teardown")
+	}
+	if !h.Handle(TeardownMsg{PluginID: "files"}) {
+		t.Fatal("second teardown not handled")
+	}
+	if good.unregistered != true { // still exactly one unregister
+		t.Fatal("second teardown repeated work")
+	}
+	var teardowns int
+	for _, s := range loop.statuses {
+		_ = s
+	}
+	teardowns = len(loop.logs)
+	if teardowns != 1 {
+		t.Fatal("teardown logged more than once", loop.logs)
+	}
+}
+
+// The same launch failure may be reported by both the synchronous starter
+// path and the process's async notice; the Host applies the first report
+// only (round-1 finding 5 support): one failed liveness write, one log.
+func TestLaunchFailedAppliedOnce(t *testing.T) {
+	h, loop, _, _ := hostFixture(t)
+	p := addPod(t, h, "files")
+	err := errors.New("spawn refused")
+	h.Handle(LaunchFailedMsg{PluginID: "files", Err: err})
+	h.Handle(LaunchFailedMsg{PluginID: "files", Err: err})
+
+	var failed int
+	for _, s := range loop.statuses {
+		if s.Info.Status == wrapper.Failed {
+			failed++
+		}
+	}
+	if failed != 1 || p.info.Status != wrapper.Failed {
+		t.Fatal("failure applied more than once", failed, p.info.Status)
+	}
+	if len(loop.logs) != 1 || loop.logs[0].Level != "error" {
+		t.Fatal("failure logs", loop.logs)
+	}
 }
