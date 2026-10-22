@@ -1,70 +1,87 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
+	"fmt"
 	"io"
+	"net"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/hyperlab-sh/husk/pkg/huskipc"
-	"github.com/hyperlab-sh/husk/pkg/manifest"
+	"github.com/hyperlab-sh/husk/internal/pods/manifest"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
-// syncBuf is a stderr stand-in that the test can read while the plugin writes.
-type syncBuf struct {
+const testToken = "tok-123"
+
+// logBuf is a stderr stand-in the test can wait on while the plugin writes.
+type logBuf struct {
 	mu sync.Mutex
 	b  strings.Builder
+	ch chan string
 }
 
-func (s *syncBuf) Write(p []byte) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.b.Write(p)
+func (l *logBuf) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	l.b.Write(p)
+	l.mu.Unlock()
+	select {
+	case l.ch <- string(p):
+	default:
+	}
+	return len(p), nil
 }
 
-func (s *syncBuf) String() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.b.String()
+func (l *logBuf) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
 }
 
-// harness runs a plugin over pipes and exposes its output as envelopes.
+// harness runs a plugin over pipes: the host's stdin, the plugin's stdout and
+// a socket connection. Nothing sleeps; ordering comes from the plugin's
+// single loop and from channel receives.
 type harness struct {
-	t    *testing.T
-	in   *io.PipeWriter
-	out  chan huskipc.Envelope
-	logs *syncBuf
-	done chan error
+	t     *testing.T
+	in    *io.PipeWriter // host -> plugin stdin
+	out   chan protocol.Message
+	sockW net.Conn // host end of the socket
+	sock  chan protocol.Message
+	logs  *logBuf
+	armed chan func() // retry callbacks handed to cfg.after
+	done  chan error
+	pings int
 }
 
 func start(t *testing.T, contributor bool) *harness {
 	t.Helper()
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
-	h := &harness{t: t, in: inW, out: make(chan huskipc.Envelope, 64), logs: &syncBuf{}, done: make(chan error, 1)}
+	plug, host := net.Pipe()
+	h := &harness{
+		t: t, in: inW, sockW: host,
+		out: make(chan protocol.Message, 64), sock: make(chan protocol.Message, 64),
+		logs:  &logBuf{ch: make(chan string, 256)},
+		armed: make(chan func(), 256), done: make(chan error, 1),
+	}
+	pump := func(r io.Reader, ch chan protocol.Message) {
+		_ = protocol.ReadLoop(r, func(m protocol.Message) { ch <- m }, func(le *protocol.LineError) {
+			t.Errorf("plugin wrote an unreadable line: %v", le)
+		})
+		close(ch)
+	}
+	go pump(outR, h.out)
+	go pump(host, h.sock)
 	go func() {
-		sc := bufio.NewScanner(outR)
-		sc.Buffer(nil, huskipc.MaxLineBytes)
-		for sc.Scan() {
-			var e huskipc.Envelope
-			if err := json.Unmarshal(sc.Bytes(), &e); err != nil {
-				t.Errorf("plugin wrote invalid JSON %q: %v", sc.Text(), err)
-				continue
-			}
-			h.out <- e
-		}
-		close(h.out)
-	}()
-	go func() {
-		err := run(contributor, inR, outW, h.logs, 5*time.Millisecond)
+		err := run(config{contributor: contributor, token: testToken, after: func(f func()) { h.armed <- f }}, inR, outW, plug, h.logs)
 		outW.Close()
+		plug.Close()
 		h.done <- err
 	}()
-	t.Cleanup(func() { inW.Close() })
+	t.Cleanup(func() { inW.Close(); host.Close() })
 	return h
 }
 
@@ -75,94 +92,116 @@ func (h *harness) send(line string) {
 	}
 }
 
-func (h *harness) next(typ string) huskipc.Envelope {
+func (h *harness) toSocket(line string) {
 	h.t.Helper()
+	if _, err := io.WriteString(h.sockW, line+"\n"); err != nil {
+		h.t.Fatalf("write to plugin socket: %v", err)
+	}
+}
+
+func recv(t *testing.T, ch chan protocol.Message, what string) protocol.Message {
+	t.Helper()
 	select {
-	case e, ok := <-h.out:
+	case m, ok := <-ch:
 		if !ok {
-			h.t.Fatalf("plugin output closed while waiting for %s", typ)
+			t.Fatalf("channel closed while waiting for %s", what)
 		}
-		if e.Type != typ {
-			h.t.Fatalf("got %s, want %s", e.Type, typ)
-		}
-		return e
-	case <-time.After(2 * time.Second):
-		h.t.Fatalf("timed out waiting for %s", typ)
+		return m
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out waiting for %s", what)
 	}
-	return huskipc.Envelope{}
+	return protocol.Message{}
 }
 
-// quiet asserts the plugin writes nothing within a short window.
-func (h *harness) quiet() {
+// sockNext returns the next socket message, which must be method and carry the
+// plugin's token.
+func (h *harness) sockNext(method string) protocol.Message {
 	h.t.Helper()
-	select {
-	case e := <-h.out:
-		h.t.Fatalf("expected no output, got %s", e.Type)
-	case <-time.After(60 * time.Millisecond):
+	m := recv(h.t, h.sock, method)
+	if m.Method != method {
+		h.t.Fatalf("socket got %q, want %q", m.Method, method)
+	}
+	if m.Token != testToken {
+		h.t.Errorf("%s token = %q, want %q", method, m.Token, testToken)
+	}
+	return m
+}
+
+func (h *harness) outNext() protocol.Message {
+	h.t.Helper()
+	return recv(h.t, h.out, "a reply on stdout")
+}
+
+func decode[T any](t *testing.T, raw json.RawMessage) T {
+	t.Helper()
+	var v T
+	if err := json.Unmarshal(raw, &v); err != nil {
+		t.Fatalf("decode %s: %v", raw, err)
+	}
+	return v
+}
+
+func (h *harness) update() protocol.SurfaceUpdateParams {
+	h.t.Helper()
+	return decode[protocol.SurfaceUpdateParams](h.t, h.sockNext(protocol.MethodSurfaceUpdate).Params)
+}
+
+// stdoutBarrier proves the plugin processed everything sent on stdin so far
+// and wrote nothing to stdout in between: its single loop answers an unknown
+// request after handling every earlier line.
+func (h *harness) stdoutBarrier() {
+	h.t.Helper()
+	h.pings++
+	id := fmt.Sprintf("barrier-%d", h.pings)
+	h.send(`{"id":"` + id + `","method":"barrier.ping"}`)
+	m := h.outNext()
+	if m.ID == nil || m.ID.String() != `"`+id+`"` || m.Error == nil || m.Error.Code != protocol.CodeUnknownMethod {
+		h.t.Fatalf("expected the barrier's unknown_method reply, got %+v", m)
 	}
 }
 
-func welcome(w, hgt int) string {
-	return `{"type":"welcome","welcome":{"protocol_version":"1.1","slot_sizes":{"main-stage":{"width":` + itoa(w) + `,"height":` + itoa(hgt) + `}}}}`
+func (h *harness) key(surface, key string) {
+	h.send(`{"method":"input.key","params":{"surface":"` + surface + `","key":"` + key + `","modifiers":{"alt":false,"ctrl":false,"shift":false,"super":false}}}`)
 }
 
-func itoa(n int) string {
-	b, _ := json.Marshal(n)
-	return string(b)
+func resized(surface string, w, hgt int, focused, visible bool) string {
+	return fmt.Sprintf(`{"method":"surface.resized","params":{"surfaces":[{"surface":"%s","width":%d,"height":%d,"focused":%t,"visible":%t}]}}`,
+		surface, w, hgt, focused, visible)
 }
 
-func TestPublisherHelloDeclaresEveryExtensionPoint(t *testing.T) {
-	h := start(t, false)
-	hello := h.next("hello").Hello
-	if hello.ProtocolVersion != huskipc.ProtocolVersion {
-		t.Errorf("protocol_version = %q, want %q", hello.ProtocolVersion, huskipc.ProtocolVersion)
-	}
-	if hello.PluginID != publisherID || len(hello.Slots) != 1 || hello.Slots[0] != huskipc.SlotMainStage {
-		t.Errorf("identity = %q slots %v", hello.PluginID, hello.Slots)
-	}
-	want := huskipc.FrameSpec{Border: true, Label: "Reference plugin", Close: true}
-	if got := hello.Frames[huskipc.SlotMainStage]; got != want {
-		t.Errorf("frame = %+v, want %+v", got, want)
-	}
-	if len(hello.PublishedSlots) != 1 || hello.PublishedSlots[0].ID != rowActionsSlot || hello.PublishedSlots[0].Kind != "inline" {
-		t.Errorf("published slots = %+v", hello.PublishedSlots)
-	}
-	if len(hello.Hooks) != 1 || hello.Hooks[0].ID != refreshHook || hello.Hooks[0].Title == "" {
-		t.Errorf("hooks = %+v", hello.Hooks)
-	}
-	if len(hello.Events) != 1 || hello.Events[0].ID != selectionEvent || hello.Events[0].Title == "" {
-		t.Errorf("events = %+v", hello.Events)
-	}
-	// Every declared ID must pass the host's namespace rule: the final dot
-	// separates the plugin ID from one dot-free name.
-	for _, id := range []string{rowActionsSlot, refreshHook, selectionEvent} {
-		i := strings.LastIndexByte(id, '.')
-		if id[:i] != publisherID || strings.Contains(id[i+1:], ".") || id[i+1:] == "" {
-			t.Errorf("id %q is not in the %s namespace", id, publisherID)
+func (h *harness) waitLog(substr string) {
+	h.t.Helper()
+	deadline := time.After(5 * time.Second)
+	for !strings.Contains(h.logs.String(), substr) {
+		select {
+		case <-h.logs.ch:
+		case <-deadline:
+			h.t.Fatalf("log never contained %q: %q", substr, h.logs.String())
 		}
 	}
 }
 
-func TestRenderUsesSlotSizeAndAnchors(t *testing.T) {
+func TestRenderUsesSurfaceSizeAndAnchors(t *testing.T) {
 	h := start(t, false)
-	h.next("hello")
-	h.send(welcome(50, 20))
-	u := h.next("slot_update").SlotUpdate
-	if u.Slot != huskipc.SlotMainStage || u.PluginID != publisherID {
-		t.Fatalf("slot_update target = %s/%s", u.PluginID, u.Slot)
+	h.send(resized("main-stage", 50, 20, true, true))
+	u := h.update()
+	if u.Surface != protocol.SurfaceMainStage || u.Title != "Reference plugin" {
+		t.Fatalf("surface.update target = %s %q", u.Surface, u.Title)
 	}
 	if got := u.Lines[1]; got != strings.Repeat("─", 50) {
 		t.Errorf("separator = %d cells, want 50", len([]rune(got)))
 	}
 	for i, row := range rows {
-		line := u.Lines[2+i]
 		anchor := "\x1b]husk;slot=" + rowActionsSlot + ";key=" + row + "\x1b\\"
-		if !strings.HasSuffix(line, anchor) {
+		if line := u.Lines[2+i]; !strings.HasSuffix(line, anchor) {
 			t.Errorf("row %d = %q, want anchor suffix %q", i, line, anchor)
 		}
 	}
 	if !strings.HasPrefix(u.Lines[2], "> alpha") || !strings.HasPrefix(u.Lines[3], "  bravo") {
 		t.Errorf("selection marker wrong: %q %q", u.Lines[2], u.Lines[3])
+	}
+	if !strings.Contains(strings.Join(u.Lines, "\n"), "size 50x20 · replies: none") {
+		t.Errorf("status line = %q", u.Lines)
 	}
 	for i, l := range u.Lines {
 		if i >= 2 && i < 2+len(rows) {
@@ -173,158 +212,281 @@ func TestRenderUsesSlotSizeAndAnchors(t *testing.T) {
 		}
 	}
 
-	h.send(`{"type":"slot_resize","slot_resize":{"slot_sizes":{"main-stage":{"width":30,"height":10}}}}`)
-	u = h.next("slot_update").SlotUpdate
+	h.send(resized("main-stage", 30, 10, true, true))
+	u = h.update()
 	if got := u.Lines[1]; got != strings.Repeat("─", 30) {
 		t.Errorf("after resize separator = %d cells, want 30", len([]rune(got)))
 	}
 	if !strings.Contains(strings.Join(u.Lines, "\n"), "size 30x10") {
 		t.Errorf("status line does not report the new size: %q", u.Lines)
 	}
+}
 
-	// Same size again, and any modifier traffic, must not re-render.
-	h.send(`{"type":"slot_resize","slot_resize":{"slot_sizes":{"main-stage":{"width":30,"height":10}}}}`)
-	h.send(`{"type":"key_state","key_state":{"phase":"down","key":"alt","held":true,"modifiers":{"alt":true}}}`)
-	h.quiet()
+func TestNothingRendersWhenNothingVisibleChanged(t *testing.T) {
+	h := start(t, false)
+	h.send(resized("main-stage", 30, 10, true, true))
+	h.update()
+	h.send(resized("main-stage", 30, 10, true, true))   // identical
+	h.send(resized("main-stage", 30, 10, false, true))  // focus only
+	h.send(resized("main-stage", 40, 12, false, false)) // hidden
+	h.send(resized("side-panel", 40, 12, false, true))  // not ours
+	h.send(resized("main-stage", 0, 0, true, true))     // no room
+	h.send(`{"method":"input.key_state","params":{"phase":"down","key":"alt","held":true,"modifiers":{"alt":true,"ctrl":false,"shift":false,"super":false}}}`)
+	h.send(`{"method":"theme.changed","params":{"palette":{"name":"x"}}}`)
+	h.send(`{"method":"input.mouse","params":{"surface":"main-stage","x":1,"y":1,"button":"left"}}`)
+	h.send(resized("main-stage", 40, 12, false, true)) // visible again: renders
+	// The next socket message must be that render, not one of the above.
+	if u := h.update(); u.Surface != protocol.SurfaceMainStage || !strings.Contains(strings.Join(u.Lines, "\n"), "size 40x12") {
+		t.Errorf("first render after the quiet period = %q", u.Lines)
+	}
+	h.stdoutBarrier()
 }
 
 func TestKeysEmitEventAndCallHook(t *testing.T) {
 	h := start(t, false)
-	h.next("hello")
-	h.send(welcome(60, 20))
-	h.next("slot_update")
+	h.send(resized("main-stage", 60, 20, true, true))
+	h.update()
 
-	h.send(`{"type":"slot_key","slot_key":{"slot":"main-stage","key":"j"}}`)
-	ev := h.next("event_emit").EventEmit
-	if ev.Topic != selectionEvent || ev.Data["row"] != "bravo" {
+	h.key("main-stage", "j")
+	em := h.sockNext(protocol.MethodEventEmit)
+	if em.ID == nil {
+		t.Fatal("event.emit must be a request: the CLI-style caller needs the reply")
+	}
+	ev := decode[struct {
+		Name string
+		Data map[string]any
+	}](t, em.Params)
+	if ev.Name != selectionEvent || ev.Data["row"] != "bravo" {
 		t.Errorf("event = %+v", ev)
 	}
-	if u := h.next("slot_update").SlotUpdate; !strings.HasPrefix(u.Lines[3], "> bravo") {
+	if u := h.update(); !strings.HasPrefix(u.Lines[3], "> bravo") {
 		t.Errorf("selected row not moved: %q", u.Lines[3])
 	}
-	h.send(`{"type":"slot_key","slot_key":{"slot":"main-stage","key":"k"}}`)
-	h.send(`{"type":"slot_key","slot_key":{"slot":"main-stage","key":"k"}}`)
-	h.next("event_emit")
-	h.next("slot_update")
-	if ev := h.next("event_emit").EventEmit; ev.Data["row"] != "charlie" {
-		t.Errorf("selection must wrap to the last row, got %v", ev.Data["row"])
-	}
-	h.next("slot_update")
+	h.toSocket(`{"id":` + em.ID.String() + `,"result":{}}`)
 
-	h.send(`{"type":"slot_key","slot_key":{"slot":"main-stage","key":"r"}}`)
-	c1 := h.next("hook_call").HookCall
-	h.send(`{"type":"slot_key","slot_key":{"slot":"main-stage","key":"r"}}`)
-	c2 := h.next("hook_call").HookCall
-	if c1.ID != refreshHook || c1.RequestID != publisherID+".refresh-1" || c2.RequestID != publisherID+".refresh-2" {
-		t.Errorf("request ids = %q, %q (hook %q)", c1.RequestID, c2.RequestID, c1.ID)
+	h.key("main-stage", "k")
+	h.key("main-stage", "up") // wraps from alpha to charlie
+	h.sockNext(protocol.MethodEventEmit)
+	h.update()
+	last := decode[struct{ Data map[string]any }](t, h.sockNext(protocol.MethodEventEmit).Params)
+	if last.Data["row"] != "charlie" {
+		t.Errorf("selection must wrap to the last row, got %v", last.Data["row"])
+	}
+	h.update()
+	h.key("main-stage", "down") // wraps back to alpha
+	h.sockNext(protocol.MethodEventEmit)
+	h.update()
+
+	h.key("main-stage", "r")
+	c1 := h.sockNext(protocol.MethodHookCall)
+	h.key("main-stage", "r")
+	c2 := h.sockNext(protocol.MethodHookCall)
+	hp := decode[struct {
+		Hook string
+		Data map[string]any
+	}](t, c1.Params)
+	if hp.Hook != refreshHook || hp.Data["reason"] != "manual" {
+		t.Errorf("hook.call params = %+v", hp)
+	}
+	if c1.ID == nil || c2.ID == nil || c1.ID.String() == c2.ID.String() {
+		t.Fatalf("hook.call ids must be distinct: %v %v", c1.ID, c2.ID)
 	}
 
-	h.send(`{"type":"hook_result","hook_result":{"id":"` + refreshHook + `","request_id":"` + c1.RequestID + `","plugin_id":"` + contributorID + `"}}`)
-	got := strings.Join(h.next("slot_update").SlotUpdate.Lines, "\n")
-	if !strings.Contains(got, "replies: 1, last "+contributorID) {
+	h.toSocket(`{"id":` + c1.ID.String() + `,"result":{"results":[{"plugin_id":"` + contributorID + `","data":{"ready":true}}]}}`)
+	if got := strings.Join(h.update().Lines, "\n"); !strings.Contains(got, "replies: 1, last "+contributorID) {
 		t.Errorf("hook result not shown: %q", got)
 	}
-	h.send(`{"type":"hook_result","hook_result":{"id":"` + refreshHook + `","request_id":"x","plugin_id":"` + contributorID + `","error":"timeout"}}`)
-	got = strings.Join(h.next("slot_update").SlotUpdate.Lines, "\n")
-	if !strings.Contains(got, "replies: 2, last timeout") {
-		t.Errorf("hook timeout not shown: %q", got)
+	h.toSocket(`{"id":` + c2.ID.String() + `,"result":{"results":[{"plugin_id":"` + contributorID + `","error":{"code":"timeout","message":"no reply in 10s"}}]}}`)
+	if got := strings.Join(h.update().Lines, "\n"); !strings.Contains(got, "replies: 2, last timeout") {
+		t.Errorf("subscriber timeout not shown: %q", got)
 	}
 
-	// Unbound keys do nothing.
-	h.send(`{"type":"slot_key","slot_key":{"slot":"main-stage","key":"x"}}`)
-	h.quiet()
+	h.key("main-stage", "r")
+	c3 := h.sockNext(protocol.MethodHookCall)
+	h.toSocket(`{"id":` + c3.ID.String() + `,"result":{"results":[]}}`)
+	if got := strings.Join(h.update().Lines, "\n"); !strings.Contains(got, "replies: 2, last no subscribers") {
+		t.Errorf("empty result not shown: %q", got)
+	}
+	h.key("main-stage", "r")
+	c4 := h.sockNext(protocol.MethodHookCall)
+	h.toSocket(`{"id":` + c4.ID.String() + `,"error":{"code":"denied","message":"no"}}`)
+	if got := strings.Join(h.update().Lines, "\n"); !strings.Contains(got, "replies: 3, last denied") {
+		t.Errorf("error reply not shown: %q", got)
+	}
 }
 
-func TestProtocolErrorIsLoggedAndNeverAnswered(t *testing.T) {
+func TestUnboundOrForeignKeysDoNothing(t *testing.T) {
 	h := start(t, false)
-	h.next("hello")
-	h.send(`{"type":"protocol_error","protocol_error":{"message_type":"slot_update","message":"nope"}}`)
-	h.quiet()
-	if !strings.Contains(h.logs.String(), `host rejected "slot_update": nope`) {
-		t.Errorf("stderr = %q", h.logs.String())
+	h.send(resized("main-stage", 60, 20, true, true))
+	h.update()
+	h.key("main-stage", "x")                                                                   // unbound
+	h.key("side-panel", "j")                                                                   // surface the plugin does not occupy
+	h.send(`{"method":"input.key","params":{"surface":"main-stage","key":"","modifiers":{}}}`) // invalid
+	h.send(`{"method":"input.key","params":"nope"}`)
+	// The barrier's event.emit is the first thing on the socket, and it moved
+	// the selection exactly once.
+	h.key("main-stage", "j")
+	if ev := decode[struct{ Data map[string]any }](t, h.sockNext(protocol.MethodEventEmit).Params); ev.Data["row"] != "bravo" {
+		t.Errorf("selection = %v after one effective key, want bravo", ev.Data["row"])
 	}
+	h.update()
+}
+
+func TestRepliesToUnknownReplyIdsAreIgnored(t *testing.T) {
+	h := start(t, false)
+	h.toSocket(`{"id":999,"result":{}}`)
+	h.waitLog("reply 999 matches no request")
+}
+
+func TestHostRequestsGetErrorRepliesAndErrorsAreNeverAnswered(t *testing.T) {
+	h := start(t, false)
+	h.send(`{"id":5,"method":"action.invoke","params":{"action":"go.reference.nope","args":{}}}`)
+	if m := h.outNext(); m.ID.String() != "5" || m.Error == nil || m.Error.Code != protocol.CodeNotFound {
+		t.Errorf("action.invoke reply = %+v", m)
+	}
+	h.send(`{"id":6,"method":"hook.call","params":{"hook":"` + refreshHook + `","data":{}}}`)
+	if m := h.outNext(); m.ID.String() != "6" || m.Error == nil || m.Error.Code != protocol.CodeNotFound {
+		t.Errorf("hook.call on the publisher = %+v", m)
+	}
+	h.send(`{"method":"protocol.error","params":{"code":"invalid_message","message":"nope","method":"surface.update"}}`)
+	h.waitLog(`host rejected "surface.update": invalid_message: nope`)
+	h.toSocket(`{"method":"protocol.error","params":{"code":"denied","message":"bad token","method":"surface.update"}}`)
+	h.waitLog("denied: bad token")
+	h.stdoutBarrier() // nothing was written to stdout for either error
 }
 
 func TestEOFEndsTheRun(t *testing.T) {
 	h := start(t, false)
-	h.next("hello")
 	h.in.Close()
 	select {
 	case err := <-h.done:
 		if err != nil {
 			t.Errorf("run returned %v at EOF", err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("run did not return at EOF")
+	}
+}
+
+func TestSocketCloseEndsTheRunWithAnError(t *testing.T) {
+	h := start(t, false)
+	h.sockW.Close()
+	select {
+	case err := <-h.done:
+		if err == nil || !strings.Contains(err.Error(), "socket closed") {
+			t.Errorf("run returned %v, want a socket closed error", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("run did not return when the socket closed")
 	}
 }
 
 func TestContributorFillsSlotAndAnswersHook(t *testing.T) {
 	h := start(t, true)
-	hello := h.next("hello").Hello
-	if hello.PluginID != contributorID || len(hello.Slots) != 0 {
-		t.Errorf("contributor hello = %+v", hello)
+	c := h.sockNext(protocol.MethodSlotContribute)
+	if c.ID == nil {
+		t.Fatal("slot.contribute must be a request")
 	}
-	h.send(welcome(50, 20))
-	c := h.next("slot_contribute").SlotContribute
-	if c.SlotID != rowActionsSlot || c.ID != inspectContrib || c.OnClick != inspectCommand || !strings.Contains(c.Content, "[inspect]") {
-		t.Errorf("contribution = %+v", c)
+	p := decode[protocol.SlotContributeParams](t, c.Params)
+	if p.SlotID != rowActionsSlot || p.ID != inspectContrib || p.OnClick != inspectAction || !strings.Contains(p.Content, "[inspect]") {
+		t.Errorf("contribution = %+v", p)
 	}
-	if got := h.next("hook_subscribe").HookSubscribe.ID; got != refreshHook {
-		t.Errorf("hook subscription = %q", got)
+	h.toSocket(`{"id":` + c.ID.String() + `,"result":{}}`)
+
+	h.send(`{"id":7,"method":"hook.call","params":{"hook":"` + refreshHook + `","data":{"reason":"manual"}}}`)
+	r := h.outNext()
+	if r.ID.String() != "7" || r.Error != nil || r.Token != "" {
+		t.Fatalf("hook reply = %+v", r)
 	}
-	if got := h.next("event_subscribe").EventSubscribe.ID; got != selectionEvent {
-		t.Errorf("event subscription = %q", got)
+	if got := decode[struct{ Data map[string]any }](t, r.Result); got.Data["ready"] != true {
+		t.Errorf("hook reply data = %v", got.Data)
+	}
+	h.send(`{"id":"h","method":"hook.call","params":{"hook":"someone.else","data":{}}}`)
+	if m := h.outNext(); m.ID.String() != `"h"` || m.Error == nil || m.Error.Code != protocol.CodeNotFound {
+		t.Errorf("foreign hook reply = %+v", m)
 	}
 
-	h.send(`{"type":"hook_call","hook_call":{"id":"` + refreshHook + `","request_id":"go.reference.refresh-7"}}`)
-	r := h.next("hook_result").HookResult
-	if r.ID != refreshHook || r.RequestID != "go.reference.refresh-7" || r.Data["ready"] != true || r.Error != "" {
-		t.Errorf("hook result = %+v", r)
-	}
-
-	h.send(`{"type":"command_invoke","command_invoke":{"command_id":"` + inspectCommand + `","args":{"row_key":"bravo"}}}`)
-	if toast := h.next("toast").Toast; toast.PluginID != contributorID || toast.Message != "row bravo" {
+	h.send(`{"id":8,"method":"action.invoke","params":{"action":"` + inspectAction + `","args":{"row_key":"bravo"},"caller":{"kind":"input"}}}`)
+	toast := decode[protocol.ToastShowParams](t, h.sockNext(protocol.MethodToastShow).Params)
+	if toast.Message != "row bravo" || toast.Title != "Inspect" || toast.Level != "info" {
 		t.Errorf("toast = %+v", toast)
 	}
-	h.send(`{"type":"command_invoke","command_invoke":{"command_id":"someone.else"}}`)
-	h.quiet()
+	if m := h.outNext(); m.ID.String() != "8" || m.Error != nil {
+		t.Errorf("action reply = %+v", m)
+	}
+	h.send(`{"id":9,"method":"action.invoke","params":{"action":"someone.else"}}`)
+	if m := h.outNext(); m.Error == nil || m.Error.Code != protocol.CodeNotFound {
+		t.Errorf("foreign action reply = %+v", m)
+	}
+
+	h.send(`{"method":"event.deliver","params":{"name":"` + selectionEvent + `","source":"` + publisherID + `","data":{"row":"charlie"}}}`)
+	h.waitLog("event " + selectionEvent + " row=charlie")
+
+	// The contributor never renders: resizes and keys are ignored.
+	h.send(resized("main-stage", 50, 20, true, true))
+	h.key("main-stage", "j")
+	h.stdoutBarrier()
+	h.send(`{"id":10,"method":"action.invoke","params":{"action":"` + inspectAction + `","args":{}}}`)
+	// The next socket message is this toast, so the resize and key sent nothing.
+	if got := decode[protocol.ToastShowParams](t, h.sockNext(protocol.MethodToastShow).Params); got.Message != "row " {
+		t.Errorf("toast = %+v", got)
+	}
+	h.outNext()
 }
 
-func TestContributorRetriesWhenPublisherIsNotConnectedYet(t *testing.T) {
+func TestContributorRetriesWhenPublisherIsNotInTheCatalogYet(t *testing.T) {
 	h := start(t, true)
-	h.next("hello")
-	h.send(welcome(50, 20))
-	h.next("slot_contribute")
-	h.next("hook_subscribe")
-	h.next("event_subscribe")
+	c := h.sockNext(protocol.MethodSlotContribute)
+	h.toSocket(`{"id":` + c.ID.String() + `,"error":{"code":"not_found","message":"unknown slot"}}`)
+	fire := recvFn(t, h.armed)
+	select {
+	case <-h.armed:
+		t.Fatal("one refusal must arm exactly one retry")
+	default:
+	}
+	fire()
+	c2 := h.sockNext(protocol.MethodSlotContribute)
+	if c2.ID.String() == c.ID.String() {
+		t.Errorf("a retry must use a fresh request id")
+	}
+	h.toSocket(`{"id":` + c2.ID.String() + `,"result":{}}`)
+	h.stdoutBarrier()
+	select {
+	case <-h.armed:
+		t.Fatal("an accepted contribution must not retry")
+	default:
+	}
+	if !strings.Contains(h.logs.String(), "refused a contribution: not_found") {
+		t.Errorf("log = %q", h.logs.String())
+	}
+}
 
-	// The host answers with protocol_error while the publisher is missing;
-	// the contributor must try again, and must not reply to the error.
-	h.send(`{"type":"protocol_error","protocol_error":{"message_type":"slot_contribute","message":"unknown slot \"` + rowActionsSlot + `\""}}`)
-	h.next("slot_contribute")
-	h.next("hook_subscribe")
-	h.next("event_subscribe")
-	h.quiet()
+func recvFn(t *testing.T, ch chan func()) func() {
+	t.Helper()
+	select {
+	case f := <-ch:
+		return f
+	case <-time.After(5 * time.Second):
+		t.Fatal("no retry was armed")
+	}
+	return nil
 }
 
 func TestContributorRetriesAreBounded(t *testing.T) {
 	h := start(t, true)
-	h.next("hello")
-	for i := 0; i < maxRetries+10; i++ {
-		h.send(`{"type":"protocol_error","protocol_error":{"message_type":"slot_contribute","message":"unknown slot"}}`)
-		// Drain whatever the retry produced so the pipe never blocks.
-		for drained := false; !drained; {
-			select {
-			case <-h.out:
-			case <-time.After(15 * time.Millisecond):
-				drained = true
-			}
-		}
+	for i := 0; i < maxRetries; i++ {
+		c := h.sockNext(protocol.MethodSlotContribute)
+		h.toSocket(`{"id":` + c.ID.String() + `,"error":{"code":"not_found","message":"unknown slot"}}`)
+		recvFn(t, h.armed)()
 	}
-	h.quiet()
-	if n := strings.Count(h.logs.String(), "host rejected"); n != maxRetries+10 {
-		t.Errorf("logged %d rejections, want %d", n, maxRetries+10)
+	c := h.sockNext(protocol.MethodSlotContribute)
+	h.toSocket(`{"id":` + c.ID.String() + `,"error":{"code":"not_found","message":"unknown slot"}}`)
+	h.waitLog(fmt.Sprintf("giving up on contributing after %d retries", maxRetries))
+	h.stdoutBarrier()
+	select {
+	case <-h.armed:
+		t.Fatal("retried past the bound")
+	default:
 	}
 }
 
@@ -346,27 +508,67 @@ func TestClip(t *testing.T) {
 	}
 }
 
-func TestManifestsMatchHelloAndShareOneBinary(t *testing.T) {
-	pub, err := manifest.Load(".")
-	if err != nil {
-		t.Fatal(err)
+func TestLaunchRequiresTheHostEnvironment(t *testing.T) {
+	t.Setenv("HUSK_SOCKET_PATH", "")
+	t.Setenv("HUSK_PLUGIN_TOKEN", "x")
+	if err := launch(false); err == nil || !strings.Contains(err.Error(), "HUSK_SOCKET_PATH") {
+		t.Errorf("missing socket path: %v", err)
 	}
-	act, err := manifest.Load("../reference-actions")
-	if err != nil {
-		t.Fatal(err)
+	t.Setenv("HUSK_SOCKET_PATH", "/nonexistent/husk.sock")
+	t.Setenv("HUSK_PLUGIN_TOKEN", "")
+	if err := launch(false); err == nil {
+		t.Error("missing token must fail")
 	}
-	if pub.ID != publisherID || act.ID != contributorID {
-		t.Errorf("manifest ids = %q, %q; want %q, %q", pub.ID, act.ID, publisherID, contributorID)
+}
+
+func TestManifestsAreValidV2AndMatchThePlugin(t *testing.T) {
+	reg := manifest.NewRegistry()
+	pub, warns, err := reg.Load(".")
+	if err != nil || len(warns) != 0 {
+		t.Fatalf("publisher manifest: %v %v", err, warns)
 	}
-	if pub.Transport != manifest.TransportStdio || act.Transport != manifest.TransportStdio {
-		t.Errorf("transports = %q, %q; both must be stdio", pub.Transport, act.Transport)
+	act, warns, err := reg.Load("../reference-actions")
+	if err != nil || len(warns) != 0 {
+		t.Fatalf("contributor manifest: %v %v", err, warns)
 	}
-	if len(pub.Slots) != 1 || pub.Slots[0] != string(huskipc.SlotMainStage) {
-		t.Errorf("publisher slots = %v", pub.Slots)
+	if pub.ID != publisherID || act.ID != contributorID || pub.Protocol != protocol.Major || act.Protocol != protocol.Major {
+		t.Errorf("identities = %q/%d, %q/%d", pub.ID, pub.Protocol, act.ID, act.Protocol)
 	}
-	pc, ac := pub.ResolvedCommand(), act.ResolvedCommand()
+	if len(pub.Surfaces) != 1 || pub.Surfaces[0].ID != protocol.SurfaceMainStage {
+		t.Fatalf("publisher surfaces = %+v", pub.Surfaces)
+	}
+	if want := (protocol.FrameSpec{Border: true, Label: "Reference plugin", Close: true}); pub.Surfaces[0].Frame == nil || *pub.Surfaces[0].Frame != want {
+		t.Errorf("frame = %+v, want %+v", pub.Surfaces[0].Frame, want)
+	}
+	if len(surfaces) != 1 || surfaces[0] != pub.Surfaces[0].ID {
+		t.Errorf("code renders %v, manifest claims %v", surfaces, pub.Surfaces)
+	}
+	if len(pub.RailItems) != 0 || len(act.Surfaces) != 0 {
+		t.Errorf("no rail items or contributor surfaces expected: %+v %+v", pub.RailItems, act.Surfaces)
+	}
+	if len(pub.PublishedSlots) != 1 || pub.PublishedSlots[0].ID != rowActionsSlot || pub.PublishedSlots[0].Kind != "inline" {
+		t.Errorf("published slots = %+v", pub.PublishedSlots)
+	}
+	if len(pub.HooksDeclared) != 1 || pub.HooksDeclared[0].ID != refreshHook || pub.HooksDeclared[0].Title == "" {
+		t.Errorf("hooks = %+v", pub.HooksDeclared)
+	}
+	if len(pub.EventsDeclared) != 1 || pub.EventsDeclared[0].Name != selectionEvent || pub.EventsDeclared[0].Title == "" {
+		t.Errorf("events = %+v", pub.EventsDeclared)
+	}
+	// The contributor's subscriptions and on_click action are what the code
+	// answers and contributes.
+	if len(act.HookRegistrations) != 1 || act.HookRegistrations[0].ID != refreshHook {
+		t.Errorf("hook registrations = %+v", act.HookRegistrations)
+	}
+	if len(act.Subscriptions) != 1 || act.Subscriptions[0] != selectionEvent {
+		t.Errorf("event subscriptions = %v", act.Subscriptions)
+	}
+	if len(act.Actions) != 1 || act.Actions[0].ID != inspectAction {
+		t.Errorf("actions = %+v", act.Actions)
+	}
+	pc, ac := pub.Argv(), act.Argv()
 	if filepath.Clean(pc[0]) != filepath.Clean(ac[0]) {
-		t.Errorf("both plugins must run the same binary: %q vs %q", pc[0], ac[0])
+		t.Errorf("both plugins must run the same binary: %q vs %q", pc, ac)
 	}
 	if len(pc) != 1 || len(ac) != 2 || ac[1] != "--contributor" {
 		t.Errorf("argv = %q, %q", pc, ac)

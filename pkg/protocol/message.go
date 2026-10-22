@@ -1,7 +1,7 @@
 // Package protocol defines Husk's version 2 JSON-lines wire format. It imports
 // only the standard library; transports and request correlation live elsewhere.
 //
-//go:generate go run github.com/hyperlab-sh/husk/cmd/genschema-v2
+//go:generate go run github.com/hyperlab-sh/husk/cmd/genschema
 package protocol
 
 import (

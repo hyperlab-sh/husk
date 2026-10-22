@@ -1,10 +1,21 @@
 {
+  "manifest_version": 2,
+  "protocol": 2,
   "id": "go.reference",
   "name": "Reference plugin",
   "version": "0.1.0",
-  "language": "Go",
   "description": "Declares a frame, a published slot, a hook and an event; build it first with go build -o plugins/reference/reference ./plugins/reference",
   "command": ["./reference"],
-  "transport": "stdio",
-  "slots": ["main-stage"]
+  "surfaces": [
+    {"id": "main-stage", "frame": {"border": true, "label": "Reference plugin", "close": true}}
+  ],
+  "published_slots": [
+    {"id": "go.reference.row-actions", "title": "Row actions", "description": "Actions beside each row", "kind": "inline"}
+  ],
+  "hooks": {
+    "publish": [{"id": "go.reference.before-refresh", "title": "Before refresh", "description": "Called when the reference plugin refreshes"}]
+  },
+  "events": {
+    "publish": [{"name": "go.reference.selection-changed", "title": "Selection changed", "description": "The selected row changed"}]
+  }
 }

@@ -1,33 +1,42 @@
 // Command reference is Husk's reference plugin. It is deliberately small and
-// exercises every extension point a plugin can use:
+// exercises every extension point a v2 plugin can use:
 //
-//   - a frame (border, label and close declared in hello.frames),
-//   - a published inline slot (row actions anchored in slot_update lines),
+//   - a frame (border, label and close declared on the surface in the manifest),
+//   - a published inline slot (row actions anchored in surface content),
 //   - a hook the plugin calls and an event it emits,
-//   - slot_resize for width, so nothing is hard-coded.
+//   - surface.resized for geometry, so nothing is hard-coded.
 //
 // It runs in one of two roles from the same binary, because a plugin cannot
 // contribute to its own published slot:
 //
-//	reference                 the publisher: owns main-stage, publishes the slot,
-//	                          hook and event
-//	reference --contributor   fills the publisher's slot, answers its hook and
+//	reference                 the publisher: occupies the surfaces its manifest
+//	                          claims, publishes the slots, hook and event
+//	reference --contributor   fills the publisher's slots, answers its hook and
 //	                          listens to its event
 //
-// The wire types come from pkg/huskipc, the same package the host uses, so the
-// plugin cannot drift from the protocol. It speaks stdio (see its manifest).
-// Diagnostics go to stderr, which Husk keeps in the plugin's log file.
+// Transport (protocol 2.0, no handshake): Husk writes requests and
+// notifications to the plugin's stdin; the plugin's stdout carries replies
+// only. Everything the plugin starts itself (surface.update, slot.contribute,
+// event.emit, hook.call, toast.show) goes over the Unix socket named by
+// HUSK_SOCKET_PATH, with HUSK_PLUGIN_TOKEN as the token member of each
+// message. Declarations live in the manifests, not on the wire. Diagnostics go
+// to stderr, which Husk keeps in the plugin's log file.
+//
+// The wire types come from pkg/protocol, the only Husk package this plugin
+// imports.
 package main
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/hyperlab-sh/husk/pkg/huskipc"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
 // IDs follow the <plugin_id>.<name> rule: the final dot separates the plugin
@@ -39,17 +48,19 @@ const (
 	rowActionsSlot = publisherID + ".row-actions"
 	refreshHook    = publisherID + ".before-refresh"
 	selectionEvent = publisherID + ".selection-changed"
-	inspectCommand = contributorID + ".inspect"
-	inspectContrib = contributorID + ".inspect-button"
 
-	stage = huskipc.SlotMainStage
+	inspectAction  = contributorID + ".inspect"
+	inspectContrib = contributorID + ".inspect-button"
 )
+
+// surfaces are the host surfaces the publisher's manifest claims.
+var surfaces = []protocol.SurfaceID{protocol.SurfaceMainStage}
 
 var rows = []string{"alpha", "bravo", "charlie"}
 
 // retryDelay paces setup retries. A contributor can start before the
-// publisher has declared what it subscribes to; the host answers with a
-// protocol_error and the contributor tries again.
+// publisher's declarations are in the catalog; the host refuses the
+// contribution and the contributor tries again.
 const retryDelay = 100 * time.Millisecond
 
 // maxRetries bounds the retries so a missing publisher cannot loop forever.
@@ -57,75 +68,145 @@ const maxRetries = 50
 
 func main() {
 	contributor := len(os.Args) > 1 && os.Args[1] == "--contributor"
-	if err := run(contributor, os.Stdin, os.Stdout, os.Stderr, retryDelay); err != nil {
+	if err := launch(contributor); err != nil {
 		fmt.Fprintln(os.Stderr, "reference:", err)
 		os.Exit(1)
 	}
 }
 
-// plugin is single-threaded: run feeds it one message at a time.
-type plugin struct {
-	contributor bool
-	out         *huskipc.ConnWriter
-	log         io.Writer
-
-	width, height int
-	selected      int
-	requests      int // refresh hook calls made
-	results       int // hook results received
-	lastResult    string
-	lastEvent     string
-
-	retries int
-}
-
-// run drives one plugin until in reaches EOF.
-func run(contributor bool, in io.Reader, out, errw io.Writer, retry time.Duration) error {
-	p := &plugin{contributor: contributor, out: huskipc.NewConnWriter(out), log: errw}
-
-	msgs := make(chan huskipc.Envelope)
-	var readErr error
-	go func() {
-		defer close(msgs)
-		readErr = huskipc.ReadLoopReporting(in, func(e huskipc.Envelope) { msgs <- e }, func(le *huskipc.LineError) {
-			fmt.Fprintf(errw, "reference: unreadable line: %v\n", le)
-		})
-	}()
-
-	if err := p.hello(); err != nil {
+// launch reads the environment the host provides and runs until stdin closes.
+// Neither variable has a default: without them nothing can be rendered.
+func launch(contributor bool) error {
+	path, token := os.Getenv("HUSK_SOCKET_PATH"), os.Getenv("HUSK_PLUGIN_TOKEN")
+	if path == "" || token == "" {
+		return errors.New("HUSK_SOCKET_PATH and HUSK_PLUGIN_TOKEN must be set by the host")
+	}
+	conn, err := net.Dial("unix", path)
+	if err != nil {
 		return err
 	}
-	var mu sync.Mutex // guards timer: AfterFunc fires on its own goroutine
-	var timer *time.Timer
-	tick := make(chan struct{}, 1)
-	schedule := func() {
-		mu.Lock()
-		defer mu.Unlock()
-		if timer != nil {
-			timer.Stop()
+	defer conn.Close()
+	return run(config{
+		contributor: contributor,
+		token:       token,
+		after:       func(f func()) { time.AfterFunc(retryDelay, f) },
+	}, os.Stdin, os.Stdout, conn, os.Stderr)
+}
+
+// config is everything run needs besides its four streams.
+type config struct {
+	contributor bool
+	token       string
+	// after runs f once, later, on any goroutine. It paces setup retries and
+	// is injected so tests never sleep.
+	after func(f func())
+}
+
+type pendingKind int
+
+const (
+	pendingContribute pendingKind = iota + 1
+	pendingHook
+	pendingEmit
+)
+
+// plugin is single-threaded: run feeds it one message at a time.
+type plugin struct {
+	cfg    config
+	stdout *protocol.Writer // replies only
+	sock   *protocol.Writer // everything the plugin initiates
+	log    io.Writer
+
+	nextID  int64
+	pending map[string]pendingKind
+
+	sizes    map[protocol.SurfaceID]protocol.SurfaceSize
+	selected int
+	answered bool // a hook.call reply arrived
+	results  int  // subscriber results received
+	last     string
+
+	arm     func()
+	retries int
+	gaveUp  bool
+}
+
+type source int
+
+const (
+	fromHost source = iota + 1
+	fromSocket
+)
+
+type input struct {
+	from source
+	msg  protocol.Message
+	done bool // the stream ended; msg is zero
+	err  error
+}
+
+// run drives one plugin until stdin reaches EOF. stdin is the host's
+// requests and notifications, stdout takes replies, and sock is the connection
+// to the host's instance socket.
+func run(cfg config, stdin io.Reader, stdout io.Writer, sock io.ReadWriteCloser, errw io.Writer) error {
+	p := &plugin{
+		cfg:     cfg,
+		stdout:  protocol.NewWriter(stdout),
+		sock:    protocol.NewWriter(sock),
+		log:     errw,
+		pending: map[string]pendingKind{},
+		sizes:   map[protocol.SurfaceID]protocol.SurfaceSize{},
+	}
+
+	in := make(chan input)
+	stop := make(chan struct{})
+	defer close(stop)
+	pump := func(from source, r io.Reader) {
+		send := func(i input) {
+			select {
+			case in <- i:
+			case <-stop:
+			}
 		}
-		timer = time.AfterFunc(retry, func() {
+		err := protocol.ReadLoop(r,
+			func(m protocol.Message) { send(input{from: from, msg: m}) },
+			func(le *protocol.LineError) { fmt.Fprintf(errw, "reference: unreadable line: %v\n", le) })
+		send(input{from: from, done: true, err: err})
+	}
+	go pump(fromHost, stdin)
+	go pump(fromSocket, sock)
+
+	tick := make(chan struct{}, 1)
+	p.arm = func() {
+		cfg.after(func() {
 			select {
 			case tick <- struct{}{}:
 			default:
 			}
 		})
 	}
-	defer func() {
-		mu.Lock()
-		defer mu.Unlock()
-		if timer != nil {
-			timer.Stop()
-		}
-	}()
 
+	if cfg.contributor {
+		if err := p.setup(); err != nil {
+			return err
+		}
+	}
 	for {
 		select {
-		case env, ok := <-msgs:
-			if !ok {
-				return readErr
+		case i := <-in:
+			if i.done {
+				if i.from == fromHost {
+					return i.err
+				}
+				return fmt.Errorf("instance socket closed: %v", i.err)
 			}
-			if err := p.handle(env, schedule); err != nil {
+			var err error
+			if i.from == fromHost {
+				err = p.fromHost(i.msg)
+			} else {
+				err = p.fromSocket(i.msg)
+			}
+			if err != nil {
 				return err
 			}
 		case <-tick:
@@ -136,139 +217,274 @@ func run(contributor bool, in io.Reader, out, errw io.Writer, retry time.Duratio
 	}
 }
 
-func (p *plugin) hello() error {
-	h := &huskipc.HelloPayload{
-		ProtocolVersion: huskipc.ProtocolVersion,
-		PluginID:        publisherID,
-		Name:            "Reference plugin",
-		Version:         "0.1.0",
-		Language:        "Go",
-		PID:             os.Getpid(),
-		Description:     "Frame, published slot, hook and event in one small plugin",
-		Slots:           []huskipc.SlotID{stage},
-		Frames: map[huskipc.SlotID]huskipc.FrameSpec{
-			stage: {Border: true, Label: "Reference plugin", Close: true},
-		},
-		PublishedSlots: []huskipc.SlotDeclarePayload{{
-			ID: rowActionsSlot, Title: "Row actions", Description: "Actions beside each row", Kind: "inline",
-		}},
-		Hooks: []huskipc.HookDeclarePayload{{
-			ID: refreshHook, Title: "Before refresh", Description: "Called when the reference plugin refreshes",
-		}},
-		Events: []huskipc.EventDeclarePayload{{
-			ID: selectionEvent, Title: "Selection changed", Description: "The selected row changed",
-		}},
-	}
-	if p.contributor {
-		h = &huskipc.HelloPayload{
-			ProtocolVersion: huskipc.ProtocolVersion,
-			PluginID:        contributorID,
-			Name:            "Reference actions",
-			Version:         "0.1.0",
-			Language:        "Go",
-			PID:             os.Getpid(),
-			Description:     "Contributes to the reference plugin's row actions slot",
-			Slots:           []huskipc.SlotID{},
-		}
-	}
-	return p.out.Send(huskipc.Envelope{Type: "hello", Hello: h})
+// ---- sending
+
+func (p *plugin) sendSock(m protocol.Message) error {
+	m.Token = p.cfg.token
+	return p.sock.Send(m)
 }
 
-// setup is the contributor's work that depends on the publisher being
-// connected. It is safe to repeat: contributions replace by ID and duplicate
-// subscriptions are ignored.
+func (p *plugin) notify(method string, params any) error {
+	raw, err := json.Marshal(params)
+	if err != nil {
+		return err
+	}
+	return p.sendSock(protocol.Message{Method: method, Params: raw})
+}
+
+// call sends a request on the socket and remembers what the reply is for.
+func (p *plugin) call(kind pendingKind, method string, params any) error {
+	raw, err := json.Marshal(params)
+	if err != nil {
+		return err
+	}
+	p.nextID++
+	id, err := protocol.NewIntID(p.nextID)
+	if err != nil {
+		return err
+	}
+	p.pending[id.String()] = kind
+	return p.sendSock(protocol.Message{ID: &id, Method: method, Params: raw})
+}
+
+func (p *plugin) reply(req protocol.Message, result any) error {
+	raw, err := json.Marshal(result)
+	if err != nil {
+		return err
+	}
+	return p.stdout.Send(protocol.Message{ID: req.ID, Result: raw})
+}
+
+func (p *plugin) replyError(req protocol.Message, code protocol.Code, msg string) error {
+	return p.stdout.Send(protocol.Message{ID: req.ID, Error: &protocol.Error{Code: code, Message: msg}})
+}
+
+// ---- contributor setup
+
+// setup is the contributor's work that depends on the publisher's slots being
+// in the host catalog. It is safe to repeat: contributions replace by id.
 func (p *plugin) setup() error {
-	for _, env := range []huskipc.Envelope{
-		{Type: "slot_contribute", SlotContribute: &huskipc.SlotContributePayload{
-			SlotID: rowActionsSlot, ID: inspectContrib, Content: "\x1b[32m[inspect]\x1b[0m", OnClick: inspectCommand,
-		}},
-		{Type: "hook_subscribe", HookSubscribe: &huskipc.HookSubscribePayload{ID: refreshHook}},
-		{Type: "event_subscribe", EventSubscribe: &huskipc.EventSubscribePayload{ID: selectionEvent}},
-	} {
-		if err := p.out.Send(env); err != nil {
+	return p.call(pendingContribute, protocol.MethodSlotContribute, protocol.SlotContributeParams{
+		SlotID: rowActionsSlot, ID: inspectContrib, Content: "\x1b[32m[inspect]\x1b[0m", OnClick: inspectAction,
+	})
+}
+
+// ---- host to plugin (stdin)
+
+func (p *plugin) fromHost(m protocol.Message) error {
+	kind, err := m.Kind()
+	if err != nil {
+		return nil // ReadLoop already validated; nothing to answer
+	}
+	switch kind {
+	case protocol.KindRequest:
+		return p.request(m)
+	case protocol.KindNotification:
+		return p.notification(m)
+	}
+	// A reply on stdin answers nothing this plugin sent there; replies are
+	// never answered.
+	fmt.Fprintln(p.log, "reference: unexpected reply on stdin")
+	return nil
+}
+
+func (p *plugin) request(m protocol.Message) error {
+	switch m.Method {
+	case protocol.MethodActionInvoke:
+		var a struct {
+			Action string            `json:"action"`
+			Args   map[string]string `json:"args"`
+		}
+		if err := json.Unmarshal(m.Params, &a); err != nil {
+			return p.replyError(m, protocol.CodeInvalidParams, "action.invoke params: "+err.Error())
+		}
+		if !p.cfg.contributor || a.Action != inspectAction {
+			return p.replyError(m, protocol.CodeNotFound, fmt.Sprintf("no action %q", a.Action))
+		}
+		if err := p.notify(protocol.MethodToastShow, protocol.ToastShowParams{
+			Level: "info", Title: "Inspect", Message: "row " + a.Args["row_key"],
+		}); err != nil {
 			return err
 		}
+		return p.reply(m, struct{}{})
+	case protocol.MethodHookCall:
+		var h struct {
+			Hook string `json:"hook"`
+		}
+		if err := json.Unmarshal(m.Params, &h); err != nil {
+			return p.replyError(m, protocol.CodeInvalidParams, "hook.call params: "+err.Error())
+		}
+		if !p.cfg.contributor || h.Hook != refreshHook {
+			return p.replyError(m, protocol.CodeNotFound, fmt.Sprintf("not subscribed to %q", h.Hook))
+		}
+		return p.reply(m, map[string]any{"data": map[string]any{"ready": true}})
+	}
+	return p.replyError(m, protocol.CodeUnknownMethod, fmt.Sprintf("unknown method %q", m.Method))
+}
+
+func (p *plugin) notification(m protocol.Message) error {
+	switch m.Method {
+	case protocol.MethodSurfaceResized:
+		if p.cfg.contributor {
+			return nil
+		}
+		var r protocol.SurfaceResizedParams
+		if err := json.Unmarshal(m.Params, &r); err != nil {
+			fmt.Fprintf(p.log, "reference: bad surface.resized: %v\n", err)
+			return nil
+		}
+		return p.resized(r)
+	case protocol.MethodInputKey:
+		if p.cfg.contributor {
+			return nil
+		}
+		var k protocol.SurfaceKeyParams
+		if err := json.Unmarshal(m.Params, &k); err != nil || k.Validate() != nil || !ours(k.Surface) {
+			return nil
+		}
+		return p.key(k.Key)
+	case protocol.MethodEventDeliver:
+		var e struct {
+			Name string         `json:"name"`
+			Data map[string]any `json:"data"`
+		}
+		if json.Unmarshal(m.Params, &e) == nil {
+			fmt.Fprintf(p.log, "reference: event %s row=%v\n", e.Name, e.Data["row"])
+		}
+	case protocol.MethodProtocolError:
+		p.logProtocolError(m)
+	}
+	// Everything else (theme.changed, input.mouse, input.key_state,
+	// slot.contributions) is deliberately ignored: Husk expands the row
+	// anchors itself, and a plugin re-renders only when what it shows changes.
+	return nil
+}
+
+// ---- host to plugin (socket)
+
+func (p *plugin) fromSocket(m protocol.Message) error {
+	kind, err := m.Kind()
+	if err != nil {
+		return nil
+	}
+	switch kind {
+	case protocol.KindReply:
+		return p.complete(m)
+	case protocol.KindNotification:
+		if m.Method == protocol.MethodProtocolError {
+			p.logProtocolError(m)
+		}
+	}
+	// Never answer: two strict peers answering each other would loop.
+	return nil
+}
+
+func (p *plugin) logProtocolError(m protocol.Message) {
+	var e protocol.ProtocolErrorParams
+	if json.Unmarshal(m.Params, &e) == nil {
+		fmt.Fprintf(p.log, "reference: host rejected %q: %s: %s\n", e.Method, e.Code, e.Message)
+	}
+}
+
+// complete completes the pending request the reply belongs to.
+func (p *plugin) complete(m protocol.Message) error {
+	key := m.ID.String()
+	kind, ok := p.pending[key]
+	if !ok {
+		fmt.Fprintf(p.log, "reference: reply %s matches no request\n", key)
+		return nil
+	}
+	delete(p.pending, key)
+	switch kind {
+	case pendingContribute:
+		if m.Error == nil {
+			return nil
+		}
+		fmt.Fprintf(p.log, "reference: host refused a contribution: %s: %s\n", m.Error.Code, m.Error.Message)
+		p.retry()
+	case pendingEmit:
+		if m.Error != nil {
+			fmt.Fprintf(p.log, "reference: event refused: %s: %s\n", m.Error.Code, m.Error.Message)
+		}
+	case pendingHook:
+		p.answered = true
+		if m.Error != nil {
+			p.results++
+			p.last = string(m.Error.Code)
+			return p.renderAll()
+		}
+		var res struct {
+			Results []struct {
+				PluginID string          `json:"plugin_id"`
+				Error    *protocol.Error `json:"error"`
+			} `json:"results"`
+		}
+		if err := json.Unmarshal(m.Result, &res); err != nil {
+			fmt.Fprintf(p.log, "reference: bad hook.call result: %v\n", err)
+		}
+		p.last = "no subscribers"
+		for _, r := range res.Results {
+			p.results++
+			p.last = r.PluginID
+			if r.Error != nil {
+				p.last = string(r.Error.Code)
+			}
+		}
+		return p.renderAll()
 	}
 	return nil
 }
 
-func (p *plugin) handle(env huskipc.Envelope, retry func()) error {
-	switch env.Type {
-	case "welcome":
-		if w := env.Welcome; w != nil {
-			p.resize(w.SlotSizes)
+// retry arms one setup retry unless the budget is spent.
+func (p *plugin) retry() {
+	if p.gaveUp {
+		return
+	}
+	if p.retries >= maxRetries {
+		p.gaveUp = true
+		fmt.Fprintf(p.log, "reference: giving up on contributing after %d retries\n", maxRetries)
+		return
+	}
+	p.retries++
+	p.arm()
+}
+
+// ---- publisher: state and rendering
+
+func ours(s protocol.SurfaceID) bool {
+	for _, o := range surfaces {
+		if o == s {
+			return true
 		}
-		if p.contributor {
-			return p.setup()
+	}
+	return false
+}
+
+func (s sizeKey) usable() bool { return s.visible && s.w > 0 && s.h > 0 }
+
+type sizeKey struct {
+	w, h    int
+	visible bool
+}
+
+func keyOf(s protocol.SurfaceSize) sizeKey { return sizeKey{s.Width, s.Height, s.Visible} }
+
+// resized stores the new geometry and renders each surface whose size or
+// visibility changed; a focus-only change renders nothing.
+func (p *plugin) resized(r protocol.SurfaceResizedParams) error {
+	for _, s := range r.Surfaces {
+		if !ours(s.Surface) {
+			continue
 		}
-		return p.render()
-	case "slot_resize":
-		if env.SlotResize == nil {
-			return nil
-		}
-		w, h := p.width, p.height
-		p.resize(env.SlotResize.SlotSizes)
-		if p.contributor || (w == p.width && h == p.height) {
-			return nil
-		}
-		return p.render()
-	case "slot_key":
-		if p.contributor || env.SlotKey == nil {
-			return nil
-		}
-		return p.key(env.SlotKey.Key)
-	case "hook_result":
-		if p.contributor || env.HookResult == nil {
-			return nil
-		}
-		p.results++
-		p.lastResult = env.HookResult.PluginID
-		if env.HookResult.Error != "" {
-			p.lastResult = env.HookResult.Error
-		}
-		return p.render()
-	case "hook_call":
-		if !p.contributor || env.HookCall == nil {
-			return nil
-		}
-		return p.out.Send(huskipc.Envelope{Type: "hook_result", HookResult: &huskipc.HookResultPayload{
-			ID: env.HookCall.ID, RequestID: env.HookCall.RequestID, Data: map[string]any{"ready": true},
-		}})
-	case "event_emit":
-		if env.EventEmit != nil {
-			p.lastEvent = fmt.Sprint(env.EventEmit.Data["row"])
-			fmt.Fprintf(p.log, "reference: event %s row=%s\n", env.EventEmit.Topic, p.lastEvent)
-		}
-		return nil
-	case "command_invoke":
-		if !p.contributor || env.CommandInvoke == nil || env.CommandInvoke.CommandID != inspectCommand {
-			return nil
-		}
-		return p.out.Send(huskipc.Envelope{Type: "toast", Toast: &huskipc.ToastPayload{
-			PluginID: contributorID, Level: "info", Title: "Inspect",
-			Message: "row " + env.CommandInvoke.Args["row_key"],
-		}})
-	case "protocol_error":
-		// Log it and never answer: two strict peers answering each other
-		// would loop. A contributor that raced the publisher tries again.
-		if e := env.ProtocolError; e != nil {
-			fmt.Fprintf(p.log, "reference: host rejected %q: %s\n", e.MessageType, e.Message)
-			if p.contributor && p.retries < maxRetries {
-				p.retries++
-				retry()
+		old := keyOf(p.sizes[s.Surface])
+		p.sizes[s.Surface] = s
+		if now := keyOf(s); now != old && now.usable() {
+			if err := p.render(s.Surface); err != nil {
+				return err
 			}
 		}
 	}
-	// Every other message, key_state and slot_contributions included, is
-	// deliberately ignored: Husk expands the anchors itself, and a plugin
-	// re-renders only when what it shows changes.
 	return nil
-}
-
-func (p *plugin) resize(sizes map[huskipc.SlotID]huskipc.SlotSize) {
-	if s, ok := sizes[stage]; ok && s.Width > 0 && s.Height > 0 {
-		p.width, p.height = s.Width, s.Height
-	}
 }
 
 func (p *plugin) key(key string) error {
@@ -278,29 +494,24 @@ func (p *plugin) key(key string) error {
 	case "k", "up":
 		p.selected = (p.selected + len(rows) - 1) % len(rows)
 	case "r":
-		p.requests++
-		return p.out.Send(huskipc.Envelope{Type: "hook_call", HookCall: &huskipc.HookCallPayload{
-			ID: refreshHook, RequestID: fmt.Sprintf("%s.refresh-%d", publisherID, p.requests),
-			Data: map[string]any{"reason": "manual"},
-		}})
+		return p.call(pendingHook, protocol.MethodHookCall, map[string]any{
+			"hook": refreshHook, "data": map[string]any{"reason": "manual"},
+		})
 	default:
 		return nil
 	}
-	if err := p.out.Send(huskipc.Envelope{Type: "event_emit", EventEmit: &huskipc.EventPayload{
-		PluginID: publisherID, Topic: selectionEvent, Data: map[string]any{"row": rows[p.selected]},
-	}}); err != nil {
+	if err := p.call(pendingEmit, protocol.MethodEventEmit, map[string]any{
+		"name": selectionEvent, "data": map[string]any{"row": rows[p.selected]},
+	}); err != nil {
 		return err
 	}
-	return p.render()
+	return p.renderAll()
 }
 
-// lines builds the surface content for the current size. Row actions are OSC
+// lines builds the surface content for one surface size. Row actions are OSC
 // anchors; Husk replaces each with the slot's contributions.
-func (p *plugin) lines() []string {
-	width := p.width
-	if width <= 0 {
-		width = 40 // before the first size: the host clips to the real rect
-	}
+func (p *plugin) lines(size protocol.SurfaceSize) []string {
+	width := size.Width
 	out := []string{
 		clip("Reference plugin: frame, published slot, hook, event", width),
 		strings.Repeat("─", width),
@@ -313,12 +524,12 @@ func (p *plugin) lines() []string {
 		out = append(out, clip(marker+row, width-12)+"  \x1b]husk;slot="+rowActionsSlot+";key="+row+"\x1b\\")
 	}
 	result := "none"
-	if p.results > 0 {
-		result = fmt.Sprintf("%d, last %s", p.results, p.lastResult)
+	if p.answered {
+		result = fmt.Sprintf("%d, last %s", p.results, p.last)
 	}
 	return append(out,
 		"",
-		clip(fmt.Sprintf("size %dx%d · replies: %s", p.width, p.height, result), width),
+		clip(fmt.Sprintf("size %dx%d · replies: %s", size.Width, size.Height, result), width),
 		clip("j/k select (event)  r refresh (hook)", width),
 	)
 }
@@ -335,8 +546,22 @@ func clip(s string, width int) string {
 	return string(r[:width-1]) + "…"
 }
 
-func (p *plugin) render() error {
-	return p.out.Send(huskipc.Envelope{Type: "slot_update", SlotUpdate: &huskipc.SlotUpdatePayload{
-		PluginID: publisherID, Slot: stage, Title: "Reference plugin", Lines: p.lines(),
-	}})
+// render draws one surface, if the host has told us it is visible.
+func (p *plugin) render(s protocol.SurfaceID) error {
+	size := p.sizes[s]
+	if !keyOf(size).usable() {
+		return nil
+	}
+	return p.notify(protocol.MethodSurfaceUpdate, protocol.SurfaceUpdateParams{
+		Surface: s, Title: "Reference plugin", Lines: p.lines(size),
+	})
+}
+
+func (p *plugin) renderAll() error {
+	for _, s := range surfaces {
+		if err := p.render(s); err != nil {
+			return err
+		}
+	}
+	return nil
 }
