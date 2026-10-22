@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"testing"
 
@@ -159,7 +160,10 @@ func TestWatchRefusedPattern(t *testing.T) {
 
 // With the real bus: watch, emit, flush, deliver, ctx end, silence.
 func TestWatchEndToEndWithRealBus(t *testing.T) {
-	bus := eventbus.New(eventbus.Options{})
+	bus, err := eventbus.New(eventbus.Options{Liveness: allLive{}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	sb := &signalBus{Bus: bus, done: make(chan struct{})}
 	p := stem.NewEvents(sb, &fakeLoop{})
 	rec := fakes.NewRecorder()
@@ -195,4 +199,31 @@ type signalBus struct {
 func (s *signalBus) Subscribe(n contracts.Notifier, p string) (func(), error) {
 	c, err := s.Bus.Subscribe(n, p)
 	return func() { c(); close(s.done) }, err
+}
+
+type allLive struct{}
+
+func (allLive) Live(string) bool { return true }
+
+// A Watch whose ctx has already ended must unregister again.
+func TestWatchWithCancelledCtxUnregisters(t *testing.T) {
+	b := &recBus{}
+	p := stem.NewEvents(b, &fakeLoop{})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := p.Watch(ctx, cli, "notes.*", fakes.NewNotifier(nil)); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-b.cancel; got != "notes.*" {
+		t.Fatalf("cancel for %q", got)
+	}
+}
+
+func TestEmitWrapsWrappedCodedLoopError(t *testing.T) {
+	coded := contracts.NewError(protocol.CodeUnavailable, "down", nil)
+	l := &fakeLoop{err: fmt.Errorf("loop: %w", coded)}
+	err := stem.NewEvents(&recBus{}, l).Emit(context.Background(), plugin, "notes.saved", nil)
+	if contracts.CodeOf(err) != "unavailable" {
+		t.Fatalf("%v", err)
+	}
 }

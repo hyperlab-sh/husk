@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
 	"github.com/hyperlab-sh/husk/internal/stem/eventbus"
@@ -49,7 +50,8 @@ func (e *Events) Emit(ctx context.Context, c contracts.Caller, name string, data
 	}
 	ev := eventbus.Event{Name: name, Source: source, Data: obj}
 	if err := e.loop.Do(ctx, func() { e.bus.Publish(ev) }); err != nil {
-		if _, ok := err.(contracts.CodedError); ok {
+		var coded contracts.CodedError
+		if errors.As(err, &coded) {
 			return err
 		}
 		return contracts.NewError(protocol.CodeCancelled, "event not published: "+err.Error(), nil)
