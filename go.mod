@@ -5,12 +5,23 @@ go 1.26.6
 require (
 	charm.land/bubbletea/v2 v2.1.0
 	charm.land/lipgloss/v2 v2.0.6
+	filippo.io/age v1.2.1
 	github.com/charmbracelet/ultraviolet v0.0.0-20261008173134-6b8d4baf91b4
 	github.com/charmbracelet/x/ansi v0.11.9
 	github.com/charmbracelet/x/exp/charmtone v0.1.0
 	github.com/charmbracelet/x/exp/golden v0.0.0-20251109135125-8916d276318f
 	github.com/charmbracelet/x/exp/teatest/v2 v2.0.0-20261018003744-cb897cb4ed72
+	github.com/gofrs/flock v0.12.1
+	github.com/tailscale/hujson v0.0.0-20260727124030-b80ff77dac4f
+	github.com/zalando/go-keyring v0.2.6
 	golang.org/x/sys v0.47.0
+)
+
+require (
+	al.essio.dev/pkg/shellescape v1.5.1 // indirect
+	github.com/danieljoos/wincred v1.2.2 // indirect
+	github.com/godbus/dbus/v5 v5.1.0 // indirect
+	golang.org/x/crypto v0.24.0 // indirect
 )
 
 require (
