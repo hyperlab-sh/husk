@@ -266,10 +266,11 @@ func TestHostRunFailureQuitsTheProgram(t *testing.T) {
 	if m.hostErr == nil || cmd == nil {
 		t.Fatalf("hostErr=%v cmd=%v, want the program to quit", m.hostErr, cmd)
 	}
-	if _, ok := cmd().(tea.QuitMsg); !ok {
-		if b, ok := cmd().(tea.BatchMsg); !ok || len(b) == 0 {
-			t.Fatalf("not a quit: %T", cmd())
-		}
+	if msg := cmd(); msg != (tea.QuitMsg{}) {
+		t.Fatalf("cmd = %T %v, want tea.QuitMsg", msg, msg)
+	}
+	if !m.closed {
+		t.Fatal("the host was not shut down")
 	}
 	// A clean end after Close is not an error.
 	m2 := goldenModel()
