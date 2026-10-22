@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"runtime"
 	"strings"
@@ -188,19 +187,15 @@ func TestDumpFrameRailModalWaitsForModalSurface(t *testing.T) {
 	}
 }
 
-func TestDumpFrameRailWithoutMatchingItemWarnsAndStillSettles(t *testing.T) {
+func TestDumpFrameRailWithoutMatchingItemFailsAndKeepsTheFrame(t *testing.T) {
 	m, prog := dumpModel()
 	feed(prog,
 		register(m, "alpha", []protocol.SurfaceID{protocol.SurfaceMainStage}),
 		slotMsg(m, "alpha", protocol.SurfaceMainStage, "ONLY-STAGE"),
 	)
-	var stderr bytes.Buffer
-	frame, err := runDumpFrame(m, dumpFrameOptions{Program: prog, Launched: 1, RailMode: "full-canvas", Quiet: 20 * time.Millisecond, Timeout: 30 * time.Second, Stderr: &stderr})
-	if err != nil {
-		t.Fatalf("runDumpFrame: %v", err)
-	}
-	if want := "--rail full-canvas: no loaded plugin declares a full-canvas rail item"; !strings.Contains(stderr.String(), want) {
-		t.Fatalf("stderr = %q, want it to contain %q", stderr.String(), want)
+	frame, err := runDumpFrame(m, dumpFrameOptions{Program: prog, Launched: 1, RailMode: "full-canvas", Quiet: 20 * time.Millisecond, Timeout: 30 * time.Second})
+	if want := "--rail full-canvas: no loaded plugin declares a full-canvas rail item"; err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("err = %v, want it to contain %q", err, want)
 	}
 	if !strings.Contains(ansi.Strip(frame), "ONLY-STAGE") {
 		t.Fatalf("frame lacks stage content:\n%s", ansi.Strip(frame))

@@ -29,7 +29,7 @@ Frame dumps render without a terminal:
 ./bin/husk --demo-frame                     # one frame from a built-in demo plugin that declares border+label+close
 ```
 
-`--dump-frame` always prints the frame on stdout. It exits 0 when the run settled and 1 when no plugin went live, when the wait timed out, or when the host stopped on its own (the cause is printed once on stderr), so scripts and CI can tell a rendered workbench from an empty one.
+`--dump-frame` always prints the frame on stdout. It exits 0 when the run settled and 1 when no plugin went live, when the wait timed out, when `--rail` names a placement no loaded plugin declares a rail item for, or when the host stopped on its own (the cause is printed once on stderr), so scripts and CI can tell a rendered workbench from an empty one.
 
 ## Concepts
 

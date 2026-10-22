@@ -53,7 +53,7 @@ type dumpFrameOptions struct {
 	Timeout time.Duration
 	// Program receives the headless program so the host's Post reaches it.
 	Program *programRef
-	// Stderr receives host diagnostics (a --rail with no matching item).
+	// Stderr receives host diagnostics.
 	Stderr io.Writer
 }
 
@@ -81,6 +81,7 @@ type dumpFrameDriver struct {
 	settled      bool
 	traffic      string // fingerprint of the last seen plugin traffic
 	failed       bool   // every launched Pod ended without going live
+	noRailItem   string // the --rail placement no loaded plugin declares
 }
 
 // activity fingerprints what a plugin can change: its Pod status and the
@@ -184,9 +185,7 @@ func (d *dumpFrameDriver) advance() {
 			if ri, ok := m.firstRailItemWithPlacement(contracts.RailPlacement(d.mode)); ok {
 				m.activateRailItem(ri)
 			} else {
-				if d.opt.Stderr != nil {
-					fmt.Fprintf(d.opt.Stderr, "husk: --rail %s: no loaded plugin declares a %s rail item\n", d.mode, d.mode)
-				}
+				d.noRailItem = d.mode
 				d.mode = "" // nothing to wait for
 			}
 		}
@@ -251,6 +250,10 @@ func runDumpFrame(m *WorkbenchModel, opt dumpFrameOptions) (string, error) {
 		return frame, fmt.Errorf("host stopped: %w", m.hostErr)
 	case d.failed:
 		return frame, fmt.Errorf("no plugin went live: %s", failedPods(m.podStatus))
+	case d.noRailItem != "":
+		// The frame is still returned; the run fails so scripts notice the
+		// requested surface was never opened.
+		return frame, fmt.Errorf("--rail %s: no loaded plugin declares a %s rail item", d.noRailItem, d.noRailItem)
 	case d.settled:
 		return frame, nil
 	case errors.Is(err, tea.ErrProgramPanic):
