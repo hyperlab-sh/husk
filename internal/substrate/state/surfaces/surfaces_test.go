@@ -159,6 +159,17 @@ func TestValidatedWrites(t *testing.T) {
 		{"occupant of an unknown surface", func() error {
 			return occ.Set(surfaces.Occupants{"not-a-surface": {Surface: "not-a-surface", Plugin: pluginFiles}})
 		}},
+		{"occupant stored under another surface key", func() error {
+			return occ.Set(surfaces.Occupants{protocol.SurfaceSidebarList: {Surface: protocol.SurfaceMainStage, Plugin: pluginFiles}})
+		}},
+		{"contribution stored under another slot key", func() error {
+			return con.Set(surfaces.Contributions{"example.editor.toolbar": {
+				{Slot: "example.editor.status", ID: "example.files.count", Plugin: pluginFiles},
+			}})
+		}},
+		{"upsert whose slot does not name the target", func() error {
+			return con.Upsert("example.editor.toolbar", surfaces.Contribution{Slot: "example.editor.status", ID: "example.files.count", Plugin: pluginFiles})
+		}},
 		{"contribution of another plugin", func() error {
 			return con.Upsert("example.editor.toolbar", surfaces.Contribution{Slot: "example.editor.toolbar", ID: "example.files.count", Plugin: pluginEditor})
 		}},
@@ -274,7 +285,8 @@ func TestContributionsOrdering(t *testing.T) {
 	}
 
 	// Ids stay scoped to their slot: the same id may live in two slots, as
-	// in the registry's independent per-slot lists.
+	// in the registry's independent per-slot lists. Each entry names its own
+	// slot, so the copies differ in Slot while sharing the id.
 	branchInToolbar := branch
 	branchInToolbar.Slot = toolbar
 	if err := con.Upsert(toolbar, branchInToolbar); err != nil {
@@ -332,6 +344,7 @@ func TestValidateOwnerParity(t *testing.T) {
 		{"empty name", surfaces.Contribution{Slot: "s", ID: "example.git.", Plugin: pluginGit}, "must use example.git.<name>"},
 		{"foreign on_click", surfaces.Contribution{Slot: "s", ID: "example.git.x", Plugin: pluginGit, OnClick: "example.editor.open"}, "own action"},
 		{"empty slot", surfaces.Contribution{ID: "example.git.x", Plugin: pluginGit}, "names no slot"},
+		{"slot parity", surfaces.Contribution{Slot: "other", ID: "example.git.x", Plugin: pluginGit}, `stored under "s"`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
