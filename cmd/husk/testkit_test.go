@@ -45,6 +45,7 @@ type fakeFE struct {
 	// HintsFn answers Hints; nil advertises none.
 	HintsFn func(contracts.KeyContext) []contracts.KeyHint
 	pods    map[string]string
+	podErr  map[string]string // last_error per Pod
 	occ     map[protocol.SurfaceID]string
 	seq     uint64
 	// Log is every outbound call in order, for tests that assert on routing.
@@ -401,12 +402,17 @@ func mustContribute(t testing.TB, r *surfaceCatalog, plugin, slot, id, content s
 
 // snapshot builds the State a host would hold: Pod statuses by plugin and the
 // Surfaces resolution slice.
-func snapshot(seq uint64, pods map[string]string, res surfaces.Surfaces) *state.Snapshot {
+func snapshot(seq uint64, pods map[string]string, res surfaces.Surfaces, lastErr ...map[string]string) *state.Snapshot {
 	pd := struct {
 		Plugins map[string]map[string]string `json:"plugins"`
 	}{Plugins: map[string]map[string]string{}}
 	for id, st := range pods {
 		pd.Plugins[id] = map[string]string{"status": st}
+		for _, errs := range lastErr {
+			if e := errs[id]; e != "" {
+				pd.Plugins[id]["last_error"] = e
+			}
+		}
 	}
 	pj, _ := json.Marshal(pd)
 	rj, _ := json.Marshal(res)
@@ -429,7 +435,7 @@ func (f *fakeFE) publish() {
 		res.Occupants[s] = contracts.Occupant{Surface: s, Plugin: p}
 	}
 	f.seq++
-	f.Snap = snapshot(f.seq, f.pods, res)
+	f.Snap = snapshot(f.seq, f.pods, res, f.podErr)
 }
 
 // hostPlugin brings a plugin live through the same path a real host does:
