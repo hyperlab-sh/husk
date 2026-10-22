@@ -358,7 +358,9 @@ In code the bus writes `event.deliver` through the host's `Notifier`
 called, and cancelled, from any goroutine, while `Publish` and `Flush` are
 loop-only. A malformed pattern makes `Subscribe` fail with `invalid_params`
 and register nothing. The manifest table (patterns per plugin, plus the event
-names declared `"coalesce": false`) is replaced as a whole on reload.
+names declared `"coalesce": false`) is replaced as a whole on reload. A
+plugin with a malformed pattern loses its own subscriptions and is reported by
+name; other plugins' subscriptions are applied.
 
 Subscriptions. A plugin subscribes in its manifest, once, by exact name or by
 prefix:
@@ -425,10 +427,10 @@ Coalescing. Within one loop tick, for one subscriber, events with the same
 `(Name, Key)` collapse to the last one; the position in the batch is that of
 the first. Events with different names or keys never collapse. A publisher
 may declare `"coalesce": false` for an event whose every occurrence matters;
-those are queued in full, up to 256 per subscriber per tick, and the excess
-is dropped, newest first, with one log line per subscriber per tick. The cap
-restarts each tick. A refused `Notify` drops only that notification. A tick ends at the end of one `Update`
-call. The loop flushes State first, so its change events join that call's
+those are queued in full, up to 256 per subscriber per tick, and the newest
+excess events are dropped, with one log line per subscriber per tick. The cap
+restarts each tick. A refused `Notify` drops only that notification. A tick
+ends at the end of one `Update` call. The loop flushes State first, so its change events join that call's
 batch, then flushes the Event bus. Follow-up messages are separate ticks;
 there is no posted `flushEventsMsg` extending the coalescing window.
 
@@ -459,7 +461,7 @@ Failure modes:
 | Subscriber not live | Bus via State | Event skipped for it | Nobody; no replay |
 | Subscriber stdin queue full or write times out | Wrapper | Plugin disconnected (1,024 queue, 5 s write deadline), logged and toasted | User sees the existing disconnect toast |
 | Burst of the same `(Name, Key)` | Bus | Collapsed to the last | Subscriber gets one event |
-| More than 256 non-coalescing events to one subscriber in a tick | Bus | Excess dropped, one log line | Subscriber misses them |
+| More than 256 non-coalescing events to one subscriber in a tick | Bus | Excess dropped, one log line per subscriber per tick | Subscriber misses them |
 | Plugin emits under another namespace or a core name | Server | Dropped, logged | `denied` reply to the `event.emit` request |
 | Pattern is malformed (`*foo`, `a.*.b`) | Manifest conversion at load | Plugin refused with a manifest error | User sees the launch failure |
 | `event.watch` connection closes | Server | Subscription cancelled | CLI exits |
@@ -528,7 +530,7 @@ Hook runner invariants:
 - Input and Server import Dispatcher and Event bus. Neither is imported by them.
 - Dispatcher imports Calls; Calls imports nothing from Stem's message modules.
 - Hook runner imports Calls; Hook runner never imports Dispatcher.
-- Event bus imports nothing from Calls; it writes through `Sink`.
+- Event bus imports nothing from Calls; it writes through `Notifier`.
 - Dispatcher, Event bus and Hook runner read State and the catalog through
   interfaces (`Liveness`, `ActionCatalog`, the subscription tables). State
   never imports them; it calls `EventBus.Publish` through an interface the
@@ -604,7 +606,7 @@ Hook runner invariants:
 13. `state.changed` carries `{slice, owner, revision}` and no value.
 14. A publisher receives its own events when it subscribed to them.
 15. Events with `coalesce: false` are queued in full up to 256 per subscriber
-    per tick, excess dropped with one log line.
+    per tick, excess dropped with one log line per subscriber per tick.
 16. Events are not replayed to a subscriber that was not live when they were
     published.
 17. Hook results are aggregated into one reply to the caller, one entry per

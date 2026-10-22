@@ -10,6 +10,8 @@ package eventbus
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -55,9 +57,9 @@ type Table struct {
 	NoCoalesce []string
 }
 
-// Options configures a Bus. Liveness and Sinks are required for manifest
-// subscribers; a nil Liveness treats every plugin as live. A nil Logger is
-// a no-op and must not block or call back into the bus.
+// Options configures a Bus. Liveness is required (New fails without it);
+// Sinks is needed only for manifest subscribers. A nil Logger is a no-op and
+// must not block or call back into the bus.
 type Options struct {
 	Liveness Liveness
 	Sinks    Sinks
@@ -117,9 +119,13 @@ type Bus struct {
 	stats      Stats
 }
 
-// New returns an empty bus.
-func New(opts Options) *Bus {
-	return &Bus{opts: opts, pending: map[target]*batch{}}
+// New returns an empty bus. A nil Liveness is an error: a bus that silently
+// treats every plugin as live would deliver to dead subscribers.
+func New(opts Options) (*Bus, error) {
+	if opts.Liveness == nil {
+		return nil, errors.New("eventbus: Options.Liveness is required")
+	}
+	return &Bus{opts: opts, pending: map[target]*batch{}}, nil
 }
 
 func (b *Bus) logf(format string, args ...any) {
@@ -128,32 +134,64 @@ func (b *Bus) logf(format string, args ...any) {
 	}
 }
 
+// Problem says why part of a Table was not applied.
+type Problem struct {
+	// Plugin is the plugin id whose subscriptions were dropped, or "" for a
+	// NoCoalesce entry.
+	Plugin string
+	// Value is the offending pattern or name.
+	Value string
+	// Err is the reason.
+	Err error
+}
+
+// Error implements error.
+func (p Problem) Error() string {
+	if p.Plugin == "" {
+		return fmt.Sprintf("eventbus: non-coalescing name %q: %v", p.Value, p.Err)
+	}
+	return fmt.Sprintf("eventbus: plugin %q subscription %q: %v", p.Plugin, p.Value, p.Err)
+}
+
 // SetTable replaces the manifest subscriptions and non-coalescing names. A
-// malformed pattern or name refuses the whole table and changes nothing.
-func (b *Bus) SetTable(t Table) error {
+// plugin with a malformed pattern (or an empty id) loses all its subscriptions
+// and a malformed NoCoalesce name is skipped; everything else is applied. One
+// Problem per offender is returned, in plugin id order, so the caller can
+// report each plugin by name.
+func (b *Bus) SetTable(t Table) []Problem {
+	var problems []Problem
 	subs := make(map[string][]string, len(t.Subscribe))
-	for id, patterns := range t.Subscribe {
+	ids := make([]string, 0, len(t.Subscribe))
+	for id := range t.Subscribe {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+plugins:
+	for _, id := range ids {
 		if id == "" {
-			return invalid("empty plugin id in subscription table")
+			problems = append(problems, Problem{Value: "", Err: invalid("empty plugin id in subscription table")})
+			continue
 		}
-		for _, p := range patterns {
+		for _, p := range t.Subscribe[id] {
 			if err := ValidatePattern(p); err != nil {
-				return err
+				problems = append(problems, Problem{Plugin: id, Value: p, Err: err})
+				continue plugins
 			}
 		}
-		subs[id] = slices.Clone(patterns)
+		subs[id] = slices.Clone(t.Subscribe[id])
 	}
 	nc := make(map[string]struct{}, len(t.NoCoalesce))
 	for _, n := range t.NoCoalesce {
 		if err := ValidateName(n); err != nil {
-			return err
+			problems = append(problems, Problem{Value: n, Err: err})
+			continue
 		}
 		nc[n] = struct{}{}
 	}
 	b.mu.Lock()
 	b.subs, b.noCoalesce = subs, nc
 	b.mu.Unlock()
-	return nil
+	return problems
 }
 
 // Subscribe adds a connection-lifetime subscription. cancel removes it and is
@@ -205,7 +243,7 @@ func (b *Bus) Publish(e Event) {
 		if !slices.ContainsFunc(b.subs[id], func(p string) bool { return Matches(p, e.Name) }) {
 			continue
 		}
-		if b.opts.Liveness != nil && !b.opts.Liveness.Live(id) {
+		if !b.opts.Liveness.Live(id) {
 			b.stats.NotLive++
 			continue
 		}

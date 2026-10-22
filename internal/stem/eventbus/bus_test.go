@@ -86,9 +86,13 @@ func newRig(t *testing.T, subs map[string][]string, noCo ...string) *rig {
 		r.sink[id] = &capture{}
 		s[id] = r.sink[id]
 	}
-	r.bus = eventbus.New(eventbus.Options{Liveness: r.live, Sinks: s, Logger: func(f string, a ...any) { r.logs = append(r.logs, fmt.Sprintf(f, a...)) }})
-	if err := r.bus.SetTable(eventbus.Table{Subscribe: subs, NoCoalesce: noCo}); err != nil {
+	bus, err := eventbus.New(eventbus.Options{Liveness: r.live, Sinks: s, Logger: func(f string, a ...any) { r.logs = append(r.logs, fmt.Sprintf(f, a...)) }})
+	if err != nil {
 		t.Fatal(err)
+	}
+	r.bus = bus
+	if p := r.bus.SetTable(eventbus.Table{Subscribe: subs, NoCoalesce: noCo}); len(p) != 0 {
+		t.Fatal(p)
 	}
 	return r
 }
@@ -159,19 +163,73 @@ func TestPatternValidation(t *testing.T) {
 	}
 }
 
-func TestSetTableRefusesMalformedAndKeepsOld(t *testing.T) {
-	r := newRig(t, map[string][]string{"a": {"x.y"}})
-	if err := r.bus.SetTable(eventbus.Table{Subscribe: map[string][]string{"a": {"*foo"}}}); err == nil {
-		t.Fatal("malformed pattern accepted")
+func TestSetTableDropsOnlyOffendingPlugin(t *testing.T) {
+	r := newRig(t, map[string][]string{"a": {"x.y"}, "bad": {"x.y"}, "b": {"x.y"}})
+	probs := r.bus.SetTable(eventbus.Table{
+		Subscribe:  map[string][]string{"a": {"x.y"}, "bad": {"x.y", "*foo"}, "b": {"x.y"}, "": {"x.y"}},
+		NoCoalesce: []string{"x.y", "x.*"},
+	})
+	if len(probs) != 3 {
+		t.Fatalf("%v", probs)
 	}
-	if err := r.bus.SetTable(eventbus.Table{NoCoalesce: []string{"a.*"}}); err == nil {
-		t.Fatal("wildcard in NoCoalesce accepted")
+	if probs[0].Plugin != "" || probs[1].Plugin != "bad" || probs[1].Value != "*foo" || !strings.Contains(probs[1].Error(), `"bad"`) {
+		t.Fatalf("%v", probs)
+	}
+	if contracts.CodeOf(probs[1].Err) != "invalid_params" {
+		t.Fatal(probs[1].Err)
 	}
 	r.bus.Publish(eventbus.Event{Name: "x.y"})
+	r.bus.Publish(eventbus.Event{Name: "x.y"})
 	r.bus.Flush()
-	if len(r.sink["a"].msgs) != 1 {
-		t.Fatal("old table lost after refused SetTable")
+	if len(r.sink["bad"].msgs) != 0 {
+		t.Fatal("offending plugin kept its subscriptions")
 	}
+	// The rest applied, and the valid NoCoalesce name took effect.
+	if len(r.sink["a"].msgs) != 2 || len(r.sink["b"].msgs) != 2 {
+		t.Fatal("other plugins lost their subscriptions")
+	}
+}
+
+func TestNewRequiresLiveness(t *testing.T) {
+	if b, err := eventbus.New(eventbus.Options{Sinks: sinks{}}); err == nil || b != nil {
+		t.Fatal("nil Liveness accepted")
+	}
+}
+
+func TestCancelDuringFlushStopsRemainingDelivery(t *testing.T) {
+	r := newRig(t, nil)
+	var cancelB func()
+	var aCancel func()
+	a := &hookNotifier{}
+	b := &capture{}
+	a.on = func(n int) {
+		if n == 1 {
+			cancelB() // B is queued but not yet reached
+			aCancel() // A has a second item still to go
+		}
+	}
+	aCancel, _ = r.bus.Subscribe(a, "x.*")
+	cancelB, _ = r.bus.Subscribe(b, "x.*")
+	r.bus.Publish(eventbus.Event{Name: "x.1"})
+	r.bus.Publish(eventbus.Event{Name: "x.2"})
+	r.bus.Flush()
+	if a.n != 1 {
+		t.Fatalf("A got %d after cancelling itself", a.n)
+	}
+	if len(b.msgs) != 0 {
+		t.Fatal("B got a delivery after cancel")
+	}
+}
+
+type hookNotifier struct {
+	n  int
+	on func(n int)
+}
+
+func (h *hookNotifier) Notify(protocol.Message) error {
+	h.n++
+	h.on(h.n)
+	return nil
 }
 
 func TestCoalescing(t *testing.T) {
@@ -361,19 +419,6 @@ func TestMissingSinkDropsQuietly(t *testing.T) {
 	}
 }
 
-func TestNilLivenessTreatsPluginsAsLive(t *testing.T) {
-	c := &capture{}
-	b := eventbus.New(eventbus.Options{Sinks: sinks{"a": c}})
-	if err := b.SetTable(eventbus.Table{Subscribe: map[string][]string{"a": {"x.y"}}}); err != nil {
-		t.Fatal(err)
-	}
-	b.Publish(eventbus.Event{Name: "x.y"})
-	b.Flush()
-	if len(c.msgs) != 1 {
-		t.Fatal("not delivered")
-	}
-}
-
 func TestSlowOrDeadSubscriberAffectsOnlyItself(t *testing.T) {
 	r := newRig(t, map[string][]string{"a": {"x.*"}, "b": {"x.*"}})
 	r.sink["a"].err = errors.New("queue full")
@@ -525,7 +570,7 @@ func TestStateChangedIsAnOrdinaryEvent(t *testing.T) {
 func TestFakeNotifierIsAccepted(t *testing.T) {
 	rec := fakes.NewRecorder()
 	n := fakes.NewNotifier(rec)
-	b := eventbus.New(eventbus.Options{})
+	b := newBus(t)
 	if _, err := b.Subscribe(n, "x.*"); err != nil {
 		t.Fatal(err)
 	}
@@ -537,7 +582,7 @@ func TestFakeNotifierIsAccepted(t *testing.T) {
 }
 
 func TestConcurrentSubscribeCancel(t *testing.T) {
-	b := eventbus.New(eventbus.Options{})
+	b := newBus(t)
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
 		wg.Add(1)
@@ -605,4 +650,13 @@ func TestCoreNames(t *testing.T) {
 			t.Errorf("%s core", n)
 		}
 	}
+}
+
+func newBus(t *testing.T) *eventbus.Bus {
+	t.Helper()
+	b, err := eventbus.New(eventbus.Options{Liveness: live{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }
