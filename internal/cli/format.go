@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"text/tabwriter"
+
+	"github.com/charmbracelet/x/term"
 )
 
 // Output formats of --format.
@@ -19,8 +21,7 @@ const (
 
 // IsTTY reports whether f is a terminal; the default output format keys on it.
 func IsTTY(f *os.File) bool {
-	st, err := f.Stat()
-	return err == nil && st.Mode()&os.ModeCharDevice != 0
+	return term.IsTerminal(f.Fd())
 }
 
 // writeTable prints rows under headers in aligned columns.

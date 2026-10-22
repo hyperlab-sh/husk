@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"testing"
+	"time"
 
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
@@ -206,5 +207,24 @@ func TestClientIgnoresRepliesToOtherIDs(t *testing.T) {
 	got, err := c.Call(t.Context(), "x.y", nil)
 	if err != nil || string(got) != `{"mine":true}` {
 		t.Fatalf("Call = %s, %v", got, err)
+	}
+}
+
+func TestClientUnattributableErrorReplyIsAnErrorNotATimeout(t *testing.T) {
+	// A reply without a usable id cannot be matched; the codec reports it as
+	// a malformed line, which must end the call as a protocol failure rather
+	// than leave it waiting for its own reply.
+	for _, line := range []string{
+		`{"id":null,"error":{"code":"internal","message":"boom"}}`,
+		`{"error":{"code":"internal","message":"boom"}}`,
+	} {
+		srv := serve(t, shortDir(t), "a", func(c *srvConn, req protocol.Message) { c.raw(line) })
+		c := dialTest(t, srv.Socket, ClientOptions{})
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		_, err := c.Call(ctx, "x.y", nil)
+		cancel()
+		if got := exitOf(t, err); got != ExitProtocol {
+			t.Fatalf("%s: exit = %d (%v), want %d", line, got, err, ExitProtocol)
+		}
 	}
 }

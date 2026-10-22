@@ -18,12 +18,14 @@ type instanceRow struct {
 // target flags do not apply; stale entries are removed by the survey.
 func runInstances(ctx context.Context, inv *Invocation, args []string) error {
 	if len(args) != 0 {
-		return usageErr("usage: husk instances takes no arguments")
+		return usageErr("instances takes no arguments")
 	}
 	dir, err := inv.env.RuntimeDir()
 	if err != nil {
-		return &Error{Exit: ExitRemote, Code: "runtime_dir", Message: err.Error(), Err: err}
+		return runtimeDirErr(err)
 	}
+	ctx, cancel := inv.withTimeout(ctx)
+	defer cancel()
 	type surveyed struct {
 		st  []instance.Status
 		err error

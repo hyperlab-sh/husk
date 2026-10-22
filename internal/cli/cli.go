@@ -8,6 +8,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -77,6 +78,21 @@ type Invocation struct {
 	format   string
 	instance string
 	socket   string
+	// timeout is the effective --timeout: it starts when resolution is
+	// done and bounds the rest of the command. Zero means none.
+	timeout time.Duration
+}
+
+// EnvPluginToken is the environment variable holding the plugin token; the
+// CLI sends it as the request's token member.
+const EnvPluginToken = "HUSK_PLUGIN_TOKEN"
+
+// withTimeout bounds ctx by the command's --timeout, from now on.
+func (inv *Invocation) withTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	if inv.timeout <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, inv.timeout)
 }
 
 // Resolve picks the one instance this command talks to, through
@@ -84,7 +100,7 @@ type Invocation struct {
 func (inv *Invocation) Resolve() (instance.Resolved, error) {
 	dir, err := inv.env.RuntimeDir()
 	if err != nil {
-		return instance.Resolved{}, &Error{Exit: ExitRemote, Code: "runtime_dir", Message: err.Error(), Err: err}
+		return instance.Resolved{}, runtimeDirErr(err)
 	}
 	res, err := instance.Resolve(instance.ResolveOptions{
 		Dir:           dir,
@@ -94,9 +110,14 @@ func (inv *Invocation) Resolve() (instance.Resolved, error) {
 		EnvInstance:   inv.env.Getenv(instance.EnvInstance),
 		Deps:          inv.env.Deps,
 	})
+	var ie *instance.Error
+	if errors.As(err, &ie) {
+		inv.warnSkipped(ie.Skipped)
+	}
 	if err != nil {
 		return instance.Resolved{}, resolveErr(err)
 	}
+	inv.warnSkipped(res.Skipped)
 	if res.Entry != nil && res.Entry.ProtocolVersion != "" {
 		if err := checkMajor(res.Entry.ProtocolVersion); err != nil {
 			return instance.Resolved{}, err
@@ -105,14 +126,54 @@ func (inv *Invocation) Resolve() (instance.Resolved, error) {
 	return res, nil
 }
 
-// Dial resolves the target and connects to it.
-func (inv *Invocation) Dial(ctx context.Context) (*Client, instance.Resolved, error) {
+// warnSkipped tells the user which unresponsive instances discovery passed
+// over: one stderr line each, a JSON object in JSON mode.
+func (inv *Invocation) warnSkipped(skipped []instance.Status) {
+	for _, st := range skipped {
+		msg := fmt.Sprintf("instance %q did not answer within %s; skipped", st.Entry.ID, instance.DiscoveryPingTimeout)
+		if inv.format == formatJSON {
+			b, _ := json.Marshal(map[string]any{"warning": map[string]any{"code": "unresponsive", "message": msg}})
+			fmt.Fprintf(inv.env.Stderr, "%s\n", b)
+			continue
+		}
+		fmt.Fprintf(inv.env.Stderr, "husk: %s\n", msg)
+	}
+}
+
+// Dial resolves the target, connects to it and returns the client with the
+// context to use for its calls: the parent bounded by --timeout, which
+// starts once resolution is done. The context ends when the client is
+// closed. A target found only by socket path, or by an entry without a
+// version, is asked for its protocol version first, so no command reaches
+// an instance of another major.
+func (inv *Invocation) Dial(ctx context.Context) (*Client, context.Context, instance.Resolved, error) {
 	res, err := inv.Resolve()
 	if err != nil {
-		return nil, res, err
+		return nil, ctx, res, err
 	}
-	c, err := Dial(ctx, res.Socket, ClientOptions{Token: inv.env.Getenv("HUSK_PLUGIN_TOKEN")})
-	return c, res, err
+	cctx, cancel := inv.withTimeout(ctx)
+	c, err := Dial(cctx, res.Socket, ClientOptions{Token: inv.env.Getenv(EnvPluginToken)})
+	if err != nil {
+		cancel()
+		return nil, ctx, res, err
+	}
+	c.cancel = cancel
+	if res.Entry == nil || res.Entry.ProtocolVersion == "" {
+		raw, err := c.Call(cctx, protocol.MethodSessionPing, protocol.SessionPingParams{})
+		if err == nil {
+			var ping protocol.SessionPingResult
+			if err = json.Unmarshal(raw, &ping); err != nil {
+				err = protocolErr(err, "unreadable session.ping reply: %v", err)
+			} else {
+				err = checkMajor(ping.ProtocolVersion)
+			}
+		}
+		if err != nil {
+			_ = c.Close()
+			return nil, ctx, res, err
+		}
+	}
+	return c, cctx, res, nil
 }
 
 // checkMajor is the spec's protocol check: a different major is exit 6.
@@ -197,11 +258,9 @@ func Main(ctx context.Context, args []string, env Env) int {
 	if timeout == 0 {
 		timeout = cmd.timeout
 	}
+	inv.timeout = timeout
 	timeoutText := ""
 	if timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, timeout)
-		defer cancel()
 		timeoutText = timeout.String()
 	}
 
@@ -258,6 +317,6 @@ func usage(w io.Writer, table map[string]command) {
 	for _, n := range names {
 		fmt.Fprintf(&b, "       %s\n", table[n].usage)
 	}
-	b.WriteString("\nflags of every command: --instance <id> | --socket <path>, --format json|table, --timeout <duration>\n")
+	b.WriteString("\nflags of every command follow the command name: --instance <id> | --socket <path>, --format json|table, --timeout <duration>\n")
 	fmt.Fprint(w, b.String())
 }

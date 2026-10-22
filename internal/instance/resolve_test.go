@@ -416,6 +416,9 @@ func TestResolveDiscoveryOneLiveOneUnresponsive(t *testing.T) {
 	if _, serr := os.Lstat(EntryPath(dir, "4242")); serr != nil {
 		t.Error("unresponsive entry must be kept")
 	}
+	if len(got.Skipped) != 1 || got.Skipped[0].Entry.ID != "4242" || got.Skipped[0].Verdict != VerdictUnresponsive {
+		t.Errorf("Skipped = %+v, want the unresponsive 4242", got.Skipped)
+	}
 }
 
 func TestResolveDiscoveryOnlyUnresponsive(t *testing.T) {
@@ -428,6 +431,9 @@ func TestResolveDiscoveryOnlyUnresponsive(t *testing.T) {
 	var e *Error
 	if !errors.As(err, &e) || e.Kind != KindNoInstance {
 		t.Fatalf("error = %v, want KindNoInstance", err)
+	}
+	if len(e.Skipped) != 1 || e.Skipped[0].Entry.ID != "notes" {
+		t.Errorf("Skipped = %+v, want the unresponsive notes", e.Skipped)
 	}
 }
 

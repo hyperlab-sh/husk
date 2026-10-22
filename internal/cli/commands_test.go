@@ -1,12 +1,14 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"os"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hyperlab-sh/husk/internal/instance"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
@@ -300,7 +302,7 @@ func TestOutputFormatFollowsTTYUnlessOverridden(t *testing.T) {
 func TestTableMode(t *testing.T) {
 	dir := shortDir(t)
 	results := map[string]any{"s.rec": []map[string]any{{"a": 1}, {"a": 2, "b": "x"}}, "s.str": "hello", "s.num": 7, "s.bool": true, "s.null": nil, "s.obj": map[string]any{"b": []int{1}, "a": "x"}}
-	srv := serve(t, dir, "a", func(c *srvConn, req protocol.Message) { c.reply(req, results[req.Method]) })
+	srv := serve(t, dir, "a", pingOK("a", func(c *srvConn, req protocol.Message) { c.reply(req, results[req.Method]) }))
 	for method, want := range map[string]string{
 		"s.str":  "hello\n",
 		"s.num":  "7\n",
@@ -412,7 +414,7 @@ func TestRuntimeDirFailureIsReported(t *testing.T) {
 	h.env.RuntimeDir = func() (string, error) { return "", os.ErrPermission }
 	for _, cmd := range []string{"ping", "instances"} {
 		h.errb.Reset()
-		if got := h.run(cmd); got != ExitRemote || !strings.HasPrefix(h.errb.String(), "{") {
+		if got := h.run(cmd); got != ExitTransport || !strings.HasPrefix(h.errb.String(), "{") {
 			t.Fatalf("%s: exit %d stderr %q", cmd, got, h.errb.String())
 		}
 	}
@@ -439,5 +441,199 @@ func TestParseInterspersed(t *testing.T) {
 				t.Fatalf("pos %q format %q err %v; want %q %q", pos, *format, err, tc.wantPos, tc.wantFmt)
 			}
 		})
+	}
+}
+
+func TestRPCToASocketOfAnotherMajorIsRefusedBeforeSending(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		via  func(sock string) (args []string, env map[string]string)
+	}{
+		{"--socket", func(s string) ([]string, map[string]string) { return []string{"--socket", s}, nil }},
+		{"HUSK_SOCKET_PATH", func(s string) ([]string, map[string]string) {
+			return nil, map[string]string{instance.EnvSocketPath: s}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := shortDir(t)
+			srv := serve(t, dir, "a", func(c *srvConn, req protocol.Message) {
+				c.reply(req, protocol.SessionPingResult{ID: "a", PID: 1, ProtocolVersion: "3.0"})
+			})
+			args, env := tc.via(srv.Socket)
+			h := newHarness(t, dir, env)
+			if got := h.run(append([]string{"rpc", "x.y"}, args...)...); got != ExitProtocol {
+				t.Fatalf("exit = %d, want %d; stderr %q", got, ExitProtocol, h.errb.String())
+			}
+			for _, r := range srv.requests() {
+				if r.Method == "x.y" {
+					t.Fatal("the command reached an instance of another major")
+				}
+			}
+		})
+	}
+}
+
+func TestTimeoutStartsAfterResolution(t *testing.T) {
+	dir := shortDir(t)
+	srv := serve(t, dir, "a", pingOK("a", func(c *srvConn, req protocol.Message) { c.reply(req, map[string]any{"ok": true}) }))
+	h := newHarness(t, dir, nil)
+	// Resolve has no clock seam, so this is the one deliberate wait: the
+	// resolution ping outlasts --timeout, and the command must still get
+	// its full budget afterwards.
+	h.env.Deps = &instance.Deps{Ping: func(string) error { time.Sleep(300 * time.Millisecond); return nil }}
+	if got := h.run("rpc", "x.y", "--socket", srv.Socket, "--timeout", "200ms"); got != 0 {
+		t.Fatalf("exit = %d; stderr %q", got, h.errb.String())
+	}
+	if strings.TrimSpace(h.out.String()) != `{"ok":true}` {
+		t.Fatalf("stdout = %q", h.out.String())
+	}
+}
+
+func TestTimeoutExpiryIsTransportExit(t *testing.T) {
+	dir := shortDir(t)
+	srv := serve(t, dir, "a", pingOK("a", func(c *srvConn, req protocol.Message) {})) // never answers x.y
+	h := newHarness(t, dir, nil)
+	// The parent context is a safety net so a missing timeout fails the
+	// test instead of hanging it.
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	if got := Main(ctx, []string{"rpc", "x.y", "--socket", srv.Socket, "--timeout", "50ms", "--format", "table"}, h.env); got != ExitTransport {
+		t.Fatalf("exit = %d, want %d", got, ExitTransport)
+	}
+	if ctx.Err() != nil {
+		t.Fatal("the command ran until the safety net: --timeout was not applied")
+	}
+	if h.errb.String() != "husk: instance did not answer within 50ms\n" {
+		t.Fatalf("stderr = %q", h.errb.String())
+	}
+}
+
+func TestDefaultTimeouts(t *testing.T) {
+	for name, want := range map[string]time.Duration{"instances": 2 * time.Second, "ping": 2 * time.Second, "rpc": 30 * time.Second} {
+		if got := commands()[name].timeout; got != want {
+			t.Errorf("%s default timeout = %s, want %s", name, got, want)
+		}
+	}
+}
+
+func TestSkippedUnresponsiveInstancesAreWarnedAbout(t *testing.T) {
+	dir := shortDir(t)
+	serve(t, dir, "a", pingOK("a", nil))
+	serve(t, dir, "hung", func(c *srvConn, req protocol.Message) {})
+	deps := &instance.Deps{Ping: func(sock string) error {
+		if strings.HasSuffix(sock, "hung.sock") {
+			return instance.ErrPingTimeout
+		}
+		return nil
+	}}
+	t.Run("one live: warning, exit 0", func(t *testing.T) {
+		h := newHarness(t, dir, nil)
+		h.env.Deps = deps
+		if got := h.run("ping", "--format", "table"); got != 0 {
+			t.Fatalf("exit %d: %s", got, h.errb.String())
+		}
+		if h.errb.String() != "husk: instance \"hung\" did not answer within 500ms; skipped\n" {
+			t.Fatalf("stderr = %q", h.errb.String())
+		}
+	})
+	t.Run("json mode warns as an object", func(t *testing.T) {
+		h := newHarness(t, dir, nil)
+		h.env.Deps = deps
+		if got := h.run("ping", "--format", "json"); got != 0 {
+			t.Fatalf("exit %d: %s", got, h.errb.String())
+		}
+		var w struct {
+			Warning struct{ Code, Message string }
+		}
+		if err := json.Unmarshal(h.errb.Bytes(), &w); err != nil || w.Warning.Code != "unresponsive" || !strings.Contains(w.Warning.Message, `"hung"`) {
+			t.Fatalf("stderr = %q (%v)", h.errb.String(), err)
+		}
+	})
+	t.Run("only unresponsive: exit 3 naming it", func(t *testing.T) {
+		only := shortDir(t)
+		serve(t, only, "hung", func(c *srvConn, req protocol.Message) {})
+		h := newHarness(t, only, nil)
+		h.env.Deps = deps
+		if got := h.run("ping", "--format", "table"); got != ExitNoInstance {
+			t.Fatalf("exit = %d, want %d", got, ExitNoInstance)
+		}
+		if h.errb.String() != "husk: instance \"hung\" did not answer within 500ms; skipped\nhusk: no instance is running\n" {
+			t.Fatalf("stderr = %q", h.errb.String())
+		}
+	})
+}
+
+func TestAmbiguousErrorCarriesCandidatesAsData(t *testing.T) {
+	dir := shortDir(t)
+	serve(t, dir, "b", pingOK("b", nil))
+	serve(t, dir, "a", pingOK("a", nil))
+	h := newHarness(t, dir, nil)
+	if got := h.run("ping", "--format", "json"); got != ExitAmbiguous {
+		t.Fatalf("exit = %d, want %d", got, ExitAmbiguous)
+	}
+	var e struct {
+		Error struct {
+			Data struct {
+				Candidates []struct {
+					ID        string `json:"id"`
+					PID       int    `json:"pid"`
+					StartedAt string `json:"started_at"`
+				}
+			}
+		}
+	}
+	if err := json.Unmarshal(h.errb.Bytes(), &e); err != nil {
+		t.Fatal(err)
+	}
+	c := e.Error.Data.Candidates
+	if len(c) != 2 || c[0].ID != "a" || c[1].ID != "b" || c[0].PID != os.Getpid() || c[0].StartedAt == "" {
+		t.Fatalf("candidates = %+v", c)
+	}
+}
+
+func TestPluginTokenFromEnvironmentIsSent(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		env  map[string]string
+		want bool
+	}{
+		{"set", map[string]string{EnvPluginToken: "tok"}, true},
+		{"unset", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := shortDir(t)
+			srv := serve(t, dir, "a", pingOK("a", func(c *srvConn, req protocol.Message) { c.reply(req, map[string]any{}) }))
+			h := newHarness(t, dir, tc.env)
+			if got := h.run("rpc", "x.y", "--socket", srv.Socket); got != 0 {
+				t.Fatalf("exit %d: %s", got, h.errb.String())
+			}
+			for _, r := range srv.requests() {
+				if r.Method == "x.y" {
+					if r.HasToken() != tc.want || (tc.want && r.Token != "tok") {
+						t.Fatalf("token = %q (present %v)", r.Token, r.HasToken())
+					}
+					return
+				}
+			}
+			t.Fatal("x.y never reached the server")
+		})
+	}
+}
+
+func TestUsageMessagesHaveNoDoublePrefix(t *testing.T) {
+	h := newHarness(t, shortDir(t), nil)
+	if got := h.run("ping", "extra", "--format", "table"); got != ExitUsage || h.errb.String() != "husk: ping takes no arguments\n" {
+		t.Fatalf("exit %d stderr %q", got, h.errb.String())
+	}
+}
+
+func TestIsTTYIsFalseForCharacterDevicesThatAreNotTerminals(t *testing.T) {
+	f, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if IsTTY(f) {
+		t.Fatal("/dev/null reported as a terminal")
 	}
 }

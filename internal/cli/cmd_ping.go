@@ -14,9 +14,9 @@ import (
 // major and prints the reply.
 func runPing(ctx context.Context, inv *Invocation, args []string) error {
 	if len(args) != 0 {
-		return usageErr("usage: husk ping takes no arguments")
+		return usageErr("ping takes no arguments")
 	}
-	c, _, err := inv.Dial(ctx)
+	c, ctx, _, err := inv.Dial(ctx)
 	if err != nil {
 		return err
 	}

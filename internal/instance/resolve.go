@@ -55,6 +55,11 @@ type Resolved struct {
 
 	// Source is the rule that won.
 	Source Source
+
+	// Skipped lists the unresponsive entries discovery passed over: they
+	// accepted a connection but did not answer the ping. The CLI warns
+	// about each one. Nil for every rule but discovery.
+	Skipped []Status
 }
 
 // ResolveOptions carries the CLI's inputs to Resolve. The string fields are
@@ -161,6 +166,10 @@ type Error struct {
 	// Candidates carries the live instances for KindAmbiguous, and is nil
 	// otherwise: their ids, pids, socket paths and start times.
 	Candidates []Status
+
+	// Skipped lists the unresponsive entries discovery passed over, for a
+	// failed discovery (KindNoInstance or KindAmbiguous); nil otherwise.
+	Skipped []Status
 
 	// Err is the wrapped cause, when there is one.
 	Err error
@@ -292,23 +301,27 @@ func discover(dir string, d *Deps) (Resolved, error) {
 	if err != nil {
 		return Resolved{}, &Error{Kind: KindTransport, Message: "read runtime dir: " + err.Error(), Err: err}
 	}
-	var live []Status
+	var live, skipped []Status
 	for _, st := range statuses {
-		if st.Verdict == VerdictLive {
+		switch st.Verdict {
+		case VerdictLive:
 			live = append(live, st)
+		case VerdictUnresponsive:
+			skipped = append(skipped, st)
 		}
 	}
 	switch len(live) {
 	case 1:
 		e := live[0].Entry
-		return Resolved{Entry: &e, Socket: e.Socket, Source: SourceDiscovery}, nil
+		return Resolved{Entry: &e, Socket: e.Socket, Source: SourceDiscovery, Skipped: skipped}, nil
 	case 0:
-		return Resolved{}, &Error{Kind: KindNoInstance, Message: "no instance is running"}
+		return Resolved{}, &Error{Kind: KindNoInstance, Message: "no instance is running", Skipped: skipped}
 	default:
 		return Resolved{}, &Error{
 			Kind:       KindAmbiguous,
 			Message:    fmt.Sprintf("%d instances are running; choose one with --instance <id>", len(live)),
 			Candidates: live,
+			Skipped:    skipped,
 		}
 	}
 }
