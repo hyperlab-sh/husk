@@ -10,8 +10,9 @@ import (
 )
 
 // Event adapts contracts.EventPort for event.emit and event.watch. Watch
-// registers the connection's notifier with the port; the baseline for the
-// watch reply is the event catalog, per the protocol spec.
+// registers the connection's notifier with the port; the watch reply is
+// empty — delivery is one event.deliver notification per matching emit on
+// the same connection (protocol.md), with no baseline payload.
 type Event struct {
 	Port contracts.EventPort
 }
