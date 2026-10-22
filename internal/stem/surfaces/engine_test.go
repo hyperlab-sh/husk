@@ -322,7 +322,7 @@ func TestReleaseOnCloseAndReclaim(t *testing.T) {
 }
 
 func TestReleaseOnOwnerDeathViaOwnerCleanup(t *testing.T) {
-	st, eng, pods := newEngine(t, Options{})
+	st, eng, pods := newEngine(t, Options{Publications: publications{owners: map[string]string{"publisher.list": "publisher"}}})
 	eng.WatchSlot("publisher", "publisher.list", &sink{})
 
 	pods.launch("alpha.files")
@@ -371,8 +371,45 @@ func TestReleaseOnOwnerDeathViaOwnerCleanup(t *testing.T) {
 	}
 }
 
+func TestSlotVanishesWhenPublisherLeaves(t *testing.T) {
+	pubs := publications{owners: map[string]string{"publisher.toolbar": "publisher"}}
+	st, eng, pods := newEngine(t, Options{Publications: pubs})
+	seen := &sink{}
+	eng.WatchSlot("contributor", "publisher.toolbar", seen)
+
+	pods.launch("publisher")
+	pods.launch("alpha.files")
+	pods.declare("alpha.files", "publisher.toolbar",
+		Contribution{ID: "alpha.files.tool", Plugin: "alpha.files", Label: "one"})
+	settle(st, eng)
+
+	res := resolution(t, st)
+	if got := entryIDs(res.Contributions["publisher.toolbar"]); len(got) != 1 || got[0] != "alpha.files.tool" {
+		t.Fatalf("contributions = %v", got)
+	}
+
+	// The publisher dies: its Pod tears down its declarations and the
+	// host's catalog drops the slot; the contributors' entries vanish with
+	// it, whatever they keep declaring.
+	pods.teardown("publisher")
+	delete(pubs.owners, "publisher.toolbar")
+	settle(st, eng)
+
+	res = resolution(t, st)
+	if _, has := res.Contributions["publisher.toolbar"]; has {
+		t.Fatalf("slot survived its publisher: %v", res.Contributions["publisher.toolbar"])
+	}
+	msgs := seen.slotMsgs(t)
+	if len(msgs) != 2 {
+		t.Fatalf("watcher notifications = %d, want 2", len(msgs))
+	}
+	if len(msgs[1].Contributions) != 0 {
+		t.Fatalf("final notification = %v, want an emptied slot", msgs[1].Contributions)
+	}
+}
+
 func TestContributionOrderAndReplace(t *testing.T) {
-	st, eng, pods := newEngine(t, Options{})
+	st, eng, pods := newEngine(t, Options{Publications: publications{owners: map[string]string{"publisher.list": "publisher"}}})
 	watching := &sink{}
 	other := &sink{}
 	eng.WatchSlot("publisher", "publisher.list", watching)
@@ -429,7 +466,7 @@ func TestContributionOrderAndReplace(t *testing.T) {
 }
 
 func TestContributionOrderWithinOneFlush(t *testing.T) {
-	st, eng, pods := newEngine(t, Options{})
+	st, eng, pods := newEngine(t, Options{Publications: publications{owners: map[string]string{"publisher.list": "publisher"}}})
 	pods.launch("beta.notes")
 	pods.launch("alpha.files")
 
@@ -451,7 +488,7 @@ func TestContributionOrderWithinOneFlush(t *testing.T) {
 }
 
 func TestRemovedEntryLeavesSequence(t *testing.T) {
-	st, eng, pods := newEngine(t, Options{})
+	st, eng, pods := newEngine(t, Options{Publications: publications{owners: map[string]string{"publisher.list": "publisher"}}})
 	pods.launch("alpha.files")
 	pods.launch("beta.notes")
 	pods.declare("alpha.files", "publisher.list",
