@@ -73,7 +73,8 @@ type Root struct {
 	loopGID   atomic.Int64 // goroutine id of the loop, learned on its first Update
 	mu        sync.Mutex   // guards running and closing
 	running   bool
-	closing   bool // shutdown began: spawn refuses new workers
+	closing   bool         // shutdown began: spawn refuses new workers
+	workers   atomic.Int32 // host workers not yet finished (for the shutdown error)
 	closeOnce sync.Once
 	closeErr  error
 	done      chan struct{} // closed when Close finishes
@@ -460,12 +461,14 @@ func (r *Root) spawn(cmd tea.Cmd) {
 		return
 	}
 	r.wg.Add(1)
+	r.workers.Add(1)
 	r.mu.Unlock()
 	if r.opts.onSpawn != nil {
 		r.opts.onSpawn(true)
 	}
 	go func() {
 		defer r.wg.Done()
+		defer r.workers.Add(-1)
 		if msg := cmd(); msg != nil {
 			r.cfg.Post(msg)
 		}
@@ -490,10 +493,13 @@ func (r *Root) spawn(cmd tea.Cmd) {
 // Close from Update blocks the loop goroutine while the plugin processes stop
 // and the workers finish, and those workers end by calling Config.Post. So the
 // loop owner must close its post gate before calling Close from Update: Post
-// then refuses (false) instead of blocking, which is what Config.Post
-// requires. A Post that blocks anyway cannot deadlock Close for good: the wait
-// for workers is bounded by storeCloseTimeout and Close returns an error
-// naming the workers it did not wait for.
+// then returns false instead of blocking, which is what Config.Post requires
+// of a closed gate. The pods.Stop kill path and the wrapper's exit notice also
+// call Post on the loop goroutine and need the gate closed; nothing bounds
+// them. Only the wait for host workers is bounded (storeCloseTimeout): when it
+// expires Close returns an error with the count of stuck workers and does not
+// close the Store, so a worker still inside a command never sees a closed
+// Store. The Store then stays open until the process exits.
 func (r *Root) Close() error {
 	r.closeOnce.Do(func() {
 		r.closeErr = r.shutdown()
@@ -553,16 +559,18 @@ func (r *Root) shutdown() error {
 	if r.rt != nil {
 		r.rt.Close()
 	}
+	workersStuck := false
 	workersDone := make(chan struct{})
 	go func() { r.wg.Wait(); close(workersDone) }()
 	wctx, wcancel := context.WithTimeout(context.Background(), r.opts.workerWaitOr(storeCloseTimeout))
 	select {
 	case <-workersDone:
 	case <-wctx.Done():
-		errs = append(errs, fmt.Errorf("workers still running after %v: a Config.Post that blocks keeps them from finishing", r.opts.workerWaitOr(storeCloseTimeout)))
+		workersStuck = true
+		errs = append(errs, fmt.Errorf("%d workers still running after %v: store left open", r.workers.Load(), r.opts.workerWaitOr(storeCloseTimeout)))
 	}
 	wcancel()
-	if r.store != nil {
+	if r.store != nil && !workersStuck {
 		ctx, cancel := context.WithTimeout(context.Background(), storeCloseTimeout)
 		if err := r.store.Close(ctx); err != nil {
 			errs = append(errs, fmt.Errorf("store: %w", err))

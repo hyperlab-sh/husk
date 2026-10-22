@@ -802,10 +802,11 @@ func TestSpawnRefusedOnceClosing(t *testing.T) {
 	}
 }
 
-// TeardownMsg handled while Close waits on the worker group must not Add to
-// it. A held worker keeps shutdown inside the wait; one TeardownMsg for a live
-// Pod is then delivered through Update and its Reload worker must be refused.
-func TestTeardownWhileShutdownWaitsOnWorkersIsRefused(t *testing.T) {
+// TeardownMsg handled after closing is set must not Add to the worker group.
+// Shutdown is parked in the "pods" hook, before wg.Wait starts, with a held
+// worker keeping wg above zero; one TeardownMsg for a live Pod is then
+// delivered through Update and its Reload worker must be refused.
+func TestTeardownAfterClosingIsSetRefusesTheWorker(t *testing.T) {
 	hook, ready := readyHook("")
 	f := newFakes()
 	var mu sync.Mutex
@@ -936,8 +937,8 @@ func TestCloseFromUpdateWithLiveWorkerAfterGateClosed(t *testing.T) {
 	}
 }
 
-// A Post that breaks the contract and blocks must not hang Close: the wait for
-// workers is bounded and Close says so.
+// A Post that blocks past shutdown must not hang Close: the wait for workers
+// is bounded, Close counts the stuck workers, and the Store is left open.
 func TestCloseFromUpdateBoundsTheWaitOnABlockedPost(t *testing.T) {
 	g := &postGate{gate: make(chan struct{})}
 	var workerDone atomic.Bool
@@ -952,8 +953,11 @@ func TestCloseFromUpdateBoundsTheWaitOnABlockedPost(t *testing.T) {
 	if workerDone.Load() {
 		t.Error("worker finished although its Post was still blocked")
 	}
-	if want := []string{"calls", "server", "pods", "store"}; !slices.Equal(steps, want) {
-		t.Fatalf("steps = %v, want %v", steps, want)
+	if !strings.Contains(err.Error(), "1 workers still running") {
+		t.Errorf("Close = %v, want the stuck-worker count", err)
+	}
+	if want := []string{"calls", "server", "pods"}; !slices.Equal(steps, want) {
+		t.Fatalf("steps = %v, want %v (no store close under a live worker)", steps, want)
 	}
 	close(g.gate) // release the worker so the test leaks nothing
 }
