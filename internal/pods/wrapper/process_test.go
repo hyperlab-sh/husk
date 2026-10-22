@@ -43,6 +43,11 @@ func fakePlugin(mode string) int {
 		fmt.Fprint(os.Stderr, "one\n\x1b[31mtwo\x1b[0m\nthree\nlast\n")
 		return 7
 	}
+	if mode == "selfkill" {
+		// A foreign signal: nothing in the host asked this process to stop.
+		_ = syscall.Kill(os.Getpid(), syscall.SIGKILL)
+		select {}
+	}
 	if mode == "legacy" {
 		go func() {
 			for range sigs {
@@ -382,6 +387,25 @@ func TestCleanAndCrashExitsRouteClosedBeforeLiveness(t *testing.T) {
 				t.Fatal("post-exit send accepted")
 			}
 		})
+	}
+}
+
+// A Pod killed by a signal the host did not send (not through Stop) is a
+// failure with a recorded cause, like a non-zero exit (pods.md decision 16).
+func TestForeignSignalExitFailsWithCauseBeforeLiveness(t *testing.T) {
+	f := newFixture(t, "selfkill", nil)
+	f.start(t)
+	exit := awaitNotice[ExitMsg](t, f)
+	if exit.Info.Status != Failed || !strings.Contains(exit.Info.LastError, "signal") {
+		t.Fatalf("exit = %+v, want failed with a signal cause", exit.Info)
+	}
+	if closedCount(f) != 1 {
+		t.Fatal("Closed was not posted exactly once before Exit")
+	}
+	for _, notice := range f.notices {
+		if closed, ok := notice.(ClosedMsg); ok && !strings.Contains(closed.Reason.Error(), "signal") {
+			t.Fatal("closed reason:", closed.Reason)
+		}
 	}
 }
 
