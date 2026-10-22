@@ -43,7 +43,11 @@ func Format(key tea.Key) string {
 	return name
 }
 
-// Normalize parses one written key using Bubble Tea's own canonical formatter.
+// Normalize parses one binding key using Bubble Tea's canonical formatter.
+// Canonical host spellings round-trip, including case-sensitive lone-Alt text.
+// Ctrl/command letters canonicalize to lowercase; Shift+digit/symbol spellings
+// and multi-rune text are rejected rather than guessed. Format may represent
+// synthetic keys outside this binding vocabulary; those are not identity cases.
 // Sequences are arrays; whitespace-separated key lists are deliberately invalid.
 func Normalize(text string) (string, error) {
 	original := text
@@ -80,7 +84,7 @@ func Normalize(text string) (string, error) {
 		}
 		code = r
 	}
-	if mods != 0 && unicode.IsLetter(code) {
+	if mods&(tea.ModCtrl|tea.ModMeta|tea.ModSuper|tea.ModHyper) != 0 && unicode.IsLetter(code) {
 		code = unicode.ToLower(code)
 	}
 	if mods.Contains(tea.ModShift) && unicode.IsPrint(code) && !unicode.IsLetter(code) && !unicode.IsSpace(code) {
