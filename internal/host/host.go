@@ -19,7 +19,6 @@ import (
 	"github.com/hyperlab-sh/husk/internal/pods/server"
 	"github.com/hyperlab-sh/husk/internal/pods/wrapper"
 	"github.com/hyperlab-sh/husk/internal/services"
-	"github.com/hyperlab-sh/husk/internal/services/settings"
 	"github.com/hyperlab-sh/husk/internal/stem/calls"
 	"github.com/hyperlab-sh/husk/internal/stem/dispatcher"
 	"github.com/hyperlab-sh/husk/internal/stem/eventbus"
@@ -292,7 +291,6 @@ func (r *Root) buildServices() error {
 		Clock:     storeClock{r.clock},
 		Crypto:    secretsDoc,
 		Prompt:    prompt,
-		Schema:    settings.Builtins(),
 		Warn: func(p services.Problem) {
 			r.log(pods.LogMsg{Level: "warn", Message: "services: " + p.Message})
 		},
