@@ -818,6 +818,25 @@ func TestToastBoundAndTTL(t *testing.T) {
 	}
 }
 
+// TestToastBoundDefaultsTo32 pins the default: an Options with no bound
+// queues DefaultMaxToasts toasts and drops the oldest at the bound.
+func TestToastBoundDefaultsTo32(t *testing.T) {
+	st, eng, _ := newEngine(t, Options{})
+	_ = st
+	for i := 0; i < DefaultMaxToasts+1; i++ {
+		if err := eng.ToastShow("alpha.files", protocol.ToastShowParams{Level: LevelInfo, Title: "t"}); err != nil {
+			t.Fatalf("show %d: %v", i, err)
+		}
+	}
+	if got := eng.Stats().ToastsDropped; got != 1 {
+		t.Fatalf("dropped = %d, want 1 (the default bound is %d)", got, DefaultMaxToasts)
+	}
+	active, ok := eng.ActiveToast()
+	if !ok || active.Title != "t" {
+		t.Fatalf("active = %+v ok=%v, want the youngest toast", active, ok)
+	}
+}
+
 func TestResizedReachesOnlyOccupants(t *testing.T) {
 	st, eng, pods := newEngine(t, Options{})
 	pods.launch("alpha.files")

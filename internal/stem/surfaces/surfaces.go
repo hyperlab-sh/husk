@@ -9,8 +9,8 @@
 // from State snapshots and never writes another owner's slice.
 // husk.surfaces is the resolution: one occupant per surface (first claim
 // wins, conflicts refused) and the combined per-slot contribution order,
-// which the engine records itself in first-observed order across ticks
-// (D49). The host renders only from the resolution.
+// which the engine records itself in first-observed order across ticks.
+// The host renders only from the resolution.
 //
 // The value types are the State surfaces package's (which freezes the
 // contracts entry shapes); the aliases below keep the engine's one-spelling
@@ -75,11 +75,11 @@ func lastDot(s string) int {
 	return -1
 }
 
-// decodeOccupants decodes an occupants declaration value defensively: a
-// malformed slice logs and resolves as absent. Entries naming a plugin
-// other than the namespace owner, or a surface other than their key, are
-// dropped: the Pod's wrappers refuse them at write time, so seeing one here
-// means a stale or foreign value.
+// decodeOccupants decodes an occupants declaration value defensively and
+// returns the decode error for the caller to log. Entries whose plugin is
+// empty or whose surface mismatches their key are dropped: the Pod's
+// owner-checked wrappers refuse foreign or stale writes at write time, so
+// what survives here is a well-shaped declaration the engine can resolve.
 func decodeOccupants(raw json.RawMessage) (Occupants, error) {
 	if len(raw) == 0 {
 		return nil, nil
@@ -97,9 +97,9 @@ func decodeOccupants(raw json.RawMessage) (Occupants, error) {
 }
 
 // decodeContributions decodes a contributions declaration value
-// defensively: entries naming a plugin other than the namespace owner or a
-// slot other than their key are dropped, and the remaining entries keep the
-// plugin's declared order.
+// defensively and returns the decode error for the caller to log. Entries
+// whose plugin is empty or whose slot mismatches their key are dropped;
+// the survivors keep the plugin's declared order.
 func decodeContributions(raw json.RawMessage) (Contributions, error) {
 	if len(raw) == 0 {
 		return nil, nil

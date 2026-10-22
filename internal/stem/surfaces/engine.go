@@ -426,7 +426,7 @@ func (e *Engine) resolvePlugin(plugin string, old, cur *pluginDecl, res *Surface
 		}
 	}
 
-	// Contributions (D49): the engine records the per-slot order. An entry
+	// Contributions: the engine records the per-slot order. An entry
 	// keeps its first-observed position across ticks; a re-declared entry
 	// updates its content in place; an entry gone from the declaration
 	// leaves the sequence, and observing it again appends anew. New entries
