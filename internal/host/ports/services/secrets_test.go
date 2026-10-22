@@ -1,8 +1,10 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -17,10 +19,18 @@ import (
 // newSecrets wires a real secrets service with an in-memory crypto doc, a
 // prompt seam and loop posts, declaring one git.token request for "files".
 func newSecrets(t *testing.T) (Secrets, *secrets.Service, chan func(), chan bool, *fakeClock) {
+	port, svc, posts, answers, clock, _ := newSecretsWithCrypto(t)
+	return port, svc, posts, answers, clock
+}
+
+// newSecretsWithCrypto also hands back the store crypto so tests can inject
+// read errors or plant stored bytes directly.
+func newSecretsWithCrypto(t *testing.T) (Secrets, *secrets.Service, chan func(), chan bool, *fakeClock, *memoryCrypto) {
 	t.Helper()
 	posts := make(chan func(), 8)
 	answers := make(chan bool, 1)
 	clock := &fakeClock{}
+	crypto := &memoryCrypto{data: map[string][]byte{}}
 	in := services.ReloadInput{
 		Doc: store.Resolved{Doc: doc(t, `{}`), Origins: map[string]store.Layer{}},
 		Declared: map[store.DocName]map[string]store.Doc{
@@ -32,7 +42,7 @@ func newSecrets(t *testing.T) (Secrets, *secrets.Service, chan func(), chan bool
 	svc, err := secrets.New(secrets.Options{
 		State:  state.New(state.Options{}),
 		Clock:  clock,
-		Crypto: &memoryCrypto{data: map[string][]byte{}},
+		Crypto: crypto,
 		Post:   func(f func()) bool { posts <- f; return true },
 		Prompt: func(secrets.Prompt) <-chan bool { return answers },
 	})
@@ -41,7 +51,7 @@ func newSecrets(t *testing.T) (Secrets, *secrets.Service, chan func(), chan bool
 	}
 	t.Cleanup(svc.Close)
 	applyTo(t, svc, in)
-	return Secrets{Svc: svc}, svc, posts, answers, clock
+	return Secrets{Svc: svc}, svc, posts, answers, clock, crypto
 }
 
 func TestSecretsUserLifecycleAndViews(t *testing.T) {
@@ -176,7 +186,7 @@ func TestCodedDeadlineAndMutation(t *testing.T) {
 
 func TestSecretValueNeverAppearsInErrorStrings(t *testing.T) {
 	const value = "hunter2-super-secret"
-	port, _, posts, answers, _ := newSecrets(t)
+	port, _, posts, answers, _, crypto := newSecretsWithCrypto(t)
 	ctx := context.Background()
 	if err := port.Set(ctx, userCaller, "git.token", []byte(value)); err != nil {
 		t.Fatal(err)
@@ -189,15 +199,45 @@ func TestSecretValueNeverAppearsInErrorStrings(t *testing.T) {
 	answers <- true
 	runPosted(t, posts)
 
-	// Every failing path a caller can reach while the value exists: reads
-	// that must not confirm or leak, foreign plugins, unknown names, plugin
-	// mutations — and the one success that returns the value for comparison.
+	// The granted read returns the value, so the scan below is not vacuous.
 	if got, err := port.Get(ctx, filesCaller, "git.token"); err != nil {
 		t.Fatalf("granted read failed: %v", err)
 	} else if string(got) != value {
 		t.Fatalf("granted read = %q", got)
 	}
-	errs := []error{
+
+	// Paths where the value (or its bytes) is actually in scope when the
+	// error is built — the round-1 rows only ever failed before the read.
+	inScope := []error{
+		// Crypto read error whose own text contains the value: services must
+		// answer unavailable and never pass the store error through.
+		mustErr(t, func() error {
+			crypto.getErr = errors.New("store get failed for " + value)
+			defer func() { crypto.getErr = nil }()
+			_, err := port.Reveal(ctx, userCaller, "git.token")
+			return err
+		}),
+		// Stored bytes past the 64 KiB read cap: the oversize branch must
+		// answer unavailable without quoting what it refused.
+		mustErr(t, func() error {
+			saved := crypto.data["git.token"]
+			oversize := bytes.Repeat([]byte("x"), 64*1024+1)
+			copy(oversize, value)
+			crypto.data["git.token"] = oversize
+			defer func() { crypto.data["git.token"] = saved }()
+			_, err := port.Reveal(ctx, userCaller, "git.token")
+			return err
+		}),
+	}
+	for i, err := range inScope {
+		if code, _ := codedOf(t, err); code != "unavailable" {
+			t.Fatalf("in-scope error %d: code = %s, want unavailable", i, code)
+		}
+	}
+
+	// Pre-read denials kept from round 1: they fail before the value is
+	// touched, and must stay value-free too.
+	errs := append(inScope,
 		mustErr(t, func() error { _, err := port.Reveal(ctx, filesCaller, "git.token"); return err }),
 		mustErr(t, func() error { _, err := port.Get(ctx, filesCaller, "nope"); return err }),
 		mustErr(t, func() error {
@@ -206,7 +246,7 @@ func TestSecretValueNeverAppearsInErrorStrings(t *testing.T) {
 		}),
 		mustErr(t, func() error { return port.Set(ctx, filesCaller, "git.token", []byte("x")) }),
 		mustErr(t, func() error { return port.Grant(ctx, filesCaller, "files", "git.token") }),
-	}
+	)
 	for i, err := range errs {
 		text := err.Error()
 		if de, ok := err.(host.DataError); ok {

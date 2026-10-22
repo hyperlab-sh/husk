@@ -63,10 +63,18 @@ var (
 // hostState builds a fresh state tree for secrets tests.
 func hostState() *state.State { return state.New(state.Options{}) }
 
-// memoryCrypto is an in-memory store.SecretDoc.
-type memoryCrypto struct{ data map[string][]byte }
+// memoryCrypto is an in-memory store.SecretDoc. getErr, when set, is
+// returned by Get — the leak test injects an error whose text carries the
+// secret to prove services never passes the value through.
+type memoryCrypto struct {
+	data   map[string][]byte
+	getErr error
+}
 
 func (m *memoryCrypto) Get(k string) ([]byte, bool, error) {
+	if m.getErr != nil {
+		return nil, false, m.getErr
+	}
 	v, ok := m.data[k]
 	return append([]byte(nil), v...), ok, nil
 }
