@@ -543,7 +543,7 @@ func (w *Wrapper) wait(cmd *exec.Cmd) {
 	reason := w.fault
 	shutdown := w.shutdown
 	w.mu.Unlock()
-	if reason == nil {
+	if reason == nil || shutdown {
 		reason = errors.New("exited")
 		if err != nil && !shutdown {
 			reason = fmt.Errorf("crashed (%s): %w", cmd.ProcessState.String(), err)
