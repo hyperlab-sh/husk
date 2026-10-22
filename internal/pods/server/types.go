@@ -70,12 +70,20 @@ const (
 	QueueCapacity = 1024
 	// WriteTimeout bounds an outbound socket write.
 	WriteTimeout = 5 * time.Second
+	// DiagnosticInterval bounds coalesced loop notices per connection.
+	DiagnosticInterval = time.Second
 )
 
 // Notice is a token-free diagnostic posted to the owning loop.
 type Notice struct {
 	ConnID         uint64
 	Level, Message string
+	// Count is the number of coalesced diagnostics; zero for lifecycle notices.
+	Count uint64
+	// LastCode is the final diagnostic code in this batch.
+	LastCode protocol.Code
+	// Suppressed counts rate-limited protocol.error wire notifications.
+	Suppressed uint64
 }
 
 type systemClock struct{}

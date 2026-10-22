@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"strings"
@@ -15,20 +14,25 @@ import (
 )
 
 type connection struct {
-	server            *SocketServer
-	raw               *net.UnixConn
-	id                uint64
-	ctx               context.Context
-	cancel            context.CancelFunc
-	writer            *protocol.Writer
-	once              sync.Once
-	slots             chan struct{}
-	notifications     chan notification
-	notifySlots       chan struct{}
-	notifyDone        chan struct{}
-	budgetMu          sync.Mutex
-	window            time.Time
-	count, suppressed int
+	server                                *SocketServer
+	raw                                   *net.UnixConn
+	id                                    uint64
+	ctx                                   context.Context
+	cancel                                context.CancelFunc
+	writer                                *protocol.Writer
+	once                                  sync.Once
+	slots                                 chan struct{}
+	notifications                         chan notification
+	notifySlots                           chan struct{}
+	notifyDone                            chan struct{}
+	budgetMu                              sync.Mutex
+	window                                time.Time
+	count                                 int
+	diagnosticCount, diagnosticSuppressed uint64
+	lastDiagnosticCode                    protocol.Code
+	diagnosticTimer                       protocol.Timer
+	lastDiagnosticPost                    time.Time
+	hasDiagnosticPost                     bool
 }
 
 type notification struct {
@@ -42,19 +46,31 @@ func newConnection(s *SocketServer, raw *net.UnixConn, id uint64) *connection {
 	c := &connection{server: s, raw: raw, id: id, ctx: ctx, cancel: cancel, slots: make(chan struct{}, MaxInFlight), notifications: make(chan notification, MaxNotificationQueue), notifySlots: make(chan struct{}, MaxNotificationQueue), notifyDone: make(chan struct{})}
 	// Use the queue watchdog rather than an absolute native write deadline:
 	// an injected clock's epoch need not be the operating system's epoch.
-	c.writer = protocol.NewQueuedWriter(struct{ io.Writer }{raw}, protocol.QueueOptions{Capacity: QueueCapacity, WriteTimeout: WriteTimeout, Clock: s.cfg.Clock, Closer: raw, OnFail: func(err error) { c.close(); s.post(id, "warn", "IPC connection closed: "+err.Error()) }})
+	c.writer = protocol.NewQueuedWriter(struct{ io.Writer }{raw}, protocol.QueueOptions{Capacity: QueueCapacity, WriteTimeout: WriteTimeout, Clock: s.cfg.Clock, Closer: raw, OnFail: func(error) { c.noteDiagnostic(protocol.CodeUnavailable); c.close(); c.publishDiagnostic() }})
 	return c
 }
-func (c *connection) close() { c.once.Do(func() { c.cancel(); c.writer.Abort(); _ = c.raw.Close() }) }
+func (c *connection) close() {
+	c.once.Do(func() {
+		c.cancel()
+		c.budgetMu.Lock()
+		if c.diagnosticTimer != nil {
+			c.diagnosticTimer.Stop()
+			c.diagnosticTimer = nil
+		}
+		c.budgetMu.Unlock()
+		c.writer.Abort()
+		_ = c.raw.Close()
+	})
+}
 func (c *connection) run() {
-	defer c.flush()
+	defer c.publishDiagnostic()
 	defer c.close()
 	go c.runNotifications()
 	_ = protocol.ReadLoop(c.raw, c.receive, func(e *protocol.LineError) {
 		if m, ok := e.Response(); ok {
 			c.respond(m)
 		} else {
-			c.server.post(c.id, "warn", fmt.Sprintf("husk: protocol error from connection %d: %s: %s", c.id, e.Code, e.Err))
+			c.noteDiagnostic(e.Code)
 		}
 	})
 }
@@ -83,41 +99,27 @@ func (c *connection) send(m protocol.Message) error {
 	}
 	return err
 }
-func (c *connection) flush() {
-	c.budgetMu.Lock()
-	defer c.budgetMu.Unlock()
-	if c.suppressed > 0 {
-		c.server.post(c.id, "warn", fmt.Sprintf("connection %d: %d rejections suppressed", c.id, c.suppressed))
-		c.suppressed = 0
-	}
-}
 func (c *connection) respond(m protocol.Message) {
-	if m.Method == protocol.MethodProtocolError {
-		c.budgetMu.Lock()
-		now := c.server.cfg.Clock.Now()
-		if c.window.IsZero() || now.Sub(c.window) >= time.Second {
-			if c.suppressed > 0 {
-				c.server.post(c.id, "warn", fmt.Sprintf("connection %d: %d rejections suppressed", c.id, c.suppressed))
-			}
-			c.window = now
-			c.count = 0
-			c.suppressed = 0
-		}
-		if c.count >= protocol.MaxProtocolErrorsPerSecond {
-			c.suppressed++
-			c.budgetMu.Unlock()
-			return
-		}
-		c.count++
-		c.budgetMu.Unlock()
-	}
 	if m.Error != nil {
-		c.server.post(c.id, "warn", fmt.Sprintf("husk: protocol error from connection %d: %s: %s", c.id, m.Error.Code, m.Error.Message))
+		c.noteDiagnostic(m.Error.Code)
 	}
 	if m.Method == protocol.MethodProtocolError {
 		var p protocol.ProtocolErrorParams
 		_ = json.Unmarshal(m.Params, &p)
-		c.server.post(c.id, "warn", fmt.Sprintf("husk: protocol error from connection %d: %s: %s", c.id, p.Code, p.Message))
+		c.budgetMu.Lock()
+		now := c.server.cfg.Clock.Now()
+		if c.window.IsZero() || now.Sub(c.window) >= time.Second {
+			c.window = now
+			c.count = 0
+		}
+		if c.count >= protocol.MaxProtocolErrorsPerSecond {
+			c.noteDiagnosticLocked(p.Code, true)
+			c.budgetMu.Unlock()
+			return
+		}
+		c.count++
+		c.noteDiagnosticLocked(p.Code, false)
+		c.budgetMu.Unlock()
 	}
 	_ = c.send(m)
 }
@@ -140,7 +142,7 @@ func (c *connection) receive(req protocol.Message) {
 	}
 	kind, _ := req.Kind()
 	if kind == protocol.KindReply || req.Method == protocol.MethodProtocolError {
-		c.server.post(c.id, "debug", "socket reply or protocol.error ignored")
+		c.noteDiagnostic(protocol.CodeInvalidMessage)
 		return
 	}
 	caller := Caller{Kind: CallerCLI, ConnID: c.id}
@@ -181,7 +183,7 @@ func (c *connection) receive(req protocol.Message) {
 		if req.ID != nil {
 			c.reject(req, protocol.CodeUnknownMethod, "unknown method", nil)
 		} else {
-			c.server.post(c.id, "debug", "unknown notification ignored: "+req.Method)
+			c.noteDiagnostic(protocol.CodeUnknownMethod)
 		}
 		return
 	}
