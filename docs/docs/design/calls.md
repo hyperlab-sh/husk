@@ -65,6 +65,16 @@ type Options struct {
 	Requester Requester     // required
 }
 
+// TableOptions is instance configuration, separate from per-call Options.
+// Clock defaults to the system clock; nil Logger is a no-op. Logger must not
+// block or reenter Calls. Zero caps use the limits below; negative caps panic.
+type TableOptions struct {
+	Clock               Clock
+	Logger              func(format string, args ...any)
+	MaxPending          int
+	MaxPendingPerPlugin int
+}
+
 // Result is the single outcome of a call. Exactly one of Value or Err is set.
 type Result struct {
 	Handle    Handle
@@ -95,7 +105,7 @@ type Clock interface{ Now() time.Time }
 All methods run on the Loop goroutine only. None blocks. None calls a requester.
 
 ```go
-func New(out Outbox, clock Clock) *Table
+func New(out Outbox, opts TableOptions) *Table
 
 // Send assigns an id, records the call, then writes it through Outbox.
 // On any error nothing stays recorded and no Result is ever produced for it.
@@ -122,11 +132,28 @@ func (t *Table) Cancel(h Handle) bool
 // Close fails every pending call with "cancelled" (shutdown) and refuses later Sends.
 func (t *Table) Close() []Result
 
-// SweepCmd returns a tick only while calls are pending and no tick is in
-// flight; otherwise nil. The Loop batches it after every Send.
+// NextSweep claims the single sweep slot and returns the delay, without
+// scheduling anything. False means no calls pend, a sweep is already in flight,
+// or the table is closed. A true result obliges the caller to schedule the sweep.
+func (t *Table) NextSweep() (time.Duration, bool)
+
+// Sweep acknowledges the tick, clears its in-flight flag and expires at Clock.Now.
+func (t *Table) Sweep() []Result
+
+// SweepCmd is a thin adapter in a separate file: it calls NextSweep and builds
+// tea.Tick only on success. The table and Clock contain no scheduler. The Loop
+// batches it after every Send and after delivering sweep results.
 func (t *Table) SweepCmd() tea.Cmd
 
-func (t *Table) Stats() Stats // pending total and per plugin, timeouts, orphans, since start
+// Stats returns detached pending counts and cumulative counters since New.
+func (t *Table) Stats() Stats
+
+type Stats struct {
+	Pending   int
+	PerPlugin map[PluginID]int // fresh map, only nonzero counts
+	Timeouts  uint64
+	Orphans   uint64
+}
 
 // Messages the Loop receives.
 type ReplyMsg struct { // posted by the Wrapper's stdout reader goroutine
@@ -140,8 +167,8 @@ Synchronous `Send` errors are Go sentinels; the requester turns them into whatev
 
 | Sentinel | Condition |
 |---|---|
-| `ErrBusy` | `MaxPending` calls already pending across all plugins |
-| `ErrPluginBusy` | `MaxPendingPerPlugin` calls already pending on this plugin |
+| `ErrBusy` | the configured overall pending cap is full, or not enough representable ids remain for the requested calls |
+| `ErrPluginBusy` | the configured per-plugin pending cap is full for this plugin |
 | `ErrUnavailable` | `Outbox.Send` failed (no live writer, writer closed, queue full); wraps the cause |
 | `ErrBadOptions` | timeout outside bounds, or empty `Requester` |
 | `ErrClosed` | `Close` already ran |
@@ -188,16 +215,19 @@ A `Result` that a requester forwards to a CLI or plugin caller, after a timeout:
 4. The Loop hands each `Result`, in slice order, to the handler registered for `Result.Requester` (`func(calls.Result) tea.Cmd`) in the same `Update`. Results are not re-queued as separate `tea.Msg`s: a second trip would let another reply or an exit interleave, and `tea.Batch` gives no ordering.
 5. A handler may call `Send`, `Cancel` or `CanSend` on the same table. This is the only reentrancy, and it is safe because step 3 finished every mutation first.
 
+Malformed reply recovery: if the protocol reader rejects a reply line but exposes a readable `LineError.ID`, the Wrapper salvages that id and forwards a bare-id `protocol.Message` through `ReplySink.Reply`, so the Loop posts `ReplyMsg`. A matching call then fails immediately with `internal` and `data.reason: "invalid_reply"`, rather than waiting for its timeout; an unmatched or non-numeric id is an orphan as usual. The reader goroutine never touches the table.
+
 ### Ids
 
-- One counter per `Table`, starting at 1, incremented on every `Send` attempt that passes validation, never reset or reused while the process lives. A failed `Send` burns its id.
+- One counter per `Table`, starting at 1, incremented on every `Send` attempt that passes call-option validation, never reset or reused while the process lives. A failed `Send` burns its id, including cap and outbox failures; rejected call options do not.
+- The counter is a `uint64` bounded by the wire's `2^53 - 1` maximum; exhaustion is an instance fault, logged once and rejected permanently with `ErrBusy`, never wrapped or reused.
 - The counter is shared across plugins, so an id names one call in logs without the plugin. The table is still keyed by `(plugin, id)`: a reply carrying another plugin's id is an orphan, not a match.
 - A reply whose `id` is a string, a fraction, or out of range never matches and is an orphan.
 
 ### Timeouts and the sweep
 
 - The deadline is `Send time + timeout`, read from `Clock`. It starts at enqueue, not at write completion; a write that stalls fails the writer within its own 5 s deadline and becomes a plugin exit.
-- `SweepCmd` keeps today's property: a tick exists only while calls pend. It schedules `tea.Tick(SweepInterval)` when the table is non-empty and no tick is in flight. On `SweepMsg` the Loop clears the in-flight flag, calls `Expire(clock.Now())`, delivers, and batches `SweepCmd()` again. An idle host runs no ticks.
+- `NextSweep` claims the one in-flight slot only when calls pend; the separate `SweepCmd` adapter schedules `tea.Tick(SweepInterval)` after a successful claim. On `SweepMsg` the Loop calls `Sweep()` (clear the flag, then `Expire(clock.Now())`), delivers the returned results, and batches `SweepCmd()` again. Clock supplies only `Now`, never scheduling. An idle host runs no ticks; an already-scheduled tick may still arrive after the final call is removed and is then acknowledged without rearming.
 - A call therefore fails between `timeout` and `timeout + SweepInterval` after `Send`. A reply handled before the sweep that would expire it wins, even if its deadline has passed.
 - `Expire` returns results ordered by deadline, then plugin, then id, so output is deterministic for tests.
 
@@ -213,13 +243,17 @@ A `Result` that a requester forwards to a CLI or plugin caller, after a timeout:
 | `SweepInterval` | 250 ms | today 1 s; 250 ms bounds lateness at 2.5 % of the default timeout for four wakeups per second, only while calls pend |
 | Orphan log rate | 1 line per plugin per second, with a suppressed count | a plugin replying in a loop cannot flood the host log |
 
+The caps are constructor-configurable through `TableOptions`; zero selects the defaults above. `CanSend` counts repeated target arguments separately and checks pending capacity plus enough remaining representable ids for the whole fan-out, without reserving entries, burning ids or checking liveness. The caller must not interleave other loop work between the check and fan-out.
+
+Orphan diagnostics use the injected logger. The first orphan logs immediately, later orphans within one second increment a suppressed count, and the next eligible orphan logs that count. Logging never starts an idle sweep solely to flush diagnostics.
+
 ### Invariants
 
 1. Every successful `Send` produces exactly one `Result`, unless the requester calls `Cancel` first. A failed `Send` produces none.
 2. A `(plugin, id)` is in the table from the `Send` that created it until the first of: matching reply, expiry, plugin exit, cancel, close. Nothing else removes it.
 3. After `Resolve`, `Expire`, `DropPlugin`, `Cancel` or `Close` returns, no removed key remains and counts match the table.
-4. `len(pending) <= MaxPending` and, for every plugin, `pending(plugin) <= MaxPendingPerPlugin`, at every point the Loop can observe.
-5. A tick is in flight if and only if the table was non-empty when the last `SweepCmd` ran, and at most one tick is in flight.
+4. Pending totals and per-plugin counts never exceed their configured caps at any point the Loop can observe; the defaults are `MaxPending` and `MaxPendingPerPlugin`.
+5. A successful `NextSweep` claim stays marked until `Sweep` acknowledges it. No second claim succeeds while marked, even if the table temporarily becomes empty; at most one tick is in flight.
 6. Calls never blocks the Loop: `Outbox.Send` is non-blocking by contract and no method waits on a channel, timer or lock.
 7. Results from one call to `Expire`, `DropPlugin` or `Close` are ordered deterministically (deadline, plugin, id; or id for a single plugin).
 8. A reply is matched only against the plugin whose stdout carried it.
@@ -231,7 +265,7 @@ A `Result` that a requester forwards to a CLI or plugin caller, after a timeout:
 | Condition | Who detects | What happens | What the requester / plugin / user sees |
 |---|---|---|---|
 | Plugin does not reply in time | Sweep (`Expire`) | Call removed, `Result` with `timeout` | Requester gets the error and forwards it; plugin sees nothing; a late reply is an orphan |
-| Plugin exits or is disconnected with calls pending | Wrapper, which posts its exit message; Loop calls `DropPlugin` | Every call on that plugin removed, `cancelled` with the Wrapper's reason in `data` | Requesters get one error per call; user sees the Wrapper's exit toast, not one per call |
+| Plugin exits or is disconnected with calls pending | Wrapper, which posts its exit message; Loop calls `DropPlugin` | Every call on that plugin removed, `cancelled` with `data.reason` `plugin_exited` and the Wrapper's diagnostic reason in `message` | Requesters get one error per call; user sees the Wrapper's exit toast, not one per call |
 | Outbox write fails at `Send` (no live writer, queue full, writer closed) | `Outbox.Send` | `Send` returns `ErrUnavailable`, nothing recorded | Requester reports failure synchronously; a queue overflow also disconnects the plugin through the Wrapper |
 | Global cap reached | `Send` / `CanSend` | `ErrBusy`, nothing recorded or written | Requester refuses its caller |
 | Per-plugin cap reached | `Send` / `CanSend` | `ErrPluginBusy` | Same; other plugins are unaffected |
