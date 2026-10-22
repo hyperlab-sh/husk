@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 )
 
 // MaxEntryBytes is the registration entry size limit; a larger file is
@@ -17,13 +18,15 @@ const MaxEntryBytes = 4096
 // <id>.json, so a reader never sees a partial entry. The file gets mode
 // 0600.
 //
-// If an entry for the same id already belongs to a different, live process
-// — its socket answers a ping and its pid differs from e's — Register fails
-// with the spec's taken-name error and writes nothing. A stale or corrupt
-// entry is replaced: the Server reaches Register only after bind made the
-// name its own, so whatever entry is left there belongs to a dead run. A
-// zero StartedAt is stamped from Deps.Now before writing.
-func Register(dir string, e Entry, d *Deps) error {
+// Register does no liveness probing: the claim on the name is made by
+// binding the socket, not by this file. The Server reaches Register only
+// after bind made the name its own, so any entry still on disk belongs to
+// a dead run — stale, corrupt, or the same pid re-registering — and is
+// replaced. (Probing here would ping the new server's own freshly bound
+// socket, see a different pid in the old entry, and wrongly refuse: a
+// named instance could then never restart after a crash.) A zero
+// StartedAt is stamped from the wall clock before writing.
+func Register(dir string, e Entry) error {
 	if err := ValidID(e.ID); err != nil {
 		return err
 	}
@@ -43,15 +46,9 @@ func Register(dir string, e Entry, d *Deps) error {
 	}
 
 	path := EntryPath(dir, e.ID)
-	if old, err := readEntry(path); err == nil && old.PID != e.PID && d.classify(old) == VerdictLive {
-		return &Error{
-			Kind:    KindTaken,
-			Message: fmt.Sprintf("instance %q is already running (pid %d)", displayName(old), old.PID),
-		}
-	}
 
 	if e.StartedAt.IsZero() {
-		e.StartedAt = d.now().UTC()
+		e.StartedAt = time.Now().UTC()
 	}
 	data, err := json.MarshalIndent(e, "", "  ")
 	if err != nil {
@@ -159,11 +156,4 @@ func readEntry(path string) (Entry, error) {
 		return Entry{}, fmt.Errorf("%s: incomplete entry", path)
 	}
 	return e, nil
-}
-
-func displayName(e Entry) string {
-	if e.Name != "" {
-		return e.Name
-	}
-	return e.ID
 }

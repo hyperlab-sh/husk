@@ -16,8 +16,8 @@ import (
 // milliseconds, so discovery and stale checks wait no longer than this.
 const DiscoveryPingTimeout = 500 * time.Millisecond
 
-// Deps holds the seams tests inject so that no test needs a real socket, a
-// real clock or the real process table. The zero value is production:
+// Deps holds the seams tests inject so that no test needs a real socket,
+// a real clock or the real process table. The zero value is production:
 // pings go out over real Unix sockets with the discovery timeout, the pid
 // check is disabled (see ProcessAlive), and StartedAt stamps come from
 // time.Now. A nil *Deps anywhere means those production defaults.
@@ -36,10 +36,6 @@ type Deps struct {
 	// unsafe) and a live ping outranks it in every case. When set and
 	// reporting false, the entry is stale without a ping.
 	ProcessAlive func(pid int) bool
-
-	// Now returns the current time, used to stamp a zero StartedAt in
-	// Register. When nil, time.Now is used.
-	Now func() time.Time
 }
 
 // Verdict classifies one registration entry's liveness.
@@ -153,13 +149,6 @@ func (d *Deps) ping(socketPath string) error {
 		return d.Ping(socketPath)
 	}
 	return DefaultPing(socketPath, DiscoveryPingTimeout)
-}
-
-func (d *Deps) now() time.Time {
-	if d != nil && d.Now != nil {
-		return d.Now()
-	}
-	return time.Now()
 }
 
 // Sentinels DefaultPing (and any well-behaved injected Ping) wraps its
