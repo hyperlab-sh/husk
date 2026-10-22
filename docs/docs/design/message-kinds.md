@@ -668,3 +668,27 @@ Hook runner invariants:
    distributions ship host-side extensions, `husk.*` handlers may need a
    registry outside `cmd/husk`. Recommended: defer; `RegisterHost` already
    covers it.
+6. Today's hook path checks the global and per-subscriber caps before any
+   envelope is delivered, and the cut-out keeps that: a cap refusal (or a
+   transport failure mid fan-out, which the runner rolls back) refuses the
+   whole call — a call reaches every live subscriber or none. The spec names
+   the caps but not the all-or-nothing fan-out. Recommended: keep it; a
+   partial fan-out has no aggregate a caller could use.
+7. The runner can refuse before any subscriber is asked: `not_found` for an
+   undeclared hook id (today's `unknown hook`), `busy` for the caps, and
+   `unavailable` when Calls cannot deliver. The spec's HookResult codes name
+   only timeout, cancelled and the subscriber's own codes; these refusals
+   answer the caller's `hook.call` directly with no result list.
+   Recommended: confirm the codes in the protocol table suffice; they do
+   today.
+8. A subscriber that is not live when the hook is called is skipped without
+   an entry in the aggregate, as today. The spec says "every live subscriber"
+   but does not name that a non-live subscriber produces no entry (unlike a
+   subscriber that exits mid-call, which gets `cancelled`). Recommended:
+   keep; liveness at call time defines the fan-out.
+9. Today's registry keys pending hook calls on the caller's `request_id`,
+   refusing duplicates in flight and freeing the id on reply or timeout. The
+   cut-out drops that seam: the wire envelope `id` correlates the caller's
+   request and Calls ids correlate the legs, so there is no caller-supplied
+   request id to deduplicate. Recommended: nothing needs it; record that the
+   migration drops it.
