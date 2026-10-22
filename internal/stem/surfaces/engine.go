@@ -28,7 +28,11 @@ type Liveness interface {
 
 // Publications is the engine's read-only view of the published-slot catalog:
 // it maps a published slot id to its owning publisher plugin. The host
-// implements it over the manifest catalog; the engine owns no catalog.
+// implements it over the manifest catalog; the engine owns no catalog and
+// never polls it. The host calls CatalogChanged whenever Owner's answer
+// changes — a publisher registered, torn down, or its slots re-declared —
+// so a catalog-only change, which is no declaration change, still reaches
+// the next pass.
 type Publications interface {
 	Owner(slotID string) (publisher string, ok bool)
 }
@@ -230,6 +234,17 @@ func New(st *state.State, opts Options) (*Engine, error) {
 		e.lastRev = ent.Revision
 	}
 	return e, nil
+}
+
+// CatalogChanged marks the engine dirty: the published-slot catalog
+// changed since the last pass. The engine never polls the catalog, and a
+// catalog-only change is no declaration change — a publisher torn down
+// changes its declarations first, and the catalog's own update may land an
+// Update later — so without this call a dropped slot would wait for an
+// unrelated pass to notice. The host calls it on the loop, like every
+// engine entry point, whenever the catalog changes.
+func (e *Engine) CatalogChanged() {
+	e.dirty = true
 }
 
 // Flush runs one resolution pass: it diffs the Pod-written declaration

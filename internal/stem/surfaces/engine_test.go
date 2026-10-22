@@ -926,6 +926,86 @@ func TestForeignResolutionWriteReResolves(t *testing.T) {
 	}
 }
 
+func TestCatalogChangedDropsSlotAfterLateCatalogUpdate(t *testing.T) {
+	pubs := publications{owners: map[string]string{"publisher.list": "publisher"}}
+	st, eng, pods := newEngine(t, Options{Publications: pubs})
+	w := &sink{}
+	eng.WatchSlot("publisher", "publisher.list", w)
+
+	pods.launch("publisher")
+	pods.claim("publisher", string(protocol.SurfaceSidebarList))
+	pods.launch("alpha.files")
+	pods.declare("alpha.files", "publisher.list", Contribution{ID: "alpha.files.item", Plugin: "alpha.files", Label: "one"})
+	settle(st, eng)
+
+	res := resolution(t, st)
+	if got := entryIDs(res.Contributions["publisher.list"]); len(got) != 1 || got[0] != "alpha.files.item" {
+		t.Fatalf("contributions = %v", got)
+	}
+
+	// The publisher's Pod tears down first: its declaration change
+	// triggers a pass, but the host's catalog still lists the slot — that
+	// update lands one Update later — so the pass keeps the slot.
+	pods.teardown("publisher")
+	settle(st, eng)
+	res = resolution(t, st)
+	if _, has := res.Contributions["publisher.list"]; !has {
+		t.Fatal("slot dropped before the catalog changed")
+	}
+
+	// The catalog update is no declaration change: only CatalogChanged
+	// marks the engine dirty, and the next pass drops the slot and tells
+	// its watchers the slot is empty.
+	delete(pubs.owners, "publisher.list")
+	eng.CatalogChanged()
+	settle(st, eng)
+
+	res = resolution(t, st)
+	if _, has := res.Contributions["publisher.list"]; has {
+		t.Fatal("slot survived the catalog change")
+	}
+	msgs := w.slotMsgs(t)
+	if len(msgs) == 0 {
+		t.Fatal("watcher never notified")
+	}
+	last := msgs[len(msgs)-1]
+	if last.SlotID != "publisher.list" || len(last.Contributions) != 0 {
+		t.Fatalf("last notification = %+v, want the empty publisher.list", last)
+	}
+
+	// Catalog-only change: a plugin that only published (its Pod had no
+	// declarations — or its catalog update simply lands with no other
+	// change in flight) leaves State untouched, so nothing dirties the
+	// engine. Re-register the slot — the standing declaration, nudged with
+	// a value change, resolves again — then prove the engine does not poll
+	// the catalog, and that CatalogChanged alone drops it.
+	pubs.owners["publisher.list"] = "publisher"
+	pods.declare("alpha.files", "publisher.list", Contribution{ID: "alpha.files.item", Plugin: "alpha.files", Label: "two"})
+	settle(st, eng) // the declaration change marks the pass; the catalog lists the slot again
+	settle(st, eng) // that pass wrote the resolution, which re-dirties the engine through the State listener; burn the cascade so the next settle is quiet
+	res = resolution(t, st)
+	if got := entryIDs(res.Contributions["publisher.list"]); len(got) != 1 || got[0] != "alpha.files.item" {
+		t.Fatalf("contributions re-registered = %v", got)
+	}
+	delete(pubs.owners, "publisher.list")
+	settle(st, eng) // no CatalogChanged: the engine never looks
+	res = resolution(t, st)
+	if _, has := res.Contributions["publisher.list"]; !has {
+		t.Fatal("slot dropped without CatalogChanged: the engine polled the catalog")
+	}
+	eng.CatalogChanged()
+	settle(st, eng)
+	res = resolution(t, st)
+	if _, has := res.Contributions["publisher.list"]; has {
+		t.Fatal("catalog-only change survived without CatalogChanged marking the pass")
+	}
+	msgs = w.slotMsgs(t)
+	last = msgs[len(msgs)-1]
+	if last.SlotID != "publisher.list" || len(last.Contributions) != 0 {
+		t.Fatalf("final notification = %+v, want the empty publisher.list", last)
+	}
+}
+
 func TestInitialSweepResolvesPreRegisteredDeclarations(t *testing.T) {
 	st := state.New(state.Options{})
 	pods := newPod(t, st)
