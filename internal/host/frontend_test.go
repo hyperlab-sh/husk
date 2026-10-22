@@ -921,3 +921,32 @@ func TestTickFlushesFrontendWrites(t *testing.T) {
 		}
 	})
 }
+
+// The decoded catalog is rebuilt only when a plugins document is declared or
+// undeclared, and Actions carries the declared title and description.
+func TestDeclaredCatalogIsCachedByRevision(t *testing.T) {
+	h, err := boot(t, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.root.store.Declare(store.DeclaredPlugins, "one", map[string]any{
+		"actions": []any{map[string]any{"id": "one.go", "title": "Go", "description": "d"}},
+	})
+	first := h.root.readCatalog()
+	acts := h.root.Actions()
+	if len(acts) != 1 || acts[0] != (contracts.PluginAction{Plugin: "one", ID: "one.go", Title: "Go", Description: "d"}) {
+		t.Fatalf("Actions = %+v", acts)
+	}
+	second := h.root.readCatalog()
+	if &first.acts[0] != &second.acts[0] {
+		t.Fatal("unchanged declarations rebuilt the catalog")
+	}
+	h.root.store.Declare(store.DeclaredPlugins, "two", map[string]any{"actions": []any{map[string]any{"id": "two.go"}}})
+	if got := h.root.Actions(); len(got) != 2 || got[1].Plugin != "two" {
+		t.Fatalf("Declare did not invalidate: %+v", got)
+	}
+	h.root.store.Undeclare("one")
+	if got := h.root.Actions(); len(got) != 1 || got[0].Plugin != "two" {
+		t.Fatalf("Undeclare did not invalidate: %+v", got)
+	}
+}

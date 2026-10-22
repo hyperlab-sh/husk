@@ -171,7 +171,9 @@ func (r *Root) deliver(plugin, method string, params any) error {
 // document.
 type declaredPlugin struct {
 	Actions []struct {
-		ID string `json:"id"`
+		ID          string `json:"id"`
+		Title       string `json:"title"`
+		Description string `json:"description"`
 	} `json:"actions"`
 	RailItems      []contracts.RailItem `json:"rail_items"`
 	PublishedSlots []struct {
@@ -192,6 +194,7 @@ type declaredCatalog struct {
 	rail   []contracts.RailItem
 	slots  []contracts.PublishedSlot
 	frames map[string]map[protocol.SurfaceID]protocol.FrameSpec
+	acts   []contracts.PluginAction
 }
 
 // declaredIndex indexes the declared plugins documents.
@@ -212,7 +215,21 @@ func (r *Root) readDeclared() (declaredIndex, []contracts.RailItem) {
 	return c.index, c.rail
 }
 
+// readCatalog returns the decoded catalog, rebuilt only when the Store's
+// declared-documents revision moved. Callers must not mutate the result. Any
+// goroutine.
 func (r *Root) readCatalog() declaredCatalog {
+	rev := r.store.DeclaredRevision()
+	r.catMu.Lock()
+	defer r.catMu.Unlock()
+	if r.catValid && r.catRev == rev {
+		return r.cat
+	}
+	r.cat, r.catRev, r.catValid = r.buildCatalog(), rev, true
+	return r.cat
+}
+
+func (r *Root) buildCatalog() declaredCatalog {
 	docs := r.store.Declared(store.DeclaredPlugins)
 	ids := make([]string, 0, len(docs))
 	for id := range docs {
@@ -223,6 +240,7 @@ func (r *Root) readCatalog() declaredCatalog {
 	items := []contracts.RailItem{}
 	slots := []contracts.PublishedSlot{}
 	frames := map[string]map[protocol.SurfaceID]protocol.FrameSpec{}
+	acts := []contracts.PluginAction{}
 	for _, id := range ids {
 		raw, err := json.Marshal(docs[id])
 		var d declaredPlugin
@@ -235,6 +253,7 @@ func (r *Root) readCatalog() declaredCatalog {
 		}
 		for _, a := range d.Actions {
 			idx.actions[a.ID] = id
+			acts = append(acts, contracts.PluginAction{Plugin: id, ID: a.ID, Title: a.Title, Description: a.Description})
 		}
 		for _, item := range d.RailItems {
 			item.Plugin = id
@@ -254,7 +273,7 @@ func (r *Root) readCatalog() declaredCatalog {
 			frames[id][sf.ID] = *sf.Frame
 		}
 	}
-	return declaredCatalog{index: idx, rail: items, slots: slots, frames: frames}
+	return declaredCatalog{index: idx, rail: items, slots: slots, frames: frames, acts: acts}
 }
 
 // warnDeclaredOnce reports an undecodable plugins document the first time it
@@ -286,6 +305,11 @@ func (r *Root) PublishedSlots() []contracts.PublishedSlot {
 // SurfaceFrames implements contracts.Frontend.
 func (r *Root) SurfaceFrames() map[string]map[protocol.SurfaceID]protocol.FrameSpec {
 	return r.readCatalog().frames
+}
+
+// Actions implements contracts.Frontend.
+func (r *Root) Actions() []contracts.PluginAction {
+	return r.readCatalog().acts
 }
 
 // ActiveToast implements contracts.Frontend.

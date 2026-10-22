@@ -69,12 +69,17 @@ type Root struct {
 	instStart time.Time
 
 	// Frontend support.
-	frontendSlices *contracts.FrontendSlices         // set once by OwnSlices
-	hostActions    map[string]bool                   // ids bound by RegisterHostAction
-	sizesDirty     bool                              // geometry, focus or visibility changed this tick
-	lastSizes      map[protocol.SurfaceID]pushedSize // what each surface's occupant was last told
-	declWarnMu     sync.Mutex                        // guards declWarned
-	declWarned     map[string]bool                   // plugins whose declared document failed to decode
+	frontendSlices *contracts.FrontendSlices // set once by OwnSlices
+	hostActions    map[string]bool           // ids bound by RegisterHostAction
+	catMu          sync.Mutex                // guards the cached declared catalog
+	cat            declaredCatalog
+	catRev         uint64
+	catValid       bool
+
+	sizesDirty bool                              // geometry, focus or visibility changed this tick
+	lastSizes  map[protocol.SurfaceID]pushedSize // what each surface's occupant was last told
+	declWarnMu sync.Mutex                        // guards declWarned
+	declWarned map[string]bool                   // plugins whose declared document failed to decode
 
 	// Lifecycle.
 	live      atomicBool   // New returned: the loop may be running
