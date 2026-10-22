@@ -6,7 +6,7 @@ import (
 )
 
 func TestReviewModifiedLettersAndShiftedSymbols(t *testing.T) {
-	for _, tc := range []struct{ in, want string }{{"ctrl+X", "ctrl+x"}, {"alt+X", "alt+x"}, {"ctrl+alt+X", "alt+ctrl+x"}, {"shift+x", "X"}, {"shift+X", "X"}, {"alt+shift+X", "alt+X"}, {"ctrl+shift+X", "ctrl+shift+x"}, {"X", "X"}, {"ctrl+É", "ctrl+é"}} {
+	for _, tc := range []struct{ in, want string }{{"ctrl+X", "ctrl+x"}, {"alt+X", "alt+X"}, {"ctrl+alt+X", "alt+ctrl+x"}, {"shift+x", "X"}, {"shift+X", "X"}, {"alt+shift+X", "alt+X"}, {"ctrl+shift+X", "ctrl+shift+x"}, {"X", "X"}, {"ctrl+É", "ctrl+é"}} {
 		t.Run(tc.in, func(t *testing.T) {
 			got, err := Normalize(tc.in)
 			if err != nil || got != tc.want {
