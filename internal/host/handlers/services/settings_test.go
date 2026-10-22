@@ -184,6 +184,49 @@ func TestSettingsGetRateLimitedPerPlugin(t *testing.T) {
 	}
 }
 
+func TestRateLimitCountsMalformedRequests(t *testing.T) {
+	// services.md Limits: the cap counts requests, not valid requests. The
+	// check runs before decode, so malformed params consume budget and a
+	// later well-formed request is refused by the exhausted window.
+	rec := fakes.NewRecorder()
+	port := fakes.NewSettings(rec)
+	clock := fakes.NewClock(time.Unix(0, 0))
+	h := Settings{Port: port, Limiter: NewWindowLimiter(clock, contracts.RateLimitPerSecond)}
+	bad := req(t, "settings.get", `{"key":123}`)
+	for i := 0; i < contracts.RateLimitPerSecond; i++ {
+		err := replyErr(t, h.Serve(context.Background(), pluginCaller("files"), bad, nil))
+		if err.Code != protocol.CodeInvalidParams {
+			t.Fatalf("malformed call %d: code = %s, want invalid_params", i+1, err.Code)
+		}
+	}
+	good := req(t, "settings.get", `{"key":"theme.name"}`)
+	refused := replyErr(t, h.Serve(context.Background(), pluginCaller("files"), good, nil))
+	if refused.Code != protocol.CodeBusy {
+		t.Fatalf("well-formed call after budget spent: code = %s, want busy", refused.Code)
+	}
+	if calls := rec.Methods(); len(calls) != 0 {
+		t.Fatalf("port calls = %d, want 0", len(calls))
+	}
+	// Same ruling for secrets.get.
+	secretsRec := fakes.NewRecorder()
+	sh := Secrets{Port: fakes.NewSecrets(secretsRec), Limiter: NewWindowLimiter(clock, contracts.RateLimitPerSecond)}
+	badSecret := req(t, "secrets.get", `{"name":123}`)
+	for i := 0; i < contracts.RateLimitPerSecond; i++ {
+		err := replyErr(t, sh.Serve(context.Background(), pluginCaller("files"), badSecret, nil))
+		if err.Code != protocol.CodeInvalidParams {
+			t.Fatalf("malformed secrets call %d: code = %s, want invalid_params", i+1, err.Code)
+		}
+	}
+	goodSecret := req(t, "secrets.get", `{"name":"api_key"}`)
+	refused = replyErr(t, sh.Serve(context.Background(), pluginCaller("files"), goodSecret, nil))
+	if refused.Code != protocol.CodeBusy {
+		t.Fatalf("well-formed secrets call after budget spent: code = %s, want busy", refused.Code)
+	}
+	if calls := secretsRec.Methods(); len(calls) != 0 {
+		t.Fatalf("secrets port calls = %d, want 0", len(calls))
+	}
+}
+
 func TestSharedBudgetCoversSettingsAndSecretsGet(t *testing.T) {
 	clock := fakes.NewClock(time.Unix(0, 0))
 	limiter := NewWindowLimiter(clock, contracts.RateLimitPerSecond)

@@ -41,15 +41,17 @@ func (h Settings) Serve(ctx context.Context, c contracts.Caller, req protocol.Me
 	}
 	switch req.Method {
 	case protocol.MethodSettingsGet:
+		// The cap counts requests, not valid requests (services.md, Limits):
+		// check before decoding so malformed params still consume budget.
+		if deny := admitRateLimited(req, c, h.Limiter); deny != nil {
+			return *deny
+		}
 		var p settingsGetParams
 		if bad := decodeParams(req, &p); bad != nil {
 			return *bad
 		}
 		if bad := requireString(req, "params.key", p.Key); bad != nil {
 			return *bad
-		}
-		if deny := admitRateLimited(req, c, h.Limiter); deny != nil {
-			return *deny
 		}
 		value, source, err := h.Port.Get(ctx, c, p.Key)
 		if err != nil {
