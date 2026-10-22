@@ -48,6 +48,13 @@ func (l *blockedLoop) Post(fn func()) bool {
 	return true
 }
 
+// deadLoop models a loop that has shut down: Post refuses the closure.
+type deadLoop struct{}
+
+func (deadLoop) Do(ctx context.Context, fn func()) error { return ctx.Err() }
+
+func (deadLoop) Post(func()) bool { return false }
+
 // handleSource fakes the Pod-held handle seam: it serves exactly the handles
 // the test registered, keyed by plugin id and namespace.
 type handleSource struct {
@@ -357,6 +364,22 @@ func TestStatePortWriteErrors(t *testing.T) {
 		cancel()
 		_, err := w.Set(wctx, callerAtlas, "atlas.state", json.RawMessage(`{}`))
 		wantPortCode(t, err, protocol.CodeCancelled)
+	})
+	t.Run("loop no longer running answers unavailable", func(t *testing.T) {
+		w, _, _ := newPort(t, StatePortOptions{Loop: deadLoop{}}, specAtlas)
+		for _, call := range []func() error{
+			func() error {
+				_, err := w.Set(ctxBG, callerAtlas, "atlas.state", json.RawMessage(`{}`))
+				return err
+			},
+			func() error {
+				_, err := w.Patch(ctxBG, callerAtlas, "atlas.state", json.RawMessage(`{}`), 0)
+				return err
+			},
+			func() error { return w.Clear(ctxBG, callerCLI, "atlas.state") },
+		} {
+			wantPortCode(t, call(), protocol.CodeUnavailable)
+		}
 	})
 }
 

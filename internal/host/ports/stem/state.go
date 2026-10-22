@@ -217,20 +217,23 @@ func (w *State) writeHandle(c contracts.Caller, namespace string) (contracts.Sli
 	return h, nil
 }
 
-// apply posts f to the loop and waits for its outcome on ctx. If ctx ends
-// first the reply is cancelled; the posted closure may still run later.
-// A substrate error is mapped with the namespace's current revision and cap
-// so conflict and size-cap replies carry their data.
+// apply posts f to the loop and waits for its outcome on ctx. A Post that
+// reports the loop no longer running answers unavailable at once; if ctx
+// ends first the reply is cancelled, and the posted closure may still run
+// later. A substrate error is mapped with the namespace's current revision
+// and cap so conflict and size-cap replies carry their data.
 func (w *State) apply(ctx context.Context, namespace string, f func() (uint64, error)) (uint64, error) {
 	type outcome struct {
 		rev uint64
 		err error
 	}
 	done := make(chan outcome, 1)
-	w.loop.Post(func() {
+	if !w.loop.Post(func() {
 		rev, err := f()
 		done <- outcome{rev: rev, err: err}
-	})
+	}) {
+		return 0, contracts.NewError(protocol.CodeUnavailable, "the host loop no longer runs", nil)
+	}
 	select {
 	case o := <-done:
 		if o.err != nil {
