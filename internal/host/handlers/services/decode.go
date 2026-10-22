@@ -2,41 +2,23 @@ package services
 
 import (
 	"encoding/json"
-	"errors"
 
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
 	"github.com/hyperlab-sh/husk/internal/host/handlers"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
-// decodeParams unmarshals req.Params into dst. Absent params leave dst at its
-// zero value, which per-method required-field checks then reject. A decode
-// failure returns invalid_params naming the offending field —
-// "params.<field>" for a typed field, "params" when the whole object has the
-// wrong shape.
+// decodeParams unmarshals req.Params into dst via the shared
+// handlers.DecodeParams. Absent params leave dst at its zero value, which
+// per-method required-field checks then reject.
 func decodeParams(req protocol.Message, dst any) *protocol.Message {
-	if len(req.Params) == 0 {
-		return nil
-	}
-	if err := json.Unmarshal(req.Params, dst); err != nil {
-		field := "params"
-		var te *json.UnmarshalTypeError
-		if errors.As(err, &te) && te.Field != "" {
-			field = "params." + te.Field
-		}
-		bad := handlers.InvalidParams(req, field, err.Error())
-		return &bad
-	}
-	return nil
+	return handlers.DecodeParams(req, dst)
 }
 
-// requireString rejects an empty required string field.
+// requireString rejects an empty required string field via the shared
+// handlers.RequireString.
 func requireString(req protocol.Message, field, value string) *protocol.Message {
-	if value == "" {
-		bad := handlers.InvalidParams(req, field, "is required")
-		return &bad
-	}
-	return nil
+	return handlers.RequireString(req, field, value)
 }
 
 // rateLimited is the shared refusal reply for an exhausted per-plugin budget:

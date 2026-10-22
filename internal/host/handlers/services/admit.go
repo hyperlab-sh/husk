@@ -16,13 +16,7 @@ func admitCall(req protocol.Message, c contracts.Caller) *protocol.Message {
 		return deny
 	}
 	if c.Kind == contracts.CallerPlugin && c.PluginID == "" {
-		denied := protocol.Message{Error: &protocol.Error{
-			Code:    protocol.CodeDenied,
-			Message: req.Method + " does not accept a plugin caller with no id",
-		}}
-		if req.ID != nil {
-			denied.ID = req.ID
-		}
+		denied := handlers.Denied(req, req.Method+" does not accept a plugin caller with no id")
 		return &denied
 	}
 	return nil
