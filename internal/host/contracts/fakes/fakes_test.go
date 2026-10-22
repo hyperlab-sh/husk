@@ -62,7 +62,7 @@ func TestRecorderOrderCallerAndReset(t *testing.T) {
 	st.Get(ctx, plugin, "s", "/p")
 	pr.Use(ctx, cli, "work")
 	calls := rec.Calls()
-	if len(calls) != 2 || calls[0].Method != "Get" || calls[0].Kind != contracts.CallerPlugin ||
+	if len(calls) != 2 || calls[0].Method != "State.Get" || calls[0].Kind != contracts.CallerPlugin ||
 		calls[0].PluginID != "a" || calls[1].Kind != contracts.CallerCLI || calls[1].Args[0] != "work" {
 		t.Fatalf("calls = %+v", calls)
 	}
@@ -70,8 +70,23 @@ func TestRecorderOrderCallerAndReset(t *testing.T) {
 	if len(rec.Calls()) != 0 {
 		t.Fatal("reset")
 	}
-	if fakes.NewState(nil).Recorder == nil {
+	if fakes.NewState(nil).Recorder() == nil {
 		t.Fatal("nil recorder must be replaced")
+	}
+	// Zero values work and keep a private log.
+	z := &fakes.State{}
+	z.Get(ctx, cli, "s", "")
+	if got := z.Methods(); len(got) != 1 || got[0] != "State.Get" {
+		t.Fatalf("zero-value log = %v", got)
+	}
+	if len((&fakes.Pods{}).Methods()) != 0 {
+		t.Fatal("fresh log not empty")
+	}
+	if err := (&fakes.Pods{}).Reserve(ctx, "z"); err != nil {
+		t.Fatal(err)
+	}
+	if (&fakes.Limiter{Clock: fakes.NewClock(time.Unix(0, 0)), Burst: 1}).Allow("k") != true {
+		t.Fatal("limiter")
 	}
 }
 
@@ -93,7 +108,7 @@ func TestLaunchOrderAcrossFakes(t *testing.T) {
 	}
 	_ = wr.Start("a", nil)
 	_ = pods.SetStatus(ctx, "a", contracts.PodStatusUpdate{Status: contracts.PodLive, PID: &pid, StartedAt: &started})
-	wantMethods(t, rec, "Reserve", "SetStatus", "Declare", "Reload", "RegisterSlice", "Start", "SetStatus")
+	wantMethods(t, rec, "Pods.Reserve", "Pods.SetStatus", "Catalog.Declare", "Reloader.Reload", "Slices.RegisterSlice", "Wrapper.Start", "Pods.SetStatus")
 
 	e, _ := pods.Entry("a")
 	if e.Status != contracts.PodLive || *e.PID != 42 || !e.StartedAt.Equal(started) {
@@ -130,7 +145,7 @@ func TestHandlerAndNotifier(t *testing.T) {
 	if n.Notify(protocol.Message{Method: "state.changed"}) == nil {
 		t.Fatal("notify err")
 	}
-	wantMethods(t, rec, "Serve", "Notify")
+	wantMethods(t, rec, "Handler.Serve", "Notifier.Notify")
 }
 
 func TestPortsRecordCallerAndReturn(t *testing.T) {
@@ -221,7 +236,7 @@ func TestPortsRecordCallerAndReturn(t *testing.T) {
 
 	// Every port call was attributed; the callerless seams are not in this log.
 	for _, c := range rec.Calls() {
-		if c.Method != "Run" && c.Method != "Close" && c.Kind == 0 {
+		if c.Method != "Host.Run" && c.Method != "Host.Close" && c.Kind == 0 {
 			t.Errorf("%s recorded no caller", c.Method)
 		}
 	}

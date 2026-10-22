@@ -57,7 +57,10 @@
 //	pods.Loop.Prepare   = CatalogDeclarer.Declare + SliceRegistrar.RegisterSlice
 //	                      + Reloader.Reload (step 3 to 6, one reload per batch)
 //	pods.Loop.Liveness  = PodRegistry.SetStatus (the husk.pods writes);
-//	                      Reserve and Release guard the entry itself
+//	                      Reserve and Release guard the entry itself. The
+//	                      launch sequence calls Reserve inside pods.Host.Add
+//	                      before the duplicate check Add performs today;
+//	                      host-launch deletes that old check.
 //	pods.Host.Handle    starts the wrappers after the gate through
 //	                      WrapperStarter.Start with the opening messages
 //	pods.Loop.Opening   produces those opening messages: theme.changed,

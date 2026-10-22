@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/hyperlab-sh/husk/internal/substrate/state"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
@@ -23,11 +22,32 @@ type StateReadResult struct {
 	Value json.RawMessage `json:"value"`
 }
 
+// StateRetention is a slice's persistence policy as state.snapshot reports it.
+type StateRetention struct {
+	Policy string `json:"policy"`
+	N      int    `json:"n,omitempty"`
+	TTL    string `json:"ttl,omitempty"`
+}
+
+// StateSlice is one slice descriptor as the state.snapshot and state.watch
+// replies carry it. Value is set only when values were requested.
+type StateSlice struct {
+	Slice      string          `json:"slice"`
+	Owner      string          `json:"owner"`
+	Scope      string          `json:"scope"`
+	Persistent bool            `json:"persistent"`
+	Retention  *StateRetention `json:"retention,omitempty"`
+	Revision   uint64          `json:"revision"`
+	Bytes      int             `json:"bytes"`
+	Hydrated   bool            `json:"hydrated"`
+	Value      json.RawMessage `json:"value,omitempty"`
+}
+
 // StateSnapshotResult is the answer to state.snapshot and the baseline of
-// state.watch. Entry.Value is empty when values were not requested.
+// state.watch.
 type StateSnapshotResult struct {
-	Seq     uint64        `json:"seq"`
-	Entries []state.Entry `json:"entries,omitempty"`
+	Seq    uint64       `json:"seq"`
+	Slices []StateSlice `json:"slices"`
 }
 
 // StatePort serves the state.* methods.
@@ -264,7 +284,7 @@ type EventPort interface {
 
 // HookResult is one subscriber's answer to a hook call.
 type HookResult struct {
-	Plugin string          `json:"plugin"`
+	Plugin string          `json:"plugin_id"`
 	Data   json.RawMessage `json:"data"`
 	// Err is nil on success; otherwise its code is timeout, cancelled or
 	// the subscriber's own (failed).

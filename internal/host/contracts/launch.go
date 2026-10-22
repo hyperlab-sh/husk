@@ -32,13 +32,13 @@ type PodStatusUpdate struct {
 	Status PodStatus `json:"status,omitempty"`
 	// Detail is the last_error text; nil leaves it unchanged and a pointer
 	// to "" clears it.
-	Detail *string `json:"detail,omitempty"`
+	Detail *string `json:"last_error,omitempty"`
 	// PID is the process id; nil leaves it unchanged.
 	PID *int `json:"pid,omitempty"`
 	// StartedAt is the process start time; nil leaves it unchanged.
 	StartedAt *time.Time `json:"started_at,omitempty"`
 	// LogPath is the stderr log path; nil leaves it unchanged.
-	LogPath *string `json:"log_path,omitempty"`
+	LogPath *string `json:"log,omitempty"`
 }
 
 // PodRegistry is launch steps 1 and 2 and the later status writes: the
