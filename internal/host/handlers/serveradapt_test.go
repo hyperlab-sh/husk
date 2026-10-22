@@ -53,6 +53,7 @@ func TestFromServerCaller(t *testing.T) {
 		{server.Caller{Kind: server.CallerCLI}, contracts.CallerCLI},
 		{server.Caller{Kind: server.CallerCLI, PluginID: "", ConnID: 3}, contracts.CallerCLI},
 		{server.Caller{Kind: server.CallerPlugin, PluginID: "p", ConnID: 4}, contracts.CallerPlugin},
+		{server.Caller{Kind: 0, ConnID: 5}, contracts.CallerKind(0)},
 	}
 	for _, tc := range cases {
 		got := FromServerCaller(tc.in)

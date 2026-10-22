@@ -25,12 +25,15 @@ func (a ServerHandler) Serve(ctx context.Context, c server.Caller, req protocol.
 }
 
 // FromServerCaller converts the Server's caller attribution to a
-// contracts.Caller: identical fields, kind by kind.
+// contracts.Caller: identical fields, kind by kind. A kind the Server does
+// not attribute — the zero kind — stays the zero kind, so Admit denies it
+// (D36) instead of handing it CLI privileges.
 func FromServerCaller(c server.Caller) contracts.Caller {
 	out := contracts.Caller{PluginID: c.PluginID, ConnID: c.ConnID}
-	if c.Kind == server.CallerPlugin {
+	switch c.Kind {
+	case server.CallerPlugin:
 		out.Kind = contracts.CallerPlugin
-	} else {
+	case server.CallerCLI:
 		out.Kind = contracts.CallerCLI
 	}
 	return out
