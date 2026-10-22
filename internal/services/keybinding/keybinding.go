@@ -659,18 +659,31 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 			}
 		}
 	}
-	kept := 0
+	// Past the cap the weakest entries go: rank the effective ones and drop
+	// the tail, so a flood of low layers cannot push out the profile or
+	// instance bindings.
+	var effective []int
+	for i := range es {
+		if es[i].State == "effective" {
+			effective = append(effective, i)
+		}
+	}
+	if len(effective) > 4096 {
+		sort.SliceStable(effective, func(a, b int) bool { return stronger(es[effective[a]].Binding, es[effective[b]].Binding) })
+		for _, i := range effective[4096:] {
+			es[i].State = "shadowed"
+		}
+		dropped := effective[4096:]
+		sort.Ints(dropped)
+		for _, i := range dropped {
+			issue("too_many", es[i].Source, sequence(es[i].Keys))
+		}
+	}
 	quit, palette := false, false
 	for i := range es {
 		if es[i].State != "effective" {
 			continue
 		}
-		if kept >= 4096 {
-			es[i].State = "shadowed"
-			issue("too_many", es[i].Source, sequence(es[i].Keys))
-			continue
-		}
-		kept++
 		b := es[i].Binding
 		if b.Disable {
 			es[i].State = "disabled"

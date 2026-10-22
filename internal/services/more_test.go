@@ -395,3 +395,37 @@ func TestCandidatesDoNotPublishUntilApplyAndDiscardCancellation(t *testing.T) {
 }
 
 var _ = fmt.Sprint
+
+// Past the resolved cap the weakest layers are dropped: the profile layer, the
+// strongest, keeps every entry.
+func TestKeybindingResolvedCapKeepsStrongestLayers(t *testing.T) {
+	kb := keybinding.New()
+	in := input(`{}`)
+	for layerIndex, layer := range []store.Layer{store.LayerDistribution, store.LayerUser, store.LayerProfile} {
+		bind := []any{}
+		for i := 0; i < 2049; i++ {
+			bind = append(bind, map[string]any{"keys": []string{"ctrl+k", string(rune(0x4e00 + layerIndex*2049 + i))}, "action": "husk.home"})
+		}
+		in.Layers = append(in.Layers, store.LayerDoc{Layer: layer, Doc: store.Doc{"version": 1, "bind": bind}})
+	}
+	apply(t, kb, in)
+	kept := map[keybinding.Layer]int{}
+	for _, entry := range kb.Listing().Entries {
+		if entry.State == "effective" {
+			kept[entry.Source.Layer]++
+		}
+	}
+	if kept[keybinding.LayerProfile] != 2048 || kept[keybinding.LayerUser] != 2048 || kept[keybinding.LayerDistribution] != 0 || kept[keybinding.LayerHusk] != 0 {
+		t.Errorf("kept per layer = %v, want both stronger layers whole, nothing weaker", kept)
+	}
+	dropped := 0
+	for _, p := range kb.Listing().Problems {
+		if p.Code == "too_many" {
+			dropped++
+		}
+	}
+	// One too_many per layer past its 2048 limit, plus one per entry past the cap.
+	if total := len(kb.Listing().Entries); dropped != 3+total-4096 {
+		t.Errorf("too_many problems = %d, want %d", dropped, 3+total-4096)
+	}
+}
