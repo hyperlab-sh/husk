@@ -40,14 +40,15 @@ func NewCalls(d *dispatcher.Dispatcher, post Post) *Calls {
 
 func coded(code protocol.Code, msg string) error { return contracts.NewError(code, msg, nil) }
 
-// callerOf maps the port's Caller to the Dispatcher's. CallerStem is Input or
-// the palette acting for the user.
+// callerOf maps the port's Caller to the Dispatcher's. CallerStem is a Host
+// caller: only Input keeps its own focus snapshot, so a Stem caller gets
+// State's.
 func callerOf(c contracts.Caller) (dispatcher.Caller, bool) {
 	switch c.Kind {
 	case contracts.CallerCLI:
 		return dispatcher.Caller{Kind: dispatcher.CallerCLI}, true
 	case contracts.CallerStem:
-		return dispatcher.Caller{Kind: dispatcher.CallerInput}, true
+		return dispatcher.Caller{Kind: dispatcher.CallerHost}, true
 	case contracts.CallerPlugin:
 		if c.PluginID != "" {
 			return dispatcher.Caller{Kind: dispatcher.CallerPlugin, PluginID: c.PluginID}, true
@@ -112,11 +113,17 @@ func (p *Calls) ActionInvoke(ctx context.Context, c contracts.Caller, action str
 		}
 		return out, nil
 	case <-ctx.Done():
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return nil, coded(protocol.CodeTimeout, "caller deadline passed")
-		}
-		return nil, coded(protocol.CodeCancelled, "caller went away")
+		return nil, ctxError(ctx)
 	}
+}
+
+// ctxError maps an ended context: a passed deadline is timeout, anything else
+// cancelled.
+func ctxError(ctx context.Context) error {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return coded(protocol.CodeTimeout, "caller deadline passed")
+	}
+	return coded(protocol.CodeCancelled, "caller went away")
 }
 
 // ActionList implements contracts.CallsPort: the catalog entries the caller
@@ -141,6 +148,6 @@ func (p *Calls) ActionList(ctx context.Context, c contracts.Caller) ([]contracts
 	case out := <-done:
 		return out, nil
 	case <-ctx.Done():
-		return nil, coded(protocol.CodeCancelled, "caller went away")
+		return nil, ctxError(ctx)
 	}
 }
