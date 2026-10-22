@@ -494,6 +494,57 @@ func TestStatePortWatchAndFanOut(t *testing.T) {
 	}
 }
 
+func TestStatePortWatchFlushBetweenRegistrationAndBaseline(t *testing.T) {
+	w, st, hs := newPort(t, StatePortOptions{}, specAtlas)
+
+	// Capture the flush that lands while the watcher sits between its
+	// registration and its baseline read.
+	var captured []state.Change
+	var capturedSnap *state.Snapshot
+	st.OnFlush(func(changes []state.Change, snap *state.Snapshot) {
+		captured, capturedSnap = changes, snap
+	})
+	hs.mu.Lock()
+	h := hs.live["atlas\x00atlas.state"].(*state.Handle)
+	hs.mu.Unlock()
+	if _, err := h.Set(json.RawMessage(`{"racing":true}`)); err != nil {
+		t.Fatal(err)
+	}
+	st.Flush()
+	if captured == nil || capturedSnap == nil {
+		t.Fatal("no flush was captured")
+	}
+
+	// The watcher's baseline reads after that flush, so replaying the raced
+	// flush delivers nothing: the change is already in the baseline.
+	rec := &noteRecorder{}
+	reg := &stateWatch{ctx: ctxBG, n: rec, baseline: st.Snapshot().Seq}
+	w.mu.Lock()
+	w.watchers[reg] = struct{}{}
+	w.mu.Unlock()
+	w.fanOut(captured, capturedSnap)
+	if got := rec.messages(); len(got) != 0 {
+		t.Fatalf("raced flush re-delivered %d notifications", len(got))
+	}
+
+	// The next flush is past the baseline and must be delivered.
+	if _, err := h.Set(json.RawMessage(`{"later":true}`)); err != nil {
+		t.Fatal(err)
+	}
+	st.Flush()
+	got := rec.messages()
+	if len(got) != 1 {
+		t.Fatalf("later flush delivered %d notifications", len(got))
+	}
+	var ch changedParams
+	if err := json.Unmarshal(got[0].Params, &ch); err != nil {
+		t.Fatal(err)
+	}
+	if ch.Slice != "atlas.state" || string(ch.Value) != `{"later":true}` {
+		t.Fatalf("change = %+v", ch)
+	}
+}
+
 func TestStatePortClear(t *testing.T) {
 	t.Run("user clear resets to initial and deletes persisted copies", func(t *testing.T) {
 		cl := &cleaner{}
