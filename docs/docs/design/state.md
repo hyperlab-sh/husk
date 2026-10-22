@@ -187,10 +187,13 @@ var (
 `Register[T]` decodes a hydrated value into `T`. If decoding fails, the slice
 starts at `initial`, `Hydrated` is false, and the error is returned wrapped
 together with a valid `*Slice[T]` so the owner logs it and continues; the
-persisted copy is replaced on the owner's first write. The same typed fallback
-applies if a hydrated document is not an object or exceeds the registered cap.
-Untyped `State.Register` instead rejects invalid hydration atomically with
-`ErrInvalidValue` or `ErrTooLarge`, without registering a slice.
+persisted copy is replaced on the owner's first write. Both typed and untyped
+registration also fall back to `Initial` if the hydrated value is invalid,
+not an object or exceeds the registered cap after normalization. Untyped
+`State.Register` returns a usable `*Handle`, `Hydrated` false and a wrapped
+`state: discarded persisted <ns>: <err>` error (`ErrInvalidValue` or
+`ErrTooLarge`). Owners log this recoverable error and continue startup; lowering
+a plugin's cap must not prevent it from launching.
 
 ### Invariants
 
@@ -219,12 +222,10 @@ Untyped `State.Register` instead rejects invalid hydration atomically with
    errors caught by the race detector in tests, not runtime errors.
 9. Revisions are per slice, start at 1 at registration (with the initial or
    hydrated value), and grow by 1 per committed write. A `Set` or `Patch` whose
-   encoding equals the current bytes commits nothing: no revision bump, no change. After
-   `Unregister` the namespace keeps a tombstone revision, so a later
-   re-registration continues above it and no reader ever sees a revision go
-   backwards within one process. Unregistration retains the last value revision
-   as its tombstone and removal revision; re-registration starts at that revision
-   plus one. Revisions are not persisted.
+   normalized encoding equals the current bytes commits nothing: no revision
+   bump, no change. `Unregister` retains the last value revision as its tombstone
+   and removal revision; re-registration starts at that revision plus one, so
+   revisions never go backwards within one process. Revisions are not persisted.
 10. A committed write publishes a new `Snapshot` before the write call returns,
     so a reply sent after a write is never overtaken by a read of the older
     value (read-your-writes for socket callers).
@@ -251,8 +252,13 @@ Untyped `State.Register` instead rejects invalid hydration atomically with
 | `keep-last-n` N | 2..20 | N=1 is `keep-latest`; 20 generations bound disk use to 20 times the slice cap ([Store](store.md)); longer history belongs in an application store, not Husk. |
 | `ttl` duration | 1m..8760h | Below a minute the value would rarely survive a restart; above a year it is `manual`. |
 
-`Spec.MaxBytes` may lower a class cap, never raise it. The size check runs on
-the encoded value after a patch is applied.
+`Spec.MaxBytes` may lower a class cap, never raise it. Every accepted value
+(`Initial`, hydrated, `Set` or the result of `Patch`) uses the same normalized
+encoding: compact JSON with object keys sorted recursively and number lexemes
+preserved without float64 rounding. Size checks and `Descriptor.Bytes` use that
+encoding, and equality checks compare it, so padding or key order alone never
+causes a write or a no-op patch change. The size check runs after applying a
+patch and normalizing its result.
 
 State has no timeouts: every operation is synchronous and in memory. Debounce
 of persistent writes belongs to [Store](store.md).
@@ -450,6 +456,7 @@ With one:
 | Invalid spec (namespace, owner mismatch, scope, retention, cap above class) | State, in `Register` | `ErrInvalidSpec` naming the field | Plugin: manifest error at load, plugin not launched, error toast. |
 | Slice limit reached | State | `ErrTooMany` | Plugin not launched, error toast naming the limit. |
 | Workspace scope from an owner the distribution did not name | State | `ErrInvalidSpec` | Error toast; the slice does not exist. |
+| Hydrated value is invalid, not an object or over the normalized size cap (including a newly lowered cap) | State, in typed or untyped `Register` | Slice starts at `Initial`, `Hydrated` false; wrapped `ErrInvalidValue` or `ErrTooLarge` returned with a usable handle/slice | Log line `state: discarded persisted <ns>: <err>`; owner continues startup and the persisted copy is replaced on the first write. |
 | Hydrated value does not decode into the owner's type | `Register[T]` | Slice starts at `initial`; wrapped error returned with a usable slice | Log line `state: discarded persisted <ns>: <err>`; the persisted copy is replaced on the first write. |
 | Plugin writes a slice it does not own | Pod | Request refused | `denied` error reply. |
 | Value over the cap | State, after encoding or patching | `ErrTooLarge`; value, revision and snapshot unchanged | `invalid_params` with `data.limit`. |
@@ -459,6 +466,7 @@ With one:
 | Plugin process exits | Wrapper | `husk.pods` entry becomes `exited` or `failed`; the plugin's slice keeps its value | Dispatcher refuses actions for it; watchers of `husk.pods` see the change. |
 | Pod torn down (plugin removed from the instance) | Pods | `Unregister`; tombstone revision kept | One `state.changed` with `removed: true`; later `state.get` gets `not_found`. |
 | Write through a handle after `Unregister` | State | `ErrUnregistered`; no change | Programming error in the owner; logged. |
+| Clear of an unknown or unregistered namespace | State, in `Clear` | `ErrUnregistered` wrapped with the namespace; no change | Server maps it to `not_found`. |
 | Snapshot with values exceeds one protocol line | Server | Request refused | `invalid_params`; `husk state dump` suggests `husk state get <slice>`. |
 | A `state.watch` connection stops reading | Server outbound queue | Connection dropped by the Server's disconnect policy | The CLI exits with the disconnect reason. |
 | Mutation from a goroutine other than the loop | Race detector in tests | Undefined at runtime | Never shipped: the tests fail. |
@@ -541,7 +549,7 @@ With one:
    are emitted once per slice per tick.
 8. `state.changed` on the Event bus carries no value; `state.watch` on the
    socket does.
-9. No-op `Set` and `Patch` writes (identical encoding) commit nothing; explicit
+9. No-op `Set` and `Patch` writes (identical normalized encoding) commit nothing; explicit
    `Clear` resets always commit. Revisions are per slice,
    survive unregistration as tombstones, and are not persisted.
 10. State notifies through in-process `Listener`s; the Event bus adapter,
