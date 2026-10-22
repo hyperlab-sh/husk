@@ -175,7 +175,10 @@ func newFixture(t *testing.T, mode string, alter func(*Options)) *fixture {
 	t.Helper()
 	clock := testclock.New()
 	events := make(chan tea.Msg, 1024)
-	dir := t.TempDir()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	sink := fixtureSink{events: events, ctx: ctx}
 	opts := Options{Clock: clock, Post: sink.post, Replies: sink, LogPath: func(string) (string, error) { return filepath.Join(dir, "fake.log"), nil }, BaseEnv: []string{"PATH=" + os.Getenv("PATH"), "GORACE=atexit_sleep_ms=0", "HUSK_FAKE_PLUGIN=drop", "HUSK_DEBUG=drop", "HUSK_PLUGIN_TOKEN=drop", "CUSTOM_KEEP=present"}, SocketPath: filepath.Join(dir, "instance.sock"), InstanceID: "instance", BinPath: os.Args[0]}
@@ -266,8 +269,14 @@ func TestLaunchEnvironmentProcessGroupAndOpeningOrder(t *testing.T) {
 	if len(v.Env) != 7 || v.Env["HUSK_FAKE_PLUGIN"] != "" || v.Env["HUSK_DEBUG"] != "" || v.Env["HUSK_PLUGIN_TOKEN"] != f.w.Token() {
 		t.Fatal("inherited Husk variables leaked or token was not replaced")
 	}
-	if v.Env["HUSK_PROTOCOL_VERSION"] != protocol.Version || v.Env["CUSTOM_KEEP"] != "present" || v.Cwd != f.w.spec.WorkDir || v.PID != v.PGID || v.PID != f.w.Info().PID {
-		t.Fatal("environment, workdir or process group mismatch")
+	if v.Env["HUSK_PROTOCOL_VERSION"] != protocol.Version || v.Env["CUSTOM_KEEP"] != "present" {
+		t.Errorf("environment mismatch: HUSK_PROTOCOL_VERSION=%q (want %q), CUSTOM_KEEP=%q (want %q)", v.Env["HUSK_PROTOCOL_VERSION"], protocol.Version, v.Env["CUSTOM_KEEP"], "present")
+	}
+	if v.Cwd != f.w.spec.WorkDir {
+		t.Errorf("workdir mismatch: plugin cwd %q, want %q", v.Cwd, f.w.spec.WorkDir)
+	}
+	if v.PID != v.PGID || v.PID != f.w.Info().PID {
+		t.Errorf("process group mismatch: pid=%d pgid=%d, want both equal to wrapper pid %d", v.PID, v.PGID, f.w.Info().PID)
 	}
 	order := awaitReply(t, f, "9001")
 	if string(order.Result) != `["theme.changed","surface.resized","input.key_state"]` {
