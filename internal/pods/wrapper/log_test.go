@@ -105,3 +105,30 @@ func TestTailLinesMissingOrUnreadablePath(t *testing.T) {
 		t.Fatalf("empty path: %q", got)
 	}
 }
+
+// A window that starts exactly on a line boundary has no cut fragment, so its
+// first line is whole and must be kept.
+func TestTailLinesWindowOnLineBoundaryKeepsFirstLine(t *testing.T) {
+	const window = 8 << 10
+	first := "first" + strings.Repeat("y", 26) // 31 bytes + newline
+	line := strings.Repeat("z", 31) + "\n"
+	body := first + "\n" + strings.Repeat(line, window/32-1)
+	if len(body) != window {
+		t.Fatalf("fixture is %d bytes, want the window", len(body))
+	}
+	content := "head-line-that-is-cut\n" + strings.Repeat("h", 100) + "\n" + body
+	got := tailLines(writeLog(t, content), 1000)
+	if len(got) == 0 || got[0] != first {
+		t.Fatalf("first returned line = %.40q, want %q", got, first)
+	}
+}
+
+// Escape-only lines after the cut fragment leave nothing to show, so the
+// fragment (the end of the long line) is kept rather than dropped.
+func TestTailLinesLongLineFollowedByEscapeOnlyLines(t *testing.T) {
+	content := strings.Repeat("x", 20000) + "\n\x1b[0m\n   \n\x1b[K\n"
+	got := tailLines(writeLog(t, content), 3)
+	if len(got) != 1 || len(got[0]) < 8000 || strings.Trim(got[0], "x") != "" {
+		t.Fatalf("got %d lines %.20q", len(got), got)
+	}
+}
