@@ -103,8 +103,8 @@ func TestSlotContribute(t *testing.T) {
 		})
 	}
 	t.Run("empty content reaches the port", func(t *testing.T) {
-		// D42: content is not a required field; an empty content is how a
-		// contribution gets withdrawn, so the port owns that meaning.
+		// D42: content is not a required field and no spec gives an empty
+		// content a meaning — the port owns whatever it means.
 		rec := fakes.NewRecorder()
 		port := fakes.NewSurfaces(rec)
 		reply := Surface{Port: port}.Serve(ctx, plugin,
