@@ -23,6 +23,8 @@ Registry, published-slot rendering/routing and protocol compatibility tests live
 
 The standalone v2 State package is tested with `go test -race ./internal/substrate/state/...`. Its mutations and `Get` are loop-only; other goroutines use read-only `Snapshot` values. Flush State at the end of each `Update` call, before the Event bus. The current host is not yet wired to this package.
 
+The standalone v2 Calls package is tested with `go test -race ./internal/stem/calls/...`. Its table is loop-only and knows no message kinds; requesters receive returned results synchronously in the same `Update`, after the table mutation finishes. Configure its clock, logger and caps through `TableOptions`, separate from per-call `Options`. `Sweep()` acknowledges a sweep message; `NextSweep()` claims the single in-flight sweep slot, while `SweepCmd()` is the isolated Bubble Tea scheduling adapter. Unit tests use fake clocks/tick factories, never sleeps or real timers. The current host is not yet wired to Calls. Spec: `docs/docs/design/calls.md`.
+
 ## Charm v2
 
 - Import `charm.land/bubbletea/v2` and `charm.land/lipgloss/v2`; stable v2 uses these canonical vanity paths, not the old GitHub module paths. Bubbles is not currently used.
