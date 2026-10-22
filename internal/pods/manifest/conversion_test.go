@@ -25,6 +25,7 @@ func TestManifestConversionFailuresAndLegacyCompatibility(t *testing.T) {
 	}{
 		{"v1", `{"id":"p","name":"P","version":"1","command":["./plugin"],"slots":["main-stage"],"transport":"socket","language":"go","hooks":[{"id":"p.before"}],"events":[{"id":"p.changed"}]}`, false, false},
 		{"v2", `{"manifest_version":2,"protocol":2,"id":"p","name":"P","version":"1","command":["plugin"],"actions":[{"id":"p.new","title":"New"}]}`, true, false},
+		{"null protocol", `{"manifest_version":2,"protocol":null,"id":"p","name":"P","version":"1","command":["plugin"]}`, true, true},
 		{"missing protocol", `{"manifest_version":2,"id":"p","name":"P","version":"1","command":["plugin"]}`, true, true},
 		{"wrong major", `{"manifest_version":2,"protocol":1,"id":"p","name":"P","version":"1","command":["plugin"]}`, true, true},
 		{"bad id", `{"manifest_version":2,"protocol":2,"id":"bad/id","name":"P","version":"1","command":["plugin"]}`, true, true},
@@ -68,7 +69,7 @@ func TestNormalizedCatalogFocusProblemsAndExactCaseSettings(t *testing.T) {
  "published_slots":[{"id":"Case.Owner.toolbar","kind":"region","rect":{"surface":"sidebar-list","x":0,"y":0,"width":2,"height":1}}],
  "state":{"scope":"user","persistent":true,"retention":{"policy":"keep-last-n","n":5},"max_bytes":1024},
  "secrets":[{"name":"git.token","purpose":"Push","required":true}],
- "settings":[{"key":"show_hidden","type":"bool","default":false},{"key":"plugins.Case.Owner.nullable","type":"string","default":null}]
+ "settings":[{"key":"show_hidden","type":"bool","default":false},{"key":"nullable","type":"string","default":null}]
  }`
 	s, w, err := convertBytes(t, raw, true)
 	if err != nil {
