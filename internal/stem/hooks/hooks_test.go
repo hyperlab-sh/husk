@@ -178,8 +178,11 @@ func TestUnknownHookRefused(t *testing.T) {
 
 func TestCallFansOutToLiveSubscribersOnly(t *testing.T) {
 	subs := fakeSubs{"a.h": {"b", "dead", "c"}}
-	r, _, box, _ := newRunner(t, subs, fakeLiveness{"b": true, "c": true, "dead": false}, calls.TableOptions{})
-	mustCall(t, r, "a.h", map[string]any{"x": 1}, nil)
+	r, table, box, _ := newRunner(t, subs, fakeLiveness{"b": true, "c": true, "dead": false}, calls.TableOptions{})
+	c := &collector{}
+	if err := r.Call(Caller{Kind: CallerCLI}, "a.h", map[string]any{"x": 1}, c.onDone); err != nil {
+		t.Fatalf("fan-out: %v", err)
+	}
 	if len(box.sent) != 2 {
 		t.Fatalf("want 2 legs, got %d", len(box.sent))
 	}
@@ -199,6 +202,31 @@ func TestCallFansOutToLiveSubscribersOnly(t *testing.T) {
 	}
 	if r.Pending() != 2 {
 		t.Fatalf("pending %d", r.Pending())
+	}
+	// Complete the call: the dead subscriber never had a leg, so the
+	// aggregate holds b and c and no entry for it.
+	res, ok := table.Resolve("b", reply(box.sent[0].msg.ID, json.RawMessage(`{"data":{"ok":true}}`)))
+	complete(t, r, res, ok)
+	if c.calls != 0 {
+		t.Fatal("aggregate delivered before the last leg")
+	}
+	res, ok = table.Resolve("c", reply(box.sent[1].msg.ID, json.RawMessage(`{"data":{"ok":true}}`)))
+	complete(t, r, res, ok)
+	if c.calls != 1 || len(c.result) != 2 {
+		t.Fatalf("delivered %d aggregates, first has %d entries", c.calls, len(c.result))
+	}
+	saw := map[string]bool{}
+	for _, e := range c.result {
+		saw[e.Plugin] = true
+		if e.Err != nil {
+			t.Fatalf("entry %#v", e)
+		}
+	}
+	if !saw["b"] || !saw["c"] || saw["dead"] || len(saw) != 2 {
+		t.Fatalf("aggregate plugins %v", saw)
+	}
+	if r.Pending() != 0 {
+		t.Fatal("legs leaked")
 	}
 	// A nil payload omits the data member, as today's wire does.
 	mustCall(t, r, "a.h", nil, nil)
@@ -235,20 +263,55 @@ func TestCapsRefuseWholeCall(t *testing.T) {
 	}
 }
 
-func TestSendFailureMidFanoutRollsBackWholeCall(t *testing.T) {
+func TestSendFailureBecomesThatSubscribersEntry(t *testing.T) {
 	r, table, box, _ := newRunner(t, fakeSubs{"a.h": {"b", "c"}}, fakeLiveness{"b": true, "c": true}, calls.TableOptions{})
 	box.errFor = map[calls.PluginID]error{"c": errors.New("writer closed")}
 	c := &collector{}
-	err := r.Call(Caller{Kind: CallerCLI}, "a.h", map[string]any{"x": 1}, c.onDone)
-	var he *HookError
-	if !errors.As(err, &he) || he.Code != CodeUnavailable {
-		t.Fatalf("want unavailable, got %v", err)
+	if err := r.Call(Caller{Kind: CallerCLI}, "a.h", map[string]any{"x": 1}, c.onDone); err != nil {
+		t.Fatalf("per-subscriber fan-out refused the call: %v", err)
 	}
-	if len(box.sent) != 1 || r.Pending() != 0 || table.Stats().Pending != 0 {
-		t.Fatalf("half-fanned-out call not rolled back: sent=%d legs=%d table=%d", len(box.sent), r.Pending(), table.Stats().Pending)
+	if len(box.sent) != 1 || r.Pending() != 1 || table.Stats().Pending != 1 {
+		t.Fatalf("b's leg missing: sent=%d legs=%d table=%d", len(box.sent), r.Pending(), table.Stats().Pending)
 	}
 	if c.calls != 0 {
-		t.Fatal("refused call delivered an aggregate")
+		t.Fatal("aggregate delivered before the last leg")
+	}
+	// b still answers; the aggregate carries c's send failure and b's
+	// payload — the rest of the call proceeded.
+	res, ok := table.Resolve("b", reply(box.sent[0].msg.ID, json.RawMessage(`{"data":{"ready":true}}`)))
+	complete(t, r, res, ok)
+	if c.calls != 1 || len(c.result) != 2 {
+		t.Fatalf("delivered %d aggregates, first has %d entries", c.calls, len(c.result))
+	}
+	first, second := c.result[0], c.result[1]
+	if first.Plugin != "c" || first.Err == nil || first.Err.Code != CodeUnavailable || first.Err.Data["reason"] != "disconnected" || first.Data != nil {
+		t.Fatalf("failed send's entry %#v", first)
+	}
+	if second.Plugin != "b" || second.Err != nil || second.Data["ready"] != true {
+		t.Fatalf("b's entry %#v", second)
+	}
+	if r.Pending() != 0 {
+		t.Fatal("legs leaked")
+	}
+}
+
+func TestAllSendsFailAnswersAtOnceWithFailureEntries(t *testing.T) {
+	r, table, box, _ := newRunner(t, fakeSubs{"a.h": {"b", "c"}}, fakeLiveness{"b": true, "c": true}, calls.TableOptions{})
+	box.errFor = map[calls.PluginID]error{"b": errors.New("writer closed"), "c": errors.New("writer closed")}
+	c := &collector{}
+	if err := r.Call(Caller{Kind: CallerCLI}, "a.h", nil, c.onDone); err != nil {
+		t.Fatalf("all-failed fan-out refused the call: %v", err)
+	}
+	if c.calls != 1 || len(c.result) != 2 {
+		t.Fatalf("delivered %d aggregates, first has %d entries", c.calls, len(c.result))
+	}
+	for _, e := range c.result {
+		if e.Err == nil || e.Err.Code != CodeUnavailable || e.Err.Data["reason"] != "disconnected" {
+			t.Fatalf("entry %#v", e)
+		}
+	}
+	if r.Pending() != 0 || table.Stats().Pending != 0 || len(box.sent) != 0 {
+		t.Fatalf("nothing was delivered but work leaked: legs=%d table=%d sent=%d", r.Pending(), table.Stats().Pending, len(box.sent))
 	}
 }
 
