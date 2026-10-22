@@ -75,6 +75,11 @@ func (p *fakeProcess) Token() string    { return "test-token-" + p.id }
 func (p *fakeProcess) Start(open []protocol.Message) error {
 	p.opening = open
 	if p.startErr != nil {
+		// The real Wrapper opens the stderr log before cmd.Start, so a
+		// failed start still carries its path in Info.
+		p.mu.Lock()
+		p.info.LogPath = "/runtime/logs/" + p.id + "/plugin.log"
+		p.mu.Unlock()
 		go func() {
 			p.opts.Replies.Closed(p.id, p.startErr)
 			p.opts.Post(LaunchFailedMsg{PluginID: p.id, Err: p.startErr})
