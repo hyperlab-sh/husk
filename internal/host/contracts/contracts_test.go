@@ -80,3 +80,15 @@ func TestImportsStayWithinAllowList(t *testing.T) {
 		}
 	}
 }
+
+func TestEveryWireMethodHasExactlyOneHome(t *testing.T) {
+	homes := contracts.MethodHomes()
+	for _, m := range protocol.Methods() {
+		if homes[m] == "" {
+			t.Errorf("method %s has no home", m)
+		}
+	}
+	if len(homes) != len(protocol.Methods()) {
+		t.Errorf("%d homes for %d methods", len(homes), len(protocol.Methods()))
+	}
+}

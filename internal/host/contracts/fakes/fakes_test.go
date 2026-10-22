@@ -32,6 +32,11 @@ var (
 	_ contracts.Clock           = (*fakes.Clock)(nil)
 	_ contracts.Limiter         = (*fakes.Limiter)(nil)
 	_ contracts.Host            = (*fakes.Host)(nil)
+	_ contracts.ConfigPort      = (*fakes.Config)(nil)
+	_ contracts.EventPort       = (*fakes.Events)(nil)
+	_ contracts.HookPort        = (*fakes.Hooks)(nil)
+	_ contracts.PluginPort      = (*fakes.Plugins)(nil)
+	_ contracts.SurfacePort     = (*fakes.Surfaces)(nil)
 )
 
 var ctx = context.Background()
@@ -149,5 +154,47 @@ func TestLimiterTwentyPerSecondPerKey(t *testing.T) {
 	clk.Advance(time.Millisecond)
 	if !l.Allow("a") {
 		t.Fatal("new window")
+	}
+}
+
+func TestWireFamilyPorts(t *testing.T) {
+	c := contracts.Caller{Kind: contracts.CallerPlugin, PluginID: "a"}
+	denied := contracts.NewError(protocol.CodeDenied, "no", nil)
+
+	if r, _ := (&fakes.Config{Reports: []contracts.ReloadReport{{Service: "theme", Applied: true}}}).Reload(ctx, c); len(r) != 1 {
+		t.Fatal(r)
+	}
+	se := &fakes.Settings{Entries: []contracts.SettingEntry{{Key: "k"}}, Validation: contracts.ValidationResult{Applied: true}}
+	if e, _ := se.Schema(ctx, c, "plugin:a"); len(e) != 1 || se.Calls()[0] != "Schema plugin:a" {
+		t.Fatal(e, se.Calls())
+	}
+	if v, _ := se.Validate(ctx, c); !v.Applied {
+		t.Fatal(v)
+	}
+	ev := &fakes.Events{Err: denied}
+	if contracts.CodeOf(ev.Emit(ctx, c, "b.x", nil)) != "denied" {
+		t.Fatal("emit")
+	}
+	if ev.Watch(ctx, c, "a.*", &fakes.Notifier{}) == nil || len(ev.Calls()) != 2 {
+		t.Fatal(ev.Calls())
+	}
+	hk := &fakes.Hooks{Results: []contracts.HookResult{{Plugin: "p", Err: contracts.NewError(protocol.CodeTimeout, "t", nil)}}}
+	if r, _ := hk.HookCall(ctx, c, "a.h", nil); contracts.CodeOf(r[0].Err) != "timeout" {
+		t.Fatal(r)
+	}
+	pl := &fakes.Plugins{Infos: []contracts.PluginInfo{{ID: "a", Status: contracts.PodLive}}, Path: "/l"}
+	if i, _ := pl.List(ctx, c); i[0].Status != contracts.PodLive {
+		t.Fatal(i)
+	}
+	if p, _ := pl.Log(ctx, c, "a"); p != "/l" {
+		t.Fatal(p)
+	}
+	sf := &fakes.Surfaces{}
+	_ = sf.SurfaceUpdate(ctx, c, protocol.SurfaceUpdateParams{Surface: protocol.SurfaceMainStage})
+	_ = sf.SurfaceClose(ctx, c, protocol.SurfaceCloseParams{Surface: protocol.SurfaceMainStage})
+	_ = sf.SlotContribute(ctx, c, protocol.SlotContributeParams{SlotID: "a.s"})
+	sf.Err = denied
+	if contracts.CodeOf(sf.ToastShow(ctx, c, protocol.ToastShowParams{Title: "t"})) != "denied" || len(sf.Calls()) != 4 {
+		t.Fatal(sf.Calls())
 	}
 }

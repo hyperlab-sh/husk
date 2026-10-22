@@ -148,10 +148,12 @@ func (f *Session) Ping(context.Context, contracts.Caller) (protocol.SessionPingR
 // Settings fakes contracts.SettingsPort.
 type Settings struct {
 	Recorder
-	Value  any
-	Source string
-	Values map[string]any
-	Err    error
+	Value      any
+	Source     string
+	Values     map[string]any
+	Entries    []contracts.SettingEntry
+	Validation contracts.ValidationResult
+	Err        error
 }
 
 // Get implements contracts.SettingsPort.
@@ -164,6 +166,18 @@ func (f *Settings) Get(_ context.Context, _ contracts.Caller, key string) (any, 
 func (f *Settings) List(context.Context, contracts.Caller) (map[string]any, error) {
 	f.Record("List")
 	return f.Values, f.Err
+}
+
+// Schema implements contracts.SettingsPort.
+func (f *Settings) Schema(_ context.Context, _ contracts.Caller, owner string) ([]contracts.SettingEntry, error) {
+	f.Record("Schema", owner)
+	return f.Entries, f.Err
+}
+
+// Validate implements contracts.SettingsPort.
+func (f *Settings) Validate(context.Context, contracts.Caller) (contracts.ValidationResult, error) {
+	f.Record("Validate")
+	return f.Validation, f.Err
 }
 
 // Secrets fakes contracts.SecretsPort.
@@ -453,3 +467,97 @@ func (f *Host) Run(context.Context) error { f.Record("Run"); return f.RunErr }
 
 // Close implements contracts.Host.
 func (f *Host) Close() error { f.Record("Close"); return f.CloseErr }
+
+// Config fakes contracts.ConfigPort.
+type Config struct {
+	Recorder
+	Reports []contracts.ReloadReport
+	Err     error
+}
+
+// Reload implements contracts.ConfigPort.
+func (f *Config) Reload(context.Context, contracts.Caller) ([]contracts.ReloadReport, error) {
+	f.Record("Reload")
+	return f.Reports, f.Err
+}
+
+// Events fakes contracts.EventPort. Watch returns at once.
+type Events struct {
+	Recorder
+	Err error
+}
+
+// Emit implements contracts.EventPort.
+func (f *Events) Emit(_ context.Context, _ contracts.Caller, name string, _ json.RawMessage) error {
+	f.Record("Emit", name)
+	return f.Err
+}
+
+// Watch implements contracts.EventPort.
+func (f *Events) Watch(_ context.Context, _ contracts.Caller, pattern string, _ contracts.Notifier) error {
+	f.Record("Watch", pattern)
+	return f.Err
+}
+
+// Hooks fakes contracts.HookPort.
+type Hooks struct {
+	Recorder
+	Results []contracts.HookResult
+	Err     error
+}
+
+// HookCall implements contracts.HookPort.
+func (f *Hooks) HookCall(_ context.Context, _ contracts.Caller, hook string, _ json.RawMessage) ([]contracts.HookResult, error) {
+	f.Record("HookCall", hook)
+	return f.Results, f.Err
+}
+
+// Plugins fakes contracts.PluginPort.
+type Plugins struct {
+	Recorder
+	Infos []contracts.PluginInfo
+	Path  string
+	Err   error
+}
+
+// List implements contracts.PluginPort.
+func (f *Plugins) List(context.Context, contracts.Caller) ([]contracts.PluginInfo, error) {
+	f.Record("List")
+	return f.Infos, f.Err
+}
+
+// Log implements contracts.PluginPort.
+func (f *Plugins) Log(_ context.Context, _ contracts.Caller, id string) (string, error) {
+	f.Record("Log", id)
+	return f.Path, f.Err
+}
+
+// Surfaces fakes contracts.SurfacePort.
+type Surfaces struct {
+	Recorder
+	Err error
+}
+
+// SurfaceUpdate implements contracts.SurfacePort.
+func (f *Surfaces) SurfaceUpdate(_ context.Context, c contracts.Caller, p protocol.SurfaceUpdateParams) error {
+	f.Record("SurfaceUpdate", c.PluginID, p.Surface)
+	return f.Err
+}
+
+// SurfaceClose implements contracts.SurfacePort.
+func (f *Surfaces) SurfaceClose(_ context.Context, c contracts.Caller, p protocol.SurfaceCloseParams) error {
+	f.Record("SurfaceClose", c.PluginID, p.Surface)
+	return f.Err
+}
+
+// SlotContribute implements contracts.SurfacePort.
+func (f *Surfaces) SlotContribute(_ context.Context, c contracts.Caller, p protocol.SlotContributeParams) error {
+	f.Record("SlotContribute", c.PluginID, p.SlotID)
+	return f.Err
+}
+
+// ToastShow implements contracts.SurfacePort.
+func (f *Surfaces) ToastShow(_ context.Context, c contracts.Caller, p protocol.ToastShowParams) error {
+	f.Record("ToastShow", c.PluginID, p.Title)
+	return f.Err
+}
