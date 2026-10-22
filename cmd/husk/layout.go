@@ -98,17 +98,22 @@ func (m *WorkbenchModel) dropVanishedSides() {
 	// from its first frame. The slot we left is remembered and restored when
 	// its column returns, unless focus has moved on since.
 	_, hadFocused := m.slotRects[m.focusedSlot]
+	// Under a stage placement the centre surface is the workspace stage.
+	centre := protocol.SurfaceMainStage
+	if m.activePlacement == contracts.PlacementStage {
+		centre = protocol.SurfaceWorkspaceStage
+	}
 	switch m.focusedSlot {
 	case protocol.SurfaceSidebarNavigation, protocol.SurfaceSidebarList, protocol.SurfaceSidebarFooter:
 		if !left && hadFocused {
-			m.focusFallback, m.focusedSlot = m.focusedSlot, protocol.SurfaceMainStage
+			m.focusFallback, m.focusedSlot = m.focusedSlot, centre
 		}
 	case protocol.SurfaceSidePanel:
 		if !right && hadFocused {
-			m.focusFallback, m.focusedSlot = m.focusedSlot, protocol.SurfaceMainStage
+			m.focusFallback, m.focusedSlot = m.focusedSlot, centre
 		}
 	}
-	if fb := m.focusFallback; fb != "" && m.focusedSlot == protocol.SurfaceMainStage {
+	if fb := m.focusFallback; fb != "" && m.focusedSlot == centre {
 		if fb == protocol.SurfaceSidePanel && right || fb != protocol.SurfaceSidePanel && left {
 			m.focusedSlot, m.focusFallback = fb, ""
 		}

@@ -34,7 +34,7 @@ func (m *WorkbenchModel) clickContributionAt(x, y int) bool {
 		}
 		switch slot {
 		case protocol.SurfaceSidebarList, protocol.SurfaceMainStage, protocol.SurfaceSidePanel, protocol.SurfaceWorkspaceStage, protocol.SurfaceFullCanvas:
-			m.focusedSlot = slot
+			m.setFocus(slot)
 		}
 		return true
 	}

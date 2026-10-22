@@ -602,7 +602,7 @@ func (m *WorkbenchModel) handleMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 		if image.Pt(msg.X, msg.Y).In(rect.Rect()) {
 			if isLeftClick && (slotID == protocol.SurfaceSidebarList || slotID == protocol.SurfaceMainStage || slotID == protocol.SurfaceSidePanel || slotID == protocol.SurfaceWorkspaceStage || slotID == protocol.SurfaceFullCanvas) {
-				m.focusedSlot = slotID
+				m.setFocus(slotID)
 			}
 			relX := msg.X - rect.InnerX
 			relY := msg.Y - rect.InnerY
