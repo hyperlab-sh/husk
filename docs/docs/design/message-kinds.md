@@ -349,9 +349,16 @@ type EventBus interface {
     Flush()
     // Subscribe adds a connection-lifetime subscription (CLI watch, socket
     // client). Manifest subscriptions come from the table, not from here.
-    Subscribe(sink Sink, pattern string) (cancel func())
+    Subscribe(sink Sink, pattern string) (cancel func(), err error)
 }
 ```
+
+In code the bus writes `event.deliver` through the host's `Notifier`
+(one `protocol.Message` per notification) instead of `Sink`; `Subscribe` may be
+called, and cancelled, from any goroutine, while `Publish` and `Flush` are
+loop-only. A malformed pattern makes `Subscribe` fail with `invalid_params`
+and register nothing. The manifest table (patterns per plugin, plus the event
+names declared `"coalesce": false`) is replaced as a whole on reload.
 
 Subscriptions. A plugin subscribes in its manifest, once, by exact name or by
 prefix:
@@ -407,7 +414,9 @@ It carries no value. A subscriber that wants the value reads State
 
 Delivery. For each published event the bus finds subscribers whose pattern
 matches (manifest table plus connection subscriptions), skips plugin
-subscribers that are not live in State, and queues the event for each. Order
+subscribers that are not live in State (checked when the event is
+published, not at flush), and queues the event for each. A subscription
+cancelled before the flush receives nothing from that tick. Order
 of fan-out across subscribers is unspecified. Order per subscriber is the
 order of first arrival in the tick. A publisher receives its own events if it
 subscribed to them.
@@ -417,7 +426,8 @@ Coalescing. Within one loop tick, for one subscriber, events with the same
 the first. Events with different names or keys never collapse. A publisher
 may declare `"coalesce": false` for an event whose every occurrence matters;
 those are queued in full, up to 256 per subscriber per tick, and the excess
-is dropped with one log line per tick. A tick ends at the end of one `Update`
+is dropped, newest first, with one log line per subscriber per tick. The cap
+restarts each tick. A refused `Notify` drops only that notification. A tick ends at the end of one `Update`
 call. The loop flushes State first, so its change events join that call's
 batch, then flushes the Event bus. Follow-up messages are separate ticks;
 there is no posted `flushEventsMsg` extending the coalescing window.
