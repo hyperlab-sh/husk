@@ -128,15 +128,13 @@ type Liveness interface {
 	Live(pluginID string) bool
 }
 
-// Sender is the slice of *calls.Table the runner uses. Legs leave through
-// Send; a half-fanned-out call that cannot finish is rolled back with Cancel.
+// Sender is the slice of *calls.Table the runner uses: legs leave through
+// Send after the caps preflight in CanSend.
 type Sender interface {
 	// Send issues one request; see calls.Table.Send.
 	Send(plugin calls.PluginID, method string, params json.RawMessage, opts calls.Options) (calls.Handle, error)
 	// CanSend prechecks the pending-call caps; see calls.Table.CanSend.
 	CanSend(plugins ...calls.PluginID) error
-	// Cancel drops a sent leg without waiting for its reply.
-	Cancel(h calls.Handle) bool
 }
 
 // Options configures a Runner. Subscriptions, Liveness and Calls are required.
@@ -189,10 +187,13 @@ func (r *Runner) logf(format string, args ...any) {
 // Call fans hook out to every registered, live subscriber and returns without
 // waiting. A hook nobody registered for is answered immediately with an empty
 // result list; a hook the catalog does not know is refused with not_found.
-// Any cap refusal or delivery failure refuses the whole call and nothing is
-// sent (already-sent legs are rolled back); a call either reached every live
-// subscriber or none of them. onDone receives the aggregate exactly once, on
-// the loop goroutine, when the last leg resolved; a nil onDone discards it.
+// Cap preflights refuse the whole call and nothing is sent. Delivery is
+// per-subscriber, as today's publisher (deliverPublications): a send that
+// fails mid fan-out becomes that subscriber's error entry — unavailable,
+// reason disconnected — and the remaining subscribers still get theirs.
+// onDone receives the aggregate exactly once, on the loop goroutine, when the
+// last leg resolved (reply, timeout, plugin exit, shutdown or failed send);
+// a nil onDone discards it.
 //
 // If Call returns an error, onDone is never invoked.
 func (r *Runner) Call(caller Caller, hook string, data map[string]any, onDone func([]HookResult)) error {
@@ -224,20 +225,22 @@ func (r *Runner) Call(caller Caller, hook string, data map[string]any, onDone fu
 		return &HookError{Code: CodeInternal, Message: "cannot encode hook call: " + err.Error()}
 	}
 	f := &fanout{hook: hook, waiting: len(live), results: make([]HookResult, 0, len(live)), done: onDone}
-	sent := make([]calls.Handle, 0, len(live))
 	for _, target := range live {
 		h, err := r.opts.Calls.Send(target, Method, params, calls.Options{Timeout: r.opts.Timeout, Requester: Requester})
 		if err != nil {
-			// Roll the call back whole: cancel the legs already in flight so
-			// the table frees them and no Result ever completes the fanout.
-			for _, leg := range sent {
-				r.opts.Calls.Cancel(leg)
-				delete(r.legs, leg)
-			}
-			return sendError(err)
+			// Per-subscriber delivery: one undeliverable leg answers as that
+			// subscriber's entry; the rest still get the call.
+			r.logf("hooks: %s: send to %s failed: %v", hook, target, err)
+			e := sendError(err)
+			e.Data = map[string]any{"reason": "disconnected"}
+			f.results = append(f.results, HookResult{Hook: hook, Plugin: string(target), Err: e})
+			f.waiting--
+			continue
 		}
 		r.legs[h] = f
-		sent = append(sent, h)
+	}
+	if f.waiting == 0 && f.done != nil {
+		f.done(f.results)
 	}
 	return nil
 }
@@ -356,12 +359,13 @@ func capError(err error) *HookError {
 	}
 }
 
-// sendError maps a Send failure after the preflight passed.
+// sendError maps a Send failure after the preflight passed. It becomes that
+// subscriber's aggregate entry, not a refusal of the call.
 func sendError(err error) *HookError {
 	switch {
 	case errors.Is(err, calls.ErrUnavailable), errors.Is(err, calls.ErrClosed):
 		return &HookError{Code: CodeUnavailable, Message: "cannot send hook call: " + err.Error()}
 	default:
-		return capError(err)
+		return &HookError{Code: CodeInternal, Message: "hook send failed: " + err.Error()}
 	}
 }
