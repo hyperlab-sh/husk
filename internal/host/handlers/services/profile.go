@@ -35,10 +35,10 @@ func (h Profile) Serve(ctx context.Context, c contracts.Caller, req protocol.Mes
 		return handlers.Reply(req, profiles)
 	case protocol.MethodProfileUse:
 		var p profileUseParams
-		if bad := decodeParams(req, &p); bad != nil {
+		if bad := handlers.DecodeParams(req, &p); bad != nil {
 			return *bad
 		}
-		if bad := requireString(req, "params.name", p.Name); bad != nil {
+		if bad := handlers.RequireString(req, "params.name", p.Name); bad != nil {
 			return *bad
 		}
 		if err := h.Port.Use(ctx, c, p.Name); err != nil {

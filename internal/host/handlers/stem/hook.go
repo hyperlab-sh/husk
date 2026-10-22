@@ -43,10 +43,10 @@ func (h Hook) Serve(ctx context.Context, c contracts.Caller, req protocol.Messag
 		return handlers.UnknownMethod(req)
 	}
 	var p hookCallParams
-	if bad := decodeParams(req, &p); bad != nil {
+	if bad := handlers.DecodeParams(req, &p); bad != nil {
 		return *bad
 	}
-	if bad := requireString(req, "params.hook", p.Hook); bad != nil {
+	if bad := handlers.RequireString(req, "params.hook", p.Hook); bad != nil {
 		return *bad
 	}
 	data, bad := rawObject(req, "params.data", p.Data, false)

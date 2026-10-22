@@ -47,10 +47,10 @@ func (h Settings) Serve(ctx context.Context, c contracts.Caller, req protocol.Me
 			return *deny
 		}
 		var p settingsGetParams
-		if bad := decodeParams(req, &p); bad != nil {
+		if bad := handlers.DecodeParams(req, &p); bad != nil {
 			return *bad
 		}
-		if bad := requireString(req, "params.key", p.Key); bad != nil {
+		if bad := handlers.RequireString(req, "params.key", p.Key); bad != nil {
 			return *bad
 		}
 		value, source, err := h.Port.Get(ctx, c, p.Key)
@@ -69,7 +69,7 @@ func (h Settings) Serve(ctx context.Context, c contracts.Caller, req protocol.Me
 		return handlers.Reply(req, values)
 	case protocol.MethodSettingsSchema:
 		var p settingsSchemaParams
-		if bad := decodeParams(req, &p); bad != nil {
+		if bad := handlers.DecodeParams(req, &p); bad != nil {
 			return *bad
 		}
 		entries, err := h.Port.Schema(ctx, c, p.Owner)

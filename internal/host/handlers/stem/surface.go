@@ -23,7 +23,7 @@ func (h Surface) Serve(ctx context.Context, c contracts.Caller, req protocol.Mes
 	switch req.Method {
 	case protocol.MethodSurfaceUpdate:
 		var p protocol.SurfaceUpdateParams
-		if bad := decodeParams(req, &p); bad != nil {
+		if bad := handlers.DecodeParams(req, &p); bad != nil {
 			return *bad
 		}
 		if bad := validSurface(req, p.Surface); bad != nil {
@@ -39,7 +39,7 @@ func (h Surface) Serve(ctx context.Context, c contracts.Caller, req protocol.Mes
 		return handlers.Reply(req, nil)
 	case protocol.MethodSurfaceClose:
 		var p protocol.SurfaceCloseParams
-		if bad := decodeParams(req, &p); bad != nil {
+		if bad := handlers.DecodeParams(req, &p); bad != nil {
 			return *bad
 		}
 		if bad := validSurface(req, p.Surface); bad != nil {
@@ -51,17 +51,17 @@ func (h Surface) Serve(ctx context.Context, c contracts.Caller, req protocol.Mes
 		return handlers.Reply(req, nil)
 	case protocol.MethodSlotContribute:
 		var p protocol.SlotContributeParams
-		if bad := decodeParams(req, &p); bad != nil {
+		if bad := handlers.DecodeParams(req, &p); bad != nil {
 			return *bad
 		}
 		// slot_id and id identify the contribution; content stays free — neither
 		// protocol.md nor message-kinds.md marks it required, and no spec gives
 		// an empty content a meaning (v1 stored it as a normal update), so the
 		// port decides what it means.
-		if bad := requireString(req, "params.slot_id", p.SlotID); bad != nil {
+		if bad := handlers.RequireString(req, "params.slot_id", p.SlotID); bad != nil {
 			return *bad
 		}
-		if bad := requireString(req, "params.id", p.ID); bad != nil {
+		if bad := handlers.RequireString(req, "params.id", p.ID); bad != nil {
 			return *bad
 		}
 		if err := h.Port.SlotContribute(ctx, c, p); err != nil {
@@ -70,7 +70,7 @@ func (h Surface) Serve(ctx context.Context, c contracts.Caller, req protocol.Mes
 		return handlers.Reply(req, nil)
 	case protocol.MethodToastShow:
 		var p protocol.ToastShowParams
-		if bad := decodeParams(req, &p); bad != nil {
+		if bad := handlers.DecodeParams(req, &p); bad != nil {
 			return *bad
 		}
 		// Neither protocol.md nor message-kinds.md marks level or title required

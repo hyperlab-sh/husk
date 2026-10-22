@@ -59,10 +59,10 @@ func (h State) Serve(ctx context.Context, c contracts.Caller, req protocol.Messa
 	switch req.Method {
 	case protocol.MethodStateGet:
 		var p getParams
-		if bad := decodeParams(req, &p); bad != nil {
+		if bad := handlers.DecodeParams(req, &p); bad != nil {
 			return *bad
 		}
-		if bad := requireString(req, "params.slice", p.Slice); bad != nil {
+		if bad := handlers.RequireString(req, "params.slice", p.Slice); bad != nil {
 			return *bad
 		}
 		res, err := h.Port.Get(ctx, c, p.Slice, p.Path)
@@ -72,10 +72,10 @@ func (h State) Serve(ctx context.Context, c contracts.Caller, req protocol.Messa
 		return handlers.Reply(req, res)
 	case protocol.MethodStateSet:
 		var p setParams
-		if bad := decodeParams(req, &p); bad != nil {
+		if bad := handlers.DecodeParams(req, &p); bad != nil {
 			return *bad
 		}
-		if bad := requireString(req, "params.slice", p.Slice); bad != nil {
+		if bad := handlers.RequireString(req, "params.slice", p.Slice); bad != nil {
 			return *bad
 		}
 		value, bad := rawObject(req, "params.value", p.Value, true)
@@ -89,10 +89,10 @@ func (h State) Serve(ctx context.Context, c contracts.Caller, req protocol.Messa
 		return handlers.Reply(req, revisionResult{Slice: p.Slice, Revision: rev})
 	case protocol.MethodStatePatch:
 		var p patchParams
-		if bad := decodeParams(req, &p); bad != nil {
+		if bad := handlers.DecodeParams(req, &p); bad != nil {
 			return *bad
 		}
-		if bad := requireString(req, "params.slice", p.Slice); bad != nil {
+		if bad := handlers.RequireString(req, "params.slice", p.Slice); bad != nil {
 			return *bad
 		}
 		patch, bad := rawObject(req, "params.patch", p.Patch, true)
@@ -110,7 +110,7 @@ func (h State) Serve(ctx context.Context, c contracts.Caller, req protocol.Messa
 		return handlers.Reply(req, revisionResult{Slice: p.Slice, Revision: rev})
 	case protocol.MethodStateSnapshot:
 		var p snapshotParams
-		if bad := decodeParams(req, &p); bad != nil {
+		if bad := handlers.DecodeParams(req, &p); bad != nil {
 			return *bad
 		}
 		values := p.Values != nil && *p.Values
@@ -121,7 +121,7 @@ func (h State) Serve(ctx context.Context, c contracts.Caller, req protocol.Messa
 		return handlers.Reply(req, res)
 	case protocol.MethodStateWatch:
 		var p stateWatchParams
-		if bad := decodeParams(req, &p); bad != nil {
+		if bad := handlers.DecodeParams(req, &p); bad != nil {
 			return *bad
 		}
 		res, err := h.Port.Watch(ctx, c, p.Slices, n)
@@ -131,10 +131,10 @@ func (h State) Serve(ctx context.Context, c contracts.Caller, req protocol.Messa
 		return handlers.Reply(req, res)
 	case protocol.MethodStateClear:
 		var p clearParams
-		if bad := decodeParams(req, &p); bad != nil {
+		if bad := handlers.DecodeParams(req, &p); bad != nil {
 			return *bad
 		}
-		if bad := requireString(req, "params.namespace", p.Namespace); bad != nil {
+		if bad := handlers.RequireString(req, "params.namespace", p.Namespace); bad != nil {
 			return *bad
 		}
 		if err := h.Port.Clear(ctx, c, p.Namespace); err != nil {

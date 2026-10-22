@@ -54,10 +54,10 @@ func (h Secrets) Serve(ctx context.Context, c contracts.Caller, req protocol.Mes
 			return *deny
 		}
 		var p secretsNameParams
-		if bad := decodeParams(req, &p); bad != nil {
+		if bad := handlers.DecodeParams(req, &p); bad != nil {
 			return *bad
 		}
-		if bad := requireString(req, "params.name", p.Name); bad != nil {
+		if bad := handlers.RequireString(req, "params.name", p.Name); bad != nil {
 			return *bad
 		}
 		value, err := h.Port.Get(ctx, c, p.Name)
@@ -76,10 +76,10 @@ func (h Secrets) Serve(ctx context.Context, c contracts.Caller, req protocol.Mes
 		return handlers.Reply(req, infos)
 	case protocol.MethodSecretsSet:
 		var p secretsValueParams
-		if bad := decodeParams(req, &p); bad != nil {
+		if bad := handlers.DecodeParams(req, &p); bad != nil {
 			return *bad
 		}
-		if bad := requireString(req, "params.name", p.Name); bad != nil {
+		if bad := handlers.RequireString(req, "params.name", p.Name); bad != nil {
 			return *bad
 		}
 		if err := h.Port.Set(ctx, c, p.Name, []byte(p.Value)); err != nil {
@@ -88,13 +88,13 @@ func (h Secrets) Serve(ctx context.Context, c contracts.Caller, req protocol.Mes
 		return handlers.Reply(req, nil)
 	case protocol.MethodSecretsGrant:
 		var p secretsPluginParams
-		if bad := decodeParams(req, &p); bad != nil {
+		if bad := handlers.DecodeParams(req, &p); bad != nil {
 			return *bad
 		}
-		if bad := requireString(req, "params.plugin", p.Plugin); bad != nil {
+		if bad := handlers.RequireString(req, "params.plugin", p.Plugin); bad != nil {
 			return *bad
 		}
-		if bad := requireString(req, "params.name", p.Name); bad != nil {
+		if bad := handlers.RequireString(req, "params.name", p.Name); bad != nil {
 			return *bad
 		}
 		if err := h.Port.Grant(ctx, c, p.Plugin, p.Name); err != nil {
@@ -103,13 +103,13 @@ func (h Secrets) Serve(ctx context.Context, c contracts.Caller, req protocol.Mes
 		return handlers.Reply(req, nil)
 	case protocol.MethodSecretsRevoke:
 		var p secretsPluginParams
-		if bad := decodeParams(req, &p); bad != nil {
+		if bad := handlers.DecodeParams(req, &p); bad != nil {
 			return *bad
 		}
-		if bad := requireString(req, "params.plugin", p.Plugin); bad != nil {
+		if bad := handlers.RequireString(req, "params.plugin", p.Plugin); bad != nil {
 			return *bad
 		}
-		if bad := requireString(req, "params.name", p.Name); bad != nil {
+		if bad := handlers.RequireString(req, "params.name", p.Name); bad != nil {
 			return *bad
 		}
 		if err := h.Port.Revoke(ctx, c, p.Plugin, p.Name); err != nil {
@@ -118,10 +118,10 @@ func (h Secrets) Serve(ctx context.Context, c contracts.Caller, req protocol.Mes
 		return handlers.Reply(req, nil)
 	case protocol.MethodSecretsReveal:
 		var p secretsNameParams
-		if bad := decodeParams(req, &p); bad != nil {
+		if bad := handlers.DecodeParams(req, &p); bad != nil {
 			return *bad
 		}
-		if bad := requireString(req, "params.name", p.Name); bad != nil {
+		if bad := handlers.RequireString(req, "params.name", p.Name); bad != nil {
 			return *bad
 		}
 		value, err := h.Port.Reveal(ctx, c, p.Name)
