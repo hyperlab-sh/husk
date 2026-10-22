@@ -1006,6 +1006,42 @@ func TestCatalogChangedDropsSlotAfterLateCatalogUpdate(t *testing.T) {
 	}
 }
 
+// TestReleaseDetectsForeignWriteInSameUpdate pins the release-side guard:
+// a foreign clear and a release in the same Update must not let markRev
+// absorb the foreign revision. The host's force-close path skips the
+// occupant check, so it writes over the cleared resolution and would
+// absorb the foreign revision; the guard clears the declarations cache
+// instead, and the next pass re-resolves from the live declarations —
+// restoring what the clear wiped. The claim declaration was never
+// retracted (the clear wiped the occupant the close would have released),
+// so the re-resolve re-occupies the surface from the standing claim.
+func TestReleaseDetectsForeignWriteInSameUpdate(t *testing.T) {
+	st, eng, pods := newEngine(t, Options{Publications: publications{owners: map[string]string{"publisher.list": "publisher"}}})
+
+	pods.launch("alpha.files")
+	pods.claim("alpha.files", string(protocol.SurfaceMainStage))
+	pods.declare("alpha.files", "publisher.list", Contribution{ID: "alpha.files.item", Plugin: "alpha.files", Label: "one"})
+	settle(st, eng)
+
+	// Same Update: the foreign clear, then the host's force-release of the
+	// cleared surface, before any Flush.
+	if _, err := st.Clear(state.SurfacesNamespace); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if err := eng.CloseSurface(protocol.SurfaceMainStage); err != nil {
+		t.Fatalf("force-release: %v", err)
+	}
+	settle(st, eng)
+
+	res := resolution(t, st)
+	if got := res.Occupants[protocol.SurfaceMainStage].Plugin; got != "alpha.files" {
+		t.Fatalf("occupant after rebuild = %q, want the standing claim re-resolved", got)
+	}
+	if got := entryIDs(res.Contributions["publisher.list"]); len(got) != 1 || got[0] != "alpha.files.item" {
+		t.Fatalf("contributions after foreign clear = %v, want the declaration re-resolved", got)
+	}
+}
+
 func TestInitialSweepResolvesPreRegisteredDeclarations(t *testing.T) {
 	st := state.New(state.Options{})
 	pods := newPod(t, st)
