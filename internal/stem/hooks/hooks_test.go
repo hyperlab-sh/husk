@@ -3,6 +3,7 @@ package hooks
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"strconv"
 	"testing"
@@ -69,7 +70,11 @@ func newRunner(t *testing.T, subs Subscriptions, live fakeLiveness, opts calls.T
 	clock := &fakeClock{now: time.Unix(1000, 0)}
 	opts.Clock = clock
 	table := calls.New(box, opts)
-	return New(Options{Subscriptions: subs, Liveness: live, Calls: table}), table, box, clock
+	r, err := New(Options{Subscriptions: subs, Liveness: live, Calls: table})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r, table, box, clock
 }
 
 func mustCall(t *testing.T, r *Runner, hook string, data map[string]any, onDone func([]HookResult)) {
@@ -292,6 +297,60 @@ func TestSendFailureBecomesThatSubscribersEntry(t *testing.T) {
 	}
 	if r.Pending() != 0 {
 		t.Fatal("legs leaked")
+	}
+}
+
+// errSender fails every Send, exercising the send-failure classification the
+// real table cannot be forced into from a valid Runner configuration.
+type errSender struct{ err error }
+
+func (s *errSender) Send(calls.PluginID, string, json.RawMessage, calls.Options) (calls.Handle, error) {
+	return calls.Handle{}, s.err
+}
+
+func (s *errSender) CanSend(...calls.PluginID) error { return nil }
+
+func TestNewRejectsNegativeTimeout(t *testing.T) {
+	r, err := New(Options{Subscriptions: fakeSubs{}, Liveness: fakeLiveness{}, Calls: &errSender{}, Timeout: -time.Second})
+	if err == nil || r != nil {
+		t.Fatalf("New() = %v, %v; want nil runner and an error", r, err)
+	}
+}
+
+func TestSendFailureReasonOnlyForUnavailable(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		err    error
+		code   string
+		reason string
+	}{
+		{"unavailable", fmt.Errorf("send b: %w", calls.ErrUnavailable), CodeUnavailable, "disconnected"},
+		{"internal", errors.New("send b: bad options"), CodeInternal, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r, err := New(Options{Subscriptions: fakeSubs{"a.h": {"b"}}, Liveness: fakeLiveness{"b": true}, Calls: &errSender{err: tc.err}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			c := &collector{}
+			if err := r.Call(Caller{Kind: CallerCLI}, "a.h", nil, c.onDone); err != nil {
+				t.Fatal(err)
+			}
+			if c.calls != 1 || len(c.result) != 1 {
+				t.Fatalf("delivered %d aggregates, first has %d entries", c.calls, len(c.result))
+			}
+			got := c.result[0]
+			if got.Plugin != "b" || got.Err == nil || got.Err.Code != tc.code {
+				t.Fatalf("entry %#v", got)
+			}
+			if tc.reason == "" {
+				if got.Err.Data != nil {
+					t.Fatalf("data = %v, want none", got.Err.Data)
+				}
+			} else if got.Err.Data["reason"] != tc.reason {
+				t.Fatalf("data = %v, want reason %q", got.Err.Data, tc.reason)
+			}
+		})
 	}
 }
 

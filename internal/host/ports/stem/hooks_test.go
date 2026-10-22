@@ -57,7 +57,11 @@ func newHookRig(t *testing.T, subs hookSubs, alive live) *hookRig {
 		sent: make(chan hookSend, 16),
 	}
 	r.table = calls.New(&hookOutbox{sent: r.sent}, calls.TableOptions{Clock: r.clk})
-	r.runner = hooks.New(hooks.Options{Subscriptions: subs, Liveness: alive, Calls: r.table})
+	runner, err := hooks.New(hooks.Options{Subscriptions: subs, Liveness: alive, Calls: r.table})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.runner = runner
 	r.port = stemports.NewHooks(r.runner, r.loop.post)
 	return r
 }

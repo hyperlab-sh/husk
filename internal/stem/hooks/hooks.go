@@ -138,8 +138,9 @@ type Sender interface {
 }
 
 // Options configures a Runner. Subscriptions, Liveness and Calls are required.
-// Zero Timeout selects calls.DefaultTimeout (10s, today's hook timeout). A nil
-// Logger is a no-op and must not block or reenter the runner.
+// Zero Timeout selects calls.DefaultTimeout (10s, today's hook timeout); a
+// negative Timeout is rejected by New. A nil Logger is a no-op and must not
+// block or reenter the runner.
 type Options struct {
 	Subscriptions Subscriptions
 	Liveness      Liveness
@@ -164,8 +165,9 @@ type fanout struct {
 	done    func([]HookResult)
 }
 
-// New returns a Runner over opts. It panics when a required view is missing.
-func New(opts Options) *Runner {
+// New returns a Runner over opts. It panics when a required view is missing
+// and errors on a misconfigured timeout.
+func New(opts Options) (*Runner, error) {
 	if opts.Subscriptions == nil {
 		panic("hooks: Options.Subscriptions is required")
 	}
@@ -175,7 +177,10 @@ func New(opts Options) *Runner {
 	if opts.Calls == nil {
 		panic("hooks: Options.Calls is required")
 	}
-	return &Runner{opts: opts, legs: map[calls.Handle]*fanout{}}
+	if opts.Timeout < 0 {
+		return nil, fmt.Errorf("hooks: Options.Timeout must not be negative (zero selects %s)", calls.DefaultTimeout)
+	}
+	return &Runner{opts: opts, legs: map[calls.Handle]*fanout{}}, nil
 }
 
 func (r *Runner) logf(format string, args ...any) {
@@ -188,9 +193,10 @@ func (r *Runner) logf(format string, args ...any) {
 // waiting. A hook nobody registered for is answered immediately with an empty
 // result list; a hook the catalog does not know is refused with not_found.
 // Cap preflights refuse the whole call and nothing is sent. Delivery is
-// per-subscriber, as today's publisher (deliverPublications): a send that
-// fails mid fan-out becomes that subscriber's error entry — unavailable,
-// reason disconnected — and the remaining subscribers still get theirs.
+// per-subscriber, as today's publisher (deliverPublications): a send the
+// table answers unavailable becomes that subscriber's error entry — reason
+// disconnected — while any other send failure answers with the table's code
+// and message, and the remaining subscribers still get theirs.
 // onDone receives the aggregate exactly once, on the loop goroutine, when the
 // last leg resolved (reply, timeout, plugin exit, shutdown or failed send);
 // a nil onDone discards it.
@@ -232,7 +238,10 @@ func (r *Runner) Call(caller Caller, hook string, data map[string]any, onDone fu
 			// subscriber's entry; the rest still get the call.
 			r.logf("hooks: %s: send to %s failed: %v", hook, target, err)
 			e := sendError(err)
-			e.Data = map[string]any{"reason": "disconnected"}
+			if errors.Is(err, calls.ErrUnavailable) {
+				e.Data = map[string]any{"reason": "disconnected"}
+				e.Message = "subscriber disconnected"
+			}
 			f.results = append(f.results, HookResult{Hook: hook, Plugin: string(target), Err: e})
 			f.waiting--
 			continue
