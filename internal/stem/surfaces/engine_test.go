@@ -151,6 +151,14 @@ func (p *pod) Contribute(plugin, slot string, entry Contribution) error {
 	return p.decl(plugin).con.Upsert(slot, entry)
 }
 
+// Release implements the Declarations seam: it removes the surface from the
+// plugin's occupants declaration.
+func (p *pod) Release(plugin string, surface protocol.SurfaceID) error {
+	claims := p.decl(plugin).occ.Get()
+	delete(claims, surface)
+	return p.decl(plugin).occ.Set(claims)
+}
+
 // declare overwrites one slot's entry list, as a manifest declaration would.
 func (p *pod) declare(plugin, slot string, entries ...Contribution) {
 	p.t.Helper()
@@ -224,11 +232,15 @@ func errorAs(err error, target **Error) bool {
 func newEngine(t *testing.T, opts Options) (*state.State, *Engine, *pod) {
 	t.Helper()
 	st := state.New(state.Options{})
+	pods := newPod(t, st)
+	if opts.Declarations == nil {
+		opts.Declarations = pods // the pod stand-in serves the seam by default
+	}
 	eng, err := New(st, opts)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	return st, eng, newPod(t, st)
+	return st, eng, pods
 }
 
 func TestOccupancyFirstWinsAndConflictRefused(t *testing.T) {
@@ -318,6 +330,84 @@ func TestReleaseOnCloseAndReclaim(t *testing.T) {
 	}
 	if _, occupied := resolution(t, st).Occupants[protocol.SurfaceModal]; occupied {
 		t.Fatal("occupancy survived host close")
+	}
+	settle(st, eng)
+
+	// The close retracted the claim at its source: the occupant's
+	// declaration no longer names the surface, and re-declaring the claim
+	// is a fresh claim on a free surface.
+	pods.claim("beta.notes", string(protocol.SurfaceModal))
+	settle(st, eng)
+	if got := resolution(t, st).Occupants[protocol.SurfaceModal].Plugin; got != "beta.notes" {
+		t.Fatalf("post-host-close occupant = %q, want beta.notes", got)
+	}
+}
+
+func TestCloseRetractsClaimDeclaration(t *testing.T) {
+	st, eng, pods := newEngine(t, Options{})
+	pods.launch("alpha.files")
+	pods.claim("alpha.files", string(protocol.SurfaceMainStage))
+	settle(st, eng)
+
+	// The occupant closes; the claim declaration is retracted at its source.
+	if err := eng.SurfaceClose("alpha.files", protocol.SurfaceCloseParams{Surface: protocol.SurfaceMainStage}); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	settle(st, eng)
+
+	if got := pods.decl("alpha.files").occ.Get()[protocol.SurfaceMainStage]; got.Plugin != "" {
+		t.Fatalf("declaration still claims: %+v", got)
+	}
+	if _, occupied := resolution(t, st).Occupants[protocol.SurfaceMainStage]; occupied {
+		t.Fatal("occupancy survived close")
+	}
+
+	// A full re-resolution cannot resurrect the released occupancy from a
+	// stale declaration: the declaration no longer names the surface, and
+	// the same plugin re-claiming is a fresh claim that resolves.
+	pods.claim("alpha.files", string(protocol.SurfaceMainStage))
+	settle(st, eng)
+	if got := resolution(t, st).Occupants[protocol.SurfaceMainStage].Plugin; got != "alpha.files" {
+		t.Fatalf("re-claim occupant = %q, want alpha.files", got)
+	}
+}
+
+func TestRefusedClaimResolvesWhenSurfaceFrees(t *testing.T) {
+	st, eng, pods := newEngine(t, Options{})
+	pods.launch("alpha.files")
+	pods.launch("beta.notes")
+	pods.claim("alpha.files", string(protocol.SurfaceMainStage))
+	settle(st, eng)
+
+	// beta's claim arrives while the surface is occupied: it is a
+	// declaration, refused silently — no reply code exists for it — and
+	// only counted and recorded.
+	pods.claim("beta.notes", string(protocol.SurfaceMainStage))
+	settle(st, eng)
+
+	stats := eng.Stats()
+	if stats.RefusedClaims != 1 {
+		t.Fatalf("refused claims = %d, want 1", stats.RefusedClaims)
+	}
+	if len(stats.Refused) != 1 || stats.Refused[0].Surface != protocol.SurfaceMainStage || stats.Refused[0].Plugin != "beta.notes" {
+		t.Fatalf("refused history = %+v", stats.Refused)
+	}
+	if got := resolution(t, st).Occupants[protocol.SurfaceMainStage].Plugin; got != "alpha.files" {
+		t.Fatalf("refused claim displaced the occupant: %q", got)
+	}
+
+	// The occupant closes; the standing refused claim resolves on the
+	// next pass, with no new declaration from beta.
+	if err := eng.SurfaceClose("alpha.files", protocol.SurfaceCloseParams{Surface: protocol.SurfaceMainStage}); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	settle(st, eng)
+
+	if got := resolution(t, st).Occupants[protocol.SurfaceMainStage].Plugin; got != "beta.notes" {
+		t.Fatalf("post-free occupant = %q, want beta.notes (standing claim resolves)", got)
+	}
+	if got := pods.decl("beta.notes").occ.Get()[protocol.SurfaceMainStage].Plugin; got != "beta.notes" {
+		t.Fatalf("beta declaration = %+v", got)
 	}
 }
 

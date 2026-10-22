@@ -39,12 +39,19 @@ type Publications interface {
 // Declarations is the seam through which the engine asks a plugin's Pod to
 // change its declaration slices. The Pod holds the plugin's write capability
 // (design/state.md invariant 4); the engine never writes another owner's
-// slice. Implementations post the mutation to the loop and return once it is
-// accepted; the resolution follows from the State listener.
+// slice. The engine calls these methods from its own loop-only methods, so
+// implementations run on the loop and must write the declaration directly,
+// never post-and-wait: the engine's request would deadlock on its own loop.
 type Declarations interface {
 	// Contribute upserts entry into plugin's <plugin_id>.contributions
 	// declaration for slot.
 	Contribute(plugin, slot string, entry Contribution) error
+
+	// Release removes surface from plugin's <plugin_id>.occupants
+	// declaration. surface.close and the host's force-close retract the
+	// claim at its source, so a freed surface cannot be re-occupied by its
+	// own stale declaration.
+	Release(plugin string, surface protocol.SurfaceID) error
 }
 
 // Options configures the engine. Nil seams take safe defaults: the real
@@ -82,11 +89,27 @@ const (
 type Stats struct {
 	// RefusedClaims counts claims refused because the surface was occupied.
 	RefusedClaims uint64
+	// Refused holds the most recent refusals (at most maxRefused), newest
+	// last. A refused claim is a declaration, not a request: it gets no
+	// reply code, only these counters, and it resolves on a later pass
+	// once the surface frees.
+	Refused []RefusedClaim
 	// ToastsDropped counts toasts dropped by the queue bound.
 	ToastsDropped uint64
 	// ToastsExpired counts toasts expired by the TTL.
 	ToastsExpired uint64
 }
+
+// RefusedClaim is one recorded claim refusal: the claiming plugin and the
+// surface that was occupied at the time.
+type RefusedClaim struct {
+	Surface protocol.SurfaceID
+	Plugin  string
+	At      time.Time
+}
+
+// maxRefused bounds the refused-claim history in Stats.
+const maxRefused = 32
 
 // Toast is one queued transient notice. Toasts never enter State.
 type Toast struct {
@@ -127,6 +150,10 @@ type Engine struct {
 	// decls cache: plugin id -> last resolved declarations.
 	declsCache map[string]*pluginDecl
 	dirty      bool
+
+	// freed tracks surfaces released since the last pass (surface.close,
+	// host force-close): a freed surface re-resolves standing claims.
+	freed map[protocol.SurfaceID]bool
 
 	slotWatchers   map[string]map[*watcher]struct{}
 	pluginWatchers map[string]map[*watcher]struct{}
@@ -174,6 +201,7 @@ func New(st *state.State, opts Options) (*Engine, error) {
 		live:           opts.Liveness,
 		log:            opts.Logger,
 		declsCache:     map[string]*pluginDecl{},
+		freed:          map[protocol.SurfaceID]bool{},
 		slotWatchers:   map[string]map[*watcher]struct{}{},
 		pluginWatchers: map[string]map[*watcher]struct{}{},
 	}
@@ -204,6 +232,7 @@ func (noPublications) Owner(string) (string, bool) { return "", false }
 type droppedDeclarations struct{}
 
 func (droppedDeclarations) Contribute(string, string, Contribution) error { return nil }
+func (droppedDeclarations) Release(string, protocol.SurfaceID) error     { return nil }
 
 // Flush runs one resolution pass: it diffs the Pod-written declaration
 // slices against the last pass, writes the result to husk.surfaces and
@@ -261,6 +290,10 @@ func (e *Engine) Flush() {
 		res.Contributions = Contributions{}
 	}
 	changedSlots := map[string]bool{}
+	occupiedBefore := make(map[protocol.SurfaceID]string, len(res.Occupants))
+	for surface, occ := range res.Occupants {
+		occupiedBefore[surface] = occ.Plugin
+	}
 
 	plugins := make([]string, 0, len(next)+len(e.declsCache))
 	seen := map[string]bool{}
@@ -285,6 +318,37 @@ func (e *Engine) Flush() {
 
 	for _, plugin := range plugins {
 		e.resolvePlugin(plugin, e.declsCache[plugin], next[plugin], &res, changedSlots)
+	}
+
+	// A surface freed since the last pass re-resolves standing claims:
+	// claims are declarations, so a claim that arrived while the surface
+	// was occupied was recorded and silently refused, and it wins the
+	// surface once it frees — closest in the same namespace order.
+	freed := make([]protocol.SurfaceID, 0)
+	for surface := range e.freed {
+		// Freed out-of-band (surface.close, host force-close) since the
+		// last pass and not re-occupied by a declaration this pass.
+		if res.Occupants[surface].Plugin == "" {
+			freed = append(freed, surface)
+		}
+	}
+	for surface, was := range occupiedBefore {
+		if was != "" && res.Occupants[surface].Plugin == "" {
+			freed = append(freed, surface)
+		}
+	}
+	e.freed = map[protocol.SurfaceID]bool{}
+	sort.Slice(freed, func(i, j int) bool { return freed[i] < freed[j] })
+	for _, surface := range freed {
+		for _, plugin := range plugins {
+			d, ok := next[plugin]
+			if !ok || d.claims[surface].Plugin != plugin {
+				continue
+			}
+			res.Occupants[surface] = Occupant{Surface: surface, Plugin: plugin}
+			e.log.Printf("surfaces: %s freed; standing claim by %s resolves", surface, plugin)
+			break
+		}
 	}
 
 	// A published slot whose publisher is no longer registered leaves the
@@ -337,8 +401,8 @@ func (e *Engine) resolvePlugin(plugin string, old, cur *pluginDecl, res *Surface
 			res.Occupants[surface] = Occupant{Surface: surface, Plugin: plugin} // first claim wins
 		case plugin:
 			// Still ours from a release the Pod has not re-declared; no-op.
-		default:
-			e.stats.RefusedClaims++
+	default:
+			e.recordRefusal(surface, plugin)
 			e.log.Printf("surfaces: %s occupied by %s; claim by %s refused", surface, occupant, plugin)
 		}
 	}
@@ -568,8 +632,9 @@ func (e *Engine) SurfaceUpdate(plugin string, p protocol.SurfaceUpdateParams) er
 	return nil
 }
 
-// SurfaceClose serves surface.close from the surface's occupant: it releases
-// the occupancy. The released surface is free for the next claim to arrive.
+// SurfaceClose serves surface.close from the surface's occupant: it
+// releases the occupancy and retracts the claim declaration at its source.
+// The released surface is free for the next claim to arrive or resolve.
 func (e *Engine) SurfaceClose(plugin string, p protocol.SurfaceCloseParams) error {
 	if plugin == "" {
 		return errf(protocol.CodeDenied, "surface.close requires a plugin caller")
@@ -597,7 +662,34 @@ func (e *Engine) release(surface protocol.SurfaceID, only string) error {
 		}
 		return errf(protocol.CodeDenied, "surface %q is occupied by %s", surface, occupant)
 	}
-	return e.slice.Update(func(v *Surfaces) { delete(v.Occupants, surface) })
+	if err := e.slice.Update(func(v *Surfaces) { delete(v.Occupants, surface) }); err != nil {
+		return err
+	}
+	if occupant == "" {
+		return nil
+	}
+	// Retract the claim at its source: the occupant's own declaration no
+	// longer names the surface, so a later full pass cannot re-resolve the
+	// released occupancy from the stale declaration. The write runs on
+	// this loop, and the surface re-resolves standing claims next pass.
+	if err := e.decls.Release(occupant, surface); err != nil {
+		e.log.Printf("surfaces: retracting %s's claim declaration failed: %v", occupant, err)
+	}
+	e.freed[surface] = true
+	return nil
+}
+
+// recordRefusal keeps the bounded refusal history beside the counter: a
+// refused claim gets no reply, only this record, and it resolves on a later
+// pass once the surface frees.
+func (e *Engine) recordRefusal(surface protocol.SurfaceID, plugin string) {
+	e.stats.RefusedClaims++
+	e.stats.Refused = append(e.stats.Refused, RefusedClaim{
+		Surface: surface, Plugin: plugin, At: e.opts.Clock.Now(),
+	})
+	if excess := len(e.stats.Refused) - maxRefused; excess > 0 {
+		e.stats.Refused = e.stats.Refused[excess:]
+	}
 }
 
 // SlotContribute serves slot.contribute: it validates the namespace rules —
