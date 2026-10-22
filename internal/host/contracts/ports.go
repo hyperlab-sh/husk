@@ -16,18 +16,18 @@ import (
 
 // StateReadResult is one slice as state.get and state.watch report it.
 type StateReadResult struct {
-	Slice    string
-	Owner    string
-	Revision uint64
+	Slice    string `json:"slice"`
+	Owner    string `json:"owner"`
+	Revision uint64 `json:"revision"`
 	// Value is the whole slice value, or the value at the requested pointer.
-	Value json.RawMessage
+	Value json.RawMessage `json:"value"`
 }
 
 // StateSnapshotResult is the answer to state.snapshot and the baseline of
 // state.watch. Entry.Value is empty when values were not requested.
 type StateSnapshotResult struct {
-	Seq     uint64
-	Entries []state.Entry
+	Seq     uint64        `json:"seq"`
+	Entries []state.Entry `json:"entries,omitempty"`
 }
 
 // StatePort serves the state.* methods.
@@ -43,9 +43,10 @@ type StatePort interface {
 	Patch(ctx context.Context, c Caller, slice string, patch json.RawMessage, ifRevision uint64) (uint64, error)
 	// Snapshot serves state.snapshot. Values only when values is true.
 	Snapshot(ctx context.Context, c Caller, values bool) (StateSnapshotResult, error)
-	// Watch serves state.watch: it returns the baseline for slices (all when
-	// empty) and afterwards pushes state.changed notifications on n until ctx
-	// ends. Zero or more slices names.
+	// Watch serves state.watch: it registers n for slices (all when empty),
+	// returns the baseline at once (it becomes the reply), then pushes
+	// state.changed notifications on n. The registration is removed when ctx
+	// ends (the connection closed).
 	Watch(ctx context.Context, c Caller, slices []string, n Notifier) (StateSnapshotResult, error)
 	// Clear serves state.clear, user only (plugin callers get denied).
 	Clear(ctx context.Context, c Caller, namespace string) error
@@ -53,10 +54,10 @@ type StatePort interface {
 
 // ActionInfo is one catalog entry as action.list reports it.
 type ActionInfo struct {
-	ID     string
-	Owner  string
-	Public bool
-	Live   bool
+	ID     string `json:"id"`
+	Owner  string `json:"owner"`
+	Public bool   `json:"public"`
+	Live   bool   `json:"live"`
 }
 
 // CallsPort serves the socket-originated methods that resolve through the
@@ -79,15 +80,15 @@ type SessionPort interface {
 
 // SettingEntry is one settings schema entry.
 type SettingEntry struct {
-	Key     string
-	Type    string
-	Default any
-	Enum    []string
-	Min     *int64
-	Max     *int64
-	Doc     string
-	Owner   string
-	Apply   string
+	Key     string   `json:"key"`
+	Type    string   `json:"type"`
+	Default any      `json:"default"`
+	Enum    []string `json:"enum,omitempty"`
+	Min     *int64   `json:"min,omitempty"`
+	Max     *int64   `json:"max,omitempty"`
+	Doc     string   `json:"doc"`
+	Owner   string   `json:"owner"`
+	Apply   string   `json:"apply"`
 }
 
 // SettingsPort serves settings.get, settings.list, settings.schema and
@@ -113,11 +114,11 @@ type SettingsPort interface {
 
 // SecretInfo is secret metadata. It never carries a value.
 type SecretInfo struct {
-	Name     string
-	Declared []string
-	Granted  []string
-	Set      bool
-	Broken   bool
+	Name     string   `json:"name"`
+	Declared []string `json:"declared,omitempty"`
+	Granted  []string `json:"granted,omitempty"`
+	Set      bool     `json:"set"`
+	Broken   bool     `json:"broken"`
 }
 
 // SecretsPort serves the secrets.* methods. secrets.get and secrets.names are
@@ -142,12 +143,13 @@ type SecretsPort interface {
 
 // ProfileInfo describes one profile.
 type ProfileInfo struct {
-	Name   string
-	Source string
-	Active bool
+	Name   string `json:"name"`
+	Source string `json:"source"`
+	Active bool   `json:"active"`
 }
 
-// ProfilePort serves profile.list and profile.use.
+// ProfilePort serves profile.list and profile.use. Both are CLI methods: a
+// plugin caller gets denied.
 type ProfilePort interface {
 	// List serves profile.list.
 	List(ctx context.Context, c Caller) ([]ProfileInfo, error)
@@ -157,17 +159,17 @@ type ProfilePort interface {
 
 // Problem is one validation issue. Messages never contain secret values.
 type Problem struct {
-	Severity string
-	Layer    string
-	Key      string
-	Message  string
+	Severity string `json:"severity"`
+	Layer    string `json:"layer"`
+	Key      string `json:"key"`
+	Message  string `json:"message"`
 }
 
 // ValidationResult is the outcome of a dry build: whether the candidate would
 // apply and every problem found (all of them, not the first).
 type ValidationResult struct {
-	Applied  bool
-	Problems []Problem
+	Applied  bool      `json:"applied"`
+	Problems []Problem `json:"problems,omitempty"`
 }
 
 // ThemeCheckResult is what theme.check reports: every violated pair.
@@ -181,31 +183,42 @@ type ThemePort interface {
 	Check(ctx context.Context, c Caller) (ThemeCheckResult, error)
 }
 
+// KeySource locates one original binding declaration.
+type KeySource struct {
+	Layer    string `json:"layer"`
+	File     string `json:"file,omitempty"`
+	Line     int    `json:"line,omitempty"`
+	PluginID string `json:"plugin,omitempty"`
+	Order    int    `json:"order"`
+}
+
 // KeyEntry is one resolved or shadowed binding as keys.list reports it.
 type KeyEntry struct {
-	Keys       []string
-	Action     string
-	Hint       string
-	Focus      string
-	Plugin     string
-	Disable    bool
-	Layer      string
-	State      string
-	ShadowedBy string
+	Keys       []string       `json:"keys,omitempty"`
+	Action     string         `json:"action,omitempty"`
+	Args       map[string]any `json:"args,omitempty"`
+	Hint       string         `json:"hint,omitempty"`
+	Focus      string         `json:"focus,omitempty"`
+	Plugin     string         `json:"plugin,omitempty"`
+	Disable    bool           `json:"disable,omitempty"`
+	Source     KeySource      `json:"source"`
+	State      string         `json:"state"`
+	ShadowedBy *KeySource     `json:"shadowed_by,omitempty"`
 }
 
 // KeyProblem is one loader or conversion problem.
 type KeyProblem struct {
-	Code    string
-	Layer   string
-	Key     string
-	Message string
+	Code    string    `json:"code"`
+	Layer   string    `json:"layer"`
+	Key     string    `json:"key,omitempty"`
+	Message string    `json:"message"`
+	Source  KeySource `json:"source"`
 }
 
 // KeyListing is the keys.list answer.
 type KeyListing struct {
-	Entries  []KeyEntry
-	Problems []KeyProblem
+	Entries  []KeyEntry   `json:"entries,omitempty"`
+	Problems []KeyProblem `json:"problems,omitempty"`
 }
 
 // KeybindingPort serves keys.list. A plugin caller sees only its own
@@ -217,13 +230,13 @@ type KeybindingPort interface {
 
 // ReloadReport is one service's outcome in a reload.
 type ReloadReport struct {
-	Service  string
-	Gen      uint64
-	Applied  bool
-	Problems []Problem
+	Service  string    `json:"service"`
+	Gen      uint64    `json:"gen"`
+	Applied  bool      `json:"applied"`
+	Problems []Problem `json:"problems,omitempty"`
 }
 
-// ConfigPort serves config.reload. The Services coordinator implements it;
+// ConfigPort serves config.reload, a CLI method: a plugin caller gets denied. The Services coordinator implements it;
 // the reload reason is "cli" and the coordinator, not the wire, picks it.
 type ConfigPort interface {
 	// Reload serves config.reload (user only) and returns one report per
@@ -238,20 +251,23 @@ type EventPort interface {
 	// emit only under "<plugin_id>."; the bare CLI only under "user.", else
 	// denied. Returning nil means the event is on the bus, not delivered.
 	Emit(ctx context.Context, c Caller, name string, data json.RawMessage) error
-	// Watch serves event.watch: it subscribes the connection to events
-	// matching pattern (an exact name or "<prefix>.*"), pushes event.deliver
-	// notifications on n, and returns when ctx ends or the subscription is
-	// refused. The subscription is cancelled on return.
+	// Watch serves event.watch with the same lifecycle as StatePort.Watch: it
+	// registers n for events matching pattern (an exact name or "<prefix>.*"),
+	// pushes event.deliver notifications on n afterwards, and returns nil at
+	// once, so the adapter replies {} before the first delivery and the
+	// request does not hold an in-flight slot. The subscription is removed
+	// when ctx ends (the connection closed). A refused pattern is
+	// invalid_params and registers nothing.
 	Watch(ctx context.Context, c Caller, pattern string, n Notifier) error
 }
 
 // HookResult is one subscriber's answer to a hook call.
 type HookResult struct {
-	Plugin string
-	Data   json.RawMessage
+	Plugin string          `json:"plugin"`
+	Data   json.RawMessage `json:"data"`
 	// Err is nil on success; otherwise its code is timeout, cancelled or
 	// the subscriber's own (failed).
-	Err CodedError
+	Err CodedError `json:"-"`
 }
 
 // HookPort serves hook.call. Hook subscription and publication are manifest
@@ -264,18 +280,19 @@ type HookPort interface {
 
 // PluginInfo is a plugin's spec summary plus liveness (plugin.list).
 type PluginInfo struct {
-	ID          string
-	Name        string
-	Version     string
-	Description string
-	Status      PodStatus
-	PID         int
-	StartedAt   time.Time
-	LastError   string
-	Log         string
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Version     string    `json:"version"`
+	Description string    `json:"description"`
+	Status      PodStatus `json:"status"`
+	PID         int       `json:"pid"`
+	StartedAt   time.Time `json:"started_at"`
+	LastError   string    `json:"last_error"`
+	Log         string    `json:"log"`
 }
 
-// PluginPort serves plugin.list and plugin.log. Pods implements it.
+// PluginPort serves plugin.list and plugin.log. Both are CLI methods: a
+// plugin caller gets denied.
 type PluginPort interface {
 	// List serves plugin.list.
 	List(ctx context.Context, c Caller) ([]PluginInfo, error)
