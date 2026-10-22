@@ -38,9 +38,10 @@ func readStream(t *testing.T, r io.Reader, clock *testclock.Clock) ([]protocol.M
 	close(w.waited) // no child: EOF cannot arm a process reap timer
 	var out bytes.Buffer
 	w.queue = protocol.NewQueuedWriter(&out, protocol.QueueOptions{Clock: clock})
-	w.readStdout(r)
+	go w.readStdout(r)
+	testclock.Receive(t, w.readDone)
 	_ = w.queue.Close()
-	<-w.queue.Done()
+	testclock.Receive(t, w.queue.Done())
 	var notices []protocol.Message
 	if err := protocol.ReadLoop(&out, func(m protocol.Message) { notices = append(notices, m) }, func(e *protocol.LineError) { t.Error(e) }); err != nil {
 		t.Fatal(err)
@@ -66,8 +67,11 @@ func TestReaderRecoversBadUTF8OversizeAndMalformedReply(t *testing.T) {
 	if err := json.Unmarshal(notices[2].Params, &p); err != nil {
 		t.Fatal(err)
 	}
-	if p.Code != protocol.CodeLineTooLong || string(p.Data) != `{"limit":4194304}` {
-		t.Fatal(p)
+	var limit struct {
+		Limit int `json:"limit"`
+	}
+	if err := json.Unmarshal(p.Data, &limit); err != nil || p.Code != protocol.CodeLineTooLong || limit.Limit != protocol.MaxLineBytes {
+		t.Fatal(p, err)
 	}
 }
 
@@ -100,6 +104,36 @@ func TestProtocolErrorRateLimitAndSuppressedReport(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("suppressed diagnostics were not summarized")
+	}
+}
+
+func TestSuppressedRejectionsAreReportedAtEOF(t *testing.T) {
+	notices, _, logs := readStream(t, strings.NewReader(strings.Repeat("bad\n", 12)), testclock.New())
+	if len(notices) != protocol.MaxProtocolErrorsPerSecond {
+		t.Fatal("rejection notification budget changed", len(notices))
+	}
+	summaries := 0
+	for _, log := range logs {
+		if log.Message == "husk: protocol error from fake: 2 rejections suppressed" {
+			summaries++
+		}
+	}
+	if summaries != 1 {
+		t.Fatal("EOF did not flush exactly one suppression summary", summaries)
+	}
+}
+
+func TestNonReplyLogMatchesContractAndSharesRejectionBudget(t *testing.T) {
+	line := `{"method":"surface.update","params":{}}` + "\n"
+	notices, _, logs := readStream(t, strings.NewReader(strings.Repeat(line, 12)), testclock.New())
+	count := 0
+	for _, log := range logs {
+		if log.Message == "plugin fake sent a non-reply on stdout" {
+			count++
+		}
+	}
+	if count != protocol.MaxProtocolErrorsPerSecond || len(notices) != count || len(logs) != count+1 {
+		t.Fatal("non-reply log spelling or rejection budget changed", count, len(notices), len(logs))
 	}
 }
 

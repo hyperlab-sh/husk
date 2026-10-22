@@ -2,9 +2,12 @@
 package testclock
 
 import (
-	"github.com/hyperlab-sh/husk/pkg/protocol"
+	"context"
 	"sync"
+	"testing"
 	"time"
+
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
 // Clock schedules callbacks without creating timers or sleeping.
@@ -77,12 +80,35 @@ func (c *Clock) Active(d time.Duration) bool {
 	return false
 }
 
-// Await waits for registration, not time, until a timer of d is active.
-func (c *Clock) Await(d time.Duration) {
+// Await waits for registration, not simulated time. The context deadline is
+// only a test-hang guard; process behavior still uses the injected clock.
+func (c *Clock) Await(t testing.TB, d time.Duration) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
 	for {
 		if c.Active(d) {
 			return
 		}
-		<-c.registered
+		select {
+		case <-c.registered:
+		case <-ctx.Done():
+			t.Fatalf("timer %s was not registered: %v", d, ctx.Err())
+		}
+	}
+}
+
+// Receive bounds a test's channel wait without sleeping or advancing behavior.
+func Receive[T any](t testing.TB, ch <-chan T) T {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	select {
+	case value := <-ch:
+		return value
+	case <-ctx.Done():
+		t.Fatalf("channel wait: %v", ctx.Err())
+		var zero T
+		return zero
 	}
 }

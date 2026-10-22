@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/hyperlab-sh/husk/internal/pods/manifest"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
@@ -21,25 +22,28 @@ import (
 // Wrapper owns one launch and all its pipe ends. Its mutex protects only local
 // process/channel bookkeeping; host State is updated exclusively from notices.
 type Wrapper struct {
-	spec                              manifest.Spec
-	opts                              Options
-	ctx                               context.Context
-	cancel                            context.CancelFunc
-	token                             string
-	mu                                sync.Mutex
-	info                              Info
-	started, live, finished, shutdown bool
-	killed                            bool
-	groupDone                         chan struct{}
-	fault                             error
-	queue                             *protocol.Writer
-	stdin                             *stdinMux
-	stdout                            *os.File
-	cmd                               *exec.Cmd
-	done, waited, readDone            chan struct{}
-	closedOnce, stopOnce, termOnce    sync.Once
-	termErr                           error
-	reapTimer, killTimer, drainTimer  protocol.Timer
+	spec                                  manifest.Spec
+	opts                                  Options
+	ctx                                   context.Context
+	cancel                                context.CancelFunc
+	token                                 string
+	mu                                    sync.Mutex
+	info                                  Info
+	started, live, finished, shutdown     bool
+	killed, groupEnded, terminated        bool
+	groupDone                             chan struct{}
+	groupExists                           func(int) bool
+	signal                                func(int, bool) error
+	fault                                 error
+	queue                                 *protocol.Writer
+	stdin                                 *stdinMux
+	stdout                                *os.File
+	cmd                                   *exec.Cmd
+	done, waited, readDone                chan struct{}
+	closedOnce, stopOnce, unavailableOnce sync.Once
+	termErr                               error
+	reapTimer, killTimer, drainTimer      protocol.Timer
+	pollTimer                             protocol.Timer
 }
 
 // New prepares a single-use wrapper and a fresh random token, but starts no
@@ -98,7 +102,7 @@ func New(spec manifest.Spec, opts Options) (*Wrapper, error) {
 		return nil, fmt.Errorf("generate plugin token: %w", err)
 	}
 	ctx, cancel := context.WithCancel(opts.Context)
-	return &Wrapper{spec: spec.Clone(), opts: opts, ctx: ctx, cancel: cancel, token: hex.EncodeToString(token[:]), info: Info{PluginID: spec.ID, Status: Starting}, done: make(chan struct{}), waited: make(chan struct{}), readDone: make(chan struct{})}, nil
+	return &Wrapper{spec: spec.Clone(), opts: opts, ctx: ctx, cancel: cancel, token: hex.EncodeToString(token[:]), info: Info{PluginID: spec.ID, Status: Starting}, done: make(chan struct{}), waited: make(chan struct{}), readDone: make(chan struct{}), groupDone: make(chan struct{}), groupExists: groupAlive, signal: signalGroup}, nil
 }
 
 // PluginID returns the manifest identity.
@@ -170,6 +174,8 @@ func (w *Wrapper) Start(opening []protocol.Message) error {
 	cmd.Dir = w.spec.WorkDir
 	cmd.Env = w.environment()
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = inRead, outWrite, logFile
+	// Spec-required real-clock fallback in os/exec: this bounds the leader's
+	// cancellation path only, not descendant groups or our injected deadlines.
 	cmd.WaitDelay = w.opts.StopGrace
 	if err := configureGroup(cmd); err != nil {
 		inRead.Close()
@@ -215,7 +221,7 @@ func (w *Wrapper) Start(opening []protocol.Message) error {
 	go w.readStdout(outRead)
 	go w.wait(cmd)
 	if openingErr != nil {
-		w.fail(openingErr)
+		go w.fail(openingErr)
 	}
 	return nil // cmd.Start succeeded; later channel failures arrive as ExitMsg
 }
@@ -243,7 +249,7 @@ func (w *Wrapper) MarkShutdown() {
 	defer w.mu.Unlock()
 	w.shutdown = true
 	w.live = false
-	for _, timer := range []protocol.Timer{w.reapTimer, w.killTimer, w.drainTimer} {
+	for _, timer := range []protocol.Timer{w.reapTimer, w.killTimer} {
 		if timer != nil {
 			timer.Stop()
 		}
@@ -274,34 +280,56 @@ func (w *Wrapper) Terminate() error {
 	return w.terminatePID(pid)
 }
 func (w *Wrapper) terminatePID(pid int) error {
-	w.termOnce.Do(func() { w.termErr = signalGroup(pid, false) })
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.finished || w.groupEnded {
+		return os.ErrProcessDone
+	}
+	if !w.groupExists(pid) {
+		w.endGroupLocked()
+		return os.ErrProcessDone
+	}
+	if !w.terminated {
+		w.terminated = true
+		w.termErr = w.signal(pid, false)
+		if errors.Is(w.termErr, os.ErrProcessDone) {
+			w.endGroupLocked()
+		}
+	}
 	return w.termErr
 }
 
-// Kill sends SIGKILL to the process group.
-func (w *Wrapper) Kill() error {
+// Kill sends SIGKILL once and preserves stdout until EOF or the kill wait.
+func (w *Wrapper) Kill() error { return w.kill(false) }
+
+func (w *Wrapper) kill(escalation bool) error {
 	w.mu.Lock()
-	pid, finished := w.info.PID, w.finished
-	w.mu.Unlock()
-	if finished {
+	if w.finished || w.groupEnded || (escalation && w.shutdown) {
+		w.mu.Unlock()
 		return os.ErrProcessDone
 	}
+	pid := w.info.PID
 	if pid == 0 {
+		w.mu.Unlock()
 		return nil
 	}
-	err := signalGroup(pid, true)
-	if err == nil || errors.Is(err, os.ErrProcessDone) {
-		w.mu.Lock()
-		w.killed = true
-		if w.groupDone != nil {
-			select {
-			case <-w.groupDone:
-			default:
-				close(w.groupDone)
-			}
-		}
+	if !w.groupExists(pid) {
+		w.endGroupLocked()
 		w.mu.Unlock()
-		w.closePipes()
+		return os.ErrProcessDone
+	}
+	err := w.signal(pid, true)
+	w.killed = true
+	// Any outcome is terminal for group supervision, including EPERM: never
+	// strand finishGroup waiting for a signal that cannot be delivered.
+	if err != nil && !errors.Is(err, os.ErrProcessDone) && w.fault == nil {
+		w.fault = fmt.Errorf("kill process group: %w", err)
+	}
+	w.endGroupLocked()
+	w.armDrainLocked()
+	w.mu.Unlock()
+	if err != nil && !errors.Is(err, os.ErrProcessDone) {
+		go w.log("error", fmt.Sprintf("plugin %s: kill process group: %v", w.spec.ID, err))
 	}
 	return err
 }
@@ -324,11 +352,15 @@ func (w *Wrapper) launchFailed(err error) {
 	w.info.LastError = err.Error()
 	path := w.info.LogPath
 	w.mu.Unlock()
-	w.closed(err)
-	w.post(LaunchFailedMsg{PluginID: w.spec.ID, LogPath: path, Err: err})
-	close(w.waited)
-	close(w.readDone)
-	close(w.done)
+	// Start runs on the loop. Neither ReplySink nor Post may run there, even
+	// when no executable was started; both can block on Program.Send.
+	go func() {
+		w.closed(err)
+		w.post(LaunchFailedMsg{PluginID: w.spec.ID, LogPath: path, Err: err})
+		close(w.waited)
+		close(w.readDone)
+		close(w.done)
+	}()
 }
 
 func (w *Wrapper) closed(err error) {
@@ -376,26 +408,24 @@ func (w *Wrapper) fatal(err error) {
 		return
 	default:
 	}
-	w.recordFailure(err)
+	w.recordFailure(fmt.Errorf("stopped reading: %w", err))
 	w.stop()
 }
 
-// Pipe closure can race a successful process exit. Stop new sends and notify
-// Calls immediately, but let Wait determine the outcome during the reap grace.
+// Pipe closure revokes authentication immediately, but Closed waits for the
+// final exit reason and buffered replies, or for the injected reap grace.
 func (w *Wrapper) awaitReap(err error) {
-	w.closed(err)
 	w.mu.Lock()
-	defer w.mu.Unlock()
 	w.live = false
 	select {
 	case <-w.waited:
-		return
 	default:
+		if !w.shutdown && !w.finished && w.reapTimer == nil {
+			w.reapTimer = w.opts.Clock.AfterFunc(w.opts.EOFReapGrace, func() { w.fatal(err) })
+		}
 	}
-	if w.shutdown || w.finished || w.reapTimer != nil {
-		return
-	}
-	w.reapTimer = w.opts.Clock.AfterFunc(w.opts.EOFReapGrace, func() { w.fatal(err) })
+	w.mu.Unlock()
+	w.unavailableOnce.Do(func() { w.post(ChannelClosedMsg{PluginID: w.spec.ID}) })
 }
 
 func (w *Wrapper) stop() {
@@ -409,24 +439,7 @@ func (w *Wrapper) stop() {
 		_ = w.Terminate()
 		w.cancel()
 		w.mu.Lock()
-		if w.shutdown || w.finished || w.killed {
-			w.mu.Unlock()
-			return // the Host owns the one shared shutdown deadline
-		}
-		w.killTimer = w.opts.Clock.AfterFunc(w.opts.StopGrace, func() {
-			select {
-			case <-w.done:
-				return
-			default:
-			}
-			w.log("warn", fmt.Sprintf("plugin %s did not exit within %s of SIGTERM; killing it", w.spec.ID, w.opts.StopGrace))
-			_ = w.Kill()
-			w.mu.Lock()
-			if !w.finished && !w.shutdown {
-				w.drainTimer = w.opts.Clock.AfterFunc(w.opts.KillWait, func() { w.closePipes() })
-			}
-			w.mu.Unlock()
-		})
+		w.armGroupLocked()
 		w.mu.Unlock()
 	})
 }
@@ -443,35 +456,65 @@ func (w *Wrapper) closePipes() {
 	}
 }
 
-// A reaped leader may leave children that inherited no stdio. Keep the launch
-// pending until its group is terminated, so Host.Stop cannot return early and
-// abandon a SIGTERM-resistant child merely because the leader exited first.
-func (w *Wrapper) finishGroup() {
-	w.mu.Lock()
-	pid := w.info.PID
-	w.mu.Unlock()
-	if !groupAlive(pid) {
+const groupPollInterval = 50 * time.Millisecond
+
+// endGroupLocked is the signal fence, independent of reader/final-notice
+// completion. Once empty or terminally signalled, this group is never reused.
+func (w *Wrapper) endGroupLocked() {
+	if w.groupEnded {
 		return
 	}
-	_ = w.Terminate()
-	if !groupAlive(pid) {
+	w.groupEnded = true
+	close(w.groupDone)
+	for _, timer := range []protocol.Timer{w.killTimer, w.pollTimer} {
+		if timer != nil {
+			timer.Stop()
+		}
+	}
+}
+
+func (w *Wrapper) armDrainLocked() {
+	if w.drainTimer == nil && !w.finished {
+		w.drainTimer = w.opts.Clock.AfterFunc(w.opts.KillWait, w.closePipes)
+	}
+}
+
+func (w *Wrapper) armGroupLocked() {
+	if w.finished || w.groupEnded {
 		return
 	}
-	w.mu.Lock()
-	if w.killed {
-		w.mu.Unlock()
+	if !w.groupExists(w.info.PID) {
+		w.endGroupLocked()
 		return
 	}
-	w.groupDone = make(chan struct{})
-	done := w.groupDone
 	if w.killTimer == nil && !w.shutdown {
 		w.killTimer = w.opts.Clock.AfterFunc(w.opts.StopGrace, func() {
-			w.log("warn", "plugin "+w.spec.ID+" left a process group after exit; killing survivors")
-			_ = w.Kill()
+			if err := w.kill(true); !errors.Is(err, os.ErrProcessDone) {
+				w.log("warn", fmt.Sprintf("plugin %s did not exit within %s of SIGTERM; killing it", w.spec.ID, w.opts.StopGrace))
+			}
 		})
 	}
+	if w.pollTimer == nil {
+		w.pollTimer = w.opts.Clock.AfterFunc(groupPollInterval, w.pollGroup)
+	}
+}
+
+func (w *Wrapper) pollGroup() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.pollTimer = nil
+	w.armGroupLocked()
+}
+
+// A reaped leader may leave children without inherited stdio. Poll on the
+// injected clock so a promptly exiting child cancels escalation and completes
+// without spending the full stop grace or producing a false survivor warning.
+func (w *Wrapper) finishGroup() {
+	_ = w.Terminate()
+	w.mu.Lock()
+	w.armGroupLocked()
 	w.mu.Unlock()
-	<-done
+	<-w.groupDone
 }
 
 func (w *Wrapper) wait(cmd *exec.Cmd) {
@@ -484,16 +527,29 @@ func (w *Wrapper) wait(cmd *exec.Cmd) {
 	w.mu.Unlock()
 	w.post(ReapedMsg{PluginID: w.spec.ID})
 	w.finishGroup()
-	// A descendant may still hold stdout. Stop its group instead of letting
-	// the reader keep this launch alive indefinitely.
+	// The group is finished, but buffered replies still belong to this launch.
+	// Bound a pipe held by an escaped descendant without signalling again.
 	select {
 	case <-w.readDone:
 	default:
-		w.stop()
+		w.mu.Lock()
+		w.armDrainLocked()
+		w.mu.Unlock()
 	}
 	<-w.readDone
-	// Buffered final replies are posted before cancellation of pending calls.
-	w.closed(err)
+	// Buffered final replies precede once-only Calls cancellation. A pipe EOF
+	// inside reap grace is not itself the reason for a clean or crashed exit.
+	w.mu.Lock()
+	reason := w.fault
+	shutdown := w.shutdown
+	w.mu.Unlock()
+	if reason == nil {
+		reason = errors.New("exited")
+		if err != nil && !shutdown {
+			reason = fmt.Errorf("crashed (%s): %w", cmd.ProcessState.String(), err)
+		}
+	}
+	w.closed(reason)
 	w.mu.Lock()
 	q := w.queue
 	w.mu.Unlock()

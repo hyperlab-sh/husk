@@ -16,6 +16,7 @@ import (
 )
 
 type fakeLoop struct {
+	ctx          context.Context
 	events       chan tea.Msg
 	statuses     []LivenessMsg
 	logs         []LogMsg
@@ -24,7 +25,12 @@ type fakeLoop struct {
 	result       Preparation
 }
 
-func (l *fakeLoop) Post(m tea.Msg) { l.events <- m }
+func (l *fakeLoop) Post(m tea.Msg) {
+	select {
+	case l.events <- m:
+	case <-l.ctx.Done():
+	}
+}
 func (l *fakeLoop) Opening(string) []protocol.Message {
 	return []protocol.Message{{Method: protocol.MethodThemeChanged}, {Method: protocol.MethodSurfaceResized}, {Method: protocol.MethodInputKeyState}}
 }
@@ -48,7 +54,7 @@ type fakeProcess struct {
 	ignore                             bool
 	marked, closed, terminated, killed bool
 	term                               chan struct{}
-	startErr                           error
+	startErr, killErr                  error
 	stubborn, closeEarly               bool
 	termStep                           func()
 }
@@ -58,14 +64,16 @@ func (p *fakeProcess) Token() string    { return "test-token-" + p.id }
 func (p *fakeProcess) Start(open []protocol.Message) error {
 	p.opening = open
 	if p.startErr != nil {
-		p.opts.Replies.Closed(p.id, p.startErr)
-		p.opts.Post(LaunchFailedMsg{PluginID: p.id, Err: p.startErr})
-		p.once.Do(func() { close(p.done) })
+		go func() {
+			p.opts.Replies.Closed(p.id, p.startErr)
+			p.opts.Post(LaunchFailedMsg{PluginID: p.id, Err: p.startErr})
+			p.once.Do(func() { close(p.done) })
+		}()
 		return p.startErr
 	}
 	p.info.Status = wrapper.Live
 	if p.closeEarly {
-		p.opts.Replies.Closed(p.id, errors.New("immediate exit"))
+		go p.opts.Replies.Closed(p.id, errors.New("immediate exit"))
 	}
 	return nil
 }
@@ -107,13 +115,13 @@ func (p *fakeProcess) Kill() error {
 	if !p.stubborn {
 		p.once.Do(func() { close(p.done) })
 	}
-	return nil
+	return p.killErr
 }
 func (p *fakeProcess) Done() <-chan struct{} { return p.done }
 
 func hostFixture(t *testing.T) (*Host, *fakeLoop, *testclock.Clock, map[string]*fakeProcess) {
 	t.Helper()
-	loop := &fakeLoop{events: make(chan tea.Msg, 128)}
+	loop := &fakeLoop{events: make(chan tea.Msg, 128), ctx: t.Context()}
 	clock := testclock.New()
 	processes := make(map[string]*fakeProcess)
 	h, err := New(loop, Options{Wrapper: wrapper.Options{Clock: clock}, Factory: func(s manifest.Spec, o wrapper.Options) (wrapper.Process, error) {
@@ -215,7 +223,7 @@ func TestClosedBridgeRevokesTokenBeforeExitLiveness(t *testing.T) {
 	if _, ok := h.Resolve(procs["p"].Token()); ok {
 		t.Fatal("token survived channel close")
 	}
-	msg := <-loop.events
+	msg := testclock.Receive(t, loop.events)
 	if _, ok := msg.(ClosedMsg); !ok || h.Handle(msg) {
 		t.Fatal("Host consumed Calls cleanup message")
 	}
@@ -227,7 +235,7 @@ func TestClosedBridgeRevokesTokenBeforeExitLiveness(t *testing.T) {
 		t.Fatal("exit liveness not applied")
 	}
 	procs["p"].opts.Replies.Reply("p", protocol.Message{})
-	if m, ok := (<-loop.events).(calls.ReplyMsg); !ok || m.Plugin != "p" {
+	if m, ok := testclock.Receive(t, loop.events).(calls.ReplyMsg); !ok || m.Plugin != "p" {
 		t.Fatal("reply bridge did not post Calls input")
 	}
 }
@@ -245,9 +253,9 @@ func TestSharedShutdownDeadlineKillsAllSurvivors(t *testing.T) {
 	}
 	result := make(chan tea.Msg, 1)
 	go func() { result <- cmd() }()
-	<-procs["a"].term
-	<-procs["b"].term
-	clock.Await(wrapper.StopGrace)
+	testclock.Receive(t, procs["a"].term)
+	testclock.Receive(t, procs["b"].term)
+	clock.Await(t, wrapper.StopGrace)
 	clock.Advance(wrapper.StopGrace - 1)
 	for _, p := range procs {
 		p.mu.Lock()
@@ -258,7 +266,7 @@ func TestSharedShutdownDeadlineKillsAllSurvivors(t *testing.T) {
 		}
 	}
 	clock.Advance(1)
-	msg := <-result
+	msg := testclock.Receive(t, result)
 	if m, ok := msg.(StoppedMsg); !ok || m.Err != nil {
 		t.Fatal(msg)
 	}
@@ -296,7 +304,7 @@ func TestHostNoticesOnlyMutateLoopThroughHandle(t *testing.T) {
 	if len(loop.logs) != 0 || len(loop.statuses) != before {
 		t.Fatal("Post wrote host state/log")
 	}
-	h.Handle(<-loop.events)
+	h.Handle(testclock.Receive(t, loop.events))
 	if !reflect.DeepEqual(loop.logs, []LogMsg{m}) {
 		t.Fatal(loop.logs)
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"sync"
 	"time"
@@ -186,7 +187,7 @@ func (h *Host) Handle(msg tea.Msg) bool {
 			h.loop.Log(LogMsg{PluginID: m.Info.PluginID, Level: level, Message: "plugin " + m.Info.PluginID + " stderr: " + line})
 		}
 		return true
-	case wrapper.ReapedMsg:
+	case wrapper.ReapedMsg, wrapper.ChannelClosedMsg:
 		return true // authentication was revoked by the worker-safe bridge
 	case LogMsg:
 		h.loop.Log(m)
@@ -266,8 +267,11 @@ func (h *Host) revoke(id string) {
 }
 
 func (h *Host) postWorker(msg tea.Msg) {
-	if reaped, ok := msg.(wrapper.ReapedMsg); ok {
-		h.revoke(reaped.PluginID)
+	switch m := msg.(type) {
+	case wrapper.ReapedMsg:
+		h.revoke(m.PluginID)
+	case wrapper.ChannelClosedMsg:
+		h.revoke(m.PluginID)
 	}
 	h.loop.Post(msg)
 }
@@ -321,8 +325,9 @@ func (h *Host) Stop() tea.Cmd {
 			select {
 			case <-p.Done():
 			default:
-				h.loop.Post(LogMsg{PluginID: p.PluginID(), Level: "warn", Message: fmt.Sprintf("plugin %s did not exit within %s of SIGTERM; killing it", p.PluginID(), h.opts.Wrapper.StopGrace)})
-				_ = p.Kill()
+				if err := p.Kill(); !errors.Is(err, os.ErrProcessDone) {
+					h.loop.Post(LogMsg{PluginID: p.PluginID(), Level: "warn", Message: fmt.Sprintf("plugin %s did not exit within %s of SIGTERM; killing it", p.PluginID(), h.opts.Wrapper.StopGrace)})
+				}
 			}
 		}
 		if h.waitAll(processes, killAt) {
