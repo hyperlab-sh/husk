@@ -174,10 +174,13 @@ func List(dir string) ([]Entry, error) {
 // within MaxEntryBytes holding valid JSON with a positive pid and a
 // socket — the entry must be self-consistent: its id must be a valid id
 // equal to the base name, and its socket must be this instance's own
-// SocketPath. Every mismatch is corrupt: replaceable by Register,
-// removable by stale cleanup. Deriving the paths from the validated id is
-// also what keeps a mangled id in a hand-edited entry from steering
-// callers outside dir.
+// SocketPath. Every mismatch is corrupt: List skips it and Register may
+// replace it, but stale cleanup never sees it — List is what feeds
+// cleanup, and a corrupt entry never comes back from List — so a
+// self-inconsistent entry stays on disk until a Register for the same id
+// overwrites it. Deriving the paths from the validated id is also what
+// keeps a mangled id in a hand-edited entry from steering callers
+// outside dir.
 func readEntry(dir, base string) (Entry, error) {
 	path := filepath.Join(dir, base)
 	st, err := os.Lstat(path)

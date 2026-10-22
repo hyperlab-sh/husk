@@ -110,7 +110,7 @@ type Server interface {
 
 #### Runtime directory and registration
 
-- Base: `instance.RuntimeDir()` ([Instances](instances.md) owns the rule): `$XDG_RUNTIME_DIR/husk/` when set and usable, otherwise `/tmp/husk-<uid>/`, created `0700`, refused unless it is a real directory owned by the current uid with no group or other bits. This replaces today's fresh `mkdtemp` directory: a stable path is required for discovery, so the ownership check takes over the job the random name did.
+- Base: `instance.RuntimeDir()` ([Instances](instances.md) owns the rule): `$XDG_RUNTIME_DIR/husk/` when `XDG_RUNTIME_DIR` is set — a set but unsafe root is fatal, never a fallback — otherwise `/tmp/husk-<uid>/`, created `0700`, refused unless it is a real directory owned by the current uid with no group or other bits. This replaces today's fresh `mkdtemp` directory: a stable path is required for discovery, so the ownership check takes over the job the random name did.
 - Socket: `<base>/<instance-id>.sock`, mode `0600` (chmod after bind, as `listenPrivate` does today).
 - Logs: `$XDG_STATE_HOME/husk/logs/<instance-id>/<plugin-id>.log`, one per launch, mode `0600`, opened with `O_EXCL` as today, through `Store.OpenPluginLog` ([Store](store.md)); the runtime directory holds sockets and entries only.
 - Instance id: the pid by default, or the `--instance` name, validated by `instance.ValidName` (`[a-z0-9][a-z0-9-]*`, at most 32 bytes, never all digits, so a name never collides with a pid entry).

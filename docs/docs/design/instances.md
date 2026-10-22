@@ -165,7 +165,7 @@ An entry is stale when its socket cannot be reached. The CLI classifies a dial a
 | `ENOENT` or `ECONNREFUSED` on dial | stale | `RemoveIfStale`, skip this entry |
 | Dial succeeds, no reply within the ping timeout | unresponsive | keep the entry, skip it in discovery, report it in `husk instances` |
 
-`RemoveIfStale` re-reads the entry and removes it and its socket only if the file still holds the same `pid` and `started_at`. That closes the race where a new instance reuses a name between the failed ping and the unlink.
+`RemoveIfStale` re-reads the entry and removes the entry file — never the socket, which belongs to whoever bound it (possibly the next instance of the same name) — only if the file still holds the same `pid` and `started_at`. That closes the race where a new instance reuses a name between the failed ping and the unlink.
 
 Any CLI call that sees a stale entry removes it, including `husk instances`. A pid whose process is dead does not by itself mark an entry stale (pid reuse makes that check unsafe); the failed dial does.
 
@@ -284,7 +284,7 @@ A plugin script can branch on 3, 4 and 5 without parsing text.
 | Registration write fails | Server | Instance stays up unregistered if started with plugins from `--plugin`; logs and toasts a warning, since flag and env resolution still work through `--socket` | Toast `not discoverable: <error>` |
 | Zero instances (discovery) | CLI | Exit 3 | `husk: no instance is running` |
 | Several live instances (discovery) | CLI | Exit 4, prints the list | The list above |
-| Entry stale (`ECONNREFUSED`, `ENOENT`) | CLI | Entry and socket removed, entry skipped; exit 3 if explicitly targeted | `husk: instance "notes" is not running (stale entry removed)` |
+| Entry stale (`ECONNREFUSED`, `ENOENT`) | CLI | Entry file removed, socket left alone, entry skipped; exit 3 if explicitly targeted | `husk: instance "notes" is not running (stale entry removed)` |
 | Instance unresponsive (dial ok, no reply) | CLI | Entry kept, exit 5 if explicitly targeted; skipped in discovery with a warning on stderr | `husk: instance "notes" did not answer within 2s` |
 | `HUSK_SOCKET_PATH` points at a dead socket | CLI | Exit 3, no fallback to discovery | `husk: HUSK_SOCKET_PATH points at a socket nobody is listening on; unset it or pass --instance` |
 | Peer uid differs from instance uid | Server (accept) | Connection closed (unchanged from today) | Exit 5 with `connection closed by host` |
