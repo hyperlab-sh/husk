@@ -229,8 +229,8 @@ func (f *State) Get(_ context.Context, c contracts.Caller, slice, path string) (
 }
 
 // Set implements contracts.StatePort.
-func (f *State) Set(_ context.Context, c contracts.Caller, slice string, _ json.RawMessage) (uint64, error) {
-	f.RecordCaller("State.Set", c, slice)
+func (f *State) Set(_ context.Context, c contracts.Caller, slice string, value json.RawMessage) (uint64, error) {
+	f.RecordCaller("State.Set", c, slice, value)
 	return f.Revision, f.Err
 }
 
@@ -280,8 +280,8 @@ type Calls struct {
 func NewCalls(rec *Recorder) *Calls { return &Calls{callLog: callLog{r: orNew(rec)}} }
 
 // ActionInvoke implements contracts.CallsPort.
-func (f *Calls) ActionInvoke(_ context.Context, c contracts.Caller, action string, _ json.RawMessage) (json.RawMessage, error) {
-	f.RecordCaller("Calls.ActionInvoke", c, action)
+func (f *Calls) ActionInvoke(_ context.Context, c contracts.Caller, action string, args json.RawMessage) (json.RawMessage, error) {
+	f.RecordCaller("Calls.ActionInvoke", c, action, args)
 	return f.Result, f.Err
 }
 
@@ -720,8 +720,8 @@ type Events struct {
 func NewEvents(rec *Recorder) *Events { return &Events{callLog: callLog{r: orNew(rec)}} }
 
 // Emit implements contracts.EventPort.
-func (f *Events) Emit(_ context.Context, c contracts.Caller, name string, _ json.RawMessage) error {
-	f.RecordCaller("Events.Emit", c, name)
+func (f *Events) Emit(_ context.Context, c contracts.Caller, name string, data json.RawMessage) error {
+	f.RecordCaller("Events.Emit", c, name, data)
 	return f.Err
 }
 
