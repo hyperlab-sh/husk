@@ -31,7 +31,7 @@ func (m *WorkbenchModel) railButtons() []railButton {
 		{
 			icon:     "",
 			label:    "Home Workbench",
-			shortcut: "F1",
+			shortcut: keyLabel(m.firstKey("husk.home")),
 			active:   m.activeRailID == "" && m.stageMode != "hotspots" && !m.modalOwner().Open(),
 			kind:     "home",
 		},
@@ -53,14 +53,14 @@ func (m *WorkbenchModel) railButtons() []railButton {
 		railButton{
 			icon:     "",
 			label:    "Slot Architecture Lab",
-			shortcut: "v",
+			shortcut: keyLabel(m.firstKey("husk.hotspots.toggle_stage")),
 			active:   m.stageMode == "hotspots",
 			kind:     "hotspots",
 		},
 		railButton{
 			icon:     "",
 			label:    "Command Palette",
-			shortcut: "ctrl+p",
+			shortcut: m.firstKey("husk.palette.open"),
 			active:   m.showPalette,
 			kind:     "palette",
 		},
@@ -130,13 +130,22 @@ func (m *WorkbenchModel) allCommands() []paletteCommand {
 	return m.builtinCommands()
 }
 
+// homeTitle is the palette title of husk.home; the key in it is whatever the
+// keymap binds, and it is left out when nothing is.
+func homeTitle(key string) string {
+	if key == "" {
+		return "Activity Rail (🏠): Return to Default Workbench Layout"
+	}
+	return "Activity Rail (🏠 " + key + "): Return to Default Workbench Layout"
+}
+
 // builtinCommands lists the host's own workbench commands. Each row's shortcut
 // column shows the spellings the effective keymap binds to it.
 func (m *WorkbenchModel) builtinCommands() []paletteCommand {
 	rows := []paletteCommand{
 		{
 			ID:          "husk.home",
-			Title:       "Activity Rail (🏠 F1): Return to Default Workbench Layout",
+			Title:       homeTitle(keyLabel(m.firstKey("husk.home"))),
 			Category:    "Rail Plugins",
 			Description: "Restores the default layout: main stage plus any sidebar or side panel a plugin publishes",
 		},

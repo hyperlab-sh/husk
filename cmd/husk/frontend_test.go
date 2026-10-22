@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"slices"
@@ -249,5 +250,44 @@ func TestHostRunFailureQuitsTheProgram(t *testing.T) {
 	m2.shutdownHost()
 	if _, cmd := m2.Update(hostRunEndedMsg{err: context.Canceled}); cmd != nil || m2.hostErr != nil {
 		t.Fatal("a Run that ended because of Close was treated as a failure")
+	}
+}
+
+// rebound answers KeysFor from a table, as a user keymap that moved the
+// host's own keys would.
+type rebound struct {
+	defaultKeys
+	keys map[string][]string
+}
+
+func (r rebound) KeysFor(action string) []string { return r.keys[action] }
+
+// The rail, its hover pill and the palette advertise the keys the keymap
+// binds, not the distribution's: a rebound or disabled key shows as such.
+func TestRailAndPaletteFollowTheKeymap(t *testing.T) {
+	m := goldenModel()
+	m.keys = rebound{keys: map[string][]string{
+		"husk.home":                  {"f9"},
+		"husk.palette.open":          {"ctrl+o"},
+		"husk.hotspots.toggle_stage": nil, // disabled
+	}}
+	got := map[string]string{}
+	for _, b := range m.railButtons() {
+		got[b.kind] = b.shortcut
+	}
+	if got["home"] != "F9" || got["palette"] != "ctrl+o" || got["hotspots"] != "" {
+		t.Fatalf("rail shortcuts = %v", got)
+	}
+	var home paletteCommand
+	for _, c := range m.builtinCommands() {
+		if c.ID == "husk.home" {
+			home = c
+		}
+	}
+	if !strings.Contains(home.Title, "F9") || strings.Contains(home.Title, "F1") || home.Shortcut != "f9" {
+		t.Fatalf("home command = %+v", home)
+	}
+	if parenthesized("") != "" || parenthesized("v") != "(v)" {
+		t.Fatal("hover pill parentheses")
 	}
 }
