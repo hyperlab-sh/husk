@@ -14,12 +14,6 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
-// Loop posts a closure to the Bubble Tea loop, the only goroutine that may
-// mutate State. Post returns without waiting.
-type Loop interface {
-	Post(f func())
-}
-
 // SliceHandles resolves the Pod-held write capability for one of a plugin's
 // own slices. contracts.SliceHandle is satisfied by *state.Handle; the Pod
 // owns the handle, so this wrapper never registers plugin slices itself.

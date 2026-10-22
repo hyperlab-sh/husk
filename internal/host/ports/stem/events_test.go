@@ -33,6 +33,16 @@ func (l *fakeLoop) Do(ctx context.Context, fn func()) error {
 	return nil
 }
 
+// Post satisfies the shared Loop seam; the Event port never calls it.
+func (l *fakeLoop) Post(fn func()) bool {
+	if l.err != nil {
+		return false
+	}
+	l.runs++
+	fn()
+	return true
+}
+
 type recBus struct {
 	pub    []eventbus.Event
 	subs   map[string]int

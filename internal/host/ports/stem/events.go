@@ -12,13 +12,6 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
-// Loop runs fn on the host loop goroutine and returns once it has run. It
-// returns an error, without running fn, when ctx ends first or the loop has
-// shut down.
-type Loop interface {
-	Do(ctx context.Context, fn func()) error
-}
-
 // Bus is the part of the Event bus the port uses.
 type Bus interface {
 	Publish(e eventbus.Event)
