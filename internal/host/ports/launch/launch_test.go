@@ -967,9 +967,10 @@ func assertDocEqual(t *testing.T, what string, raw json.RawMessage, doc store.Do
 	}
 }
 
-// New wires the composed host and refuses the split-brain registry wiring
-// (round-1 note): Add's duplicate answer and the liveness writes must be the
-// same registry when both are wired.
+// New wires the composed host and refuses the split-brain registry wirings
+// (round-2 finding 4): Add's duplicate answer and the liveness writes must
+// be the same registry, and it must be wired on both seams or neither — the
+// round-1 failure (Options nil with Loop set) is a split too.
 func TestNewRejectsSplitRegistries(t *testing.T) {
 	a := fakes.NewPods(fakes.NewRecorder())
 	l := launch.Loop{Context: t.Context(), Registry: a}
@@ -977,19 +978,49 @@ func TestNewRejectsSplitRegistries(t *testing.T) {
 	if err != nil || h == nil {
 		t.Fatal("agreeing registries rejected", err)
 	}
+	if _, err := launch.New(launch.Loop{Context: t.Context()}, pods.Options{}); err != nil {
+		t.Fatal("both unwired rejected", err)
+	}
 
 	b := fakes.NewPods(fakes.NewRecorder())
 	if _, err := launch.New(l, pods.Options{Registry: b}); err == nil {
-		t.Fatal("split registries accepted")
+		t.Fatal("two different registries accepted")
 	} else if !strings.Contains(err.Error(), "same PodRegistry") {
 		t.Fatal("unexpected error", err)
 	}
-
-	// Either seam unwired is fine: only a disagreement is an error.
-	if _, err := launch.New(l, pods.Options{}); err != nil {
-		t.Fatal("loop-only registry rejected", err)
+	for _, split := range []struct {
+		name string
+		l    launch.Loop
+		o    pods.Options
+	}{
+		{name: "loop only", l: l, o: pods.Options{}},
+		{name: "options only", l: launch.Loop{Context: t.Context()}, o: pods.Options{Registry: b}},
+	} {
+		if _, err := launch.New(split.l, split.o); err == nil {
+			t.Fatal("one-sided registry accepted:", split.name)
+		} else if !strings.Contains(err.Error(), "both or neither") {
+			t.Fatal("unexpected error for", split.name, err)
+		}
 	}
-	if _, err := launch.New(launch.Loop{Context: t.Context()}, pods.Options{Registry: b}); err != nil {
-		t.Fatal("options-only registry rejected", err)
+}
+
+// sameRegistry never compares uncomparable dynamic types: a registry value
+// of an uncomparable kind cannot prove identity, so New rejects it rather
+// than panicking the way plain interface equality would.
+type uncomparableRegistry struct{ sink []string }
+
+func (uncomparableRegistry) Reserve(context.Context, string) error { return nil }
+func (uncomparableRegistry) SetStatus(context.Context, string, contracts.PodStatusUpdate) error {
+	return nil
+}
+func (uncomparableRegistry) Release(context.Context, string) {}
+
+func TestNewRejectsUncomparableRegistries(t *testing.T) {
+	base := fakes.NewPods(fakes.NewRecorder())
+	l := launch.Loop{Context: t.Context(), Registry: base}
+	if _, err := launch.New(l, pods.Options{Registry: uncomparableRegistry{sink: []string{"x"}}}); err == nil {
+		t.Fatal("uncomparable registry accepted")
+	} else if !strings.Contains(err.Error(), "same PodRegistry") {
+		t.Fatal("unexpected error", err)
 	}
 }
