@@ -204,6 +204,10 @@ func (r *Root) refreshCatalog() {
 // reload without them. Occupant entries of the removed owner drop at the
 // engine's next flush, which tick runs.
 func (r *Root) teardownPod(id string) {
+	if cancel := r.podWatch[id]; cancel != nil {
+		cancel()
+		delete(r.podWatch, id)
+	}
 	r.decl.drop(id)
 	r.store.Undeclare(id)
 	r.refreshCatalog()
@@ -252,6 +256,32 @@ func (r *Root) markSizesDirty(changes []state.Change, _ *state.Snapshot) {
 		switch changes[i].Namespace {
 		case state.GeometryNamespace, state.FocusNamespace, state.SurfacesNamespace:
 			r.sizesDirty = true
+			return
+		}
+	}
+}
+
+// watchPod registers the Pod as the delivery target of its occupant's
+// surface.resized pushes. A claim holds a surface only while the Pod is
+// live, so the occupant cannot learn its size from the opening and hears it
+// from here once it takes the surface. Loop only.
+func (r *Root) watchPod(id string) {
+	if r.podWatch == nil {
+		r.podWatch = map[string]func(){}
+	}
+	if pod, ok := r.pods.Pod(id); ok {
+		r.podWatch[id] = r.engine.WatchPlugin(id, podNotifier{pod})
+	}
+}
+
+// markLivenessChanged is the State flush listener that tells the Surfaces
+// engine a Pod entered or left a status: a claim holds a surface only while
+// its Pod is live (D70), so any husk.pods write may move occupancy. The
+// engine resolves it in the same tick's pass.
+func (r *Root) markLivenessChanged(changes []state.Change, _ *state.Snapshot) {
+	for i := range changes {
+		if changes[i].Namespace == state.PodsNamespace {
+			r.engine.LivenessChanged()
 			return
 		}
 	}

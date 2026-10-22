@@ -75,6 +75,7 @@ type Root struct {
 	catRev         uint64
 	catValid       bool
 
+	podWatch   map[string]func()                 // cancels each Pod's surface.resized watcher
 	sizesDirty bool                              // geometry, focus or visibility changed this tick
 	lastSizes  map[protocol.SurfaceID]pushedSize // what each surface's occupant was last told
 	declWarnMu sync.Mutex                        // guards declWarned
@@ -344,6 +345,7 @@ func (r *Root) buildStem() error {
 	}
 	r.catalog.onSlotsChanged = r.engine.CatalogChanged
 	r.st.OnFlush(r.markSizesDirty)
+	r.st.OnFlush(r.markLivenessChanged)
 	return nil
 }
 
@@ -451,7 +453,9 @@ func (r *Root) launchPlugins(ctx context.Context) error {
 		for _, spec := range r.specs {
 			if _, err := r.pods.Add(spec); err != nil {
 				r.log(pods.LogMsg{PluginID: spec.ID, Level: "warn", Message: "plugin not added: " + err.Error()})
+				continue
 			}
+			r.watchPod(spec.ID)
 		}
 		cmd = r.pods.Prepare()
 	}); err != nil {

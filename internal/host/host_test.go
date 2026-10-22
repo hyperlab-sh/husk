@@ -240,6 +240,26 @@ func (p *fakeProc) openingParams(t *testing.T, method string, v any) {
 	t.Fatalf("opening has no %s", method)
 }
 
+// sentResized decodes every surface.resized the Pod was sent after its
+// opening, in order.
+func (p *fakeProc) sentResized(t *testing.T) [][]protocol.SurfaceSize {
+	t.Helper()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var out [][]protocol.SurfaceSize
+	for _, m := range p.sent {
+		if m.Method != protocol.MethodSurfaceResized {
+			continue
+		}
+		var params protocol.SurfaceResizedParams
+		if err := json.Unmarshal(m.Params, &params); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, params.Surfaces)
+	}
+	return out
+}
+
 func (p *fakeProc) openingMethods() []string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -678,12 +698,18 @@ func TestLaunchGoesLiveWithOpening(t *testing.T) {
 	if got := h.podStatus("alpha"); got != "live" {
 		t.Fatalf("husk.pods status = %q", got)
 	}
-	// Host-owned opening content: the claimed surface is listed, and the key
-	// state is the all-up default.
+	// Host-owned opening content: a claim holds a surface only once the Pod
+	// is live (D70), so the opening lists none and the claimed surface
+	// arrives as a surface.resized push right after; the key state is the
+	// all-up default.
 	var resized protocol.SurfaceResizedParams
 	f.proc("alpha").openingParams(t, protocol.MethodSurfaceResized, &resized)
-	if !slices.ContainsFunc(resized.Surfaces, func(s protocol.SurfaceSize) bool { return s.Surface == "sidebar-list" }) {
-		t.Fatalf("surface.resized = %+v, want sidebar-list listed", resized.Surfaces)
+	if len(resized.Surfaces) != 0 {
+		t.Fatalf("opening surface.resized = %+v, want none before the Pod is live", resized.Surfaces)
+	}
+	h.loop(func() {})
+	if got := f.proc("alpha").sentResized(t); len(got) != 1 || len(got[0]) != 1 || got[0][0].Surface != "sidebar-list" {
+		t.Fatalf("pushed surface.resized = %+v, want one listing sidebar-list", got)
 	}
 	var keys protocol.KeyStateParams
 	f.proc("alpha").openingParams(t, protocol.MethodInputKeyState, &keys)

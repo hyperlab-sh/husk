@@ -270,7 +270,8 @@ func TestSendDeliversToALivePodAndRefusesTheRest(t *testing.T) {
 	})
 	p := f.proc("alpha")
 	p.mu.Lock()
-	sent := slices.Clone(p.sent)
+	// The occupant's surface.resized push after going live is not under test.
+	sent := slices.DeleteFunc(slices.Clone(p.sent), func(m protocol.Message) bool { return m.Method == protocol.MethodSurfaceResized })
 	p.mu.Unlock()
 	methods := make([]string, len(sent))
 	for i, m := range sent {
@@ -307,7 +308,9 @@ func TestSendDeliversToALivePodAndRefusesTheRest(t *testing.T) {
 
 	// A plugin whose process exited is dead: unavailable, nothing sent.
 	h.root.cfg.Post(pods.ExitMsg{Info: wrapper.Info{PluginID: "alpha", Status: wrapper.Exited}})
-	before := len(sent)
+	p.mu.Lock()
+	before := len(p.sent)
+	p.mu.Unlock()
 	h.loop(func() {
 		if c := code(fe.SendKey("alpha", key)); c != string(protocol.CodeUnavailable) {
 			t.Errorf("dead plugin: code %q, want unavailable", c)
