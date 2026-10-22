@@ -80,10 +80,15 @@ func main() {
 		model.logOut = os.Stderr
 	}
 
+	runtimeDir, err := instance.RuntimeDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "husk: runtime directory: %v\n", err)
+		os.Exit(1)
+	}
 	prog := newProgramRef()
 	if *dumpFrame {
 		// runDumpFrame builds the headless program; a host Post waits for it.
-		h, err := newHost(prog, model, []string(*pluginPaths), []string(*pluginDirs))
+		h, err := newHost(prog, model, strconv.Itoa(os.Getpid()), runtimeDir, []string(*pluginPaths), []string(*pluginDirs))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "husk: %v\n", err)
 			os.Exit(1)
@@ -108,7 +113,7 @@ func main() {
 	// it. The model attaches the host before the program runs.
 	p := tea.NewProgram(model)
 	prog.set(p)
-	h, err := newHost(prog, model, []string(*pluginPaths), []string(*pluginDirs))
+	h, err := newHost(prog, model, strconv.Itoa(os.Getpid()), runtimeDir, []string(*pluginPaths), []string(*pluginDirs))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "husk: %v\n", err)
 		os.Exit(1)
@@ -186,12 +191,7 @@ func (r *programRef) post(msg any) bool {
 
 // newHost builds the v2 host over a private runtime directory. Nothing
 // listens until the model's Init runs the host.
-func newHost(prog *programRef, model *WorkbenchModel, plugins, dirs []string) (host.Looped, error) {
-	dir, err := instance.RuntimeDir()
-	if err != nil {
-		return nil, fmt.Errorf("runtime directory: %w", err)
-	}
-	id := strconv.Itoa(os.Getpid())
+func newHost(prog *programRef, model *WorkbenchModel, id, dir string, plugins, dirs []string, opts ...host.Option) (host.Looped, error) {
 	h, err := host.New(contracts.Config{
 		InstanceID: id,
 		RuntimeDir: dir,
@@ -205,7 +205,7 @@ func newHost(prog *programRef, model *WorkbenchModel, plugins, dirs []string) (h
 		PluginDirs: dirs,
 		Post:       prog.post,
 		Content:    model.content,
-	}, host.WithLogger(func(level, msg string) { model.logf("%s: %s", level, msg) }))
+	}, append([]host.Option{host.WithLogger(func(level, msg string) { model.logf("%s: %s", level, msg) })}, opts...)...)
 	if err != nil {
 		return nil, err
 	}
