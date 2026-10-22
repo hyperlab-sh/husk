@@ -446,7 +446,8 @@ func (s *Store) Patch(name DocName, layer Layer, profile string, patch Doc) erro
 	}
 	// configMu protects this Store's cache; the file lock protects the shared
 	// read-modify-write transaction against every other Store process.
-	return withFileLock(path+".lock", func() error {
+	lockPath := filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+".lock")
+	return withFileLock(lockPath, func() error {
 		raw, _, err := readFile(path, MaxDocBytes, false)
 		if errors.Is(err, fs.ErrNotExist) {
 			raw = []byte("{}")

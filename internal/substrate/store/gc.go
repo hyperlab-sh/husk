@@ -45,7 +45,7 @@ func (s *Store) collectRecords(ctx context.Context, entries []Entry, r state.Ret
 			remove = !s.clock.Now().Before(entry.Modified.Add(r.TTL))
 		}
 		if remove {
-			if err := s.source.Delete(ctx, entry.Key); err != nil {
+			if err := s.deleteRecord(ctx, entry.Key); err != nil {
 				return removed, err
 			}
 			p, _ := s.source.path(entry.Key, false)

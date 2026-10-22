@@ -163,7 +163,7 @@ func (s *Store) Invalidate()
 // Patch applies a merge patch (same rules as layer merge, null deletes) to
 // one writable layer's file: user, profile (needs profile name) or the named
 // instance's file. Comments and formatting of untouched parts survive.
-// A per-file cross-process lock covers the complete read-modify-write.
+// A hidden per-file .<doc>.json.lock covers the complete read-modify-write.
 func (s *Store) Patch(name DocName, layer Layer, profile string, patch Doc) error
 
 // Declared documents: in-memory only, written by Pods' manifest conversion,
@@ -291,11 +291,17 @@ type SecretDoc interface {
 - Key source: an age identity in the OS keyring through
   `github.com/zalando/go-keyring` (macOS Keychain, Secret Service on Linux),
   service `husk`, account `store-identity`. Generated on first secret write.
-- Only a definite keyring `not found` permits identity creation. A locked,
-  unavailable or otherwise unreadable keyring returns `unavailable`, emits a
-  diagnostic and never creates a new identity or `identity.txt`: a transient
-  outage must not shadow an existing key and strand its encrypted namespaces.
-- If that definite lookup found no identity but the subsequent keyring write
+- Only definite absence permits identity creation: keyring `ErrNotFound`,
+  `ErrUnsupportedPlatform`, D-Bus `ServiceUnknown` or `NameHasNoOwner`, or no
+  session bus (no discoverable address, missing `dbus-launch`, or a missing
+  Unix bus socket). This allows headless Linux without Secret Service to use
+  secrets. These are narrow classifications, not a general unavailable fallback.
+- Locked collections, timeouts, `NoReply`, permission failures and other I/O
+  uncertainty return `unavailable`, emit a diagnostic and never create a new
+  identity or `identity.txt`: a transient outage must not shadow an existing
+  key and strand its encrypted namespaces. An unclassified launcher exit error
+  is uncertainty, not proof of absence.
+- If that definite absence permits creation but the subsequent keyring write
   fails, the new identity falls back to
   `$XDG_DATA_HOME/husk/keys/identity.txt`, mode 0600. An existing private fallback
   identity raises `keyring_fallback` at every `Open`, before any secret access;
@@ -320,7 +326,10 @@ shape (namespace, owner, scope, `Persistent`, `Retention{Policy, N, TTL}`,
 Registration is not a persistence write when its normalized value equals the
 value Store hydrated or last persisted. It creates no new generation, touches
 no mtime and does not renew TTL. The same no-op check applies to workspace
-batch peers; `ttl` and `keep-last-n` count real value changes only. A newer
+batch peers; `ttl` and `keep-last-n` count real value changes only. Expired TTL
+values are not equality baselines. Deleting a persisted current record clears
+its cached value and baseline, so a later identical committed value is written
+rather than silently lost. A newer
 value queued during an in-flight write keeps its own debounce/failure state.
 On unregistration, previously committed pending changes remain queued for an
 immediate background flush (and exit retry); teardown never silently drops them.
@@ -420,7 +429,7 @@ $XDG_STATE_HOME/husk/                   ~/.local/state/husk     0700
 
 $XDG_DATA_HOME/husk/                    ~/.local/share/husk     0700
   secrets/<namespace>.age               secret namespaces, user scope
-  keys/identity.txt                     definite not-found + keyring write failed, 0600
+  keys/identity.txt                     definite absence + keyring write failed, 0600
 
 $XDG_RUNTIME_DIR/husk/                  fallback /tmp/husk-<uid>/   0700, rule owned by Instances
   <instance id>.sock                    the instance socket, 0600, written by the Server
@@ -499,8 +508,8 @@ Today's per-run `mkdtemp` directory is replaced by that check.
 | Config file fails to parse | layers, at resolve | That layer skipped for that document; previous good resolution kept after a reload | `Resolved.Problems` with file, line, column; Settings surfaces it; `husk config reload` reports it |
 | Config file over 1 MiB or depth over 64 | layers | Layer skipped | Same as parse failure |
 | Secret file fails to decrypt (missing or wrong key) | crypto | File untouched; namespace returns an error; writes to it refused | Secrets service error; diagnostic suggests `husk store reset-secrets` |
-| Keyring lookup fails other than definite not-found | crypto | `unavailable`; no new identity or fallback file; ciphertext untouched | Diagnostic; retry after keyring recovers |
-| Keyring write fails after definite not-found | crypto | New identity saved to private fallback file | `keyring_fallback` diagnostic at creation and every later Open |
+| Keyring lookup is transient/uncertain (locked, timeout, NoReply, I/O) | crypto | `unavailable`; no new identity or fallback file; ciphertext untouched | Diagnostic; retry after keyring recovers |
+| Keyring identity/platform/service/session bus is definitely absent, then keyring write fails | crypto | New identity saved to private fallback file; headless Linux remains usable | `keyring_fallback` diagnostic at creation and every later Open |
 | Write fails (disk full, permission) | retention | In-memory value kept, slice marked dirty, retried on next change and at exit | Diagnostic with errno; exit flush failures printed on stderr after the TUI ends |
 | Slice value over its cap at persist | retention | Not written; last persisted value kept on disk | Diagnostic; State is assumed to have refused the write already and replied to the plugin |
 | Runtime directory fails owner or mode check | sources, at `Open` | `Open` fails; `cmd/husk` exits 1 | stderr: "runtime directory <path> is not private: <reason>" |
@@ -635,10 +644,12 @@ files or discards the internal diagnostic history.
    `cmd/husk`, or only as an `fs.FS` from an application that embeds Husk?
    This spec allows both because a bundle is plain files. Recommended: keep
    both.
-4. **Resolved:** a fallback identity is allowed only after a definite missing
-   identity and a failed keyring write. Any other lookup failure is unavailable,
-   never permission to replace a possibly existing identity. Existing fallback
-   use is diagnosed at Open, without waiting for the first secret request.
+4. **Resolved:** a fallback identity is allowed after definite absence of the
+   identity, supported keyring platform, Secret Service or session bus, followed
+   by a failed keyring write. This supports headless Linux without treating a
+   locked collection, timeout, NoReply or I/O failure as absence. Uncertain
+   lookups never replace a possibly existing identity. Existing fallback use is
+   diagnosed at Open, without waiting for the first secret request.
 5. Should the instance-layer flag mapping (`husk.layout.rail`, `husk.input.hold_alt`)
    keep `--rail` and `--hold-alt` at all, given they exist for frame dumps?
    Recommended: keep them as config paths so a named instance file can set

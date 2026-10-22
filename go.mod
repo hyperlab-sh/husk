@@ -11,6 +11,7 @@ require (
 	github.com/charmbracelet/x/exp/charmtone v0.1.0
 	github.com/charmbracelet/x/exp/golden v0.0.0-20251109135125-8916d276318f
 	github.com/charmbracelet/x/exp/teatest/v2 v2.0.0-20261018003744-cb897cb4ed72
+	github.com/godbus/dbus/v5 v5.1.0
 	github.com/gofrs/flock v0.12.1
 	github.com/tailscale/hujson v0.0.0-20260727124030-b80ff77dac4f
 	github.com/zalando/go-keyring v0.2.6
@@ -20,7 +21,6 @@ require (
 require (
 	al.essio.dev/pkg/shellescape v1.5.1 // indirect
 	github.com/danieljoos/wincred v1.2.2 // indirect
-	github.com/godbus/dbus/v5 v5.1.0 // indirect
 	golang.org/x/crypto v0.24.0 // indirect
 )
 

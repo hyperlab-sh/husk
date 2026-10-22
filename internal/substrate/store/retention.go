@@ -210,6 +210,35 @@ func (s *Store) quarantineFile(entry Entry, label, code string, cause error) err
 	return nil
 }
 
+// deleteRecord removes a persisted record off-loop. All internal current.json
+// deletions must go through this helper (or clear's equivalent cache reset):
+// absence on disk must not leave an equality baseline or a hydratable cache.
+func (s *Store) deleteRecord(ctx context.Context, key Key) error {
+	if err := s.source.Delete(ctx, key); err != nil {
+		return err
+	}
+	ns, valid := recordNamespace(key)
+	if !valid || key.Path[len(key.Path)-1] != "current.json" {
+		return nil
+	}
+	id := storageID(key, ns)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.baseline, id)
+	var retained []savedRecord
+	for _, record := range s.loaded[id] {
+		if record.key.Path[len(record.key.Path)-1] != "current.json" {
+			retained = append(retained, record)
+		}
+	}
+	if len(retained) == 0 {
+		delete(s.loaded, id)
+	} else {
+		s.loaded[id] = retained
+	}
+	return nil
+}
+
 // Hydrate is a loop-only, non-I/O lookup of values preloaded by Open. The
 // registration's current policy, including a newly changed TTL, governs reuse.
 func (s *Store) Hydrate(spec state.Spec) (json.RawMessage, bool) {
@@ -232,10 +261,11 @@ func (s *Store) Hydrate(spec state.Spec) (json.RawMessage, bool) {
 		if spec.Retention.Policy == state.KeepLastN && !strings.HasPrefix(file, "gen-") || spec.Retention.Policy != state.KeepLastN && file != "current.json" {
 			continue
 		}
-		s.baseline[id] = bytes.Clone(record.env.Value)
 		if spec.Retention.Policy == state.TTL && !s.clock.Now().Before(record.modified.Add(spec.Retention.TTL)) {
+			delete(s.baseline, id)
 			return nil, false
 		}
+		s.baseline[id] = bytes.Clone(record.env.Value)
 		return bytes.Clone(record.env.Value), true
 	}
 	return nil, false
@@ -271,6 +301,16 @@ func (s *Store) onFlush(changes []state.Change, snap *state.Snapshot) {
 		}
 		if s.blocked[id] {
 			continue
+		}
+		// Expiry can precede the next GC pass (or race its disk deletion).
+		// Check cached timestamps only: the loop must never stat the file.
+		if entry.Retention.Policy == state.TTL {
+			for _, record := range s.loaded[id] {
+				if record.key.Path[len(record.key.Path)-1] == "current.json" && !now.Before(record.modified.Add(entry.Retention.TTL)) {
+					delete(s.baseline, id)
+					break
+				}
+			}
 		}
 		if baseline, ok := s.baseline[id]; ok && bytes.Equal(baseline, entry.Value) && !s.inflight[id] {
 			delete(s.dirty, id)
