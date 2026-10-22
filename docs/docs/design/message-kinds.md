@@ -584,7 +584,8 @@ Hook runner invariants:
   plugin liveness becomes a State slice.
 - `cmd/husk/commands.go`: `executeCommand`'s `husk.*` switch cases become
   `RegisterHost` handlers. The rail item fallback becomes a host handler per
-  rail item id. The loop over `cp.Info.Commands` becomes `catalog.Lookup`.
+  rail item id, registered by the frontend through `Frontend.RegisterHostAction`
+  ([Pods](pods.md), "Frontend seams"). The loop over `cp.Info.Commands` becomes `catalog.Lookup`.
   `sendCommandInvoke` (fire and forget, no reply) is replaced by
   `Dispatcher.Invoke`, which adds a reply and a timeout. `runPluginBinding`
   and `isHostCommand` disappear: Input passes an action id and the Dispatcher
