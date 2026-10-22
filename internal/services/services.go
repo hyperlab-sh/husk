@@ -76,7 +76,6 @@ type Coordinator struct {
 	mu     sync.Mutex
 	active *flight
 	queued *flight
-	joined chan struct{}
 	ctx    context.Context
 	cancel context.CancelFunc
 }
@@ -99,7 +98,7 @@ func NewCoordinator(opts Options) (*Coordinator, error) {
 	}
 	opts.Services = cloneServices(opts.Services)
 	ctx, cancel := context.WithCancel(opts.Context)
-	co := &Coordinator{opts: opts, ctx: ctx, cancel: cancel, joined: make(chan struct{}, 1)}
+	co := &Coordinator{opts: opts, ctx: ctx, cancel: cancel}
 	if opts.State != nil {
 		seen := opts.State.Snapshot().Slices[state.ProfileNamespace].Revision
 		opts.State.OnFlush(func(changes []state.Change, _ *state.Snapshot) {
@@ -159,11 +158,6 @@ func (co *Coordinator) Reload(ctx context.Context, reason Reason) ([]Report, err
 	co.mu.Unlock()
 	if start {
 		go co.execute(f)
-	} else {
-		select {
-		case co.joined <- struct{}{}:
-		default:
-		}
 	}
 	select {
 	case <-f.done:

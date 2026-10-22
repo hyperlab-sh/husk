@@ -226,10 +226,12 @@ func TestLateRequestsShareOneFreshFollowupFlight(t *testing.T) {
 	source.mu.Lock()
 	source.declared["new"] = doc(`{"id":"new"}`)
 	source.mu.Unlock()
-	go func() { r, _ := co.Reload(context.Background(), ReasonPlugin); done <- r }()
-	<-co.joined
-	go func() { r, _ := co.Reload(context.Background(), ReasonCLI); done <- r }()
-	<-co.joined
+	watched, parked := parkedCtx(context.Background())
+	go func() { r, _ := co.Reload(watched, ReasonPlugin); done <- r }()
+	<-parked
+	watched, parked = parkedCtx(context.Background())
+	go func() { r, _ := co.Reload(watched, ReasonCLI); done <- r }()
+	<-parked
 	close(gate)
 	gens := map[Generation]int{}
 	for i := 0; i < 3; i++ {

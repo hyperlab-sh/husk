@@ -474,14 +474,15 @@ func TestCoordinatorOrderSharedResultAndEvent(t *testing.T) {
 		done <- r
 	}()
 	<-clk.created // the running flight has not begun input capture
+	watched, parked := parkedCtx(context.Background())
 	go func() {
-		r, err := co.Reload(context.Background(), ReasonPlugin)
+		r, err := co.Reload(watched, ReasonPlugin)
 		if err != nil {
 			t.Error(err)
 		}
 		done <- r
 	}()
-	<-co.joined
+	<-parked
 	close(gate)
 	a, b := <-done, <-done
 	if fmt.Sprint(a) != fmt.Sprint(b) || len(a) != 5 {

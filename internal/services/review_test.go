@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -71,12 +72,14 @@ func TestReviewFlightLifetimeIsIndependentOfRequesters(t *testing.T) {
 			cancelled := first
 			if queued {
 				cancelled = make(chan result, 1)
-				go func() { r, e := co.Reload(owner, ReasonCLI); cancelled <- result{r, e} }()
-				<-co.joined
+				watched, parked := parkedCtx(owner)
+				go func() { r, e := co.Reload(watched, ReasonCLI); cancelled <- result{r, e} }()
+				<-parked
 			}
 			joined := make(chan result, 1)
-			go func() { r, e := co.Reload(context.Background(), ReasonPlugin); joined <- result{r, e} }()
-			<-co.joined
+			watched, parked := parkedCtx(context.Background())
+			go func() { r, e := co.Reload(watched, ReasonPlugin); joined <- result{r, e} }()
+			<-parked
 			cancel()
 			close(gate)
 			departed := <-cancelled
@@ -100,4 +103,24 @@ func TestReviewFlightLifetimeIsIndependentOfRequesters(t *testing.T) {
 			}
 		})
 	}
+}
+
+// parkedCtx wraps parent so the returned channel closes when Reload first asks
+// for its Done channel, which it does only after the call has joined a flight
+// and is parked waiting on it. Tests use it to know a caller has joined
+// without a hook in the Coordinator.
+func parkedCtx(parent context.Context) (context.Context, <-chan struct{}) {
+	p := &parkedContext{Context: parent, parked: make(chan struct{})}
+	return p, p.parked
+}
+
+type parkedContext struct {
+	context.Context
+	once   sync.Once
+	parked chan struct{}
+}
+
+func (p *parkedContext) Done() <-chan struct{} {
+	p.once.Do(func() { close(p.parked) })
+	return p.Context.Done()
 }
