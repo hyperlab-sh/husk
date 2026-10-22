@@ -23,26 +23,19 @@ const DiscoveryPingTimeout = 500 * time.Millisecond
 // The spec's 2 s.
 const LookupPingTimeout = 2 * time.Second
 
-// Deps holds the seams tests inject so that no test needs a real socket,
-// a real clock or the real process table. The zero value is production:
-// pings go out over real Unix sockets with the discovery timeout, the pid
-// check is disabled (see ProcessAlive), and StartedAt stamps come from
-// time.Now. A nil *Deps anywhere means those production defaults.
+// Deps holds the seams tests inject so that no test needs a real socket
+// or real network timing. The zero value is production: pings go out over
+// real Unix sockets with the step's timeout. A nil *Deps anywhere means
+// those production defaults.
 type Deps struct {
 	// Ping decides whether the socket at socketPath answers. It returns
 	// nil when the instance replied, or an error this package classifies:
 	// ErrSocketMissing or ErrSocketRefused (or a wrapped ENOENT /
 	// ECONNREFUSED / ENOTSOCK) mark the entry stale; anything else marks
-	// it unresponsive. When nil, DefaultPing is used with
-	// DiscoveryPingTimeout. Called from multiple goroutines at once.
+	// it unresponsive. When nil, DefaultPing is used with the step's
+	// timeout (discovery fans out at 500 ms, explicit lookups wait 2 s).
+	// Called from multiple goroutines at once.
 	Ping func(socketPath string) error
-
-	// ProcessAlive reports whether pid names a live process. It is a test
-	// seam: production leaves it nil, because the spec rules that a dead
-	// pid alone must never stale an entry (pid reuse makes the check
-	// unsafe) and a live ping outranks it in every case. When set and
-	// reporting false, the entry is stale without a ping.
-	ProcessAlive func(pid int) bool
 }
 
 // Verdict classifies one registration entry's liveness.
@@ -138,16 +131,15 @@ func pingAll(entries []Entry, d *Deps) []Status {
 	return out
 }
 
-// classify decides one entry's verdict. An injected ProcessAlive that
-// reports the pid dead marks the entry stale without a ping; that path
-// exists for tests only (see Deps.ProcessAlive). Otherwise the ping is
-// authoritative, at the discovery timeout: a reply is live, a missing or
+// classify decides one entry's verdict from a ping at the discovery
+// timeout. The ping is the only evidence: a reply is live, a missing or
 // refused socket is stale, and a dial that succeeds without a reply — or
-// any other failure — is unresponsive, never stale.
+// any other failure — is unresponsive, never stale. There is no pid
+// check anywhere in liveness: the spec rules that a dead pid alone must
+// never stale an entry, because pid reuse makes the check unsafe, and a
+// stale-looking pid says nothing a ping does not say better. Explicit
+// lookups ping at LookupPingTimeout and reuse pingVerdict directly.
 func (d *Deps) classify(e Entry) Verdict {
-	if d != nil && d.ProcessAlive != nil && !d.ProcessAlive(e.PID) {
-		return VerdictStale
-	}
 	return pingVerdict(d.pingFor(e.Socket, DiscoveryPingTimeout))
 }
 

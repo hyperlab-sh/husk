@@ -35,46 +35,6 @@ func TestClassifyVerdicts(t *testing.T) {
 	}
 }
 
-func TestClassifyDeadPidMarksStaleWithoutPinging(t *testing.T) {
-	// The ProcessAlive seam exists for tests; production leaves it nil
-	// (see Deps). When it reports the pid gone, the entry is stale and no
-	// dial is spent on it.
-	pings := 0
-	d := &Deps{
-		Ping:         func(string) error { pings++; return nil },
-		ProcessAlive: func(int) bool { return false },
-	}
-	e := Entry{ID: "notes", PID: 7, Socket: "/unused"}
-	if got := d.classify(e); got != VerdictStale {
-		t.Fatalf("classify = %v, want stale", got)
-	}
-	if pings != 0 {
-		t.Fatalf("ping called %d times, want 0", pings)
-	}
-}
-
-func TestClassifyInjectedDeadPidPrecedesPing(t *testing.T) {
-	// The ProcessAlive seam is injected-dead here, so the entry is stale
-	// without a ping even though the ping would have answered. That is
-	// the test-only short-circuit; production leaves ProcessAlive nil, and
-	// a live ping then decides liveness with no pid check at all (the
-	// spec: a dead pid alone must never stale an entry).
-	pings := 0
-	d := &Deps{
-		Ping:         func(string) error { pings++; return nil },
-		ProcessAlive: func(int) bool { return false },
-	}
-	if got := pingVerdict(nil); got != VerdictLive {
-		t.Fatalf("pingVerdict(nil) = %v, want live", got)
-	}
-	if d.ProcessAlive(7) {
-		t.Fatal("fixture pid should report dead")
-	}
-	if pings != 0 {
-		t.Fatalf("ping called %d times, want 0", pings)
-	}
-}
-
 func TestVerdictString(t *testing.T) {
 	cases := map[Verdict]string{
 		VerdictLive:         "live",
