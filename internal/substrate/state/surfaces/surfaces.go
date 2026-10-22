@@ -12,12 +12,13 @@
 // owner-cleanup path.
 //
 // husk.surfaces is the resolution: one occupant per surface (first claim
-// wins, conflicts refused), the combined per-slot contribution order across
-// plugins in arrival order, entries of a removed owner's slots dropped, plus
-// visibility, the active placement and overlays. Only the Surfaces engine
-// writes it, and the host renders only from it; the engine itself is the
-// stem-surfaces unit's to build — this package defines the slice and its
-// value shape.
+// wins, conflicts refused), the combined per-slot contribution order the
+// engine records — first observation across ticks; within one tick, by
+// namespace then by position in the declaring plugin's entries — entries of
+// a removed owner's slots dropped, plus visibility, the active placement and
+// overlays. Only the Surfaces engine writes it, and the host renders only
+// from it; the engine itself is the stem-surfaces unit's to build — this
+// package defines the slice and its value shape.
 package surfaces
 
 import (
@@ -47,11 +48,13 @@ type Contribution = contracts.Contribution
 type Occupants map[protocol.SurfaceID]Occupant
 
 // Contributions is the value shape of a contributions declaration slice:
-// the owning plugin's entries grouped by target slot, arrival order within
-// each slot, exactly the list today's registry keeps per slot for one
-// plugin. A repeated contribution id replaces the earlier entry of its slot
-// in place; ids are unique per slot, so a foreign plugin's id cannot
-// collide inside one slice.
+// the owning plugin's entries grouped by target slot, in the order the Pod
+// received them. The value carries no sequence for the combined order —
+// the Surfaces engine records the cross-plugin order (state.md); a slice's
+// entry position is only the engine's within-tick tiebreaker. A repeated
+// contribution id replaces the earlier entry of its slot in place; ids are
+// unique per slot, so a foreign plugin's id cannot collide inside one
+// slice.
 type Contributions map[string][]Contribution
 
 // SurfacesNamespace is the namespace of the resolution slice the host
@@ -65,8 +68,10 @@ type Surfaces struct {
 	// Occupants maps each occupied surface to its one occupant: the first
 	// claim wins and conflicting later claims are refused.
 	Occupants map[protocol.SurfaceID]Occupant `json:"occupants"`
-	// Contributions maps each published slot to its entries in arrival
-	// order across plugins; a removed owner's slot entries are dropped.
+	// Contributions maps each published slot to its combined entries in
+	// the order the engine records: first observation across ticks;
+	// within one tick, by namespace then by the declaring plugin's entry
+	// position. A removed owner's slot entries are dropped.
 	Contributions map[string][]Contribution `json:"contributions"`
 	// Visible lists the surfaces the layout currently shows.
 	Visible []protocol.SurfaceID `json:"visible"`
@@ -253,7 +258,7 @@ func (s *ContributionsSlice) Unregister() {
 
 // Upsert replaces c's earlier entry with the same ID in c's slot in place,
 // or appends c to that slot's list, and reports whether the value changed.
-// Replacement in place keeps arrival order stable, mirroring today's
+// Replacement in place keeps the entry's position stable, mirroring today's
 // contribute for one plugin's own list; ids stay scoped to their slot, as in
 // the registry.
 func (cs *Contributions) Upsert(slot string, c Contribution) bool {
