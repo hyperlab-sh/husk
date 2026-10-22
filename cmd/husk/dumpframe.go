@@ -245,6 +245,10 @@ func runDumpFrame(m *WorkbenchModel, opt dumpFrameOptions) (string, error) {
 	_, err := p.Run()
 	frame := m.View().Content
 	switch {
+	case m.hostErr != nil:
+		// The host died on its own (socket path too long, bind failure):
+		// nothing will ever publish, so say why instead of waiting.
+		return frame, fmt.Errorf("host stopped: %w", m.hostErr)
 	case d.failed:
 		return frame, fmt.Errorf("no plugin went live: %s", failedPods(m.podStatus))
 	case d.settled:
