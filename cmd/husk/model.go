@@ -1053,27 +1053,36 @@ func (m *WorkbenchModel) openPalette() {
 	m.paletteCursor = 0
 }
 
-// focusNext moves focus to the next surface in tab order.
+// focusNext moves focus to the next shown surface in tab order. Slots with no
+// rect (a hidden or empty column) are skipped.
 func (m *WorkbenchModel) focusNext() {
-	if m.activePlacement == contracts.PlacementStage {
-		if m.focusedSlot == protocol.SurfaceSidebarList {
-			m.focusedSlot = protocol.SurfaceWorkspaceStage
-		} else {
-			m.focusedSlot = protocol.SurfaceSidebarList
-		}
-		return
-	}
 	order := []protocol.SurfaceID{
 		protocol.SurfaceSidebarList,
 		protocol.SurfaceMainStage,
 		protocol.SurfaceSidePanel,
 	}
-	for i, s := range order {
-		if s == m.focusedSlot {
-			m.focusedSlot = order[(i+1)%len(order)]
-			break
+	if m.activePlacement == contracts.PlacementStage {
+		order = []protocol.SurfaceID{protocol.SurfaceSidebarList, protocol.SurfaceWorkspaceStage}
+	}
+	cur := slices.Index(order, m.focusedSlot)
+	if cur < 0 {
+		return
+	}
+	for step := 1; step < len(order); step++ {
+		next := order[(cur+step)%len(order)]
+		if _, shown := m.slotRects[next]; shown {
+			m.setFocus(next)
+			return
 		}
 	}
+}
+
+// setFocus moves focus by the user's choice (tab or click). It also forgets
+// any remembered fallback slot, so a column that returns later does not take
+// the focus back.
+func (m *WorkbenchModel) setFocus(slot protocol.SurfaceID) {
+	m.focusedSlot = slot
+	m.focusFallback = ""
 }
 
 // homeApplies reports whether "home" has anywhere to go; otherwise the key
