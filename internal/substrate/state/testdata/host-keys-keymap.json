@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "bind": [
+    { "key": "[", "action": "husk.sidebar.toggle" },
+    { "key": "]", "action": "husk.sidepanel.toggle" },
+    { "key": "/", "action": "husk.docks.cycle" }
+  ]
+}
