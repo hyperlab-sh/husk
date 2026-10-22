@@ -329,6 +329,7 @@ func (h *Host) Handle(msg tea.Msg) bool {
 		p.info.LastError = m.Err.Error()
 		h.loop.Liveness(LivenessMsg{Info: p.Info()})
 		h.loop.Log(LogMsg{PluginID: m.PluginID, Level: "error", Message: fmt.Sprintf("failed to launch plugin %s: %v", m.PluginID, m.Err)})
+		h.publishExited(p.Info())
 		return true
 	case ExitMsg:
 		p := h.pods[m.Info.PluginID]
@@ -347,6 +348,7 @@ func (h *Host) Handle(msg tea.Msg) bool {
 		for _, line := range m.Info.StderrTail {
 			h.loop.Log(LogMsg{PluginID: m.Info.PluginID, Level: level, Message: "plugin " + m.Info.PluginID + " stderr: " + line})
 		}
+		h.publishExited(p.Info())
 		return true
 	case wrapper.ReapedMsg, wrapper.ChannelClosedMsg:
 		return true // authentication was revoked by the worker-safe bridge
@@ -361,6 +363,29 @@ func (h *Host) Handle(msg tea.Msg) bool {
 	default:
 		return false
 	}
+}
+
+// publishExited publishes pods.plugin-exited for a Pod that left live or never
+// got there. The payload is the Pod's husk.pods entry (status, pid,
+// started_at, last_error, log; absent fields omitted) plus plugin_id.
+func (h *Host) publishExited(info wrapper.Info) {
+	if h.opts.Publisher == nil {
+		return
+	}
+	payload := map[string]any{"plugin_id": info.PluginID, "status": string(info.Status)}
+	if info.PID != 0 {
+		payload["pid"] = info.PID
+	}
+	if !info.StartedAt.IsZero() {
+		payload["started_at"] = info.StartedAt.Format(time.RFC3339Nano)
+	}
+	if info.LastError != "" {
+		payload["last_error"] = info.LastError
+	}
+	if info.LogPath != "" {
+		payload["log"] = info.LogPath
+	}
+	h.opts.Publisher.Publish(PluginExitedEvent, payload)
 }
 
 // Pod returns a loop-owned Pod for per-subscriber notification delivery.

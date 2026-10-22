@@ -35,6 +35,8 @@ type fakeFE struct {
 	SendErr error
 	// Toast is what ActiveToast reports.
 	Toast *contracts.Toast
+	// Refused is what Refusals reports.
+	Refused []contracts.PluginRefusal
 	// Snap, Rails, PubSlots and Frames are what the host would report; Snap
 	// nil keeps the model's directly seeded catalog.
 	Snap     *state.Snapshot
@@ -205,6 +207,7 @@ func (f *fakeFE) Actions() []contracts.PluginAction         { return f.Acts }
 func (f *fakeFE) SurfaceFrames() map[string]map[protocol.SurfaceID]protocol.FrameSpec {
 	return f.Frames
 }
+func (f *fakeFE) Refusals() []contracts.PluginRefusal { return f.Refused }
 func (f *fakeFE) ActiveToast() (contracts.Toast, bool) {
 	if f.Toast == nil {
 		return contracts.Toast{}, false

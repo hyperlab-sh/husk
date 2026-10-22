@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -310,6 +311,21 @@ func (r *Root) SurfaceFrames() map[string]map[protocol.SurfaceID]protocol.FrameS
 // Actions implements contracts.Frontend.
 func (r *Root) Actions() []contracts.PluginAction {
 	return r.readCatalog().acts
+}
+
+// refuse records a plugin the host refused before a Pod existed. The caller
+// logs it; Refusals hands it to the frontend.
+func (r *Root) refuse(plugin, reason string) {
+	r.refusalsMu.Lock()
+	r.refusals = append(r.refusals, contracts.PluginRefusal{Plugin: plugin, Reason: reason})
+	r.refusalsMu.Unlock()
+}
+
+// Refusals implements contracts.Frontend.
+func (r *Root) Refusals() []contracts.PluginRefusal {
+	r.refusalsMu.Lock()
+	defer r.refusalsMu.Unlock()
+	return slices.Clone(r.refusals)
 }
 
 // ActiveToast implements contracts.Frontend.

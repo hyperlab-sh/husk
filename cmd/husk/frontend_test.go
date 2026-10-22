@@ -394,3 +394,35 @@ func TestPodFailureToastsAndCleanExitDoesNot(t *testing.T) {
 		t.Fatalf("clean exit toasted: %+v", m.activeToast)
 	}
 }
+
+// A plugin the host refused before any Pod existed (invalid manifest,
+// duplicate id, protocol mismatch) gets the same warning toast as a launch
+// failure, once.
+func TestRefusedPluginToastsLikeALaunchFailure(t *testing.T) {
+	m := goldenModel()
+	fe := withFE(m)
+	m.settle()
+	if m.activeToast != nil {
+		t.Fatalf("toast with nothing refused: %+v", m.activeToast)
+	}
+
+	fe.Refused = []contracts.PluginRefusal{{Plugin: "dup", Reason: "duplicate plugin id"}}
+	m.settle()
+	if tt := m.activeToast; tt == nil || tt.Level != "warn" || tt.Title != "Plugin failed" || tt.Message != "dup: duplicate plugin id" {
+		t.Fatalf("refusal toast = %+v", m.activeToast)
+	}
+
+	// Already shown: another settle does not toast it again.
+	m.activeToast = nil
+	m.settle()
+	if m.activeToast != nil {
+		t.Fatalf("a refusal toasted twice: %+v", m.activeToast)
+	}
+
+	// A manifest too broken to name a plugin shows its reason alone.
+	fe.Refused = append(fe.Refused, contracts.PluginRefusal{Reason: "manifest /p/husk-plugin.json (v2): plugin speaks protocol 1, host speaks 2"})
+	m.settle()
+	if tt := m.activeToast; tt == nil || tt.Title != "Plugin failed" || tt.Message != "manifest /p/husk-plugin.json (v2): plugin speaks protocol 1, host speaks 2" {
+		t.Fatalf("anonymous refusal toast = %+v", m.activeToast)
+	}
+}
