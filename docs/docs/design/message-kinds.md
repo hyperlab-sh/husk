@@ -669,16 +669,18 @@ Hook runner invariants:
    registry outside `cmd/husk`. Recommended: defer; `RegisterHost` already
    covers it.
 6. Today's hook path checks the global and per-subscriber caps before any
-   envelope is delivered, and the cut-out keeps that: a cap refusal (or a
-   transport failure mid fan-out, which the runner rolls back) refuses the
-   whole call — a call reaches every live subscriber or none. The spec names
-   the caps but not the all-or-nothing fan-out. Recommended: keep it; a
-   partial fan-out has no aggregate a caller could use.
+   envelope is delivered, and the cut-out keeps that: a cap refusal refuses
+   the whole call and nothing is sent. Delivery itself is per-subscriber, as
+   today's publisher (`deliverPublications` ignores one plugin's failed send
+   and delivers the rest): a send that fails mid fan-out becomes that
+   subscriber's entry — `unavailable`, reason `disconnected` — and the
+   remaining subscribers still get theirs. The spec names the caps but not
+   the per-subscriber failure entry. Recommended: keep; parity.
 7. The runner can refuse before any subscriber is asked: `not_found` for an
    undeclared hook id (today's `unknown hook`), `busy` for the caps, and
-   `unavailable` when Calls cannot deliver. The spec's HookResult codes name
-   only timeout, cancelled and the subscriber's own codes; these refusals
-   answer the caller's `hook.call` directly with no result list.
+   `unavailable` when the call table is closed. The spec's HookResult codes
+   name only timeout, cancelled and the subscriber's own codes; these
+   refusals answer the caller's `hook.call` directly with no result list.
    Recommended: confirm the codes in the protocol table suffice; they do
    today.
 8. A subscriber that is not live when the hook is called is skipped without
@@ -692,3 +694,10 @@ Hook runner invariants:
    request and Calls ids correlate the legs, so there is no caller-supplied
    request id to deduplicate. Recommended: nothing needs it; record that the
    migration drops it.
+10. When a plugin with pending hook legs disconnects, today's registry
+   answers the waiting callers at once with `"plugin disconnected"`
+   (`cmd/husk/registry.go` `removePlugin`). The runner leaves the legs pending
+   until their own deadline instead: `DropPlugin` is the loop's call
+   (host-root wiring), so until that wiring exists nothing shortens the
+   wait. Recommended: behaviour stays for the cut-out; record that host-root
+   must feed `DropPlugin` on disconnect to recover v1's immediate answer.
