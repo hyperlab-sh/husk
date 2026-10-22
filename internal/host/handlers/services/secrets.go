@@ -8,11 +8,12 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
-// Secrets adapts contracts.SecretsPort for the secrets.* methods. get and
-// names are open to plugins under the shared per-plugin rate limit; set,
-// grant, revoke and reveal are CLI methods and are denied to a plugin caller
-// before the port is touched. Values ride only in the get result and the
-// reveal result, exactly as services.md's examples pin them.
+// Secrets adapts contracts.SecretsPort for the secrets.* methods. get is
+// open to plugins under the shared per-plugin rate limit; names is open to
+// plugins uncapped; set, grant, revoke and reveal are CLI methods and are
+// denied to a plugin caller before the port is touched. Values ride only in
+// the get result and the reveal result, exactly as services.md's examples
+// pin them.
 type Secrets struct {
 	Port contracts.SecretsPort
 	// Limiter is the shared settings.get/secrets.get budget, keyed by plugin

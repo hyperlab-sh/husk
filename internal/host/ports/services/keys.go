@@ -9,8 +9,9 @@ import (
 
 // Keys implements contracts.KeybindingPort over the keybinding service. The
 // service already scopes ListFor to the caller (D34a plugin view: only the
-// plugin's own bindings and problems; users see the full merged listing), so
-// the wrapper is a deep structural copy into the wire shape.
+// plugin's own bindings and problems; users see the full merged listing) and
+// returns an already-detached clone, so the wrapper is a shape translation,
+// not another deep copy: no slice or map is shared with the service.
 type Keys struct {
 	Svc *keybinding.Service
 }
