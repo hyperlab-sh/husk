@@ -157,10 +157,15 @@ func CheckSocketPath(path string) error {
 // path is used only when XDG_RUNTIME_DIR is empty, and a fallback that
 // fails the same check is an error.
 func RuntimeDir() (string, error) {
-	return runtimeDir(os.Getenv("XDG_RUNTIME_DIR"), os.Getuid())
+	return runtimeDir(os.Getenv("XDG_RUNTIME_DIR"), "/tmp", os.Getuid())
 }
 
-func runtimeDir(xdg string, uid int) (string, error) {
+// runtimeDir is RuntimeDir with the roots injected: xdg is the value of
+// XDG_RUNTIME_DIR, tmpBase the root of the short fallback ("/tmp" in
+// production — the spec rules out the system temp directory, whose macOS
+// value is far too long for sun_path). Tests inject t.TempDir paths so
+// nothing touches the real /tmp/husk-<uid>.
+func runtimeDir(xdg, tmpBase string, uid int) (string, error) {
 	if xdg != "" {
 		dir := filepath.Join(xdg, "husk")
 		if err := ensureDir(dir, uid); err != nil {
@@ -168,7 +173,7 @@ func runtimeDir(xdg string, uid int) (string, error) {
 		}
 		return dir, nil
 	}
-	dir := fmt.Sprintf("/tmp/husk-%d", uid)
+	dir := filepath.Join(tmpBase, fmt.Sprintf("husk-%d", uid))
 	if err := ensureDir(dir, uid); err != nil {
 		return "", fmt.Errorf("runtime dir: %w", err)
 	}

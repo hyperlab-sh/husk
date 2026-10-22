@@ -103,28 +103,21 @@ func TestCheckSocketPath(t *testing.T) {
 	}
 }
 
-// fallbackDir is where runtimeDir falls back when XDG_RUNTIME_DIR is
-// empty: /tmp/husk-<uid> for the test process's real uid. The tests use
-// the real uid because checkDir rightly refuses a directory owned by
-// anyone else — including one this test just created on behalf of a fake
-// uid — so a fake uid can only ever test refusal paths.
-var fallbackDir = fmt.Sprintf("/tmp/husk-%d", os.Getuid())
-
 func TestRuntimeDirFallbackToTemp(t *testing.T) {
-	cleanupFakeRuntime(t)
-	dir, err := runtimeDir("", os.Getuid())
+	base := t.TempDir()
+	dir, err := runtimeDir("", base, os.Getuid())
 	if err != nil {
 		t.Fatalf("runtimeDir: %v", err)
 	}
-	if dir != fallbackDir {
-		t.Fatalf("runtimeDir = %q, want %q", dir, fallbackDir)
+	if want := filepath.Join(base, fmt.Sprintf("husk-%d", os.Getuid())); dir != want {
+		t.Fatalf("runtimeDir = %q, want %q", dir, want)
 	}
 	assertPrivateDir(t, dir)
 }
 
 func TestRuntimeDirUnderXDG(t *testing.T) {
 	base := t.TempDir()
-	dir, err := runtimeDir(base, os.Getuid())
+	dir, err := runtimeDir(base, t.TempDir(), os.Getuid())
 	if err != nil {
 		t.Fatalf("runtimeDir: %v", err)
 	}
@@ -142,7 +135,7 @@ func TestRuntimeDirReusesExistingSafeDir(t *testing.T) {
 	if err := os.WriteFile(base+"/husk/marker", []byte("marker"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	dir, err := runtimeDir(base, os.Getuid())
+	dir, err := runtimeDir(base, t.TempDir(), os.Getuid())
 	if err != nil {
 		t.Fatalf("runtimeDir: %v", err)
 	}
@@ -158,7 +151,7 @@ func TestRuntimeDirReusesExistingSafeDir(t *testing.T) {
 func TestRuntimeDirCreatesMissingXDGParents(t *testing.T) {
 	base := t.TempDir()
 	xdg := base + "/missing/deeper"
-	dir, err := runtimeDir(xdg, os.Getuid())
+	dir, err := runtimeDir(xdg, t.TempDir(), os.Getuid())
 	if err != nil {
 		t.Fatalf("runtimeDir: %v", err)
 	}
@@ -188,7 +181,7 @@ func TestRuntimeDirUnsafeXDGIsRefused(t *testing.T) {
 			if err := tc.plant(base); err != nil {
 				t.Fatal(err)
 			}
-			dir, err := runtimeDir(base, os.Getuid())
+			dir, err := runtimeDir(base, t.TempDir(), os.Getuid())
 			if err == nil {
 				t.Fatalf("runtimeDir = %q, want refusal", dir)
 			}
@@ -199,12 +192,16 @@ func TestRuntimeDirUnsafeXDGIsRefused(t *testing.T) {
 	}
 }
 
+// TestRuntimeDirRefusesUnsafeFallback: the /tmp/husk-<uid> candidate
+// runs the same private-dir rule; a planted symlink is refused. The
+// fallback root is injected, so the real /tmp is never touched.
 func TestRuntimeDirRefusesUnsafeFallback(t *testing.T) {
-	cleanupFakeRuntime(t)
-	if err := os.Symlink("/tmp", fallbackDir); err != nil {
+	base := t.TempDir()
+	fallback := filepath.Join(base, fmt.Sprintf("husk-%d", os.Getuid()))
+	if err := os.Symlink("/tmp", fallback); err != nil {
 		t.Fatal(err)
 	}
-	_, err := runtimeDir("", os.Getuid())
+	_, err := runtimeDir("", base, os.Getuid())
 	if err == nil {
 		t.Fatal("a planted fallback must be refused")
 	}
@@ -213,27 +210,9 @@ func TestRuntimeDirRefusesUnsafeFallback(t *testing.T) {
 	}
 }
 
-// cleanupFakeRuntime removes the fallback directory the tests use, before
-// and after the test, so a planted or leftover directory cannot leak. A
-// directory that already existed is left alone at the end: it may belong
-// to a real instance the user is running.
-func cleanupFakeRuntime(t *testing.T) {
-	t.Helper()
-	_, err := os.Lstat(fallbackDir)
-	preExisting := err == nil
-	if !preExisting {
-		os.RemoveAll(fallbackDir)
-	}
-	t.Cleanup(func() {
-		if !preExisting {
-			os.RemoveAll(fallbackDir)
-		}
-	})
-}
-
-// startedAt is the fixed clock reading every fixture entry carries, so
+// fixedTime is the fixed clock reading every fixture entry carries, so
 // RemoveIfStale comparisons are exact.
-var startedAt = time.Date(2026, 10, 22, 6, 0, 0, 0, time.UTC)
+func fixedTime() time.Time { return time.Date(2026, 10, 22, 6, 0, 0, 0, time.UTC) }
 
 func TestEntryJSONShape(t *testing.T) {
 	dir := runDir(t)
@@ -244,7 +223,7 @@ func TestEntryJSONShape(t *testing.T) {
 		ID:              "4242",
 		PID:             4242,
 		Socket:          SocketPath(dir, "4242"),
-		StartedAt:       startedAt,
+		StartedAt:       fixedTime(),
 		ProtocolVersion: "2.0",
 	}
 	if err := Register(dir, pidEntry); err != nil {
@@ -270,7 +249,7 @@ func TestEntryJSONShape(t *testing.T) {
 		Name:            "notes",
 		PID:             5120,
 		Socket:          SocketPath(dir, "notes"),
-		StartedAt:       startedAt,
+		StartedAt:       fixedTime(),
 		ProtocolVersion: "2.0",
 		HuskVersion:     "0.9.0",
 	}
@@ -293,7 +272,7 @@ func TestEntryJSONShape(t *testing.T) {
 
 func TestRegisterEntryModeAndNoTempLeftovers(t *testing.T) {
 	dir := runDir(t)
-	e := Entry{ID: "notes", Name: "notes", PID: 5120, Socket: SocketPath(dir, "notes"), StartedAt: startedAt, ProtocolVersion: "2.0"}
+	e := Entry{ID: "notes", Name: "notes", PID: 5120, Socket: SocketPath(dir, "notes"), StartedAt: fixedTime(), ProtocolVersion: "2.0"}
 	if err := Register(dir, e); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
@@ -334,7 +313,7 @@ func TestRegisterStampsZeroStartedAt(t *testing.T) {
 
 func TestRegisterKeepsSetStartedAt(t *testing.T) {
 	dir := runDir(t)
-	e := Entry{ID: "notes", PID: 7, Socket: SocketPath(dir, "notes"), StartedAt: startedAt, ProtocolVersion: "2.0"}
+	e := Entry{ID: "notes", PID: 7, Socket: SocketPath(dir, "notes"), StartedAt: fixedTime(), ProtocolVersion: "2.0"}
 	if err := Register(dir, e); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
@@ -342,14 +321,14 @@ func TestRegisterKeepsSetStartedAt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !got.StartedAt.Equal(startedAt) {
-		t.Fatalf("StartedAt = %v, want the set value %v", got.StartedAt, startedAt)
+	if !got.StartedAt.Equal(fixedTime()) {
+		t.Fatalf("StartedAt = %v, want the set value %v", got.StartedAt, fixedTime())
 	}
 }
 
 func TestRegisterCreatesMissingDir(t *testing.T) {
 	dir := t.TempDir() + "/husk"
-	e := Entry{ID: "notes", PID: 7, Socket: SocketPath(dir, "notes"), StartedAt: startedAt, ProtocolVersion: "2.0"}
+	e := Entry{ID: "notes", PID: 7, Socket: SocketPath(dir, "notes"), StartedAt: fixedTime(), ProtocolVersion: "2.0"}
 	if err := Register(dir, e); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
@@ -382,7 +361,7 @@ func TestRegisterReplacesStaleEntry(t *testing.T) {
 	// Whatever entry is on disk belongs to a dead run — the claim on the
 	// name was made by binding the socket — so Register simply replaces it.
 	dir := runDir(t)
-	stale := Entry{ID: "notes", Name: "notes", PID: 111, Socket: SocketPath(dir, "notes"), StartedAt: startedAt, ProtocolVersion: "1.5"}
+	stale := Entry{ID: "notes", Name: "notes", PID: 111, Socket: SocketPath(dir, "notes"), StartedAt: fixedTime(), ProtocolVersion: "1.5"}
 	if err := writeEntryFile(dir, stale); err != nil {
 		t.Fatal(err)
 	}
@@ -404,7 +383,7 @@ func TestRegisterReplacesCorruptEntry(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "notes.json"), []byte("not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	e := Entry{ID: "notes", Name: "notes", PID: 222, Socket: SocketPath(dir, "notes"), StartedAt: startedAt, ProtocolVersion: "2.0"}
+	e := Entry{ID: "notes", Name: "notes", PID: 222, Socket: SocketPath(dir, "notes"), StartedAt: fixedTime(), ProtocolVersion: "2.0"}
 	if err := Register(dir, e); err != nil {
 		t.Fatalf("Register over a corrupt entry: %v", err)
 	}
@@ -417,7 +396,7 @@ func TestRegisterSamePidOverLiveEntryReplaces(t *testing.T) {
 	// The Server's own re-registration: bind made the name ours, so an
 	// entry with our own pid is replaced without a probe.
 	dir := runDir(t)
-	mine := Entry{ID: "notes", Name: "notes", PID: 222, Socket: SocketPath(dir, "notes"), StartedAt: startedAt, ProtocolVersion: "1.5"}
+	mine := Entry{ID: "notes", Name: "notes", PID: 222, Socket: SocketPath(dir, "notes"), StartedAt: fixedTime(), ProtocolVersion: "1.5"}
 	if err := writeEntryFile(dir, mine); err != nil {
 		t.Fatal(err)
 	}
@@ -479,9 +458,9 @@ func TestRemoveIfStale(t *testing.T) {
 		pinged   Entry
 		wantGone bool
 	}{
-		{"same pid and started_at", base(111, startedAt), base(111, startedAt), true},
-		{"different pid", base(111, startedAt), base(222, startedAt), false},
-		{"different started_at", base(111, startedAt), base(111, startedAt.Add(time.Minute)), false},
+		{"same pid and started_at", base(111, fixedTime()), base(111, fixedTime()), true},
+		{"different pid", base(111, fixedTime()), base(222, fixedTime()), false},
+		{"different started_at", base(111, fixedTime()), base(111, fixedTime().Add(time.Minute)), false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.label, func(t *testing.T) {
@@ -512,7 +491,7 @@ func TestRemoveIfStale(t *testing.T) {
 
 func TestRemoveIfStaleMissingEntryIsNoError(t *testing.T) {
 	dir := t.TempDir()
-	e := Entry{ID: "ghost", PID: 1, Socket: SocketPath(dir, "ghost"), StartedAt: startedAt}
+	e := Entry{ID: "ghost", PID: 1, Socket: SocketPath(dir, "ghost"), StartedAt: fixedTime()}
 	if err := RemoveIfStale(dir, e); err != nil {
 		t.Fatalf("RemoveIfStale on a missing entry: %v", err)
 	}
@@ -521,8 +500,8 @@ func TestRemoveIfStaleMissingEntryIsNoError(t *testing.T) {
 func TestList(t *testing.T) {
 	dir := t.TempDir()
 	entries := []Entry{
-		{ID: "notes", Name: "notes", PID: 5120, Socket: SocketPath(dir, "notes"), StartedAt: startedAt, ProtocolVersion: "2.0"},
-		{ID: "4242", PID: 4242, Socket: SocketPath(dir, "4242"), StartedAt: startedAt, ProtocolVersion: "2.0"},
+		{ID: "notes", Name: "notes", PID: 5120, Socket: SocketPath(dir, "notes"), StartedAt: fixedTime(), ProtocolVersion: "2.0"},
+		{ID: "4242", PID: 4242, Socket: SocketPath(dir, "4242"), StartedAt: fixedTime(), ProtocolVersion: "2.0"},
 	}
 	for _, e := range entries {
 		if err := writeEntryFile(dir, e); err != nil {
