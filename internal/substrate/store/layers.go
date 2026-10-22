@@ -444,39 +444,43 @@ func (s *Store) Patch(name DocName, layer Layer, profile string, patch Doc) erro
 	if err != nil {
 		return err
 	}
-	raw, _, err := readFile(path, MaxDocBytes, false)
-	if errors.Is(err, fs.ErrNotExist) {
-		raw = []byte("{}")
-	} else if err != nil {
-		return err
-	}
-	doc, err := ParseDoc(raw)
-	if err != nil {
-		return err
-	}
-	value, err := hujson.Parse(raw)
-	if err != nil {
-		return err
-	}
-	ops := []map[string]any{}
-	patchOps(doc, patch, "", &ops)
-	encoded, err := json.Marshal(ops)
-	if err != nil {
-		return err
-	}
-	if err = value.Patch(encoded); err != nil {
-		return err
-	}
-	packed := value.Pack()
-	if _, err = ParseDoc(packed); err != nil {
-		return err
-	}
-	if err = atomicWrite(context.Background(), path, packed); err != nil {
-		return err
-	}
-	s.layerCache = map[docKey]layerLoad{}
-	s.resolved = map[docKey]Resolved{}
-	return nil
+	// configMu protects this Store's cache; the file lock protects the shared
+	// read-modify-write transaction against every other Store process.
+	return withFileLock(path+".lock", func() error {
+		raw, _, err := readFile(path, MaxDocBytes, false)
+		if errors.Is(err, fs.ErrNotExist) {
+			raw = []byte("{}")
+		} else if err != nil {
+			return err
+		}
+		doc, err := ParseDoc(raw)
+		if err != nil {
+			return err
+		}
+		value, err := hujson.Parse(raw)
+		if err != nil {
+			return err
+		}
+		ops := []map[string]any{}
+		patchOps(doc, patch, "", &ops)
+		encoded, err := json.Marshal(ops)
+		if err != nil {
+			return err
+		}
+		if err = value.Patch(encoded); err != nil {
+			return err
+		}
+		packed := value.Pack()
+		if _, err = ParseDoc(packed); err != nil {
+			return err
+		}
+		if err = atomicWrite(context.Background(), path, packed); err != nil {
+			return err
+		}
+		s.layerCache = map[docKey]layerLoad{}
+		s.resolved = map[docKey]Resolved{}
+		return nil
+	})
 }
 func patchOps(target, patch Doc, prefix string, ops *[]map[string]any) {
 	keys := make([]string, 0, len(patch))
