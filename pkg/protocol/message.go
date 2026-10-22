@@ -59,13 +59,18 @@ func (id *ID) UnmarshalJSON(b []byte) error {
 // Message is a request, notification, or reply. A nil Result is absent;
 // json.RawMessage("null") is a present, successful result.
 type Message struct {
-	ID     *ID             `json:"id,omitempty"`
-	Method string          `json:"method,omitempty"`
-	Params json.RawMessage `json:"params,omitempty"`
-	Result json.RawMessage `json:"result,omitempty"`
-	Error  *Error          `json:"error,omitempty"`
-	Token  string          `json:"token,omitempty"`
+	ID           *ID             `json:"id,omitempty"`
+	Method       string          `json:"method,omitempty"`
+	Params       json.RawMessage `json:"params,omitempty"`
+	Result       json.RawMessage `json:"result,omitempty"`
+	Error        *Error          `json:"error,omitempty"`
+	Token        string          `json:"token,omitempty"`
+	tokenPresent bool
 }
+
+// HasToken distinguishes absent credentials from a decoded explicit empty token.
+// Programmatically constructed messages with a nonempty Token also have one.
+func (m Message) HasToken() bool { return m.tokenPresent || m.Token != "" }
 
 // Kind identifies one of the three message forms.
 type Kind int
@@ -97,7 +102,7 @@ func (m Message) Kind() (Kind, error) {
 		}
 		return KindNotification, nil
 	}
-	if m.ID == nil || m.Params != nil || m.Token != "" || (m.Result == nil) == (m.Error == nil) {
+	if m.ID == nil || m.Params != nil || m.HasToken() || (m.Result == nil) == (m.Error == nil) {
 		return 0, invalid("a reply requires id and exactly one of result or error, without params")
 	}
 	return KindReply, nil
@@ -158,6 +163,7 @@ func (m *Message) UnmarshalJSON(b []byte) error {
 			}
 		}
 	}
+	_, candidate.tokenPresent = fields["token"]
 	if _, exists := fields["method"]; exists && candidate.Method == "" {
 		return invalid("method cannot be empty")
 	}

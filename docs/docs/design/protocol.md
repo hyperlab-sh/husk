@@ -103,7 +103,7 @@ Rules:
 3. `params` is a JSON object or absent. Absent equals `{}`. Arrays are `invalid_params`.
 4. A success reply carries `result`. A method with nothing to return replies `{}`. `null` is accepted.
 5. Unknown top-level members are ignored, including a `jsonrpc` member sent by a JSON-RPC library. Unknown members inside `params`, `result` and `error.data` are ignored.
-6. Husk never trusts identity inside `params`. Any `plugin_id` a plugin puts there is ignored; Husk derives the caller from the channel (the stdio pipe, or the `token` member on a socket request, see [Pods](pods.md)) and sets `plugin_id` itself where a payload reports one. A socket request without `token` is the user's own CLI.
+6. Husk never trusts identity inside `params`. Any `plugin_id` a plugin puts there is ignored; Husk derives the caller from the channel (the stdio pipe, or the `token` member on a socket request, see [Pods](pods.md)) and sets `plugin_id` itself where a payload reports one. A socket request without `token` is the user's own CLI. Presence is distinct from value: an explicit `"token":""` is a present, invalid credential and is denied, never downgraded to CLI. The Go envelope exposes `Message.HasToken()` using decoded field presence; this adds no wire member.
 
 ### Error codes
 
