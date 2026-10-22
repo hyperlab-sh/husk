@@ -20,12 +20,12 @@ import (
 	"go.uber.org/goleak"
 
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
-	"github.com/hyperlab-sh/husk/internal/services"
 	"github.com/hyperlab-sh/husk/internal/instance"
 	"github.com/hyperlab-sh/husk/internal/pods"
 	"github.com/hyperlab-sh/husk/internal/pods/manifest"
 	"github.com/hyperlab-sh/husk/internal/pods/server"
 	"github.com/hyperlab-sh/husk/internal/pods/wrapper"
+	"github.com/hyperlab-sh/husk/internal/services"
 	"github.com/hyperlab-sh/husk/internal/substrate/state"
 	"github.com/hyperlab-sh/husk/internal/substrate/store"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
