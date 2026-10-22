@@ -227,10 +227,14 @@ func (s *ContributionsSlice) Set(contributions Contributions) error {
 
 // Upsert validates c against the owning plugin and replaces its earlier
 // entry with the same ID in c's slot in place, or appends it to that slot's
-// list, today's contribute behaviour for one plugin's own lists. An
-// identical entry commits nothing; an invalid one is refused with no effect.
-// Mutations run on the loop goroutine, so read-modify-write is race-free.
+// list, today's contribute behaviour for one plugin's own lists. A
+// contribution whose Slot does not name the target slot is refused, as is
+// anything Validate refuses; an identical entry commits nothing. Mutations
+// run on the loop goroutine, so read-modify-write is race-free.
 func (s *ContributionsSlice) Upsert(slot string, c Contribution) error {
+	if c.Slot != slot {
+		return fmt.Errorf("surfaces: contribution slot %q does not match target slot %q", c.Slot, slot)
+	}
 	v := s.Get()
 	if v == nil {
 		v = Contributions{}
@@ -277,6 +281,9 @@ func (o Occupants) Validate(pluginID string) error {
 		if occ.Plugin != pluginID {
 			return fmt.Errorf("surfaces: occupant of %q is %q, not the owner %q", surface, occ.Plugin, pluginID)
 		}
+		if occ.Surface != surface {
+			return fmt.Errorf("surfaces: occupant stored under %q names surface %q", surface, occ.Surface)
+		}
 		if !occ.Surface.Valid() {
 			return fmt.Errorf("surfaces: occupant names %q, not a defined host layout surface", occ.Surface)
 		}
@@ -287,24 +294,29 @@ func (o Occupants) Validate(pluginID string) error {
 // Validate checks the slice's owner-parity invariants: every entry names the
 // owning plugin, its ID and OnClick are that plugin's own
 // "<plugin_id>.<name>" with a non-empty dot-free name (the rule today's
-// contribute enforces with ownID), and no entry targets an empty slot. The
-// remaining registry checks — the slot must exist and must not be the
-// plugin's own — need the declaration catalog and stay Pod-side (see
-// state.md, "Pod responsibilities").
+// contribute enforces with ownID), no entry targets an empty slot, and a
+// stored entry names the key it is stored under: an occupant under surface
+// key K has Surface == K, a contribution under slot key K has Slot == K, so
+// the maps cannot misfile an entry. The remaining registry checks — the
+// slot must exist and must not be the plugin's own — need the declaration
+// catalog and stay Pod-side (see state.md, "Pod responsibilities").
 func (cs Contributions) Validate(pluginID string) error {
 	for _, slot := range slices.Sorted(maps.Keys(cs)) {
 		for _, c := range cs[slot] {
 			if c.Plugin != pluginID {
 				return fmt.Errorf("surfaces: contribution %q names plugin %q, not the owner %q", c.ID, c.Plugin, pluginID)
 			}
+			if c.Slot == "" {
+				return errors.New("surfaces: contribution names no slot")
+			}
+			if c.Slot != slot {
+				return fmt.Errorf("surfaces: contribution %q stored under %q names slot %q", c.ID, slot, c.Slot)
+			}
 			if !ownName(pluginID, c.ID) {
 				return fmt.Errorf("surfaces: contribution id %q must use %s.<name> with a non-empty dot-free name", c.ID, pluginID)
 			}
 			if c.OnClick != "" && !ownName(pluginID, c.OnClick) {
 				return fmt.Errorf("surfaces: contribution on_click %q must be %s.<name>, the plugin's own action", c.OnClick, pluginID)
-			}
-			if c.Slot == "" {
-				return errors.New("surfaces: contribution names no slot")
 			}
 		}
 	}
