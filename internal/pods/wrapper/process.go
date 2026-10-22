@@ -151,7 +151,8 @@ func (w *Wrapper) Start(opening []protocol.Message) error {
 	if err != nil {
 		return fail(err)
 	}
-	logFile, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	// Store already created the file exclusively; the wrapper only reopens it.
+	logFile, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
 	if err != nil {
 		return fail(fmt.Errorf("open stderr log: %w", err))
 	}
