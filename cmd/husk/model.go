@@ -187,7 +187,9 @@ type WorkbenchModel struct {
 	toastPollOn    bool
 	toastSeq       int
 	refusalsShown  int      // host refusals already reported
-	failures       []string // plugin failures noted this settle, toasted together
+	failures       []string // plugin failures noted, not yet toasted
+	shownFailures  []string // lines of the failure toast now up
+	failureSeq     int      // toastSeq of that toast
 	totalIPCEvents uint64   // surface updates the host routed here
 
 	logOut io.Writer // host log lines, such as launch failures
@@ -476,6 +478,7 @@ func (m *WorkbenchModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case toastExpireMsg:
 		if msg.id == m.toastSeq && !m.engineToast {
 			m.activeToast = nil
+			m.shownFailures = nil
 		}
 		return m, nil
 
@@ -666,8 +669,7 @@ func (m *WorkbenchModel) notePodTransition(id string, from, to contracts.PodStat
 // noteRefusals queues each plugin the host refused before a Pod existed
 // (invalid manifest, duplicate id, protocol mismatch) the way a launch
 // failure is: no husk.pods entry exists to carry the failure, so the host
-// lists them and the model reports each one once. It then shows everything
-// queued this settle, refusals and failed Pods together.
+// lists them and the model reports each one once.
 func (m *WorkbenchModel) noteRefusals() {
 	if m.fe == nil {
 		return
@@ -682,22 +684,29 @@ func (m *WorkbenchModel) noteRefusals() {
 		m.failures = append(m.failures, msg)
 	}
 	m.refusalsShown = len(refused)
-	m.toastFailures()
 }
 
-// toastFailures shows the failures noted since the last call as one toast, so
-// several arriving in one settle (refusals all land at boot) cannot replace
-// each other; the log holds each one in full.
+// toastFailures shows the failures noted since the last call. A failure that
+// arrives while the failure toast is still up joins it instead of replacing
+// it (refusals land at boot, launch failures in later Updates), so the toast
+// lists every failure shown so far and is re-armed; once it expires the next
+// failure starts a fresh one. The log holds each failure in full.
 func (m *WorkbenchModel) toastFailures() {
-	switch len(m.failures) {
-	case 0:
+	if len(m.failures) == 0 {
 		return
-	case 1:
-		m.cmds = append(m.cmds, m.showLocalToast("warn", "Plugin failed", m.failures[0]))
-	default:
-		m.cmds = append(m.cmds, m.showLocalToast("warn", fmt.Sprintf("%d plugins failed", len(m.failures)), strings.Join(m.failures, "; ")))
+	}
+	if m.failureSeq == m.toastSeq && m.activeToast != nil && !m.engineToast && len(m.shownFailures) > 0 {
+		m.shownFailures = append(m.shownFailures, m.failures...)
+	} else {
+		m.shownFailures = slices.Clone(m.failures)
 	}
 	m.failures = nil
+	title, msg := "Plugin failed", m.shownFailures[0]
+	if n := len(m.shownFailures); n > 1 {
+		title, msg = fmt.Sprintf("%d plugins failed", n), strings.Join(m.shownFailures, "; ")
+	}
+	m.cmds = append(m.cmds, m.showLocalToast("warn", title, msg))
+	m.failureSeq = m.toastSeq
 }
 
 // derived is everything refresh rebuilds from the host; a change in any of it
@@ -814,6 +823,7 @@ func (m *WorkbenchModel) dropGoneSurfaces() {
 // while a pass changes something (a new occupant can open a side column),
 // bounded so a flapping host cannot spin the loop.
 func (m *WorkbenchModel) settle() {
+	defer m.toastFailures()
 	for range 4 {
 		changed := m.refresh()
 		wrote := m.flushState()

@@ -399,7 +399,7 @@ Transitions:
 | `live` | `exited` | status 0, or killed by Husk during shutdown |
 | `live` | `failed` | non-zero status, a signal Husk did not send, or Husk killed it after a stdin failure (`last_error`: `stopped reading: ...`) |
 
-`exited` and `failed` are terminal for that launch. There is no restart in v1: a failed plugin stays failed until the instance restarts. The Pod also publishes `pods.plugin-exited`, whose data is the Pod's `husk.pods` entry plus `plugin_id`, through the publisher interface the loop injects at construction (the same way State and Services publish; Pods import nothing from Stem), so a notifier can toast it as today.
+`exited` and `failed` are terminal for that launch. There is no restart in v1: a failed plugin stays failed until the instance restarts. The Pod also publishes `pods.plugin-exited`, whose data is the Pod's `husk.pods` entry plus `plugin_id`, through the publisher interface the loop injects at construction (the same way State and Services publish; Pods import nothing from Stem), for other watchers; the frontend toasts the `husk.pods` transition into `failed`, not this event.
 
 #### Wrapper invariants
 
@@ -446,6 +446,8 @@ Decoration takes one surface's content (the cells or lines the plugin supplied t
 | Plugin writes a non-reply or malformed line on stdout | Wrapper reader | Line dropped, `protocol.error` notification sent | Plugin sees the notification; log line |
 | Reply with an unknown or expired id | Calls | Dropped | Debug log only |
 | Plugin ignores SIGTERM | Shutdown | SIGKILL after 2 s | Log `did not exit within 2s of SIGTERM; killing it` |
+
+Failures that arrive while a failure toast is showing join it as one "N plugins failed" toast; the log has each one.
 
 ### Limits
 
