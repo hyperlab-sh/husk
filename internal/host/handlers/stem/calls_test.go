@@ -9,6 +9,30 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
+// action.invoke accepts CLI, plugin and Stem callers; the unattributed zero
+// kind is denied. action.list is any-caller, so Stem is wrong there too.
+func TestCallsAdmissionDenied(t *testing.T) {
+	t.Run("unattributed invoke", func(t *testing.T) {
+		rec := fakes.NewRecorder()
+		reply := Calls{Port: fakes.NewCalls(rec)}.Serve(ctx, nobody,
+			req(protocol.MethodActionInvoke, `{"action":"go"}`), nil)
+		wantCode(t, reply, protocol.CodeDenied)
+		if calls := rec.Methods(); len(calls) != 0 {
+			t.Fatalf("denied caller reached the port: %v", calls)
+		}
+	})
+	for name, caller := range map[string]contracts.Caller{"stem": stemSide, "unattributed": nobody} {
+		t.Run(name+" list", func(t *testing.T) {
+			rec := fakes.NewRecorder()
+			reply := Calls{Port: fakes.NewCalls(rec)}.Serve(ctx, caller, req(protocol.MethodActionList, ""), nil)
+			wantCode(t, reply, protocol.CodeDenied)
+			if calls := rec.Methods(); len(calls) != 0 {
+				t.Fatalf("denied caller reached the port: %v", calls)
+			}
+		})
+	}
+}
+
 func TestCallsInvoke(t *testing.T) {
 	t.Run("happy path passes action and args", func(t *testing.T) {
 		rec := fakes.NewRecorder()

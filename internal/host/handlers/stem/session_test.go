@@ -14,6 +14,7 @@ var (
 	cli      = contracts.Caller{Kind: contracts.CallerCLI}
 	plugin   = contracts.Caller{Kind: contracts.CallerPlugin, PluginID: "atlas"}
 	stemSide = contracts.Caller{Kind: contracts.CallerStem}
+	nobody   = contracts.Caller{} // D36: unattributed, denied everywhere
 )
 
 func req(method string, params string) protocol.Message {
@@ -57,6 +58,21 @@ func TestSessionPortError(t *testing.T) {
 	port.Err = contracts.NewError(protocol.CodeUnavailable, "identity not ready", nil)
 	reply := Session{Port: port}.Serve(ctx, cli, req(protocol.MethodSessionPing, ""), nil)
 	wantCode(t, reply, protocol.CodeUnavailable)
+}
+
+// session.ping is any-caller (CLI or plugin): every other kind — Stem
+// in-process, the unattributed zero kind — is denied before the port.
+func TestSessionAdmissionDenied(t *testing.T) {
+	for name, caller := range map[string]contracts.Caller{"stem": stemSide, "unattributed": nobody} {
+		t.Run(name, func(t *testing.T) {
+			rec := fakes.NewRecorder()
+			reply := Session{Port: fakes.NewSession(rec)}.Serve(ctx, caller, req(protocol.MethodSessionPing, ""), nil)
+			wantCode(t, reply, protocol.CodeDenied)
+			if calls := rec.Methods(); len(calls) != 0 {
+				t.Fatalf("denied caller reached the port: %v", calls)
+			}
+		})
+	}
 }
 
 func TestSessionUnknownMethod(t *testing.T) {

@@ -8,6 +8,22 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
+// The surface family is plugin-only: the CLI, Stem and the unattributed
+// zero kind are denied before the port.
+func TestSurfaceAdmissionDenied(t *testing.T) {
+	for name, caller := range map[string]contracts.Caller{"cli": cli, "stem": stemSide, "unattributed": nobody} {
+		t.Run(name+" update", func(t *testing.T) {
+			rec := fakes.NewRecorder()
+			reply := Surface{Port: fakes.NewSurfaces(rec)}.Serve(ctx, caller,
+				req(protocol.MethodSurfaceUpdate, `{"surface":"sidebar-list","lines":["Files"]}`), nil)
+			wantCode(t, reply, protocol.CodeDenied)
+			if calls := rec.Methods(); len(calls) != 0 {
+				t.Fatalf("denied caller reached the port: %v", calls)
+			}
+		})
+	}
+}
+
 func TestSurfaceUpdate(t *testing.T) {
 	t.Run("happy path passes decoded params", func(t *testing.T) {
 		rec := fakes.NewRecorder()

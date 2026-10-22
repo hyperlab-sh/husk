@@ -19,6 +19,24 @@ func (n *noteRecorder) Notify(m protocol.Message) error {
 	return n.err
 }
 
+// event.emit and event.watch are any-caller: Stem and the unattributed
+// zero kind are denied before the port.
+func TestEventAdmissionDenied(t *testing.T) {
+	for name, caller := range map[string]contracts.Caller{"stem": stemSide, "unattributed": nobody} {
+		for _, method := range []string{protocol.MethodEventEmit, protocol.MethodEventWatch} {
+			t.Run(name+" "+method, func(t *testing.T) {
+				rec := fakes.NewRecorder()
+				reply := Event{Port: fakes.NewEvents(rec)}.Serve(ctx, caller,
+					req(method, `{"name":"file.saved","pattern":"*"}`), nil)
+				wantCode(t, reply, protocol.CodeDenied)
+				if calls := rec.Methods(); len(calls) != 0 {
+					t.Fatalf("denied caller reached the port: %v", calls)
+				}
+			})
+		}
+	}
+}
+
 func TestEventEmit(t *testing.T) {
 	t.Run("happy path passes name and data", func(t *testing.T) {
 		rec := fakes.NewRecorder()

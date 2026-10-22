@@ -203,6 +203,26 @@ func TestStateClear(t *testing.T) {
 		reply := State{Port: fakes.NewState(nil)}.Serve(ctx, cli, req(protocol.MethodStateClear, `{}`), nil)
 		wantCode(t, reply, protocol.CodeInvalidParams)
 	})
+	t.Run("stem and unattributed callers denied on the cli-only clear", func(t *testing.T) {
+		for name, caller := range map[string]contracts.Caller{"stem": stemSide, "unattributed": nobody} {
+			rec := fakes.NewRecorder()
+			reply := State{Port: fakes.NewState(rec)}.Serve(ctx, caller, req(protocol.MethodStateClear, `{"namespace":"atlas.state"}`), nil)
+			wantCode(t, reply, protocol.CodeDenied)
+			if calls := rec.Methods(); len(calls) != 0 {
+				t.Fatalf("%s: denied caller reached the port: %v", name, calls)
+			}
+		}
+	})
+}
+
+// state.get is any-caller: the unattributed zero kind is denied (D36).
+func TestStateGetUnattributedDenied(t *testing.T) {
+	rec := fakes.NewRecorder()
+	reply := State{Port: fakes.NewState(rec)}.Serve(ctx, nobody, req(protocol.MethodStateGet, `{"slice":"atlas.state"}`), nil)
+	wantCode(t, reply, protocol.CodeDenied)
+	if calls := rec.Methods(); len(calls) != 0 {
+		t.Fatalf("denied caller reached the port: %v", calls)
+	}
 }
 
 func TestStateUnknownMethod(t *testing.T) {
