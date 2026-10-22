@@ -85,29 +85,32 @@ func (m *WorkbenchModel) rightSideShown() bool {
 	return m.showSidePane && m.surfaceOwner(protocol.SurfaceSidePanel) != ""
 }
 
-// dropVanishedSides cancels a drag on, and moves focus off, a side column
-// that is no longer shown (its plugin left or its dock was hidden).
+// dropVanishedSides cancels a drag on a side column that is no longer shown
+// (its plugin left or its dock was hidden).
 func (m *WorkbenchModel) dropVanishedSides() {
 	left, right := m.leftSideShown(), m.rightSideShown()
 	if !left && strings.HasPrefix(m.activeDrag, "sidebar-") || !right && m.activeDrag == "sidepanel-width" {
 		m.activeDrag, m.hoverDivider = "", ""
 	}
-	// Focus moves only off a column that was on screen and has now gone; a
-	// column that never existed (the default focus is the sidebar list before
-	// any plugin connects) keeps it, so a plugin that connects later has keys
-	// from its first frame. The slot we left is remembered and restored when
-	// its column returns, unless focus has moved on since.
-	_, hadFocused := m.slotRects[m.focusedSlot]
-	centre := m.centreSlot()
+}
+
+// leaveUndrawnSides moves focus off a side slot that was on screen in prev
+// (the rects before this layout) and is not drawn now: its plugin left, its
+// dock was hidden, or the terminal got too narrow for the panel. A slot that
+// never had a rect (the default focus is the sidebar list before any plugin
+// connects) keeps focus, so a plugin that connects later has keys from its
+// first frame. The slot we left is remembered and restored when it is drawn
+// again, unless focus has moved on since.
+func (m *WorkbenchModel) leaveUndrawnSides(prev map[protocol.SurfaceID]SlotRect) {
 	switch m.focusedSlot {
-	case protocol.SurfaceSidebarNavigation, protocol.SurfaceSidebarList, protocol.SurfaceSidebarFooter:
-		if !left && hadFocused {
-			m.focusFallback, m.focusedSlot = m.focusedSlot, centre
-		}
-	case protocol.SurfaceSidePanel:
-		if !right && hadFocused {
-			m.focusFallback, m.focusedSlot = m.focusedSlot, centre
-		}
+	case protocol.SurfaceSidebarNavigation, protocol.SurfaceSidebarList, protocol.SurfaceSidebarFooter, protocol.SurfaceSidePanel:
+	default:
+		return
+	}
+	_, hadFocused := prev[m.focusedSlot]
+	_, drawn := m.slotRects[m.focusedSlot]
+	if hadFocused && !drawn {
+		m.focusFallback, m.focusedSlot = m.focusedSlot, m.centreSlot()
 	}
 }
 
@@ -138,7 +141,9 @@ func (m *WorkbenchModel) recomputeLayout() {
 		return
 	}
 	m.dropVanishedSides()
+	prev := m.slotRects
 	m.placeSlots()
+	m.leaveUndrawnSides(prev)
 	m.restoreFocusFallback()
 }
 
