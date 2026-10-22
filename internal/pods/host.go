@@ -189,7 +189,12 @@ func (h *Host) Handle(msg tea.Msg) bool {
 		// arrive in Failed and are handled once here, with the declaration
 		// failures.
 		for _, id := range ids {
-			p := h.pods[id]
+			p, ok := h.pods[id]
+			if !ok {
+				// Torn down while this gate was pending: the starter must not
+				// run for a removed Pod, and the dereference below would panic.
+				continue
+			}
 			if err := m.Preparation.Failed[id]; err != nil {
 				h.Handle(LaunchFailedMsg{PluginID: id, Err: err})
 				continue
@@ -221,13 +226,30 @@ func (h *Host) Handle(msg tea.Msg) bool {
 		registered := Registered{
 			Handles: make(map[string]contracts.SliceHandle, len(m.Register)),
 		}
+		fail := func(id string, err error) {
+			if registered.Failed == nil {
+				registered.Failed = make(map[string]error)
+			}
+			registered.Failed[id] = err
+		}
 		for _, id := range slices.Sorted(maps.Keys(m.Register)) {
+			if h.closing {
+				// Shutdown: no State writes from a late registration.
+				fail(id, errors.New("shut down before slice registration"))
+				continue
+			}
+			if _, ok := h.pods[id]; !ok {
+				// Torn down before the registration reached the loop; running
+				// the closure would register a slice nobody owns and leak the
+				// handle, so the next Add of the same id would fail as a
+				// duplicate. Refuse instead; the worker reports the failure,
+				// and LaunchFailedMsg no-ops for the removed Pod.
+				fail(id, fmt.Errorf("pod %s removed before slice registration", id))
+				continue
+			}
 			handle, err := m.Register[id]()
 			if err != nil {
-				if registered.Failed == nil {
-					registered.Failed = make(map[string]error)
-				}
-				registered.Failed[id] = fmt.Errorf("slice registration: %w", err)
+				fail(id, fmt.Errorf("slice registration: %w", err))
 				continue
 			}
 			h.handlesMu.Lock()
@@ -256,6 +278,22 @@ func (h *Host) Handle(msg tea.Msg) bool {
 		}
 		delete(h.pods, m.PluginID)
 		delete(h.preparing, m.PluginID)
+		// A teardown while a launch gate is pending must carry into that
+		// gate: drop the id so the later PreparedMsg neither starts the
+		// removed plugin nor dereferences its missing Pod.
+		for gate, ids := range h.gates {
+			kept := ids[:0]
+			for _, id := range ids {
+				if id != m.PluginID {
+					kept = append(kept, id)
+				}
+			}
+			if len(kept) == 0 {
+				delete(h.gates, gate)
+			} else {
+				h.gates[gate] = kept
+			}
+		}
 		if h.opts.Registry != nil {
 			h.opts.Registry.Release(h.ctx, m.PluginID)
 		}

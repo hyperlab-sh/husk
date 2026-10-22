@@ -432,3 +432,98 @@ func TestHandlesCrossingIsGuarded(t *testing.T) {
 		t.Fatal("handle survived teardown")
 	}
 }
+
+// TeardownMsg while a launch gate is pending must carry into that gate
+// (round-2 finding 2): the removed id is dropped from the pending ids, the
+// starter never runs for it, and the surviving id in the same gate still
+// starts. Without the guard the PreparedMsg called the starter for the
+// removed plugin and dereferenced its missing Pod.
+func TestTeardownWhileGatePendingSkipsRemoved(t *testing.T) {
+	h, loop, _, _ := hostFixture(t)
+	starter := &countingStarter{}
+	h.opts.Starter = starter
+	addPod(t, h, "files")
+	addPod(t, h, "other")
+
+	cmd := h.Prepare()
+	msg := cmd()
+	h.Handle(TeardownMsg{PluginID: "files"})
+	if !h.Handle(msg) {
+		t.Fatal("prepared message unhandled")
+	}
+
+	if len(starter.starts) != 1 || starter.starts["other"] != 1 {
+		t.Fatal("starter calls", starter.starts)
+	}
+	for _, s := range loop.statuses {
+		if s.Info.PluginID == "files" && s.Info.Status != wrapper.Starting {
+			t.Fatalf("removed plugin post-teardown liveness: %+v", s.Info)
+		}
+	}
+	if _, ok := h.pods["files"]; ok {
+		t.Fatal("torn-down pod still present")
+	}
+}
+
+type countingStarter struct{ starts map[string]int }
+
+func (c *countingStarter) Start(id string, _ []protocol.Message) error {
+	if c.starts == nil {
+		c.starts = map[string]int{}
+	}
+	c.starts[id]++
+	return nil
+}
+
+// A RegisterSlicesMsg that reaches the loop after the Pod was torn down is
+// refused (round-2 finding 2): the closure is a State write that would
+// register a slice nobody owns and leak the handle, so the next Add of the
+// same id would fail as a duplicate. Shutdown refuses the same way: no State
+// writes from a late registration.
+func TestRegisterSlicesAfterTeardownRefused(t *testing.T) {
+	h, _, _, _ := hostFixture(t)
+	addPod(t, h, "files")
+	called := false
+	register := map[string]func() (contracts.SliceHandle, error){
+		"files": func() (contracts.SliceHandle, error) {
+			called = true
+			return &fakeHandle{namespace: "files.state"}, nil
+		},
+	}
+	done := make(chan Registered, 1)
+	h.Handle(TeardownMsg{PluginID: "files"})
+	h.Handle(RegisterSlicesMsg{Register: register, Done: done})
+	reg := testclock.Receive(t, done)
+	if called {
+		t.Fatal("registration closure ran for a removed pod")
+	}
+	if reg.Failed["files"] == nil {
+		t.Fatal("refusal not reported", reg.Failed)
+	}
+	if _, ok := NewPodSlices(h).Handle("files", "files.state"); ok {
+		t.Fatal("handle leaked for a removed pod")
+	}
+
+	// The refused registration leaves the id launchable again.
+	addPod(t, h, "files")
+	done2 := make(chan Registered, 1)
+	h.Handle(RegisterSlicesMsg{Register: register, Done: done2})
+	if reg := testclock.Receive(t, done2); reg.Failed != nil || reg.Handles["files"] == nil {
+		t.Fatalf("relaunch registration: %+v", reg)
+	}
+
+	// Shutdown refuses late registrations too, without State writes.
+	addPod(t, h, "late")
+	h.closing = true
+	calledLate := false
+	done3 := make(chan Registered, 1)
+	h.Handle(RegisterSlicesMsg{Register: map[string]func() (contracts.SliceHandle, error){
+		"late": func() (contracts.SliceHandle, error) {
+			calledLate = true
+			return &fakeHandle{namespace: "late.state"}, nil
+		},
+	}, Done: done3})
+	if reg := testclock.Receive(t, done3); calledLate || reg.Failed["late"] == nil {
+		t.Fatalf("shutdown registration: called=%v failed=%v", calledLate, reg.Failed)
+	}
+}
