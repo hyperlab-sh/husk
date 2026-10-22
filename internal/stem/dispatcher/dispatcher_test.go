@@ -3,6 +3,7 @@ package dispatcher_test
 import (
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -293,11 +294,9 @@ func TestReplyExactlyOnceHostHandlerCannotDouble(t *testing.T) {
 func resolve(t *testing.T, r *rig, wireID int, reply string) []calls.Result {
 	t.Helper()
 	var msg protocol.Message
-	if err := json.Unmarshal([]byte(reply), &msg); err != nil {
+	if err := json.Unmarshal([]byte(`{"id":`+strconv.Itoa(wireID)+`,`+reply[1:]), &msg); err != nil {
 		t.Fatal(err)
 	}
-	id, _ := protocol.NewIntID(int64(wireID))
-	msg.ID = &id
 	res, ok := r.table.Resolve("notes", msg)
 	if !ok {
 		t.Fatal("reply not matched")
