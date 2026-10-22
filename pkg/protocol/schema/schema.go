@@ -186,7 +186,11 @@ func (g *generator) typeSchema(t reflect.Type) map[string]any {
 		return map[string]any{"oneOf": []any{map[string]any{"type": "string"}, map[string]any{"type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991}}}
 	}
 	if t == reflect.TypeFor[protocol.Code]() {
-		return map[string]any{"type": "string", "enum": protocol.Codes()}
+		return map[string]any{
+			"type":           "string",
+			"description":    "Known codes are listed in x-known-values. Unknown future codes are accepted and decoded as internal.",
+			"x-known-values": protocol.Codes(),
+		}
 	}
 	if t == reflect.TypeFor[protocol.KeyPhase]() {
 		return map[string]any{"type": "string", "enum": []protocol.KeyPhase{protocol.KeyPhaseDown, protocol.KeyPhaseUp, protocol.KeyPhaseRepeat, protocol.KeyPhaseSync}}

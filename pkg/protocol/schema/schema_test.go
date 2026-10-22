@@ -124,9 +124,10 @@ func TestPayloadRequiredFieldsAndEnums(t *testing.T) {
 	if resizeProps["surfaces"].(map[string]any)["type"] != "array" {
 		t.Fatal("surface.resized snapshot must be an array, not null")
 	}
-	codes := defs["Error"].(map[string]any)["properties"].(map[string]any)["code"].(map[string]any)["enum"].([]any)
-	if len(codes) != len(protocol.Codes()) {
-		t.Fatal(codes)
+	codeSchema := defs["Error"].(map[string]any)["properties"].(map[string]any)["code"].(map[string]any)
+	codes := codeSchema["x-known-values"].([]any)
+	if len(codes) != len(protocol.Codes()) || codeSchema["enum"] != nil || codeSchema["type"] != "string" {
+		t.Fatal(codeSchema)
 	}
 }
 
@@ -234,6 +235,7 @@ func TestEnvelopeSchema(t *testing.T) {
 		{`{"id":"x","result":null}`, true},
 		{`{"id":"x","result":[1]}`, true},
 		{`{"id":1,"error":{"code":"failed","message":"x","data":{"future":1}}}`, true},
+		{`{"id":1,"error":{"code":"future_minor_code","message":"x"}}`, true},
 		{`{}`, false}, {`[]`, false}, {`{"id":1}`, false},
 		{`{"id":null,"method":"a.b"}`, false},
 		{`{"id":9007199254740992,"method":"a.b"}`, false},

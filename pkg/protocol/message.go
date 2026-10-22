@@ -136,20 +136,31 @@ func (m *Message) UnmarshalJSON(b []byte) error {
 	if fields == nil {
 		return invalid("message must be an object")
 	}
-	type plain Message
-	var out plain
-	if err := json.Unmarshal(b, &out); err != nil {
-		return err
-	}
 	for _, name := range []string{"id", "method", "error", "token"} {
 		if raw, ok := fields[name]; ok && bytes.Equal(raw, []byte("null")) {
 			return invalid(fmt.Sprintf("%s cannot be null", name))
 		}
 	}
-	if _, exists := fields["method"]; exists && out.Method == "" {
+	// Decode exact wire names only. Decoding the entire struct would also
+	// accept case-insensitive aliases, turning unknown members into fields.
+	var candidate Message
+	for _, field := range []struct {
+		name string
+		dest any
+	}{
+		{"id", &candidate.ID}, {"method", &candidate.Method},
+		{"params", &candidate.Params}, {"result", &candidate.Result},
+		{"error", &candidate.Error}, {"token", &candidate.Token},
+	} {
+		if raw, exists := fields[field.name]; exists {
+			if err := json.Unmarshal(raw, field.dest); err != nil {
+				return err
+			}
+		}
+	}
+	if _, exists := fields["method"]; exists && candidate.Method == "" {
 		return invalid("method cannot be empty")
 	}
-	candidate := Message(out)
 	if err := candidate.Validate(); err != nil {
 		return err
 	}

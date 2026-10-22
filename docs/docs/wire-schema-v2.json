@@ -7,7 +7,9 @@
     "Error": {
       "properties": {
         "code": {
-          "enum": [
+          "description": "Known codes are listed in x-known-values. Unknown future codes are accepted and decoded as internal.",
+          "type": "string",
+          "x-known-values": [
             "parse_error",
             "invalid_message",
             "line_too_long",
@@ -23,8 +25,7 @@
             "conflict",
             "failed",
             "internal"
-          ],
-          "type": "string"
+          ]
         },
         "data": {
           "type": "object"
@@ -347,7 +348,9 @@
     "ProtocolErrorParams": {
       "properties": {
         "code": {
-          "enum": [
+          "description": "Known codes are listed in x-known-values. Unknown future codes are accepted and decoded as internal.",
+          "type": "string",
+          "x-known-values": [
             "parse_error",
             "invalid_message",
             "line_too_long",
@@ -363,8 +366,7 @@
             "conflict",
             "failed",
             "internal"
-          ],
-          "type": "string"
+          ]
         },
         "data": {
           "type": "object"
