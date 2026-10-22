@@ -54,14 +54,14 @@ func (h Surface) Serve(ctx context.Context, c contracts.Caller, req protocol.Mes
 		if bad := decodeParams(req, &p); bad != nil {
 			return *bad
 		}
-		for _, field := range []struct{ name, value string }{
-			{"params.slot_id", p.SlotID},
-			{"params.id", p.ID},
-			{"params.content", p.Content},
-		} {
-			if bad := requireString(req, field.name, field.value); bad != nil {
-				return *bad
-			}
+		// slot_id and id identify the contribution; content stays free — neither
+		// protocol.md nor message-kinds.md marks it required, and an empty content
+		// is how v1 withdrew a slot_contribute, so the port decides what it means.
+		if bad := requireString(req, "params.slot_id", p.SlotID); bad != nil {
+			return *bad
+		}
+		if bad := requireString(req, "params.id", p.ID); bad != nil {
+			return *bad
 		}
 		if err := h.Port.SlotContribute(ctx, c, p); err != nil {
 			return handlers.ErrorReply(req, err)
@@ -72,12 +72,8 @@ func (h Surface) Serve(ctx context.Context, c contracts.Caller, req protocol.Mes
 		if bad := decodeParams(req, &p); bad != nil {
 			return *bad
 		}
-		if bad := requireString(req, "params.level", p.Level); bad != nil {
-			return *bad
-		}
-		if bad := requireString(req, "params.title", p.Title); bad != nil {
-			return *bad
-		}
+		// Neither protocol.md nor message-kinds.md marks level or title required
+		// (D42); the port owns whatever defaults apply, so the adapter only decodes.
 		if err := h.Port.ToastShow(ctx, c, p); err != nil {
 			return handlers.ErrorReply(req, err)
 		}
