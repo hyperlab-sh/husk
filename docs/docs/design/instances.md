@@ -297,7 +297,7 @@ A plugin script can branch on 3, 4 and 5 without parsing text.
 
 1. One instance has exactly one socket and at most one registration entry; the id is the key.
 2. An entry present in the runtime directory means its socket was listening when the entry was written.
-3. An instance removes its own entry and socket on a clean exit. Only the CLI or the next Server start of the same id removes stale ones.
+3. An instance removes its own entry and socket on a clean exit. Only the CLI or the next Server start of the same id removes stale ones — and only the stale entry: the socket is left to whoever bound it, since after a crash and restart that may be the next instance of the same name.
 4. `RemoveIfStale` never deletes a file whose `pid` and `started_at` differ from the entry that was pinged.
 5. The Wrapper overwrites `HUSK_SOCKET_PATH`, `HUSK_INSTANCE` and `HUSK_BIN_PATH` in every plugin process. A plugin never sees another instance's value.
 6. The CLI never resolves to an instance that the user, the environment or a unique discovery result did not select.
