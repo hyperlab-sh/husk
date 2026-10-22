@@ -1,0 +1,363 @@
+// Package launch holds the host adapters for the Pods launch seams: the real
+// implementations over State, Store and the Services coordinator, plus the
+// Preparer that composes launch steps 3 to 5 and the pods.Loop that carries
+// them.
+package launch
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"time"
+
+	tea "charm.land/bubbletea/v2"
+	"github.com/hyperlab-sh/husk/internal/host/contracts"
+	"github.com/hyperlab-sh/husk/internal/pods"
+	"github.com/hyperlab-sh/husk/internal/pods/manifest"
+	"github.com/hyperlab-sh/husk/internal/services"
+	"github.com/hyperlab-sh/husk/internal/substrate/state"
+	"github.com/hyperlab-sh/husk/internal/substrate/store"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
+)
+
+// PodRegistry is the real husk.pods registry: launch steps 1 and 2 over the
+// State slice husk.pods. Reservations are loop-local; status writes are
+// merge patches on the slice value, so each update names only the fields it
+// changes. Loop-only.
+type PodRegistry struct {
+	state    *state.State
+	handle   *state.Handle
+	reserved map[string]bool
+}
+
+var _ contracts.PodRegistry = (*PodRegistry)(nil)
+
+// NewPodRegistry registers husk.pods (owner husk, instance scope, not
+// persisted) and returns its registry. Call it on the loop.
+func NewPodRegistry(st *state.State) (*PodRegistry, error) {
+	handle, err := st.Register(state.Spec{
+		Namespace: state.PodsNamespace,
+		Owner:     state.PodsOwner,
+		Scope:     state.ScopeInstance,
+		Initial:   json.RawMessage(`{"plugins":{}}`),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("launch: register husk.pods: %w", err)
+	}
+	return &PodRegistry{state: st, handle: handle, reserved: make(map[string]bool)}, nil
+}
+
+// Reserve claims pluginID for one launch; a duplicate returns the conflict
+// code and changes nothing.
+func (r *PodRegistry) Reserve(_ context.Context, pluginID string) error {
+	if r.reserved[pluginID] {
+		return contracts.NewError(protocol.CodeConflict, "duplicate plugin id", nil)
+	}
+	r.reserved[pluginID] = true
+	return nil
+}
+
+// SetStatus merges upd into the plugin's husk.pods entry; an unreserved id is
+// not_found.
+func (r *PodRegistry) SetStatus(_ context.Context, pluginID string, upd contracts.PodStatusUpdate) error {
+	if !r.reserved[pluginID] {
+		return contracts.NewError(protocol.CodeNotFound, "unknown plugin id "+pluginID, nil)
+	}
+	entry := map[string]any{}
+	if upd.Status != "" {
+		entry["status"] = string(upd.Status)
+	}
+	if upd.Detail != nil {
+		if *upd.Detail == "" {
+			entry["last_error"] = nil // merge-patch null clears the field
+		} else {
+			entry["last_error"] = *upd.Detail
+		}
+	}
+	if upd.PID != nil {
+		entry["pid"] = *upd.PID
+	}
+	if upd.StartedAt != nil {
+		entry["started_at"] = upd.StartedAt.Format(time.RFC3339Nano)
+	}
+	if upd.LogPath != nil {
+		entry["log"] = *upd.LogPath
+	}
+	return r.patchEntry(pluginID, entry)
+}
+
+// Release forgets pluginID and removes its husk.pods entry (Pod teardown).
+func (r *PodRegistry) Release(_ context.Context, pluginID string) {
+	if !r.reserved[pluginID] {
+		return
+	}
+	delete(r.reserved, pluginID)
+	_ = r.patchEntry(pluginID, nil) // teardown is best effort; Store declarations were already removed
+}
+
+// patchEntry applies a merge patch for one plugin's entry: an object merges
+// field by field, nil removes the entry.
+func (r *PodRegistry) patchEntry(pluginID string, entry any) error {
+	patch := map[string]any{"plugins": map[string]any{pluginID: entry}}
+	raw, err := json.Marshal(patch)
+	if err != nil {
+		return err
+	}
+	if _, err := r.handle.Patch(raw, 0); err != nil {
+		return fmt.Errorf("launch: patch husk.pods for %s: %w", pluginID, err)
+	}
+	return nil
+}
+
+// CatalogDeclarer is launch step 3's Store half: one atomic Declare per
+// document name and plugin id, replacing the plugin's earlier declarations.
+// It may run off the loop.
+type CatalogDeclarer struct {
+	Store *store.Store
+}
+
+var _ contracts.CatalogDeclarer = CatalogDeclarer{}
+
+// Declare stores the plugin's catalog and focus-keymap documents.
+func (c CatalogDeclarer) Declare(pluginID string, catalog, focusKeymap json.RawMessage) error {
+	catalogDoc, err := decodeDoc(catalog)
+	if err != nil {
+		return fmt.Errorf("launch: plugin %s catalog: %w", pluginID, err)
+	}
+	focusDoc, err := decodeDoc(focusKeymap)
+	if err != nil {
+		return fmt.Errorf("launch: plugin %s focus-keymap: %w", pluginID, err)
+	}
+	c.Store.Declare(store.DeclaredPlugins, pluginID, catalogDoc)
+	c.Store.Declare(store.DeclaredFocusKeymap, pluginID, focusDoc)
+	return nil
+}
+
+// Undeclare removes both declared documents (Pod teardown only).
+func (c CatalogDeclarer) Undeclare(pluginID string) {
+	c.Store.Undeclare(pluginID)
+}
+
+func decodeDoc(raw json.RawMessage) (store.Doc, error) {
+	if len(raw) == 0 {
+		return nil, fmt.Errorf("empty document")
+	}
+	var doc store.Doc
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	if err := dec.Decode(&doc); err != nil {
+		return nil, err
+	}
+	return doc, nil
+}
+
+// Reloader is launch step 3's Services half: one reload with reason "plugin".
+type Reloader struct {
+	Coordinator *services.Coordinator
+}
+
+var _ contracts.Reloader = Reloader{}
+
+// Reload blocks until the reload has completed (failed and timed-out reloads
+// included) and translates reports into host problems.
+func (r Reloader) Reload(ctx context.Context) (bool, []contracts.Problem) {
+	reports, err := r.Coordinator.Reload(ctx, services.ReasonPlugin)
+	if err != nil {
+		return false, []contracts.Problem{{Severity: "error", Layer: "services", Message: err.Error()}}
+	}
+	applied := true
+	var problems []contracts.Problem
+	for _, report := range reports {
+		if !report.Applied {
+			applied = false
+		}
+		for _, p := range report.Problems {
+			problems = append(problems, contracts.Problem{Severity: p.Severity, Layer: p.Layer, Key: p.Key, Message: p.Message})
+		}
+	}
+	return applied, problems
+}
+
+// SliceRegistrar is launch step 4 over State.
+type SliceRegistrar struct {
+	State *state.State
+}
+
+var _ contracts.SliceRegistrar = SliceRegistrar{}
+
+// RegisterSlice registers spec and returns the owner handle.
+func (s SliceRegistrar) RegisterSlice(spec state.Spec) (contracts.SliceHandle, error) {
+	return s.State.Register(spec)
+}
+
+// Preparer composes launch steps 3 to 5 for one batch against the seams: for
+// each spec the catalog and focus-keymap documents are declared atomically and
+// the plugin slice registered, then one shared Services reload is requested
+// and awaited. The reload's completion — applied or not — is the launch gate,
+// so a failed or timed-out reload never blocks the batch; per-plugin
+// declaration or registration failures mark only that plugin failed. It runs
+// in a tea.Cmd worker and may block.
+type Preparer struct {
+	Catalog contracts.CatalogDeclarer
+	Slices  contracts.SliceRegistrar
+	Reload  contracts.Reloader
+}
+
+// Prepare implements pods.Loop.Prepare. It runs in a tea.Cmd worker: the
+// Store declarations and the Services reload are off-loop work. State writes
+// are loop-only, so slice registrations are marshaled back as closures the
+// loop applies from Preparation.Register — never executed here.
+func (p Preparer) Prepare(ctx context.Context, specs []manifest.Spec) pods.Preparation {
+	failed := make(map[string]error)
+	register := make(map[string]func() error)
+	for _, spec := range specs {
+		catalog, err := spec.CatalogJSON()
+		if err != nil {
+			failed[spec.ID] = fmt.Errorf("catalog: %w", err)
+			continue
+		}
+		focus, err := spec.FocusKeymapJSON()
+		if err != nil {
+			failed[spec.ID] = fmt.Errorf("focus-keymap: %w", err)
+			continue
+		}
+		if p.Catalog != nil {
+			if err := p.Catalog.Declare(spec.ID, catalog, focus); err != nil {
+				failed[spec.ID] = err
+				continue
+			}
+		}
+		if spec.Slice != nil && p.Slices != nil {
+			slice := sliceSpec(spec.ID, spec.Slice)
+			register[spec.ID] = func() error {
+				if _, err := p.Slices.RegisterSlice(slice); err != nil {
+					return err
+				}
+				return nil
+			}
+		}
+	}
+	var reloadErr error
+	if p.Reload != nil {
+		applied, problems := p.Reload.Reload(ctx)
+		if !applied || len(problems) > 0 {
+			reloadErr = reloadError{applied: applied, problems: problems}
+		}
+	}
+	return pods.Preparation{Failed: failed, ReloadError: reloadErr, Register: register}
+}
+
+// reloadError is the non-blocking launch-gate error carried by Preparation.
+type reloadError struct {
+	applied  bool
+	problems []contracts.Problem
+}
+
+func (e reloadError) Error() string {
+	if len(e.problems) == 0 {
+		return "plugin reload completed without being applied"
+	}
+	out := "plugin reload problems:"
+	for _, p := range e.problems {
+		out += fmt.Sprintf(" [%s/%s%s] %s", p.Severity, p.Layer, p.Key, p.Message)
+	}
+	return out
+}
+
+// sliceSpec converts the manifest's slice declaration into the State
+// registration the Pod owns: namespace <plugin_id>.state, owner the plugin.
+func sliceSpec(pluginID string, decl *manifest.SliceDecl) state.Spec {
+	spec := state.Spec{
+		Namespace:  pluginID + ".state",
+		Owner:      pluginID,
+		Scope:      state.Scope(decl.Scope),
+		Persistent: decl.Persistent,
+		MaxBytes:   decl.MaxBytes,
+		Initial:    json.RawMessage(`{}`),
+	}
+	if decl.Retention != nil {
+		spec.Retention = state.Retention{
+			Policy: state.Policy(decl.Retention.Policy),
+			N:      decl.Retention.N,
+			TTL:    time.Duration(decl.Retention.TTL),
+		}
+	}
+	return spec
+}
+
+// Loop is the pods.Loop for the composed host: Prepare composes the launch
+// seams, Liveness writes husk.pods through the PodRegistry, and Post, Opening
+// and Log are injected by the composition root.
+type Loop struct {
+	// Context backs the seam calls Liveness makes; nil means Background.
+	Context context.Context
+	// Registry receives Liveness translations; nil drops them.
+	Registry contracts.PodRegistry
+	// Preparer serves Prepare.
+	Preparer Preparer
+	// PostFn delivers worker messages; nil drops them.
+	PostFn func(tea.Msg)
+	// OpeningFn builds a plugin's opening queue; nil means none.
+	OpeningFn func(pluginID string) []protocol.Message
+	// LogFn receives host log notices; nil drops them.
+	LogFn func(pods.LogMsg)
+}
+
+var _ pods.Loop = Loop{}
+
+// Post implements pods.Loop.Post.
+func (l Loop) Post(m tea.Msg) {
+	if l.PostFn != nil {
+		l.PostFn(m)
+	}
+}
+
+// Opening implements pods.Loop.Opening.
+func (l Loop) Opening(pluginID string) []protocol.Message {
+	if l.OpeningFn == nil {
+		return nil
+	}
+	return l.OpeningFn(pluginID)
+}
+
+// Prepare implements pods.Loop.Prepare.
+func (l Loop) Prepare(ctx context.Context, specs []manifest.Spec) pods.Preparation {
+	return l.Preparer.Prepare(ctx, specs)
+}
+
+// Liveness implements pods.Loop.Liveness by writing husk.pods.
+func (l Loop) Liveness(m pods.LivenessMsg) {
+	if l.Registry == nil {
+		return
+	}
+	upd := contracts.PodStatusUpdate{Status: contracts.PodStatus(m.Info.Status)}
+	if m.Info.LastError != "" {
+		upd.Detail = &m.Info.LastError
+	}
+	if m.Info.PID != 0 {
+		upd.PID = &m.Info.PID
+	}
+	if !m.Info.StartedAt.IsZero() {
+		upd.StartedAt = &m.Info.StartedAt
+	}
+	if m.Info.LogPath != "" {
+		upd.LogPath = &m.Info.LogPath
+	}
+	ctx := l.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := l.Registry.SetStatus(ctx, m.Info.PluginID, upd); err != nil {
+		if l.LogFn != nil {
+			l.LogFn(pods.LogMsg{Level: "warn", Message: fmt.Sprintf("husk.pods write failed for %s: %v", m.Info.PluginID, err)})
+		}
+	}
+}
+
+// Log implements pods.Loop.Log.
+func (l Loop) Log(m pods.LogMsg) {
+	if l.LogFn != nil {
+		l.LogFn(m)
+	}
+}
