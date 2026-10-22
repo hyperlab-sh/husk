@@ -4,91 +4,43 @@
 // (docs/docs/design/state.md, "Surfaces resolution").
 //
 // The declaration slices <plugin_id>.occupants and
-// <plugin_id>.contributions are written only by the owning Pod, through its
-// validated wrappers; the engine reads them from State snapshots and never
-// writes another owner's slice. husk.surfaces is the resolution: one
-// occupant per surface (first claim wins, conflicts refused) and the
-// combined per-slot contribution order, which the engine records itself in
-// first-observed order across ticks (D49). The host renders only from the
-// resolution.
+// <plugin_id>.contributions are written only by the owning Pod, through the
+// validated wrappers of the State surfaces package; the engine reads them
+// from State snapshots and never writes another owner's slice.
+// husk.surfaces is the resolution: one occupant per surface (first claim
+// wins, conflicts refused) and the combined per-slot contribution order,
+// which the engine records itself in first-observed order across ticks
+// (D49). The host renders only from the resolution.
 //
-// The value types here mirror the slice shapes defined by the State
-// surfaces package (contracts.Occupant and contracts.Contribution are the
-// frozen entry shapes); the engine registers the resolution slice through
-// state.Register until the shared registration helper lands.
+// The value types are the State surfaces package's (which freezes the
+// contracts entry shapes); the aliases below keep the engine's one-spelling
+// rule, and the engine registers the resolution slice through
+// RegisterSurfaces.
 package surfaces
 
 import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/hyperlab-sh/husk/internal/host/contracts"
 	"github.com/hyperlab-sh/husk/internal/substrate/state"
-	"github.com/hyperlab-sh/husk/pkg/protocol"
+	statessurfaces "github.com/hyperlab-sh/husk/internal/substrate/state/surfaces"
 )
 
-// Occupant is one surface a plugin claims for itself, the frozen contracts
-// shape.
-type Occupant = contracts.Occupant
-
-// Contribution is one entry a plugin puts in a published slot, the frozen
-// contracts shape.
-type Contribution = contracts.Contribution
-
-// Occupants is the value shape of an occupants declaration slice: the owning
-// plugin's claims, one Occupant per claimed surface, keyed by surface.
-type Occupants map[protocol.SurfaceID]Occupant
-
-// Contributions is the value shape of a contributions declaration slice:
-// the owning plugin's entries grouped by target slot, the plugin's own
-// order within each slot.
-type Contributions map[string][]Contribution
-
-// Surfaces is the value shape of husk.surfaces, the resolution slice. Only
-// the engine writes it; every other module and every plugin reads
-// snapshots. Visible, Placement and Overlays are host view state carried in
-// the same slice; the engine does not write them.
-type Surfaces struct {
-	// Occupants maps each occupied surface to its one occupant: the first
-	// claim wins and conflicting later claims are refused.
-	Occupants map[protocol.SurfaceID]Occupant `json:"occupants"`
-	// Contributions maps each published slot to its entries in the
-	// engine-recorded order: first-observed order across ticks, entries of
-	// a removed owner dropped.
-	Contributions map[string][]Contribution `json:"contributions"`
-	// Visible lists the surfaces the layout currently shows.
-	Visible []protocol.SurfaceID `json:"visible"`
-	// Placement is the active placement.
-	Placement Placement `json:"placement"`
-	// Overlays are the active host overlays.
-	Overlays Overlays `json:"overlays"`
-}
-
-// Placement is the active placement.
-type Placement struct {
-	RailItem string `json:"rail_item"`
-	Kind     string `json:"kind"`
-}
-
-// Overlays are the active host overlays.
-type Overlays struct {
-	Modal        ModalOverlay `json:"modal"`
-	Palette      bool         `json:"palette"`
-	SlotExplorer bool         `json:"slot_explorer"`
-}
-
-// ModalOverlay is the modal overlay: which plugin's rail item is open.
-type ModalOverlay struct {
-	Plugin   string `json:"plugin"`
-	RailItem string `json:"rail_item"`
-}
-
-// OccupantsNamespace returns the occupants declaration namespace of pluginID.
-func OccupantsNamespace(pluginID string) string { return pluginID + ".occupants" }
-
-// ContributionsNamespace returns the contributions declaration namespace of
-// pluginID.
-func ContributionsNamespace(pluginID string) string { return pluginID + ".contributions" }
+// The declaration and resolution value shapes, as defined by the State
+// surfaces package: the frozen contracts entries and their slice values.
+type (
+	// Occupant is one surface a plugin claims for itself.
+	Occupant = statessurfaces.Occupant
+	// Contribution is one entry a plugin puts in a published slot.
+	Contribution = statessurfaces.Contribution
+	// Occupants is the value shape of an occupants declaration slice.
+	Occupants = statessurfaces.Occupants
+	// Contributions is the value shape of a contributions declaration
+	// slice.
+	Contributions = statessurfaces.Contributions
+	// Surfaces is the value shape of husk.surfaces, the resolution slice.
+	Surfaces = statessurfaces.Surfaces
+)
 
 // splitDeclarationNamespace reports the plugin id and declaration kind of a
 // namespace, or ok=false when ns is not a declaration namespace. The core

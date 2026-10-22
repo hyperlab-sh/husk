@@ -30,7 +30,7 @@ func (p *SurfacePort) SurfaceUpdate(ctx context.Context, c contracts.Caller, par
 	if err := allowCaller(protocol.MethodSurfaceUpdate, c); err != nil {
 		return err
 	}
-	return coded(p.engine.SurfaceUpdate(c.PluginID, params))
+	return codedEngine(p.engine.SurfaceUpdate(c.PluginID, params))
 }
 
 // SurfaceClose serves surface.close (plugin callers only).
@@ -38,7 +38,7 @@ func (p *SurfacePort) SurfaceClose(ctx context.Context, c contracts.Caller, para
 	if err := allowCaller(protocol.MethodSurfaceClose, c); err != nil {
 		return err
 	}
-	return coded(p.engine.SurfaceClose(c.PluginID, params))
+	return codedEngine(p.engine.SurfaceClose(c.PluginID, params))
 }
 
 // SlotContribute serves slot.contribute (plugin callers only). Refusals are
@@ -47,7 +47,7 @@ func (p *SurfacePort) SlotContribute(ctx context.Context, c contracts.Caller, pa
 	if err := allowCaller(protocol.MethodSlotContribute, c); err != nil {
 		return err
 	}
-	return coded(p.engine.SlotContribute(c.PluginID, params))
+	return codedEngine(p.engine.SlotContribute(c.PluginID, params))
 }
 
 // ToastShow serves toast.show from a plugin or the CLI. A CLI caller's empty
@@ -56,7 +56,7 @@ func (p *SurfacePort) ToastShow(ctx context.Context, c contracts.Caller, params 
 	if err := allowCaller(protocol.MethodToastShow, c); err != nil {
 		return err
 	}
-	return coded(p.engine.ToastShow(c.PluginID, params))
+	return codedEngine(p.engine.ToastShow(c.PluginID, params))
 }
 
 // allowCaller reports whether c's kind may call method, per the homes the
@@ -88,9 +88,9 @@ func kindName(kind contracts.CallerKind) string {
 	}
 }
 
-// coded converts an engine refusal to a CodedError, passing its wire code
-// through unchanged.
-func coded(err error) error {
+// codedEngine converts an engine refusal to a CodedError, passing its wire
+// code through unchanged (the package's coded builds codes directly).
+func codedEngine(err error) error {
 	if err == nil {
 		return nil
 	}

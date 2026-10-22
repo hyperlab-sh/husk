@@ -8,6 +8,7 @@ import (
 
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
 	"github.com/hyperlab-sh/husk/internal/substrate/state"
+	statessurfaces "github.com/hyperlab-sh/husk/internal/substrate/state/surfaces"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
@@ -160,11 +161,7 @@ func New(st *state.State, opts Options) (*Engine, error) {
 	if opts.ToastTTL <= 0 {
 		opts.ToastTTL = DefaultToastTTL
 	}
-	slice, err := state.Register(st, state.Spec{
-		Namespace: state.SurfacesNamespace,
-		Owner:     state.SurfacesOwner,
-		Scope:     state.ScopeInstance,
-	}, Surfaces{Occupants: Occupants{}, Contributions: Contributions{}})
+	slice, err := statessurfaces.RegisterSurfaces(st)
 	if err != nil {
 		return nil, err
 	}
