@@ -1,11 +1,13 @@
 package pods
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
 	"github.com/hyperlab-sh/husk/internal/host/contracts/fakes"
 	"github.com/hyperlab-sh/husk/internal/pods/internal/testclock"
@@ -23,7 +25,9 @@ func (f starterFunc) Start(pluginID string, opening []protocol.Message) error {
 }
 
 // Launch step 1 through the PodRegistry seam: Reserve answers the duplicate
-// question and its conflict is Add's duplicate error.
+// question for ids the Host has not seen, and the local map check holds even
+// when the registry forgets an id (finding 6): a Pod already in this Host is
+// never replaced, so its credential cannot outlive its pod record.
 func TestAddReservesThroughPodRegistry(t *testing.T) {
 	rec := fakes.NewRecorder()
 	h, loop, _, procs := hostFixture(t)
@@ -32,10 +36,8 @@ func TestAddReservesThroughPodRegistry(t *testing.T) {
 	addPod(t, h, "files")
 	if _, err := h.Add(manifestSpec("files")); err == nil {
 		t.Fatal("duplicate id accepted")
-	} else if contracts.CodeOf(err) != string(protocol.CodeConflict) {
-		t.Fatalf("duplicate error code %q, want conflict", contracts.CodeOf(err))
 	}
-	if methods := rec.Methods(); !reflect.DeepEqual(methods, []string{"Pods.Reserve", "Pods.Reserve"}) {
+	if methods := rec.Methods(); !reflect.DeepEqual(methods, []string{"Pods.Reserve"}) {
 		t.Fatal("reserve calls", methods)
 	}
 	if len(loop.statuses) != 1 || loop.statuses[0].Info.Status != wrapper.Starting {
@@ -45,6 +47,30 @@ func TestAddReservesThroughPodRegistry(t *testing.T) {
 		t.Fatal("add launched a process")
 	}
 }
+
+// A registry that lost the id still cannot double-add: the Host's own map
+// answers the duplicate question before the reservation (finding 6).
+func TestAddDuplicateHoldsEvenWhenRegistryForgets(t *testing.T) {
+	h, _, _, _ := hostFixture(t)
+	h.opts.Registry = forgetfulRegistry{}
+
+	addPod(t, h, "files")
+	if _, err := h.Add(manifestSpec("files")); err == nil {
+		t.Fatal("duplicate id accepted through a forgetful registry")
+	}
+	if len(h.pods) != 1 {
+		t.Fatal("duplicate add replaced the pod", len(h.pods))
+	}
+}
+
+// forgetfulRegistry reserves every id without tracking it.
+type forgetfulRegistry struct{}
+
+func (forgetfulRegistry) Reserve(context.Context, string) error { return nil }
+func (forgetfulRegistry) SetStatus(context.Context, string, contracts.PodStatusUpdate) error {
+	return nil
+}
+func (forgetfulRegistry) Release(context.Context, string) {}
 
 // A spec that fails validation never claims a registry reservation.
 func TestAddValidatesBeforeReserve(t *testing.T) {
@@ -306,5 +332,55 @@ func TestLaunchFailedAppliedOnce(t *testing.T) {
 	}
 	if len(loop.logs) != 1 || loop.logs[0].Level != "error" {
 		t.Fatal("failure logs", loop.logs)
+	}
+}
+
+// A Start failure is synchronous (round-1 finding 5): the starter error is
+// returned by Start, the plugin goes starting -> failed and never reads live,
+// and the wrapper's own async LaunchFailedMsg for the same failure is
+// ignored — exactly one failed write and one error log after the drain.
+func TestStartFailureIsSynchronousAndNeverLive(t *testing.T) {
+	loop := &fakeLoop{events: make(chan tea.Msg, 128), ctx: t.Context()}
+	h, err := New(loop, Options{Wrapper: wrapper.Options{Clock: testclock.New()}, Factory: func(s manifest.Spec, o wrapper.Options) (wrapper.Process, error) {
+		p := &fakeProcess{id: s.ID, info: wrapper.Info{PluginID: s.ID, Status: wrapper.Starting}, opts: o, done: make(chan struct{}), term: make(chan struct{})}
+		p.startErr = errors.New("spawn refused")
+		return p, nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(h.cancel)
+
+	pod := addPod(t, h, "files")
+	prepareHost(t, h)
+
+	// The wrapper's async notices for the same failure drain through Handle.
+	for {
+		select {
+		case m := <-loop.events:
+			h.Handle(m)
+			continue
+		default:
+		}
+		break
+	}
+
+	var failed, live int
+	for _, s := range loop.statuses {
+		switch s.Info.Status {
+		case wrapper.Failed:
+			failed++
+		case wrapper.Live:
+			live++
+		}
+	}
+	if failed != 1 || live != 0 {
+		t.Fatalf("start failure liveness: failed=%d live=%d", failed, live)
+	}
+	if pod.info.Status != wrapper.Failed || pod.info.LastError != "spawn refused" {
+		t.Fatalf("pod state %+v", pod.info)
+	}
+	if len(loop.logs) != 1 || loop.logs[0].Level != "error" {
+		t.Fatal("error logs", loop.logs)
 	}
 }

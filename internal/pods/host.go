@@ -78,12 +78,16 @@ func (h *Host) Add(spec manifest.Spec) (*Pod, error) {
 	if err := spec.Validate(); err != nil {
 		return nil, err
 	}
+	// The local map check holds regardless of the registry: a Pod already in
+	// this Host must never be replaced (its credential would outlive the pod
+	// record), even if a registry lost track of the id.
+	if _, ok := h.pods[spec.ID]; ok {
+		return nil, errors.New("duplicate plugin id")
+	}
 	if h.opts.Registry != nil {
 		if err := h.opts.Registry.Reserve(h.ctx, spec.ID); err != nil {
 			return nil, err
 		}
-	} else if _, ok := h.pods[spec.ID]; ok {
-		return nil, errors.New("duplicate plugin id")
 	}
 	p := &Pod{spec: spec.Clone(), info: wrapper.Info{PluginID: spec.ID, Status: wrapper.Starting}, Decoration: decoration.PassThrough}
 	h.pods[spec.ID] = p
@@ -122,9 +126,13 @@ func (h *Host) Prepare() tea.Cmd {
 // Start is launch step 6's built-in WrapperStarter implementation, over the
 // Factory and the Wrapper: build the process, register its token before Start
 // so even an immediate exit revokes it, then report live when the Wrapper says
-// so. A Start failure is reported by the Wrapper's async LaunchFailedMsg, so
-// Start returns nil then; only construction failures return synchronously.
-// Loop-only.
+// so. Start is synchronous: nil is returned only once the process actually
+// started (liveness `live` is written exactly then), and a Start failure is
+// returned as the error — the caller reports the plugin failed from it, so a
+// never-started Pod never reads live and is not left `starting`. The Wrapper
+// still posts its own LaunchFailedMsg after the Closed notice for the same
+// failure; the Host applies the first report and ignores duplicates of the
+// same error. Loop-only.
 func (h *Host) Start(id string, opening []protocol.Message) error {
 	p, ok := h.pods[id]
 	if !ok {
@@ -142,9 +150,7 @@ func (h *Host) Start(id string, opening []protocol.Message) error {
 	h.register(id, process.Token()) // before Start: even an immediate exit revokes it
 	if err := process.Start(opening); err != nil {
 		h.revoke(id)
-		// Real wrappers post LaunchFailedMsg after Closed; fakes must obey
-		// the same contract. Do not bypass that message ordering here.
-		return nil
+		return err
 	}
 	p.info = process.Info()
 	if p.info.Status == wrapper.Live {
