@@ -170,10 +170,10 @@ func TestProfileFlagsUnknownDeletedAndLoopPost(t *testing.T) {
 	if err = p.Use(Caller{PluginID: "plugin"}, "work"); err == nil {
 		t.Fatal("plugin profile use")
 	}
-	if err = p.Use(Caller{}, "missing"); err == nil {
+	if err = p.Use(Caller{Kind: "cli"}, "missing"); err == nil {
 		t.Fatal("unknown profile")
 	}
-	if err = p.Use(Caller{}, "work"); err != nil {
+	if err = p.Use(Caller{Kind: "cli"}, "work"); err != nil {
 		t.Fatal(err)
 	}
 	if p.Active() != "" {
@@ -336,7 +336,7 @@ func TestSecretsConsentDigestTimeoutAndNoValueLeaks(t *testing.T) {
 	in := catalog("files")
 	report := apply(t, sec, in)
 	marker := "NEVER_LEAK_SECRET_VALUE"
-	if err = sec.Set(Caller{}, "git.token", []byte(marker)); err != nil {
+	if err = sec.Set(Caller{Kind: "cli"}, "git.token", []byte(marker)); err != nil {
 		t.Fatal(err)
 	}
 	plugin := Caller{Kind: "plugin", PluginID: "files"}
@@ -357,7 +357,7 @@ func TestSecretsConsentDigestTimeoutAndNoValueLeaks(t *testing.T) {
 	if value, err := sec.Read(plugin, "git.token"); err != nil || string(value) != marker {
 		t.Fatal("accepted grant failed", err)
 	}
-	if err = sec.Revoke(Caller{}, "files", "git.token"); err != nil {
+	if err = sec.Revoke(Caller{Kind: "cli"}, "files", "git.token"); err != nil {
 		t.Fatal(err)
 	}
 	(<-posts)()
@@ -371,17 +371,17 @@ func TestSecretsConsentDigestTimeoutAndNoValueLeaks(t *testing.T) {
 	if _, err = sec.Read(plugin, "git.token"); err == nil || !strings.Contains(err.Error(), "user_denied") {
 		t.Fatal("timeout denial", err)
 	}
-	if err = sec.Grant(Caller{}, "files", "git.token"); err != nil {
+	if err = sec.Grant(Caller{Kind: "cli"}, "files", "git.token"); err != nil {
 		t.Fatal(err)
 	}
 	(<-posts)()
 	in.Declared[store.DeclaredPlugins]["files"]["secret_requests"] = []any{map[string]any{"name": "git.token", "purpose": "Different"}}
 	apply(t, sec, in)
-	if gs, _ := sec.Grants(Caller{}); len(gs) != 0 {
+	if gs, _ := sec.Grants(Caller{Kind: "cli"}); len(gs) != 0 {
 		t.Fatal("digest failed to void grant")
 	}
 	crypto.err = errors.New(marker)
-	if _, err = sec.Read(Caller{}, "git.token"); err == nil || strings.Contains(err.Error(), marker) {
+	if _, err = sec.Read(Caller{Kind: "cli"}, "git.token"); err == nil || strings.Contains(err.Error(), marker) {
 		t.Fatal("crypto error leaked value")
 	}
 	serialized, _ := json.Marshal([]any{report, tree.Snapshot()})
@@ -503,8 +503,8 @@ func TestCoordinatorTimeoutPartialApplyNeverPublishesLate(t *testing.T) {
 	services := fakeServices()
 	entered := make(chan struct{})
 	gate := make(chan struct{})
-	finished := make(chan struct{})
-	services["theme"].(*fakeService).run = func(context.Context) { close(entered); <-gate; close(finished) }
+	probe := &lateProbeService{entered: entered, gate: gate, prepared: make(chan Candidate, 1)}
+	services["theme"] = probe
 	clock := clock()
 	co, _ := NewCoordinator(Options{Store: &fakeStore{}, Services: services, Clock: clock})
 	defer co.Close()
@@ -523,10 +523,17 @@ func TestCoordinatorTimeoutPartialApplyNeverPublishesLate(t *testing.T) {
 		t.Fatal(reports)
 	}
 	close(gate)
-	<-finished
-	if services["theme"].Generation() != 0 {
-		t.Fatal("late candidate published")
+	lateCandidate := <-probe.prepared
+	if probe.Generation() != 0 {
+		t.Fatal("coordinator applied a late candidate")
 	}
+	// Positive control: unlike a context-guarded fake, this candidate really
+	// can publish after cancellation. The coordinator must be what discards it.
+	lateCandidate.Apply()
+	if probe.Generation() != 1 {
+		t.Fatal("late-publication probe cannot fail the assertion")
+	}
+
 }
 func TestCoordinatorStoreFailureDoesNotPrepareAnyService(t *testing.T) {
 	services := fakeServices()

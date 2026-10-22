@@ -64,7 +64,6 @@ type Options struct {
 }
 type flight struct {
 	done     chan struct{}
-	start    chan struct{}
 	reason   Reason
 	captured bool // protected by Coordinator.mu; set before gathering Store inputs
 	reports  []Report
@@ -136,45 +135,41 @@ func (co *Coordinator) ReloadFor(ctx context.Context, caller Caller) ([]Report, 
 	return co.Reload(ctx, ReasonCLI)
 }
 
-// Reload prepares on worker goroutines but owns all candidate application on
-// this caller's goroutine. A late worker cannot publish any snapshot.
+// Reload waits for a coordinator-owned flight. The caller's context controls
+// only this wait; cancellation cannot poison another requester's shared work.
 func (co *Coordinator) Reload(ctx context.Context, reason Reason) ([]Report, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	co.mu.Lock()
-	if co.active == nil {
-		f := &flight{done: make(chan struct{}), reason: reason}
-		co.active = f
-		co.mu.Unlock()
-		return co.execute(ctx, f)
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
+	co.mu.Lock()
 	f := co.active
-	owner := false
-	if f.captured {
+	start := f == nil
+	if start {
+		f = &flight{done: make(chan struct{}), reason: reason}
+		co.active = f
+	} else if f.captured {
 		if co.queued == nil {
-			co.queued = &flight{done: make(chan struct{}), start: make(chan struct{}), reason: reason}
-			owner = true
+			co.queued = &flight{done: make(chan struct{}), reason: reason}
 		}
 		f = co.queued
 	}
 	co.mu.Unlock()
-	select {
-	case co.joined <- struct{}{}:
-	default:
-	}
-	if owner {
+	if start {
+		go co.execute(f)
+	} else {
 		select {
-		case <-f.start:
-			return co.execute(ctx, f)
-		case <-ctx.Done():
-			// Preserve queue ownership even when this waiter leaves early.
-			go func() { <-f.start; co.execute(ctx, f) }()
-			return nil, ctx.Err()
+		case co.joined <- struct{}{}:
+		default:
 		}
 	}
 	select {
 	case <-f.done:
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		return c.Clone(f.reports), f.err
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -182,19 +177,19 @@ func (co *Coordinator) Reload(ctx context.Context, reason Reason) ([]Report, err
 		return nil, co.ctx.Err()
 	}
 }
-func (co *Coordinator) execute(ctx context.Context, f *flight) ([]Report, error) {
-	reports, err := co.reload(ctx, f.reason, f)
+func (co *Coordinator) execute(f *flight) {
+	reports, err := co.reload(co.ctx, f.reason, f)
 	co.mu.Lock()
 	f.reports = c.Clone(reports)
 	f.err = err
 	close(f.done)
 	co.active = co.queued
 	co.queued = nil
-	if co.active != nil {
-		close(co.active.start)
-	}
+	next := co.active
 	co.mu.Unlock()
-	return c.Clone(reports), err
+	if next != nil {
+		go co.execute(next)
+	}
 }
 
 type inputResult struct {
