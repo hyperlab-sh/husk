@@ -350,14 +350,15 @@ func (s *Store) Invalidate() {
 	s.resolved = map[docKey]Resolved{}
 }
 
-// Profiles lists validated profile directory names in distribution and user layers.
-func (s *Store) Profiles() []string {
-	set := map[string]bool{}
+// ProfileSources returns profile provenance off-loop, without interpreting any
+// configuration. A user directory of the same name overrides distribution.
+func (s *Store) ProfileSources() map[string]Layer {
+	set := map[string]Layer{}
 	if s.opts.Distribution != nil {
 		entries, _ := fs.ReadDir(s.opts.Distribution, "profiles")
 		for _, e := range entries {
 			if e.IsDir() && validProfile(e.Name()) {
-				set[e.Name()] = true
+				set[e.Name()] = LayerDistribution
 			}
 		}
 	}
@@ -366,10 +367,16 @@ func (s *Store) Profiles() []string {
 		entries, _ := os.ReadDir(path)
 		for _, e := range entries {
 			if e.IsDir() && e.Type()&os.ModeSymlink == 0 && validProfile(e.Name()) {
-				set[e.Name()] = true
+				set[e.Name()] = LayerUser
 			}
 		}
 	}
+	return set
+}
+
+// Profiles lists validated profile directory names in distribution and user layers.
+func (s *Store) Profiles() []string {
+	set := s.ProfileSources()
 	out := make([]string, 0, len(set))
 	for n := range set {
 		out = append(out, n)
