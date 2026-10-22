@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
 	portsservices "github.com/hyperlab-sh/husk/internal/host/ports/services"
+	"github.com/hyperlab-sh/husk/internal/pods"
 	"github.com/hyperlab-sh/husk/internal/pods/wrapper"
 	"github.com/hyperlab-sh/husk/internal/stem/dispatcher"
 	"github.com/hyperlab-sh/husk/internal/substrate/state"
@@ -65,11 +67,21 @@ func (r *Root) InvokeAction(action string, args map[string]any, reply func(map[s
 }
 
 // RegisterHostAction implements contracts.Frontend. Loop only.
-func (r *Root) RegisterHostAction(id string, handler contracts.HostActionHandler) {
+func (r *Root) RegisterHostAction(id string, handler contracts.HostActionHandler) error {
 	if handler == nil {
 		delete(r.hostActions, id)
 		r.disp.RegisterHost(id, nil)
-		return
+		return nil
+	}
+	if !dispatcher.ValidActionID(id) {
+		return contracts.NewError(protocol.CodeInvalidParams, fmt.Sprintf("host action id %q is not a well-formed action id", id), nil)
+	}
+	decls := r.declaredPlugins()
+	if owner, ok := decls.actions[id]; ok {
+		return contracts.NewError(protocol.CodeConflict, fmt.Sprintf("action %q belongs to plugin %q; a host action would shadow it", id, owner), nil)
+	}
+	if !strings.HasPrefix(id, "husk.") && !decls.railIDs[id] {
+		return contracts.NewError(protocol.CodeInvalidParams, fmt.Sprintf("host action %q is neither a husk.* action nor a declared rail item id", id), nil)
 	}
 	if r.hostActions == nil {
 		r.hostActions = map[string]bool{}
@@ -94,6 +106,7 @@ func (r *Root) RegisterHostAction(id string, handler contracts.HostActionHandler
 		}
 		return dispatcher.ActionReply{Result: res}
 	})
+	return nil
 }
 
 // hostActionDefs lists the registered host actions for the Dispatcher's
@@ -154,32 +167,78 @@ func (r *Root) deliver(plugin, method string, params any) error {
 	return nil
 }
 
-// RailItems implements contracts.Frontend.
-func (r *Root) RailItems() []contracts.RailItem {
+// declaredPlugin is what the frontend reads from one declared plugins
+// document.
+type declaredPlugin struct {
+	Actions []struct {
+		ID string `json:"id"`
+	} `json:"actions"`
+	RailItems []contracts.RailItem `json:"rail_items"`
+}
+
+// declaredIndex indexes the declared plugins documents.
+type declaredIndex struct {
+	railIDs map[string]bool
+	actions map[string]string // action id -> declaring plugin
+}
+
+// declaredPlugins decodes every declared plugins document, in plugin id
+// order. A document that does not decode is skipped and reported once.
+func (r *Root) declaredPlugins() declaredIndex {
+	idx, _ := r.readDeclared()
+	return idx
+}
+
+func (r *Root) readDeclared() (declaredIndex, []contracts.RailItem) {
 	docs := r.store.Declared(store.DeclaredPlugins)
 	ids := make([]string, 0, len(docs))
 	for id := range docs {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
-	out := []contracts.RailItem{}
+	idx := declaredIndex{railIDs: map[string]bool{}, actions: map[string]string{}}
+	items := []contracts.RailItem{}
 	for _, id := range ids {
 		raw, err := json.Marshal(docs[id])
+		var d declaredPlugin
+		if err == nil {
+			err = json.Unmarshal(raw, &d)
+		}
 		if err != nil {
+			r.warnDeclaredOnce(id, err)
 			continue
 		}
-		var d struct {
-			RailItems []contracts.RailItem `json:"rail_items"`
-		}
-		if json.Unmarshal(raw, &d) != nil {
-			continue
+		for _, a := range d.Actions {
+			idx.actions[a.ID] = id
 		}
 		for _, item := range d.RailItems {
 			item.Plugin = id
-			out = append(out, item)
+			idx.railIDs[item.ID] = true
+			items = append(items, item)
 		}
 	}
-	return out
+	return idx, items
+}
+
+// warnDeclaredOnce reports an undecodable plugins document the first time it
+// is seen for plugin id. Any goroutine.
+func (r *Root) warnDeclaredOnce(id string, err error) {
+	r.declWarnMu.Lock()
+	defer r.declWarnMu.Unlock()
+	if r.declWarned == nil {
+		r.declWarned = map[string]bool{}
+	}
+	if r.declWarned[id] {
+		return
+	}
+	r.declWarned[id] = true
+	r.log(pods.LogMsg{PluginID: id, Level: "warn", Message: fmt.Sprintf("declared plugins document skipped: %v", err)})
+}
+
+// RailItems implements contracts.Frontend.
+func (r *Root) RailItems() []contracts.RailItem {
+	_, items := r.readDeclared()
+	return items
 }
 
 // OwnSlices implements contracts.Frontend.

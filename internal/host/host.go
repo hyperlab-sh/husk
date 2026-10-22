@@ -69,10 +69,12 @@ type Root struct {
 	instStart time.Time
 
 	// Frontend support.
-	frontendSlices *contracts.FrontendSlices // set once by OwnSlices
-	hostActions    map[string]bool           // ids bound by RegisterHostAction
-	sizesDirty     bool                      // geometry, focus or visibility changed this tick
-	lastSizes      map[protocol.SurfaceID]protocol.SurfaceSize
+	frontendSlices *contracts.FrontendSlices         // set once by OwnSlices
+	hostActions    map[string]bool                   // ids bound by RegisterHostAction
+	sizesDirty     bool                              // geometry, focus or visibility changed this tick
+	lastSizes      map[protocol.SurfaceID]pushedSize // what each surface's occupant was last told
+	declWarnMu     sync.Mutex                        // guards declWarned
+	declWarned     map[string]bool                   // plugins whose declared document failed to decode
 
 	// Lifecycle.
 	live      atomicBool   // New returned: the loop may be running
