@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
 	"github.com/hyperlab-sh/husk/internal/host/contracts/fakes"
 	"github.com/hyperlab-sh/husk/internal/host/ports/launch"
+	"github.com/hyperlab-sh/husk/internal/host/ports/stem"
 	"github.com/hyperlab-sh/husk/internal/pods"
 	"github.com/hyperlab-sh/husk/internal/pods/manifest"
 	"github.com/hyperlab-sh/husk/internal/pods/wrapper"
@@ -57,28 +59,81 @@ func specWithSlice(id string) manifest.Spec {
 	return s
 }
 
-// recordedLoop is a launch.Loop test double that also records posts and logs.
+// recordedLoop is a launch.Loop test double that also records posts and
+// logs. Its PostFn delivers to a serial executor goroutine running
+// Host.Handle, the shape a real composition has: workers post, the loop
+// applies, and the RegisterSlicesMsg acknowledgment orders slice
+// registration before the reload request.
 type recordedLoop struct {
 	launch.Loop
+	mu     sync.Mutex
 	posted []tea.Msg
 	logs   []pods.LogMsg
+	work   chan func()
 }
 
 func newRecordedLoop(ctx context.Context, registry contracts.PodRegistry, preparer launch.Preparer, starter contracts.WrapperStarter, opening []protocol.Message) (*recordedLoop, *pods.Host) {
-	l := &recordedLoop{}
+	l := &recordedLoop{work: make(chan func(), 128)}
+	var h *pods.Host
 	l.Loop = launch.Loop{
-		Context:   ctx,
-		Registry:  registry,
-		Preparer:  preparer,
-		PostFn:    func(m tea.Msg) { l.posted = append(l.posted, m) },
+		Context:  ctx,
+		Registry: registry,
+		Preparer: preparer,
+		PostFn: func(m tea.Msg) {
+			l.mu.Lock()
+			l.posted = append(l.posted, m)
+			l.mu.Unlock()
+			l.work <- func() { h.Handle(m) }
+		},
 		OpeningFn: func(string) []protocol.Message { return opening },
-		LogFn:     func(m pods.LogMsg) { l.logs = append(l.logs, m) },
+		LogFn:     func(m pods.LogMsg) { l.mu.Lock(); l.logs = append(l.logs, m); l.mu.Unlock() },
 	}
 	h, err := pods.New(l, pods.Options{Registry: registry, Starter: starter})
 	if err != nil {
 		panic(err)
 	}
+	go func() {
+		for f := range l.work {
+			f()
+		}
+	}()
 	return l, h
+}
+
+// sync blocks until everything delivered before it has run on the executor.
+func (l *recordedLoop) sync(t *testing.T) {
+	t.Helper()
+	done := make(chan struct{})
+	l.work <- func() { close(done) }
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("recorded loop executor stalled")
+	}
+}
+
+// countStatusWrites counts one plugin's registry writes of one status.
+func countStatusWrites(rec *fakes.Recorder, id string, status contracts.PodStatus) int {
+	n := 0
+	for _, call := range rec.Calls() {
+		if call.Method == "Pods.SetStatus" && call.Args[0] == id && call.Args[1] == status {
+			n++
+		}
+	}
+	return n
+}
+
+// countLogs counts recorded loop logs for one plugin at one level.
+func countLogs(l *recordedLoop, id, level string) int {
+	n := 0
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, m := range l.logs {
+		if m.PluginID == id && m.Level == level {
+			n++
+		}
+	}
+	return n
 }
 
 // Criterion 1: the six launch steps in pods.md order, asserted through one
@@ -118,8 +173,8 @@ func TestLaunchSequenceOrder(t *testing.T) {
 		"Pods.SetStatus",       // step 2: notes starting
 		"Catalog.Declare",      // step 3: files (worker)
 		"Catalog.Declare",      // step 3: notes (worker)
-		"Reloader.Reload",      // step 3/5: one reload for the batch (worker)
-		"Slices.RegisterSlice", // step 4: marshaled back, applied on the loop
+		"Slices.RegisterSlice", // step 4: on the loop, acknowledged, BEFORE the reload (D56)
+		"Reloader.Reload",      // step 3/5: one reload for the batch, requested after the ack
 		"Wrapper.Start",        // step 6: files after the gate
 		"Pods.SetStatus",       // live
 		"Wrapper.Start",        // step 6: notes
@@ -186,9 +241,10 @@ func TestFailedReloadStillOpensGate(t *testing.T) {
 	}
 }
 
-// A slice-registration failure is discovered on the loop, when the worker's
-// marshaled write is applied: that plugin fails with no Wrapper start, and
-// the batch continues (step 4 failure behaves like a declaration failure).
+// A slice-registration failure is discovered on the loop, when the batch's
+// RegisterSlicesMsg is applied and acknowledged: that plugin fails with no
+// Wrapper start, the batch continues, and the failure is reported exactly
+// once — one failed status write, one error log (round-1 finding 3).
 func TestRegisterFailureFailsOnlyThatPlugin(t *testing.T) {
 	rec := fakes.NewRecorder()
 	slices := fakes.NewSlices(rec)
@@ -197,7 +253,7 @@ func TestRegisterFailureFailsOnlyThatPlugin(t *testing.T) {
 	reload.Applied = true
 	starter := fakes.NewWrapper(rec)
 
-	_, h := newRecordedLoop(t.Context(), fakes.NewPods(rec), launch.Preparer{Slices: slices, Reload: reload}, starter, nil)
+	loop, h := newRecordedLoop(t.Context(), fakes.NewPods(rec), launch.Preparer{Slices: slices, Reload: reload}, starter, nil)
 	declared, err := h.Add(specWithSlice("files"))
 	if err != nil {
 		t.Fatal(err)
@@ -222,6 +278,17 @@ func TestRegisterFailureFailsOnlyThatPlugin(t *testing.T) {
 	}
 	if !strings.Contains(declared.Info().LastError, "slice already registered") {
 		t.Fatal("registration error not surfaced", declared.Info().LastError)
+	}
+	// Single failure handling: one starting write, one failed write, one
+	// error log for the failed plugin.
+	if n := countStatusWrites(rec, "files", contracts.PodStarting); n != 1 {
+		t.Fatal("starting writes", n)
+	}
+	if n := countStatusWrites(rec, "files", contracts.PodFailed); n != 1 {
+		t.Fatal("failed writes", n)
+	}
+	if n := countLogs(loop, "files", "error"); n != 1 {
+		t.Fatal("error logs", n)
 	}
 }
 
@@ -501,6 +568,31 @@ func TestLaunchIntegrationRealSeams(t *testing.T) {
 		}
 	}
 
+	// The plugin's owner handle is stored on the Host and retrievable through
+	// the slice lookup the Stem State port writes through (D55); the plugin
+	// can set and patch its own slice through the real port.
+	if _, ok := pods.NewPodSlices(h).Handle("files", "files.state"); !ok {
+		t.Fatal("files slice handle not stored on the host")
+	}
+	stemWork := make(chan func(), 64)
+	defer close(stemWork)
+	go func() {
+		for f := range stemWork {
+			f()
+		}
+	}()
+	port := stem.NewStatePort(stem.StatePortOptions{State: tree, Loop: stemTestLoop{work: stemWork}, Handles: pods.NewPodSlices(h)})
+	caller := contracts.Caller{Kind: contracts.CallerPlugin, PluginID: "files"}
+	if _, err := port.Set(t.Context(), caller, "files.state", json.RawMessage(`{"open":[]}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := port.Patch(t.Context(), caller, "files.state", json.RawMessage(`{"cursor":"x"}`), 0); err != nil {
+		t.Fatal(err)
+	}
+	if value := tree.Snapshot().Slices["files.state"].Value; string(value) != `{"cursor":"x","open":[]}` {
+		t.Fatalf("slice after plugin writes: %s", value)
+	}
+
 	// The fake starter started both plugins with the opening queue.
 	var startedCount int
 	for _, call := range rec.Calls() {
@@ -602,12 +694,95 @@ func TestRelaunchRedeclaresAndReregisters(t *testing.T) {
 	}
 }
 
+// stemTestLoop runs the Stem port's loop work on the test's serial queue.
+type stemTestLoop struct{ work chan func() }
+
+func (l stemTestLoop) Do(ctx context.Context, fn func()) error {
+	done := make(chan struct{})
+	l.work <- func() { fn(); close(done) }
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (l stemTestLoop) Post(fn func()) bool {
+	select {
+	case l.work <- fn:
+		return true
+	default:
+		return false
+	}
+}
+
+// Teardown is the loop half of Pod teardown: the plugin's slice is
+// unregistered through its stored owner handle, the registry id released,
+// the credential revoked, and the id is launchable again. Store
+// undeclaration and the follow-up reload belong to the composition root.
+func TestTeardownUnregistersSliceAndReleasesId(t *testing.T) {
+	st := openStore(t)
+	tree := state.New(state.Options{})
+	svc := newServiceStack(t, st, tree, fakeClock{now: time.Unix(0, 0)})
+	registry, err := launch.NewPodRegistry(tree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := fakes.NewRecorder()
+	_, h := newRecordedLoop(t.Context(), registry, launch.Preparer{
+		Catalog: launch.CatalogDeclarer{Store: st},
+		Slices:  launch.SliceRegistrar{State: tree},
+		Reload:  launch.Reloader{Coordinator: svc.runtime.Coordinator},
+	}, fakes.NewWrapper(rec), nil)
+	if _, err := h.Add(specWithSlice("files")); err != nil {
+		t.Fatal(err)
+	}
+	if !h.Handle(h.Prepare()()) {
+		t.Fatal("launch failed")
+	}
+	if _, ok := pods.NewPodSlices(h).Handle("files", "files.state"); !ok {
+		t.Fatal("slice handle missing before teardown")
+	}
+
+	if !h.Handle(h.Teardown("files")()) {
+		t.Fatal("teardown not handled")
+	}
+
+	if _, ok := tree.Snapshot().Slices["files.state"]; ok {
+		t.Fatal("teardown left the plugin slice registered")
+	}
+	if _, ok := h.Pod("files"); ok {
+		t.Fatal("teardown left the pod registered")
+	}
+	var podsValue struct {
+		Plugins map[string]map[string]any `json:"plugins"`
+	}
+	if err := json.Unmarshal(tree.Snapshot().Slices[state.PodsNamespace].Value, &podsValue); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := podsValue.Plugins["files"]; ok {
+		t.Fatal("teardown left the registry entry")
+	}
+
+	// The id is launchable again on the same tree.
+	if _, err := h.Add(specWithSlice("files")); err != nil {
+		t.Fatal("re-add after teardown", err)
+	}
+	if !h.Handle(h.Prepare()()) {
+		t.Fatal("relaunch after teardown failed")
+	}
+	if _, ok := tree.Snapshot().Slices["files.state"]; !ok {
+		t.Fatal("relaunch did not re-register the slice")
+	}
+}
+
 // Criterion 4: a secret request is a declaration — name, purpose, required —
 // with no value field anywhere, so the launch path cannot carry secret
 // material into the Wrapper, the spec, or the environment. The wrapper env is
 // pinned in the wrapper's own tests to inherited-minus-HUSK_* plus HUSK_*
 // runtime variables only.
-func TestSecretsNeverReachTheProcessEnvironment(t *testing.T) {
+func TestSecretRequestsAreDeclarationsOnly(t *testing.T) {
 	for _, req := range specWithSlice("files").SecretRequests {
 		raw, err := json.Marshal(req)
 		if err != nil {
@@ -649,6 +824,7 @@ func TestImportsStayWithinAllowList(t *testing.T) {
 			"github.com/hyperlab-sh/husk/internal/host/contracts",
 			"github.com/hyperlab-sh/husk/internal/host/contracts/fakes",
 			"github.com/hyperlab-sh/husk/internal/host/ports/launch",
+			"github.com/hyperlab-sh/husk/internal/host/ports/stem", // integration test only: the State port writing through the Pod-held handle
 			"github.com/hyperlab-sh/husk/internal/pods",
 			"github.com/hyperlab-sh/husk/internal/pods/manifest",
 			"github.com/hyperlab-sh/husk/internal/pods/wrapper",

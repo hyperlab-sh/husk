@@ -12,6 +12,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/hyperlab-sh/husk/internal/host/contracts"
 	"github.com/hyperlab-sh/husk/internal/pods/decoration"
 	"github.com/hyperlab-sh/husk/internal/pods/manifest"
 	"github.com/hyperlab-sh/husk/internal/pods/wrapper"
@@ -28,6 +29,7 @@ type Host struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
 	pods      map[string]*Pod
+	handles   map[string]contracts.SliceHandle
 	gates     map[uint64][]string
 	preparing map[string]bool
 	nextGate  uint64
@@ -63,7 +65,7 @@ func New(loop Loop, opts Options) (*Host, error) {
 	if opts.Factory == nil {
 		opts.Factory = func(s manifest.Spec, o wrapper.Options) (wrapper.Process, error) { return wrapper.New(s, o) }
 	}
-	return &Host{loop: loop, opts: opts, ctx: ctx, cancel: cancel, pods: make(map[string]*Pod), gates: make(map[uint64][]string), preparing: make(map[string]bool), tokens: make(map[string]string), byPlugin: make(map[string]string)}, nil
+	return &Host{loop: loop, opts: opts, ctx: ctx, cancel: cancel, pods: make(map[string]*Pod), handles: make(map[string]contracts.SliceHandle), gates: make(map[uint64][]string), preparing: make(map[string]bool), tokens: make(map[string]string), byPlugin: make(map[string]string)}, nil
 }
 
 // Add registers a starting Pod but never starts it. Duplicate ids fail without
@@ -168,19 +170,10 @@ func (h *Host) Handle(msg tea.Msg) bool {
 		if m.Preparation.ReloadError != nil {
 			h.loop.Log(LogMsg{Level: "warn", Message: "plugin preparation reload completed with errors: " + m.Preparation.ReloadError.Error()})
 		}
-		// Step 4 on the loop: apply the State writes the worker marshaled
-		// back. A write failure fails that plugin; the batch continues.
-		if len(m.Preparation.Register) > 0 {
-			for _, id := range slices.Sorted(maps.Keys(m.Preparation.Register)) {
-				if err := m.Preparation.Register[id](); err != nil {
-					if m.Preparation.Failed == nil {
-						m.Preparation.Failed = make(map[string]error)
-					}
-					m.Preparation.Failed[id] = fmt.Errorf("slice registration: %w", err)
-					h.Handle(LaunchFailedMsg{PluginID: id, Err: m.Preparation.Failed[id]})
-				}
-			}
-		}
+		// Slice registrations were already applied on the loop through
+		// RegisterSlicesMsg before the reload was requested; their failures
+		// arrive in Failed and are handled once here, with the declaration
+		// failures.
 		for _, id := range ids {
 			p := h.pods[id]
 			if err := m.Preparation.Failed[id]; err != nil {
@@ -204,9 +197,57 @@ func (h *Host) Handle(msg tea.Msg) bool {
 			}
 		}
 		return true
+	case RegisterSlicesMsg:
+		// Step 4 on the loop, before the worker requests the reload: each
+		// closure is a State write. The handle is kept for teardown and for
+		// the Stem State port's write path; a failure fails only that plugin.
+		if m.Done == nil {
+			return true // nothing to acknowledge; a miswired worker
+		}
+		registered := Registered{
+			Handles: make(map[string]contracts.SliceHandle, len(m.Register)),
+		}
+		for _, id := range slices.Sorted(maps.Keys(m.Register)) {
+			handle, err := m.Register[id]()
+			if err != nil {
+				if registered.Failed == nil {
+					registered.Failed = make(map[string]error)
+				}
+				registered.Failed[id] = fmt.Errorf("slice registration: %w", err)
+				continue
+			}
+			h.handles[id] = handle
+			registered.Handles[id] = handle
+		}
+		select {
+		case m.Done <- registered:
+		default: // the worker left (shutdown); its wait ended via ctx
+		}
+		return true
+	case TeardownMsg:
+		if _, ok := h.pods[m.PluginID]; !ok {
+			return true
+		}
+		h.revoke(m.PluginID)
+		if handle, ok := h.handles[m.PluginID]; ok {
+			handle.Unregister()
+			delete(h.handles, m.PluginID)
+		}
+		delete(h.pods, m.PluginID)
+		delete(h.preparing, m.PluginID)
+		if h.opts.Registry != nil {
+			h.opts.Registry.Release(h.ctx, m.PluginID)
+		}
+		h.loop.Log(LogMsg{PluginID: m.PluginID, Level: "info", Message: "torn down plugin " + m.PluginID + ": slice unregistered, registry id released"})
+		return true
 	case LaunchFailedMsg:
 		p := h.pods[m.PluginID]
 		if p == nil {
+			return true
+		}
+		// A start failure may be reported by both the synchronous starter
+		// path and the process's own async notice; apply the first report only.
+		if p.info.Status == wrapper.Failed && p.info.LastError == m.Err.Error() {
 			return true
 		}
 		h.revoke(m.PluginID)
@@ -251,6 +292,33 @@ func (h *Host) Handle(msg tea.Msg) bool {
 
 // Pod returns a loop-owned Pod for per-subscriber notification delivery.
 func (h *Host) Pod(id string) (*Pod, bool) { p, ok := h.pods[id]; return p, ok }
+
+// Teardown posts TeardownMsg for one plugin; run the command through the
+// same Update path as every other lifecycle message.
+func (h *Host) Teardown(id string) tea.Cmd {
+	return func() tea.Msg { return TeardownMsg{PluginID: id} }
+}
+
+// PodSlices adapts the Host's stored slice handles to the host's
+// SliceHandles lookup seam: the Stem State port resolves a plugin's write
+// capability by namespace here. Loop-only; a handle exists only while the
+// Pod is registered (from RegisterSlicesMsg until TeardownMsg).
+type PodSlices struct{ host *Host }
+
+// NewPodSlices wraps h. The adapter exists because Host already has a
+// Handle(tea.Msg) method and cannot also carry the lookup signature.
+func NewPodSlices(h *Host) PodSlices { return PodSlices{host: h} }
+
+// Handle returns the plugin's owner handle for its state namespace,
+// <plugin_id>.state (state.md). Other namespaces are not registered by a
+// Pod and resolve to false.
+func (s PodSlices) Handle(pluginID, namespace string) (contracts.SliceHandle, bool) {
+	if s.host == nil || namespace != pluginID+".state" {
+		return nil, false
+	}
+	handle, ok := s.host.handles[pluginID]
+	return handle, ok
+}
 
 // Send implements calls.Outbox without importing or mutating its pending table.
 func (h *Host) Send(plugin calls.PluginID, m protocol.Message) error {

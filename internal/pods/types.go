@@ -38,14 +38,37 @@ type LivenessMsg = wrapper.LivenessMsg
 
 // Preparation separates fatal declaration/slice errors from a reload report.
 // A failed or timed-out reload is completed, so ReloadError does not block launch.
-// Register carries the State slice writes the worker marshaled back: Handle
-// applies them on the loop before opening the gate, because State writes are
-// loop-only. A write failure fails that plugin like a declaration failure.
+// Slice registrations are NOT carried here: the worker applies them earlier,
+// through RegisterSlicesMsg on the loop, because the reload must observe them
+// (store.md startup order) and State writes are loop-only.
 type Preparation struct {
 	Failed      map[string]error
 	ReloadError error
-	Register    map[string]func() error
 }
+
+// RegisterSlicesMsg carries the batch's slice registrations to the loop. The
+// preparation worker posts it and waits for the acknowledgment before
+// requesting the reload, so every registered slice exists when the first
+// reload runs. Applying the closures is a State write: loop-only. A failure
+// is acknowledged and fails only that plugin, like a declaration failure.
+type RegisterSlicesMsg struct {
+	Register map[string]func() (contracts.SliceHandle, error)
+	Done     chan Registered
+}
+
+// Registered is the loop's acknowledgment of RegisterSlicesMsg: the applied
+// handles, and the per-plugin registration failures (nil maps when none).
+type Registered struct {
+	Handles map[string]contracts.SliceHandle
+	Failed  map[string]error
+}
+
+// TeardownMsg tears one Pod down on the loop: revokes its credential,
+// unregisters its State slice through the stored owner handle and releases
+// the registry id. The process must already have exited or been stopped by
+// the shared shutdown; Store undeclaration and the follow-up reload stay
+// with the composition root (pods.md teardown).
+type TeardownMsg struct{ PluginID string }
 
 // PreparedMsg is a preparation command's completion, handled on the loop.
 type PreparedMsg struct {
