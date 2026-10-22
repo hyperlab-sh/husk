@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"slices"
+	"runtime"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -202,6 +203,7 @@ func TestPostBeforeProgramIsDeliveredAfterSet(t *testing.T) {
 	reg := register(m, "a", []protocol.SurfaceID{protocol.SurfaceMainStage})
 	put := slotMsg(m, "a", protocol.SurfaceMainStage, "EARLY")
 	go func() { posted <- prog.post(hostStep(func() { reg(); put() })) }()
+	parked(t, prog) // the post is waiting for the program, not refused
 	// Launched>0 keeps the run open until the early post has landed.
 	_, err := runDumpFrame(m, dumpFrameOptions{Program: prog, Launched: 1, Quiet: 1, Timeout: 30 * time.Second})
 	if err != nil {
@@ -212,6 +214,31 @@ func TestPostBeforeProgramIsDeliveredAfterSet(t *testing.T) {
 	}
 	if su := m.slotUpdates[protocol.SurfaceMainStage]; su == nil || su.Lines[0] != "EARLY" {
 		t.Fatal("the early post never reached the loop")
+	}
+}
+
+// parked yields until a post is waiting on prog for the program or the gate.
+func parked(t *testing.T, prog *programRef) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for prog.waiting.Load() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("post never parked")
+		}
+		runtime.Gosched()
+	}
+}
+
+// A post parked before the program exists is released, refused, when the gate
+// closes.
+func TestParkedPostIsRefusedWhenGateCloses(t *testing.T) {
+	prog := newProgramRef()
+	res := make(chan bool, 1)
+	go func() { res <- prog.post(struct{}{}) }()
+	parked(t, prog)
+	prog.closeGate()
+	if <-res {
+		t.Fatal("a parked post succeeded after the gate closed")
 	}
 }
 
