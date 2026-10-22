@@ -472,7 +472,9 @@ namespaces while "Migration from today" had the TUI's `recomputeLayout` and
   calls `Frontend.OwnSlices` once, before the loop runs or on it, and gets
   untyped owner handles holding JSON objects: owner `husk`, instance scope;
   `husk.layout` is persistent with `keep-latest` and is hydrated by Store
-  inside `Register`; `husk.geometry` and `husk.focus` are not persistent.
+  inside `Register`, from the values Store preloaded before the loop
+  started, so registering after `Run` hydrates the same as registering
+  before it (`TestLayoutSliceHydratesAndPersistsAcrossHosts`); `husk.geometry` and `husk.focus` are not persistent.
   Their value shapes are the examples above; the frontend defines them.
   A second call fails. Handle writes are loop-only like every State write.
 - **The view half of `husk.surfaces`.** A namespace has one registered
@@ -493,9 +495,12 @@ namespaces while "Migration from today" had the TUI's `recomputeLayout` and
   occupied surface's `SurfaceSize` (inner width and height from
   `husk.geometry`, `focused` from `husk.focus`, `visible` from
   `husk.surfaces`) and calls `Engine.Resized` with only the sizes that
-  changed since the last push. `Engine.Resized` then sends each plugin the
+  changed since the last push, keyed by surface and occupant: a new
+  occupant of an unchanged surface is told too, and a resolution the engine
+  commits during the tick (a claim that resolves, a release) is pushed in
+  that tick, not at the next Update. `Engine.Resized` then sends each plugin the
   sizes of its own surfaces. A tick that wrote none of the three namespaces
-  does nothing, and an identical write pushes nothing. Geometry reaches
+  and resolved nothing does nothing, and an identical write pushes nothing. Geometry reaches
   occupants, never the whole workbench.
 
 `husk.pods` status is one of `starting` (launch begun, process not yet
