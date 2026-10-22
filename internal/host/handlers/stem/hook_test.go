@@ -8,6 +8,22 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
+// hook.call is any-caller: Stem and the unattributed zero kind are denied
+// before the port.
+func TestHookAdmissionDenied(t *testing.T) {
+	for name, caller := range map[string]contracts.Caller{"stem": stemSide, "unattributed": nobody} {
+		t.Run(name, func(t *testing.T) {
+			rec := fakes.NewRecorder()
+			reply := Hook{Port: fakes.NewHooks(rec)}.Serve(ctx, caller,
+				req(protocol.MethodHookCall, `{"hook":"a.before-save","data":{}}`), nil)
+			wantCode(t, reply, protocol.CodeDenied)
+			if calls := rec.Methods(); len(calls) != 0 {
+				t.Fatalf("denied caller reached the port: %v", calls)
+			}
+		})
+	}
+}
+
 func TestHookCall(t *testing.T) {
 	t.Run("encodes every subscriber outcome in one reply", func(t *testing.T) {
 		port := fakes.NewHooks(nil)
