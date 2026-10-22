@@ -43,6 +43,8 @@ func TestReadLoopRecoversFromBadLines(t *testing.T) {
 		{`{"id":1,"method":"session.ping","params":[]}`, CodeInvalidParams, "1", MethodSessionPing},
 		{`{"id":null,"method":"session.ping"}`, CodeInvalidMessage, "", MethodSessionPing},
 		{`{"id":7,"method":"session.ping","token":17}`, CodeInvalidMessage, "7", MethodSessionPing},
+		{`{"id":1}`, CodeInvalidMessage, "1", ""},
+		{`{"id":1,"method":5}`, CodeInvalidMessage, "1", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.line, func(t *testing.T) {
@@ -120,7 +122,7 @@ func TestLineErrorResponse(t *testing.T) {
 		{LineError{Code: CodeInvalidMessage, ID: &id, Method: MethodSessionPing, Err: io.ErrUnexpectedEOF}, true, KindReply},
 		{LineError{Code: CodeParseError, Err: io.ErrUnexpectedEOF}, true, KindNotification},
 		{LineError{Code: CodeLineTooLong, Err: ErrLineTooLong}, true, KindNotification},
-		{LineError{Code: CodeInvalidMessage, ID: &id, Err: io.ErrUnexpectedEOF}, false, 0},
+		{LineError{Code: CodeInvalidMessage, ID: &id, Err: io.ErrUnexpectedEOF}, true, KindNotification},
 		{LineError{Code: CodeInvalidParams, Method: MethodProtocolError, Err: io.ErrUnexpectedEOF}, false, 0},
 	} {
 		m, ok := tc.e.Response()

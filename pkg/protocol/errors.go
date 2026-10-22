@@ -101,10 +101,18 @@ func (e *Error) UnmarshalJSON(b []byte) error {
 		len(fields["message"]) == 0 || fields["message"][0] != '"' {
 		return invalid("error requires string code and message")
 	}
-	type plain Error
-	var out plain
-	if err := json.Unmarshal(b, &out); err != nil {
-		return err
+	var out Error
+	for _, field := range []struct {
+		name string
+		dest any
+	}{
+		{"code", &out.Code}, {"message", &out.Message}, {"data", &out.Data},
+	} {
+		if raw, exists := fields[field.name]; exists {
+			if err := json.Unmarshal(raw, field.dest); err != nil {
+				return err
+			}
+		}
 	}
 	if out.Data != nil && !jsonObject(out.Data) {
 		return invalid("error data must be an object")
@@ -112,7 +120,7 @@ func (e *Error) UnmarshalJSON(b []byte) error {
 	if !out.Code.Valid() {
 		out.Code = CodeInternal
 	}
-	*e = Error(out)
+	*e = out
 	return nil
 }
 

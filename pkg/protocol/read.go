@@ -13,6 +13,8 @@ import (
 // MaxLineBytes is the maximum content length, excluding the CRLF terminator.
 const MaxLineBytes = 4 * 1024 * 1024
 
+const readBufferBytes = 64 * 1024
+
 // ErrLineTooLong identifies an oversized input or output line.
 var ErrLineTooLong = fmt.Errorf("protocol: line exceeds %d bytes", MaxLineBytes)
 
@@ -38,10 +40,19 @@ func (e *LineError) Unwrap() error { return e.Err }
 // notification otherwise. The boolean is false for replies and protocol.error,
 // which must never be answered. Caller applies channel logging and rate limits.
 func (e *LineError) Response() (Message, bool) {
-	if e.reply || e.Method == MethodProtocolError || e.ID != nil && e.Method == "" {
+	if e.reply || e.Method == MethodProtocolError {
 		return Message{}, false
 	}
 	failure := &Error{Code: e.Code, Message: e.Err.Error()}
+	var protocolErr *Error
+	var typeErr *json.UnmarshalTypeError
+	switch {
+	case errors.As(e.Err, &protocolErr):
+		failure.Message = protocolErr.Message
+		failure.Data = protocolErr.Data
+	case errors.As(e.Err, &typeErr):
+		failure.Message = "message contains a field with an invalid JSON type"
+	}
 	if e.Code == CodeLineTooLong {
 		failure.Data = json.RawMessage(fmt.Sprintf(`{"limit":%d}`, MaxLineBytes))
 	}
@@ -56,7 +67,7 @@ func (e *LineError) Response() (Message, bool) {
 // skipped without closing the stream. EOF, including after an unterminated final
 // line, returns nil; other read errors are returned. Either callback may be nil.
 func ReadLoop(r io.Reader, onMessage func(Message), onError func(*LineError)) error {
-	br := bufio.NewReaderSize(r, 64*1024)
+	br := bufio.NewReaderSize(r, readBufferBytes)
 	var line []byte
 	oversized := false
 	for {
@@ -64,7 +75,7 @@ func ReadLoop(r io.Reader, onMessage func(Message), onError func(*LineError)) er
 		if len(frag) > 0 && !oversized {
 			if len(line)+len(frag) > MaxLineBytes+2 {
 				oversized = true
-				line = line[:0]
+				line = nil
 			} else {
 				line = append(line, frag...)
 			}
@@ -80,7 +91,7 @@ func ReadLoop(r io.Reader, onMessage func(Message), onError func(*LineError)) er
 			case len(bytes.TrimSpace(content)) != 0:
 				deliver(content, onMessage, onError)
 			}
-			line = line[:0]
+			line = resetLine(line)
 			oversized = false
 		}
 		if err != nil {
@@ -90,6 +101,15 @@ func ReadLoop(r io.Reader, onMessage func(Message), onError func(*LineError)) er
 			return err
 		}
 	}
+}
+
+// resetLine retains ordinary buffers but releases an unusually large line's
+// backing array, so one large frame does not pin megabytes per connection.
+func resetLine(line []byte) []byte {
+	if cap(line) > readBufferBytes {
+		return nil
+	}
+	return line[:0]
 }
 
 func deliver(b []byte, onMessage func(Message), onError func(*LineError)) {
