@@ -306,7 +306,7 @@ The CLI is a socket client speaking this protocol and nothing else. It connects,
 - `pkg/huskipc/wirevalid.go`: moves unchanged; `Validate()` errors map to `invalid_params`.
 - `pkg/huskipc/published.go`: params structs move; `HookCallPayload.RequestID` and `HookResultPayload.RequestID` are removed; `ProtocolErrorPayload` is replaced by `Error` and `protocol.error`.
 - `pkg/huskipc/queue.go`: moves into `pkg/protocol` behind `NewQueuedWriter`; limits stay.
-- `pkg/huskipc/schema` and `cmd/genschema`: regenerate `docs/docs/wire-schema.json` as the envelope schema plus one params and one result schema per method, keyed by method name. `TestCommittedSchemaIsCurrent` keeps guarding it.
+- `pkg/huskipc/schema` and `cmd/genschema`: regenerate `docs/docs/wire-schema.json` as the envelope schema plus one params and one result schema per method, keyed by method name. Until the host switchover, v2 ships independently through `pkg/protocol/schema` and `cmd/genschema-v2` as `docs/docs/wire-schema-v2.json`; the v1 generator and schema remain unchanged. `TestCommittedSchemaIsCurrent` keeps guarding it.
 - `cmd/husk/transport.go` and `cmd/husk/publications.go`: the `switch env.Type` routing becomes a method router; hook `request_id` bookkeeping moves to [Calls](calls.md).
 - `pkg/manifest`: gains the declarations removed from `hello` (owned by [Pods](pods.md)).
 - `plugins/reference`: rewritten to 2.0 in the same change; `pkg/huskipc` is deleted once nothing imports it.
