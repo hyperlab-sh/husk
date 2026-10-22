@@ -1,0 +1,1396 @@
+{
+  "$defs": {
+    "EmptyResult": {
+      "properties": {},
+      "type": "object"
+    },
+    "Error": {
+      "properties": {
+        "code": {
+          "enum": [
+            "parse_error",
+            "invalid_message",
+            "line_too_long",
+            "version_mismatch",
+            "unknown_method",
+            "invalid_params",
+            "not_found",
+            "denied",
+            "unavailable",
+            "busy",
+            "timeout",
+            "cancelled",
+            "conflict",
+            "failed",
+            "internal"
+          ],
+          "type": "string"
+        },
+        "data": {
+          "type": "object"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
+    "FrameSpec": {
+      "properties": {
+        "border": {
+          "type": "boolean"
+        },
+        "close": {
+          "type": "boolean"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "border"
+      ],
+      "type": "object"
+    },
+    "KeyStateParams": {
+      "properties": {
+        "held": {
+          "type": "boolean"
+        },
+        "held_keys": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "key": {
+          "type": "string"
+        },
+        "modifiers": {
+          "$ref": "#/$defs/ModifierState"
+        },
+        "phase": {
+          "enum": [
+            "down",
+            "up",
+            "repeat",
+            "sync"
+          ],
+          "type": "string"
+        },
+        "surface": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "phase",
+        "key",
+        "held",
+        "modifiers"
+      ],
+      "type": "object"
+    },
+    "Message": {
+      "oneOf": [
+        {
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "result"
+                ]
+              },
+              {
+                "required": [
+                  "error"
+                ]
+              }
+            ]
+          },
+          "required": [
+            "id",
+            "method"
+          ]
+        },
+        {
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "id"
+                ]
+              },
+              {
+                "required": [
+                  "result"
+                ]
+              },
+              {
+                "required": [
+                  "error"
+                ]
+              }
+            ]
+          },
+          "required": [
+            "method"
+          ]
+        },
+        {
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "method"
+                ]
+              },
+              {
+                "required": [
+                  "params"
+                ]
+              },
+              {
+                "required": [
+                  "error"
+                ]
+              },
+              {
+                "required": [
+                  "token"
+                ]
+              }
+            ]
+          },
+          "required": [
+            "id",
+            "result"
+          ]
+        },
+        {
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "method"
+                ]
+              },
+              {
+                "required": [
+                  "params"
+                ]
+              },
+              {
+                "required": [
+                  "result"
+                ]
+              },
+              {
+                "required": [
+                  "token"
+                ]
+              }
+            ]
+          },
+          "required": [
+            "id",
+            "error"
+          ]
+        }
+      ],
+      "properties": {
+        "error": {
+          "$ref": "#/$defs/Error"
+        },
+        "id": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "maximum": 9007199254740991,
+              "minimum": -9007199254740991,
+              "type": "integer"
+            }
+          ]
+        },
+        "method": {
+          "maxLength": 256,
+          "pattern": "^[a-z0-9_-]+\\.[a-z0-9_-]+$",
+          "type": "string"
+        },
+        "params": {
+          "type": "object"
+        },
+        "result": {},
+        "token": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "ModifierState": {
+      "properties": {
+        "alt": {
+          "type": "boolean"
+        },
+        "ctrl": {
+          "type": "boolean"
+        },
+        "shift": {
+          "type": "boolean"
+        },
+        "super": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "alt",
+        "ctrl",
+        "shift",
+        "super"
+      ],
+      "type": "object"
+    },
+    "Palette": {
+      "properties": {
+        "accent": {
+          "type": "string"
+        },
+        "accent_secondary": {
+          "type": "string"
+        },
+        "accent_soft": {
+          "type": "string"
+        },
+        "border": {
+          "type": "string"
+        },
+        "border_focused": {
+          "type": "string"
+        },
+        "border_subtle": {
+          "type": "string"
+        },
+        "canvas": {
+          "type": "string"
+        },
+        "danger": {
+          "type": "string"
+        },
+        "info": {
+          "type": "string"
+        },
+        "ink": {
+          "type": "string"
+        },
+        "ink_muted": {
+          "type": "string"
+        },
+        "ink_subtle": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "slot_background": {
+          "type": "string"
+        },
+        "success": {
+          "type": "string"
+        },
+        "surface": {
+          "type": "string"
+        },
+        "surface_elevated": {
+          "type": "string"
+        },
+        "surface_hover": {
+          "type": "string"
+        },
+        "surface_selected": {
+          "type": "string"
+        },
+        "warning": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "canvas",
+        "surface",
+        "surface_elevated",
+        "surface_selected",
+        "surface_hover",
+        "border",
+        "border_subtle",
+        "border_focused",
+        "ink",
+        "ink_muted",
+        "ink_subtle",
+        "accent",
+        "accent_secondary",
+        "accent_soft",
+        "success",
+        "warning",
+        "danger",
+        "info"
+      ],
+      "type": "object"
+    },
+    "ProtocolErrorParams": {
+      "properties": {
+        "code": {
+          "enum": [
+            "parse_error",
+            "invalid_message",
+            "line_too_long",
+            "version_mismatch",
+            "unknown_method",
+            "invalid_params",
+            "not_found",
+            "denied",
+            "unavailable",
+            "busy",
+            "timeout",
+            "cancelled",
+            "conflict",
+            "failed",
+            "internal"
+          ],
+          "type": "string"
+        },
+        "data": {
+          "type": "object"
+        },
+        "message": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "method"
+      ],
+      "type": "object"
+    },
+    "RowHitTarget": {
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "line": {
+          "type": "integer"
+        },
+        "payload": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "line",
+        "id",
+        "kind",
+        "action"
+      ],
+      "type": "object"
+    },
+    "SessionPingParams": {
+      "properties": {},
+      "type": "object"
+    },
+    "SessionPingResult": {
+      "properties": {
+        "host_version": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "pid": {
+          "type": "integer"
+        },
+        "protocol_version": {
+          "type": "string"
+        },
+        "uptime_ms": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "pid",
+        "protocol_version",
+        "host_version",
+        "uptime_ms"
+      ],
+      "type": "object"
+    },
+    "SlotContributeParams": {
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "on_click": {
+          "type": "string"
+        },
+        "slot_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "slot_id",
+        "id",
+        "content"
+      ],
+      "type": "object"
+    },
+    "SlotContribution": {
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "on_click": {
+          "type": "string"
+        },
+        "plugin_id": {
+          "type": "string"
+        },
+        "slot_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "slot_id",
+        "id",
+        "content",
+        "plugin_id"
+      ],
+      "type": "object"
+    },
+    "SlotContributionsParams": {
+      "properties": {
+        "contributions": {
+          "items": {
+            "$ref": "#/$defs/SlotContribution"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "slot_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "slot_id",
+        "contributions"
+      ],
+      "type": "object"
+    },
+    "SurfaceCloseParams": {
+      "properties": {
+        "surface": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "surface"
+      ],
+      "type": "object"
+    },
+    "SurfaceKeyParams": {
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "modifiers": {
+          "$ref": "#/$defs/ModifierState"
+        },
+        "surface": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "surface",
+        "key",
+        "modifiers"
+      ],
+      "type": "object"
+    },
+    "SurfaceMouseParams": {
+      "properties": {
+        "button": {
+          "type": "string"
+        },
+        "hit_action": {
+          "type": "string"
+        },
+        "hit_id": {
+          "type": "string"
+        },
+        "hit_kind": {
+          "type": "string"
+        },
+        "hit_payload": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "surface": {
+          "type": "string"
+        },
+        "x": {
+          "type": "integer"
+        },
+        "y": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "surface",
+        "x",
+        "y",
+        "button"
+      ],
+      "type": "object"
+    },
+    "SurfaceResizedParams": {
+      "properties": {
+        "surfaces": {
+          "items": {
+            "$ref": "#/$defs/SurfaceSize"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "surfaces"
+      ],
+      "type": "object"
+    },
+    "SurfaceSize": {
+      "properties": {
+        "focused": {
+          "type": "boolean"
+        },
+        "height": {
+          "type": "integer"
+        },
+        "surface": {
+          "type": "string"
+        },
+        "visible": {
+          "type": "boolean"
+        },
+        "width": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "surface",
+        "width",
+        "height",
+        "focused",
+        "visible"
+      ],
+      "type": "object"
+    },
+    "SurfaceUpdateParams": {
+      "properties": {
+        "badge": {
+          "type": "string"
+        },
+        "hit_targets": {
+          "items": {
+            "$ref": "#/$defs/RowHitTarget"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "lines": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "plugin_id": {
+          "type": "string"
+        },
+        "status_meta": {
+          "additionalProperties": {},
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "subtitle": {
+          "type": "string"
+        },
+        "surface": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "surface",
+        "lines"
+      ],
+      "type": "object"
+    },
+    "ThemeChangedParams": {
+      "properties": {
+        "palette": {
+          "$ref": "#/$defs/Palette"
+        }
+      },
+      "required": [
+        "palette"
+      ],
+      "type": "object"
+    },
+    "ToastShowParams": {
+      "properties": {
+        "level": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "plugin_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "level",
+        "title",
+        "message"
+      ],
+      "type": "object"
+    },
+    "action.invoke.params": {
+      "description": "Payload owned by design/message-kinds.md; no additional field constraints specified here.",
+      "type": "object"
+    },
+    "action.invoke.result": {
+      "description": "Result owned by design/message-kinds.md; no additional field constraints specified here."
+    },
+    "action.list.params": {
+      "description": "Payload owned by design/message-kinds.md; no additional field constraints specified here.",
+      "type": "object"
+    },
+    "action.list.result": {
+      "description": "Result owned by design/message-kinds.md; no additional field constraints specified here."
+    },
+    "config.reload.params": {
+      "description": "Payload owned by design/services.md; no additional field constraints specified here.",
+      "type": "object"
+    },
+    "config.reload.result": {
+      "description": "Result owned by design/services.md; no additional field constraints specified here."
+    },
+    "event.deliver.params": {
+      "description": "Payload owned by design/message-kinds.md; no additional field constraints specified here.",
+      "type": "object"
+    },
+    "event.deliver.result": {
+      "description": "Result owned by design/message-kinds.md; no additional field constraints specified here."
+    },
+    "event.emit.params": {
+      "description": "Payload owned by design/message-kinds.md; no additional field constraints specified here.",
+      "type": "object"
+    },
+    "event.emit.result": {
+      "description": "Result owned by design/message-kinds.md; no additional field constraints specified here."
+    },
+    "event.watch.params": {
+      "description": "Payload owned by design/message-kinds.md; no additional field constraints specified here.",
+      "type": "object"
+    },
+    "event.watch.result": {
+      "description": "Result owned by design/message-kinds.md; no additional field constraints specified here."
+    },
+    "hook.call.params": {
+      "description": "Payload owned by design/message-kinds.md; no additional field constraints specified here.",
+      "type": "object"
+    },
+    "hook.call.result": {
+      "description": "Result owned by design/message-kinds.md; no additional field constraints specified here."
+    },
+    "input.key.params": {
+      "$ref": "#/$defs/SurfaceKeyParams"
+    },
+    "input.key.result": {
+      "description": "Result owned by design/protocol.md; no additional field constraints specified here."
+    },
+    "input.key_state.params": {
+      "$ref": "#/$defs/KeyStateParams"
+    },
+    "input.key_state.result": {
+      "description": "Result owned by design/protocol.md; no additional field constraints specified here."
+    },
+    "input.mouse.params": {
+      "$ref": "#/$defs/SurfaceMouseParams"
+    },
+    "input.mouse.result": {
+      "description": "Result owned by design/protocol.md; no additional field constraints specified here."
+    },
+    "keys.list.params": {
+      "description": "Payload owned by design/keybindings.md; no additional field constraints specified here.",
+      "type": "object"
+    },
+    "keys.list.result": {
+      "description": "Result owned by design/keybindings.md; no additional field constraints specified here."
+    },
+    "plugin.list.params": {
+      "description": "Payload owned by design/pods.md; no additional field constraints specified here.",
+      "type": "object"
+    },
+    "plugin.list.result": {
+      "description": "Result owned by design/pods.md; no additional field constraints specified here."
+    },
+    "plugin.log.params": {
+      "description": "Payload owned by design/pods.md; no additional field constraints specified here.",
+      "type": "object"
+    },
+    "plugin.log.result": {
+      "description": "Result owned by design/pods.md; no additional field constraints specified here."
+    },
+    "profile.list.params": {
+      "description": "Payload owned by design/services.md; no additional field constraints specified here.",
+      "type": "object"
+    },
+    "profile.list.result": {
+      "description": "Result owned by design/services.md; no additional field constraints specified here."
+    },
+    "profile.use.params": {
+      "description": "Payload owned by design/services.md; no additional field constraints specified here.",
+      "type": "object"
+    },
+    "profile.use.result": {
+      "description": "Result owned by design/services.md; no additional field constraints specified here."
+    },
+    "protocol.error.params": {
+      "$ref": "#/$defs/ProtocolErrorParams"
+    },
+    "protocol.error.result": {
+      "description": "Result owned by design/protocol.md; no additional field constraints specified here."
+    },
+    "secrets.get.params": {
+      "description": "Payload owned by design/services.md; no additional field constraints specified here.",
+      "type": "object"
+    },
+    "secrets.get.result": {
+      "description": "Result owned by design/services.md; no additional field constraints specified here."
+    },
+    "secrets.grant.params": {
+      "description": "Payload owned by design/services.md; no additional field constraints specified here.",
+      "type": "object"
+    },
+    "secrets.grant.result": {
+      "description": "Result owned by design/services.md; no additional field constraints specified here."
+    },
+    "secrets.names.params": {
+      "description": "Payload owned by design/services.md; no additional field constraints specified here.",
+      "type": "object"
+    },
+    "secrets.names.result": {
+      "description": "Result owned by design/services.md; no additional field constraints specified here."
+    },
+    "secrets.reveal.params": {
+      "description": "Payload owned by design/services.md; no additional field constraints specified here.",
+      "type": "object"
+    },
+    "secrets.reveal.result": {
+      "description": "Result owned by design/services.md; no additional field constraints specified here."
+    },
+    "secrets.revoke.params": {
+      "description": "Payload owned by design/services.md; no additional field constraints specified here.",
+      "type": "object"
+    },
+    "secrets.revoke.result": {
+      "description": "Result owned by design/services.md; no additional field constraints specified here."
+    },
+    "secrets.set.params": {
+      "description": "Payload owned by design/services.md; no additional field constraints specified here.",
+      "type": "object"
+    },
+    "secrets.set.result": {
+      "description": "Result owned by design/services.md; no additional field constraints specified here."
+    },
+    "session.ping.params": {
+      "$ref": "#/$defs/SessionPingParams"
+    },
+    "session.ping.result": {
+      "$ref": "#/$defs/SessionPingResult"
+    },
+    "settings.get.params": {
+      "description": "Payload owned by design/services.md; no additional field constraints specified here.",
+      "type": "object"
+    },
+    "settings.get.result": {
+      "description": "Result owned by design/services.md; no additional field constraints specified here."
+    },
+    "settings.list.params": {
+      "description": "Payload owned by design/services.md; no additional field constraints specified here.",
+      "type": "object"
+    },
+    "settings.list.result": {
+      "description": "Result owned by design/services.md; no additional field constraints specified here."
+    },
+    "settings.schema.params": {
+      "description": "Payload owned by design/services.md; no additional field constraints specified here.",
+      "type": "object"
+    },
+    "settings.schema.result": {
+      "description": "Result owned by design/services.md; no additional field constraints specified here."
+    },
+    "settings.validate.params": {
+      "description": "Payload owned by design/services.md; no additional field constraints specified here.",
+      "type": "object"
+    },
+    "settings.validate.result": {
+      "description": "Result owned by design/services.md; no additional field constraints specified here."
+    },
+    "slot.contribute.params": {
+      "$ref": "#/$defs/SlotContributeParams"
+    },
+    "slot.contribute.result": {
+      "$ref": "#/$defs/EmptyResult"
+    },
+    "slot.contributions.params": {
+      "$ref": "#/$defs/SlotContributionsParams"
+    },
+    "slot.contributions.result": {
+      "description": "Result owned by design/message-kinds.md; no additional field constraints specified here."
+    },
+    "state.changed.params": {
+      "description": "Payload owned by design/state.md; no additional field constraints specified here.",
+      "type": "object"
+    },
+    "state.changed.result": {
+      "description": "Result owned by design/state.md; no additional field constraints specified here."
+    },
+    "state.clear.params": {
+      "description": "Payload owned by design/state.md; no additional field constraints specified here.",
+      "type": "object"
+    },
+    "state.clear.result": {
+      "description": "Result owned by design/state.md; no additional field constraints specified here."
+    },
+    "state.get.params": {
+      "description": "Payload owned by design/state.md; no additional field constraints specified here.",
+      "type": "object"
+    },
+    "state.get.result": {
+      "description": "Result owned by design/state.md; no additional field constraints specified here."
+    },
+    "state.patch.params": {
+      "description": "Payload owned by design/state.md; no additional field constraints specified here.",
+      "type": "object"
+    },
+    "state.patch.result": {
+      "description": "Result owned by design/state.md; no additional field constraints specified here."
+    },
+    "state.set.params": {
+      "description": "Payload owned by design/state.md; no additional field constraints specified here.",
+      "type": "object"
+    },
+    "state.set.result": {
+      "description": "Result owned by design/state.md; no additional field constraints specified here."
+    },
+    "state.snapshot.params": {
+      "description": "Payload owned by design/state.md; no additional field constraints specified here.",
+      "type": "object"
+    },
+    "state.snapshot.result": {
+      "description": "Result owned by design/state.md; no additional field constraints specified here."
+    },
+    "state.watch.params": {
+      "description": "Payload owned by design/state.md; no additional field constraints specified here.",
+      "type": "object"
+    },
+    "state.watch.result": {
+      "description": "Result owned by design/state.md; no additional field constraints specified here."
+    },
+    "surface.close.params": {
+      "$ref": "#/$defs/SurfaceCloseParams"
+    },
+    "surface.close.result": {
+      "description": "Result owned by design/protocol.md; no additional field constraints specified here."
+    },
+    "surface.resized.params": {
+      "$ref": "#/$defs/SurfaceResizedParams"
+    },
+    "surface.resized.result": {
+      "description": "Result owned by design/protocol.md; no additional field constraints specified here."
+    },
+    "surface.update.params": {
+      "$ref": "#/$defs/SurfaceUpdateParams"
+    },
+    "surface.update.result": {
+      "description": "Result owned by design/protocol.md; no additional field constraints specified here."
+    },
+    "theme.changed.params": {
+      "$ref": "#/$defs/ThemeChangedParams"
+    },
+    "theme.changed.result": {
+      "description": "Result owned by design/services.md; no additional field constraints specified here."
+    },
+    "theme.check.params": {
+      "description": "Payload owned by design/services.md; no additional field constraints specified here.",
+      "type": "object"
+    },
+    "theme.check.result": {
+      "description": "Result owned by design/services.md; no additional field constraints specified here."
+    },
+    "theme.get.params": {
+      "description": "Payload owned by design/services.md; no additional field constraints specified here.",
+      "type": "object"
+    },
+    "theme.get.result": {
+      "description": "Result owned by design/services.md; no additional field constraints specified here."
+    },
+    "toast.show.params": {
+      "$ref": "#/$defs/ToastShowParams"
+    },
+    "toast.show.result": {
+      "description": "Result owned by design/protocol.md; no additional field constraints specified here."
+    }
+  },
+  "$id": "https://github.com/hyperlab-sh/husk/blob/main/docs/docs/wire-schema-v2.json",
+  "$ref": "#/$defs/Message",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "One UTF-8 JSON object per line, at most 4194304 bytes. Protocol 2.0. Generated from pkg/protocol; do not edit. x-methods indexes payload schemas; unknown fields are accepted.",
+  "title": "Husk wire protocol v2",
+  "x-methods": {
+    "action.invoke": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/action.invoke.params"
+      },
+      "result": {
+        "$ref": "#/$defs/action.invoke.result"
+      }
+    },
+    "action.list": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/action.list.params"
+      },
+      "result": {
+        "$ref": "#/$defs/action.list.result"
+      }
+    },
+    "config.reload": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/config.reload.params"
+      },
+      "result": {
+        "$ref": "#/$defs/config.reload.result"
+      }
+    },
+    "event.deliver": {
+      "form": "notification",
+      "params": {
+        "$ref": "#/$defs/event.deliver.params"
+      },
+      "result": {
+        "$ref": "#/$defs/event.deliver.result"
+      }
+    },
+    "event.emit": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/event.emit.params"
+      },
+      "result": {
+        "$ref": "#/$defs/event.emit.result"
+      }
+    },
+    "event.watch": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/event.watch.params"
+      },
+      "result": {
+        "$ref": "#/$defs/event.watch.result"
+      }
+    },
+    "hook.call": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/hook.call.params"
+      },
+      "result": {
+        "$ref": "#/$defs/hook.call.result"
+      }
+    },
+    "input.key": {
+      "form": "notification",
+      "params": {
+        "$ref": "#/$defs/input.key.params"
+      },
+      "result": {
+        "$ref": "#/$defs/input.key.result"
+      }
+    },
+    "input.key_state": {
+      "form": "notification",
+      "params": {
+        "$ref": "#/$defs/input.key_state.params"
+      },
+      "result": {
+        "$ref": "#/$defs/input.key_state.result"
+      }
+    },
+    "input.mouse": {
+      "form": "notification",
+      "params": {
+        "$ref": "#/$defs/input.mouse.params"
+      },
+      "result": {
+        "$ref": "#/$defs/input.mouse.result"
+      }
+    },
+    "keys.list": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/keys.list.params"
+      },
+      "result": {
+        "$ref": "#/$defs/keys.list.result"
+      }
+    },
+    "plugin.list": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/plugin.list.params"
+      },
+      "result": {
+        "$ref": "#/$defs/plugin.list.result"
+      }
+    },
+    "plugin.log": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/plugin.log.params"
+      },
+      "result": {
+        "$ref": "#/$defs/plugin.log.result"
+      }
+    },
+    "profile.list": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/profile.list.params"
+      },
+      "result": {
+        "$ref": "#/$defs/profile.list.result"
+      }
+    },
+    "profile.use": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/profile.use.params"
+      },
+      "result": {
+        "$ref": "#/$defs/profile.use.result"
+      }
+    },
+    "protocol.error": {
+      "form": "notification",
+      "params": {
+        "$ref": "#/$defs/protocol.error.params"
+      },
+      "result": {
+        "$ref": "#/$defs/protocol.error.result"
+      }
+    },
+    "secrets.get": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/secrets.get.params"
+      },
+      "result": {
+        "$ref": "#/$defs/secrets.get.result"
+      }
+    },
+    "secrets.grant": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/secrets.grant.params"
+      },
+      "result": {
+        "$ref": "#/$defs/secrets.grant.result"
+      }
+    },
+    "secrets.names": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/secrets.names.params"
+      },
+      "result": {
+        "$ref": "#/$defs/secrets.names.result"
+      }
+    },
+    "secrets.reveal": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/secrets.reveal.params"
+      },
+      "result": {
+        "$ref": "#/$defs/secrets.reveal.result"
+      }
+    },
+    "secrets.revoke": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/secrets.revoke.params"
+      },
+      "result": {
+        "$ref": "#/$defs/secrets.revoke.result"
+      }
+    },
+    "secrets.set": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/secrets.set.params"
+      },
+      "result": {
+        "$ref": "#/$defs/secrets.set.result"
+      }
+    },
+    "session.ping": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/session.ping.params"
+      },
+      "result": {
+        "$ref": "#/$defs/session.ping.result"
+      }
+    },
+    "settings.get": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/settings.get.params"
+      },
+      "result": {
+        "$ref": "#/$defs/settings.get.result"
+      }
+    },
+    "settings.list": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/settings.list.params"
+      },
+      "result": {
+        "$ref": "#/$defs/settings.list.result"
+      }
+    },
+    "settings.schema": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/settings.schema.params"
+      },
+      "result": {
+        "$ref": "#/$defs/settings.schema.result"
+      }
+    },
+    "settings.validate": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/settings.validate.params"
+      },
+      "result": {
+        "$ref": "#/$defs/settings.validate.result"
+      }
+    },
+    "slot.contribute": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/slot.contribute.params"
+      },
+      "result": {
+        "$ref": "#/$defs/slot.contribute.result"
+      }
+    },
+    "slot.contributions": {
+      "form": "notification",
+      "params": {
+        "$ref": "#/$defs/slot.contributions.params"
+      },
+      "result": {
+        "$ref": "#/$defs/slot.contributions.result"
+      }
+    },
+    "state.changed": {
+      "form": "notification",
+      "params": {
+        "$ref": "#/$defs/state.changed.params"
+      },
+      "result": {
+        "$ref": "#/$defs/state.changed.result"
+      }
+    },
+    "state.clear": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/state.clear.params"
+      },
+      "result": {
+        "$ref": "#/$defs/state.clear.result"
+      }
+    },
+    "state.get": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/state.get.params"
+      },
+      "result": {
+        "$ref": "#/$defs/state.get.result"
+      }
+    },
+    "state.patch": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/state.patch.params"
+      },
+      "result": {
+        "$ref": "#/$defs/state.patch.result"
+      }
+    },
+    "state.set": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/state.set.params"
+      },
+      "result": {
+        "$ref": "#/$defs/state.set.result"
+      }
+    },
+    "state.snapshot": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/state.snapshot.params"
+      },
+      "result": {
+        "$ref": "#/$defs/state.snapshot.result"
+      }
+    },
+    "state.watch": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/state.watch.params"
+      },
+      "result": {
+        "$ref": "#/$defs/state.watch.result"
+      }
+    },
+    "surface.close": {
+      "form": "notification",
+      "params": {
+        "$ref": "#/$defs/surface.close.params"
+      },
+      "result": {
+        "$ref": "#/$defs/surface.close.result"
+      }
+    },
+    "surface.resized": {
+      "form": "notification",
+      "params": {
+        "$ref": "#/$defs/surface.resized.params"
+      },
+      "result": {
+        "$ref": "#/$defs/surface.resized.result"
+      }
+    },
+    "surface.update": {
+      "form": "notification",
+      "params": {
+        "$ref": "#/$defs/surface.update.params"
+      },
+      "result": {
+        "$ref": "#/$defs/surface.update.result"
+      }
+    },
+    "theme.changed": {
+      "form": "notification",
+      "params": {
+        "$ref": "#/$defs/theme.changed.params"
+      },
+      "result": {
+        "$ref": "#/$defs/theme.changed.result"
+      }
+    },
+    "theme.check": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/theme.check.params"
+      },
+      "result": {
+        "$ref": "#/$defs/theme.check.result"
+      }
+    },
+    "theme.get": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/theme.get.params"
+      },
+      "result": {
+        "$ref": "#/$defs/theme.get.result"
+      }
+    },
+    "toast.show": {
+      "form": "notification",
+      "params": {
+        "$ref": "#/$defs/toast.show.params"
+      },
+      "result": {
+        "$ref": "#/$defs/toast.show.result"
+      }
+    }
+  }
+}
