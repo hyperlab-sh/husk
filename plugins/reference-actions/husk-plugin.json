@@ -1,10 +1,14 @@
 {
+  "manifest_version": 2,
+  "protocol": 2,
   "id": "go.reference-actions",
   "name": "Reference actions",
   "version": "0.1.0",
-  "language": "Go",
   "description": "Fills the reference plugin's row actions slot, answers its hook and listens to its event; same binary as the reference plugin",
   "command": ["../reference/reference", "--contributor"],
-  "transport": "stdio",
-  "slots": []
+  "actions": [
+    {"id": "go.reference-actions.inspect", "title": "Inspect", "description": "Toasts the row that was clicked"}
+  ],
+  "hooks": {"subscribe": ["go.reference.before-refresh"]},
+  "events": {"subscribe": ["go.reference.selection-changed"]}
 }
