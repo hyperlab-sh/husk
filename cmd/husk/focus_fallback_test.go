@@ -148,18 +148,53 @@ func TestStagePlacementNeverRestoresSidePanel(t *testing.T) {
 	}
 }
 
+// narrowPanelWidth is a terminal width at which the side panel is shown but
+// not drawn: the centre column beside the sidebar is one cell short of the
+// 72 the panel needs.
+func narrowPanelWidth(m *WorkbenchModel) int {
+	return activityRailWidth + m.sidebarWidth + 71
+}
+
 // On a terminal too narrow to draw the side panel, a returning panel plugin
 // must not take focus either.
 func TestNarrowTerminalDoesNotRestoreUndrawnPanel(t *testing.T) {
 	m := sidesModelPanelGone(t)
-	m.width = minTermWidth
+	m.width = narrowPanelWidth(m)
 	m.recomputeLayout()
 	hostPlugin(m, "p.panel", protocol.SurfaceSidePanel)
 	if _, drawn := m.slotRects[protocol.SurfaceSidePanel]; drawn {
-		t.Skip("side panel is drawn at the minimum width")
+		t.Fatalf("setup: the side panel is drawn at width %d", m.width)
 	}
 	if m.focusedSlot != protocol.SurfaceMainStage {
 		t.Errorf("focus = %q, want the main stage", m.focusedSlot)
+	}
+}
+
+// Focusing the side panel and then narrowing the terminal until it is not
+// drawn moves focus to the stage; widening again gives it back.
+func TestNarrowingTerminalMovesFocusOffDrawnPanel(t *testing.T) {
+	m := goldenModel()
+	hostPlugin(m, "p.list", protocol.SurfaceSidebarList)
+	hostPlugin(m, "p.panel", protocol.SurfaceSidePanel)
+	m.width = narrowPanelWidth(m) + 40
+	m.recomputeLayout()
+	if _, drawn := m.slotRects[protocol.SurfaceSidePanel]; !drawn {
+		t.Fatalf("setup: the side panel is not drawn at width %d", m.width)
+	}
+	wide := m.width
+	m.focusedSlot = protocol.SurfaceSidePanel
+	m.width = narrowPanelWidth(m)
+	m.recomputeLayout()
+	if _, drawn := m.slotRects[protocol.SurfaceSidePanel]; drawn {
+		t.Fatalf("setup: the side panel is drawn at width %d", m.width)
+	}
+	if m.focusedSlot != protocol.SurfaceMainStage {
+		t.Fatalf("focus = %q on an undrawn panel, want the main stage", m.focusedSlot)
+	}
+	m.width = wide
+	m.recomputeLayout()
+	if m.focusedSlot != protocol.SurfaceSidePanel {
+		t.Errorf("focus = %q after widening, want the side panel back", m.focusedSlot)
 	}
 }
 
