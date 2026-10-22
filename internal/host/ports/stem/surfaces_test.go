@@ -171,6 +171,34 @@ func TestToastAttributionFromCaller(t *testing.T) {
 	}
 }
 
+// TestUnauthenticatedPluginCallerDenied pins S4: a plugin-kind caller with
+// an empty PluginID has no identity to authorize, so every method denies it
+// like the Calls port's callerOf.
+func TestUnauthenticatedPluginCallerDenied(t *testing.T) {
+	port, _, _, _, _ := newPort(t)
+	anon := contracts.Caller{Kind: contracts.CallerPlugin}
+	ctx := context.Background()
+	calls := map[string]func() error{
+		"surface.update": func() error {
+			return port.SurfaceUpdate(ctx, anon, protocol.SurfaceUpdateParams{Surface: protocol.SurfaceMainStage})
+		},
+		"surface.close": func() error {
+			return port.SurfaceClose(ctx, anon, protocol.SurfaceCloseParams{Surface: protocol.SurfaceMainStage})
+		},
+		"slot.contribute": func() error {
+			return port.SlotContribute(ctx, anon, protocol.SlotContributeParams{SlotID: "s", ID: "p.x"})
+		},
+		"toast.show": func() error {
+			return port.ToastShow(ctx, anon, protocol.ToastShowParams{Level: "info", Title: "t"})
+		},
+	}
+	for name, call := range calls {
+		if code := contracts.CodeOf(call()); code != "denied" {
+			t.Fatalf("%s with empty plugin id: code = %q, want denied", name, code)
+		}
+	}
+}
+
 // TestEngineCallsRunOnTheLoop pins the seam: a port call made off the loop
 // still runs its engine body on the loop goroutine, observed where the
 // engine's own clock tick runs.
