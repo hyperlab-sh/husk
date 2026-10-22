@@ -96,7 +96,8 @@ type Outbox interface {
 	Send(plugin PluginID, req protocol.Message) error
 }
 
-// Clock is a value type so model-purity tests can deep-compare the table.
+// Clock is a value type so model-purity tests can deep-compare the table
+// when Logger is nil; reflect.DeepEqual never equates non-nil functions.
 type Clock interface{ Now() time.Time }
 ```
 
@@ -245,7 +246,7 @@ Malformed reply recovery: if the protocol reader rejects a reply line but expose
 
 The caps are constructor-configurable through `TableOptions`; zero selects the defaults above. `CanSend` counts repeated target arguments separately and checks pending capacity plus enough remaining representable ids for the whole fan-out, without reserving entries, burning ids or checking liveness. The caller must not interleave other loop work between the check and fan-out.
 
-Orphan diagnostics use the injected logger. The first orphan logs immediately, later orphans within one second increment a suppressed count, and the next eligible orphan logs that count. Logging never starts an idle sweep solely to flush diagnostics.
+Orphan diagnostics use the injected logger. The first orphan logs immediately, later orphans within one second increment a suppressed count, and the next eligible orphan logs that count. Logging never starts an idle sweep solely to flush diagnostics. `DropPlugin` clears that plugin's cooldown and suppressed count so a restarted plugin logs its first orphan immediately; the lifetime Orphans counter remains cumulative.
 
 ### Invariants
 

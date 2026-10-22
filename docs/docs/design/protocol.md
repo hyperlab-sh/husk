@@ -77,7 +77,7 @@ const MaxLineBytes = 4 * 1024 * 1024
 func ReadLoop(r io.Reader, onMessage func(Message), onError func(*LineError)) error
 type LineError struct {
 	Code Code    // CodeParseError, CodeInvalidMessage or CodeLineTooLong
-	ID   *ID     // the request id when it was still readable, else nil
+	ID   *ID     // the request or reply id when it was still readable, else nil
 	Method string // the method when it was still readable, else ""
 	Err  error
 }

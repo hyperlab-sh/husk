@@ -51,6 +51,49 @@ func TestOrphanLogsAreRateLimitedPerPluginWithSuppressedCount(t *testing.T) {
 	}
 }
 
+func TestDropPluginResetsOnlyItsOrphanLogState(t *testing.T) {
+	for _, pending := range []bool{false, true} {
+		t.Run(fmt.Sprintf("pending=%v", pending), func(t *testing.T) {
+			var logs []string
+			table, _, _ := newTestTable(TableOptions{Logger: func(f string, a ...any) {
+				logs = append(logs, fmt.Sprintf(f, a...))
+			}})
+			if pending {
+				mustSend(t, table, "p")
+			}
+			for _, plugin := range []PluginID{"p", "p", "q", "q"} {
+				table.Resolve(plugin, protocol.Message{})
+			}
+			lastID := table.lastID
+			if len(logs) != 2 || table.orphanLogs["p"].suppressed != 1 {
+				t.Fatal("initial orphan cooldown not established")
+			}
+			results := table.DropPlugin("p", "restarting")
+			wantResults := 0
+			if pending {
+				wantResults = 1
+			}
+			if len(results) != wantResults || table.Stats().Orphans != 4 || table.lastID != lastID {
+				t.Fatal("exit changed lifetime counters or cancellation results")
+			}
+			if _, exists := table.orphanLogs["p"]; exists {
+				t.Fatal("exited plugin retained orphan log state")
+			}
+			// No time passes: a restarted plugin's first orphan logs immediately,
+			// without inheriting suppression from the previous launch.
+			table.Resolve("p", protocol.Message{})
+			table.Resolve("q", protocol.Message{})
+			if len(logs) != 3 || !strings.Contains(logs[2], `plugin "p"`) || !strings.Contains(logs[2], "0 suppressed") {
+				t.Fatal(logs)
+			}
+			if table.orphanLogs["q"].suppressed != 2 || table.Stats().Orphans != 6 {
+				t.Fatal("other plugin's cooldown or lifetime orphan count changed")
+			}
+			assertCounts(t, table)
+		})
+	}
+}
+
 func TestOrphanLogTruncatesUntrustedIDs(t *testing.T) {
 	var logs []string
 	table, _, _ := newTestTable(TableOptions{Logger: func(f string, a ...any) { logs = append(logs, fmt.Sprintf(f, a...)) }})

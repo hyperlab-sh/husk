@@ -35,7 +35,9 @@ type Options struct {
 // TableOptions configures one instance's table. Nil Clock uses the system clock;
 // nil Logger is a no-op. Zero caps select the specification's defaults. Negative
 // caps are programmer errors and cause New to panic. Logger must not block or
-// reenter the table. Clock remains a value interface for model-purity tests.
+// reenter the table. Clock remains a value interface for model-purity tests;
+// deep comparison also requires a nil Logger, since non-nil funcs never compare
+// equal with reflect.DeepEqual.
 type TableOptions struct {
 	Clock               Clock
 	Logger              func(format string, args ...any)
