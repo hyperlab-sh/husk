@@ -149,10 +149,10 @@ func TestStagePlacementNeverRestoresSidePanel(t *testing.T) {
 }
 
 // narrowPanelWidth is a terminal width at which the side panel is shown but
-// not drawn: the centre column beside the sidebar is one cell short of the
-// 72 the panel needs.
+// not drawn: the centre column beside the sidebar is one cell short of
+// minPanelCentreWidth.
 func narrowPanelWidth(m *WorkbenchModel) int {
-	return activityRailWidth + m.sidebarWidth + 71
+	return activityRailWidth + m.sidebarWidth + minPanelCentreWidth - 1
 }
 
 // On a terminal too narrow to draw the side panel, a returning panel plugin

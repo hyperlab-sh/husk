@@ -53,8 +53,6 @@ type dumpFrameOptions struct {
 	Timeout time.Duration
 	// Program receives the headless program so the host's Post reaches it.
 	Program *programRef
-	// Stderr receives host diagnostics.
-	Stderr io.Writer
 }
 
 // dumpQuietMsg fires when a quiet window ends; Gen discards stale timers.
@@ -250,14 +248,14 @@ func runDumpFrame(m *WorkbenchModel, opt dumpFrameOptions) (string, error) {
 		return frame, fmt.Errorf("host stopped: %w", m.hostErr)
 	case d.failed:
 		return frame, fmt.Errorf("no plugin went live: %s", failedPods(m.podStatus))
+	case errors.Is(err, tea.ErrProgramPanic):
+		return frame, err
 	case d.noRailItem != "":
 		// The frame is still returned; the run fails so scripts notice the
 		// requested surface was never opened.
 		return frame, fmt.Errorf("--rail %s: no loaded plugin declares a %s rail item", d.noRailItem, d.noRailItem)
 	case d.settled:
 		return frame, nil
-	case errors.Is(err, tea.ErrProgramPanic):
-		return frame, err
 	case d.ready && (errors.Is(err, context.DeadlineExceeded) || errors.Is(err, tea.ErrProgramKilled)):
 		// Everything registered and published; the plugin is just still
 		// streaming. That is not an error.

@@ -130,7 +130,6 @@ func dumpFrameMain(model *WorkbenchModel, h host.Looped, prog *programRef, railM
 	frame, err := runDumpFrame(model, dumpFrameOptions{
 		Launched: h.Planned(),
 		RailMode: railMode,
-		Stderr:   stderr,
 		Program:  prog,
 	})
 	prog.closeGate()
