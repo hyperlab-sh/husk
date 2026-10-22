@@ -366,7 +366,7 @@ func TestPodFailureToastsAndCleanExitDoesNot(t *testing.T) {
 		fe.pods[id], fe.podErr[id] = status, lastErr
 		fe.publish()
 		m.activeToast = nil
-		m.refresh()
+		m.settle()
 	}
 	step("bad", "starting", "")
 	step("bad", "live", "")
@@ -386,6 +386,12 @@ func TestPodFailureToastsAndCleanExitDoesNot(t *testing.T) {
 	step("never", "failed", "start: no such file")
 	if m.activeToast == nil || m.activeToast.Message != "never: start: no such file" {
 		t.Fatalf("launch failure toast = %+v", m.activeToast)
+	}
+	// A foreign signal is a failure like a non-zero exit.
+	step("killed", "live", "")
+	step("killed", "failed", "signal: killed")
+	if m.activeToast == nil || m.activeToast.Level != "warn" || m.activeToast.Message != "killed: signal: killed" {
+		t.Fatalf("signal toast = %+v", m.activeToast)
 	}
 	// A clean exit is a log line only.
 	step("good", "live", "")
@@ -424,5 +430,30 @@ func TestRefusedPluginToastsLikeALaunchFailure(t *testing.T) {
 	m.settle()
 	if tt := m.activeToast; tt == nil || tt.Title != "Plugin failed" || tt.Message != "manifest /p/husk-plugin.json (v2): plugin speaks protocol 1, host speaks 2" {
 		t.Fatalf("anonymous refusal toast = %+v", m.activeToast)
+	}
+}
+
+// Refusals all land at boot together with launch failures; none may replace
+// another, so one settle that sees two refusals and a failed Pod reports all
+// three.
+func TestFailuresInOneSettleAllReachTheUser(t *testing.T) {
+	m := goldenModel()
+	fe := withFE(m)
+	m.settle()
+	fe.Refused = []contracts.PluginRefusal{
+		{Plugin: "dup", Reason: "duplicate plugin id"},
+		{Reason: "manifest /p/husk-plugin.json (v2): plugin speaks protocol 1, host speaks 2"},
+	}
+	fe.pods["bad"], fe.podErr["bad"] = "failed", "start: no such file"
+	fe.publish()
+	m.settle()
+	tt := m.activeToast
+	if tt == nil || tt.Title != "3 plugins failed" {
+		t.Fatalf("toast = %+v, want one covering 3 failures", tt)
+	}
+	for _, want := range []string{"dup: duplicate plugin id", "protocol 1, host speaks 2", "bad: start: no such file"} {
+		if !strings.Contains(tt.Message, want) {
+			t.Errorf("toast message %q is missing %q", tt.Message, want)
+		}
 	}
 }
