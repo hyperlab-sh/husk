@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -355,6 +356,29 @@ type codedErrorStub struct {
 func (e codedErrorStub) Error() string        { return string(e.code) }
 func (e codedErrorStub) Code() string         { return string(e.code) }
 func (e codedErrorStub) Data() map[string]any { return e.data }
+
+func TestSecretsSetMalformedParamsNeverQuoteValue(t *testing.T) {
+	// A malformed secrets.set is decoded by handlers.DecodeParams, whose
+	// invalid_params message carries the json error text. The json errors
+	// never quote the offending value, and this test is the net that keeps
+	// it that way: the secret rides in the raw params, a syntax error lands
+	// mid-value, and neither the message nor the data may quote it.
+	const value = "hunter2-super-secret"
+	h := Secrets{Port: fakes.NewSecrets(nil)}
+	for _, params := range []string{
+		`{"name":"git.token","value":"` + value + `"@}`, // syntax error after the value
+		`{"name":"git.token","value":` + value + `}`,    // syntax error mid-value
+		`{"name":"git.token","value":123}`,              // type error where the value would ride
+	} {
+		errp := replyErr(t, h.Serve(context.Background(), cliCaller, req(t, "secrets.set", params), nil))
+		if errp.Code != protocol.CodeInvalidParams {
+			t.Fatalf("%s: code = %s, want invalid_params", params, errp.Code)
+		}
+		if strings.Contains(errp.Message, value) || strings.Contains(string(errp.Data), value) {
+			t.Fatalf("invalid_params quotes the value: %s %s", errp.Message, errp.Data)
+		}
+	}
+}
 
 func TestPortErrorsKeepCodeAndReason(t *testing.T) {
 	port := fakes.NewSettings(nil)
