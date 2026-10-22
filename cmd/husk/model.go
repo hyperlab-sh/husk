@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"image"
 	"io"
 	"maps"
@@ -185,8 +186,9 @@ type WorkbenchModel struct {
 	engineToast    bool // activeToast came from the engine queue
 	toastPollOn    bool
 	toastSeq       int
-	refusalsShown  int    // host refusals already toasted
-	totalIPCEvents uint64 // surface updates the host routed here
+	refusalsShown  int      // host refusals already reported
+	failures       []string // plugin failures noted this settle, toasted together
+	totalIPCEvents uint64   // surface updates the host routed here
 
 	logOut io.Writer // host log lines, such as launch failures
 }
@@ -655,16 +657,17 @@ func (m *WorkbenchModel) notePodTransition(id string, from, to contracts.PodStat
 			msg = id + ": failed"
 		}
 		m.logf("plugin %s failed: %s", id, lastError)
-		m.cmds = append(m.cmds, m.showLocalToast("warn", "Plugin failed", msg))
+		m.failures = append(m.failures, msg)
 	case contracts.PodExited:
 		m.logf("plugin %s exited", id)
 	}
 }
 
-// noteRefusals toasts each plugin the host refused before a Pod existed
+// noteRefusals queues each plugin the host refused before a Pod existed
 // (invalid manifest, duplicate id, protocol mismatch) the way a launch
 // failure is: no husk.pods entry exists to carry the failure, so the host
-// lists them and the model shows each one once.
+// lists them and the model reports each one once. It then shows everything
+// queued this settle, refusals and failed Pods together.
 func (m *WorkbenchModel) noteRefusals() {
 	if m.fe == nil {
 		return
@@ -676,9 +679,25 @@ func (m *WorkbenchModel) noteRefusals() {
 			msg = r.Plugin + ": " + r.Reason
 		}
 		m.logf("plugin refused: %s", msg)
-		m.cmds = append(m.cmds, m.showLocalToast("warn", "Plugin failed", msg))
+		m.failures = append(m.failures, msg)
 	}
 	m.refusalsShown = len(refused)
+	m.toastFailures()
+}
+
+// toastFailures shows the failures noted since the last call as one toast, so
+// several arriving in one settle (refusals all land at boot) cannot replace
+// each other; the log holds each one in full.
+func (m *WorkbenchModel) toastFailures() {
+	switch len(m.failures) {
+	case 0:
+		return
+	case 1:
+		m.cmds = append(m.cmds, m.showLocalToast("warn", "Plugin failed", m.failures[0]))
+	default:
+		m.cmds = append(m.cmds, m.showLocalToast("warn", fmt.Sprintf("%d plugins failed", len(m.failures)), strings.Join(m.failures, "; ")))
+	}
+	m.failures = nil
 }
 
 // derived is everything refresh rebuilds from the host; a change in any of it
