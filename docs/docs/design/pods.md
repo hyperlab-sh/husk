@@ -44,7 +44,7 @@ pods             Pod: ties one plugin's spec, wrapper and decoration together; H
 
 Directions, stated once:
 
-- Server imports `protocol`, the `instance` leaf package ([Instances](instances.md)) and its own `Handler` interface. Server never imports Dispatcher, State or Services; `cmd/husk` registers their handlers on it at startup.
+- Server imports `protocol`, the `instance` leaf package ([Instances](instances.md)) and its own `Handler` interface. Server never imports Dispatcher, State or Services; the host's composition root (`internal/host.New`) registers their handlers on it.
 - Wrapper imports `protocol` and the `ReplySink` interface it is handed. Calls never imports Wrapper; the Pods `Host` implements `calls.Outbox` and the Message kinds `Sink` over the Wrappers' `Channel`s and is handed to Calls and the Event bus at startup.
 - Pods writes State; State never imports Pods.
 - Pods writes Store (catalog config); Store never imports Pods.
@@ -130,7 +130,7 @@ Framing: one JSON object per line, at most 4 MiB (`MaxLineBytes`, unchanged), re
 {"id":8,"error":{"code":"not_found","message":"no action \"nope\""}}
 ```
 
-Method families and their handlers (registered by `cmd/husk`; names and forms are [Protocol](protocol.md)'s):
+Method families and their handlers (registered by `internal/host.New`; names and forms are [Protocol](protocol.md)'s):
 
 | Prefix | Handler owner | Notes |
 | :--- | :--- | :--- |
@@ -463,6 +463,8 @@ No per-request timeout lives in the Server. A request waits as long as its handl
 
 Host contracts. `internal/host/contracts` holds the consumer-defined Go interfaces the host's adapters and composition root code against: the adapter `Handler`, `Caller` and `Notifier` (same shapes as the Server's, converted by a one-line adapter), one owner port per method family (`StatePort`, `CallsPort`, `SessionPort`, `SettingsPort`, `SecretsPort`, `ProfilePort`, `ThemePort`, `KeybindingPort`, `ConfigPort`, `EventPort`, `HookPort`, `PluginPort`, `SurfacePort`; `MethodHomes` maps every wire method to its one port), the launch seams for the steps above (`PodRegistry`, `CatalogDeclarer`, `Reloader`, `SliceRegistrar`, `WrapperStarter`), the `Limiter` for the 20 calls per second per plugin rule, and the `Config` and `Host` of the composition root. Ports return errors that carry a wire code (`CodedError`); adapters map by code and never read error text. The package imports neither Services nor the Server.
 
+Composition root. The v2 host boots from `internal/host.New(contracts.Config)`, not from `cmd/husk`. `New` builds, in order, the plugin specs (`--plugin` / `--plugin-dir` through the converter registry), Store, State, Services, the Stem modules (Calls, Dispatcher, Hook runner, Event bus, Surfaces), Pods and the Server, registers every adapter from `internal/host/handlers` on one Mux and the Mux on the Server for each inbound prefix of `MethodHomes` except `session` (the Server answers `session.ping` from its registration entry), and wires the launch seams. It listens and starts nothing until `Run`, which starts the Server and adds the configured plugins as one launch batch. The caller owns the Bubble Tea loop: it posts what `Config.Post` receives back into the host through `Update` on the loop goroutine. `Close` is idempotent and follows [Shutdown](#shutdown): the Calls table closes, the Server stops and unregisters, plugins stop, then the final flush and Store close. A failure in any stage closes what was already built. The root also owns the content of the Pod opening (`theme.changed`, `surface.resized`, `input.key_state`), registers each plugin's occupants and contributions declaration slices from its manifest before the first reload and drops them with the Pod, and calls the Surfaces engine's `CatalogChanged()` whenever the published-slot catalog changes. The cutover of `cmd/husk` to this root is a separate step.
+
 | File | Fate |
 | :--- | :--- |
 | `cmd/husk/transport.go` | Accept loop moves to `pods/server`. `serveStreamOrigin`, `streamOrigin`, the `hello` gate and `ConnectedPlugin` registration are removed: there is no hello and no plugin stream on the socket. `post` and `hostNoticeMsg` stay in `cmd/husk` as the loop's posting function the Server is configured with. |
@@ -487,7 +489,7 @@ Removed behaviour, stated for the changelog: the socket transport for plugins (p
 2. A request without a token is a user call; a request with a bad token is refused, never downgraded.
 3. The runtime directory is stable (`$XDG_RUNTIME_DIR/husk/` or `/tmp/husk-<uid>/`) with an ownership and mode check, replacing the random `mkdtemp` directory, because discovery needs a known place. The rule and the registration entry live in the `instance` package ([Instances](instances.md)); the Server calls it.
 4. Instance names follow Instances: lowercase, at most 32 bytes, never all digits, so they never collide with pid ids.
-5. The Server routes by method prefix to handlers registered by `cmd/husk`; it does not import Stem, State or Services.
+5. The Server routes by method prefix to handlers registered by the composition root (`internal/host.New`); it does not import Stem, State or Services.
 6. `state.set` from a plugin goes through that plugin's Pod, which writes as the slice owner; plugins never write State directly.
 7. Watch methods (`event.watch`, `state.watch`) are the only socket pushes and exist for the CLI; plugins get events on stdin.
 8. Stdout carries replies only. Plugin-originated requests go through the socket.
