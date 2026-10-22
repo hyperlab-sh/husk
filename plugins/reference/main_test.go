@@ -432,6 +432,15 @@ func TestContributorFillsSlotAndAnswersHook(t *testing.T) {
 		t.Errorf("toast = %+v", got)
 	}
 	h.outNext()
+
+	// A non-string args value is absent, not an error.
+	h.send(`{"id":11,"method":"action.invoke","params":{"action":"` + inspectAction + `","args":{"row_key":7,"extra":{"x":1}}}}`)
+	if got := decode[protocol.ToastShowParams](t, h.sockNext(protocol.MethodToastShow).Params); got.Message != "row " {
+		t.Errorf("non-string row_key toast = %+v", got)
+	}
+	if m := h.outNext(); m.ID.String() != "11" || m.Error != nil {
+		t.Errorf("non-string args reply = %+v", m)
+	}
 }
 
 func TestContributorRetriesWhenPublisherIsNotInTheCatalogYet(t *testing.T) {

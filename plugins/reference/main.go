@@ -292,8 +292,8 @@ func (p *plugin) request(m protocol.Message) error {
 	switch m.Method {
 	case protocol.MethodActionInvoke:
 		var a struct {
-			Action string            `json:"action"`
-			Args   map[string]string `json:"args"`
+			Action string         `json:"action"`
+			Args   map[string]any `json:"args"`
 		}
 		if err := json.Unmarshal(m.Params, &a); err != nil {
 			return p.replyError(m, protocol.CodeInvalidParams, "action.invoke params: "+err.Error())
@@ -301,8 +301,11 @@ func (p *plugin) request(m protocol.Message) error {
 		if !p.cfg.contributor || a.Action != inspectAction {
 			return p.replyError(m, protocol.CodeNotFound, fmt.Sprintf("no action %q", a.Action))
 		}
+		// args is an open object; row_key is the only key this plugin reads and
+		// a non-string value is treated as absent rather than failing the call.
+		row, _ := a.Args["row_key"].(string)
 		if err := p.notify(protocol.MethodToastShow, protocol.ToastShowParams{
-			Level: "info", Title: "Inspect", Message: "row " + a.Args["row_key"],
+			Level: "info", Title: "Inspect", Message: "row " + row,
 		}); err != nil {
 			return err
 		}
