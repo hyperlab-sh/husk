@@ -262,8 +262,8 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 	}
 	catalog, ps := c.Catalogs(in)
 	r.Problems = append(r.Problems, ps...)
-	secretNames := map[string]bool{}
 	for id, cat := range catalog {
+		secretNames := map[string]bool{}
 		for _, req := range cat.SecretRequests {
 			secretNames[req.Name] = true
 		}
@@ -273,6 +273,10 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 				continue
 			}
 			e.Owner = "plugin:" + id
+			local := strings.TrimPrefix(e.Key, "plugins."+id+".")
+			if secretNames[local] || secretNames[e.Key] {
+				c.Issue(&r.Problems, "error", e.Owner, e.Key, "secrets are not settings")
+			}
 			if e.Apply == "" {
 				e.Apply = "live"
 			}
@@ -302,17 +306,6 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 		layer := string(in.Doc.Origins[key])
 		if layer == "" {
 			layer = "user"
-		}
-		for suffix := key; suffix != ""; {
-			if secretNames[suffix] {
-				c.Issue(&r.Problems, "error", layer, key, "secrets are not settings")
-				break
-			}
-			at := strings.IndexByte(suffix, '.')
-			if at < 0 {
-				break
-			}
-			suffix = suffix[at+1:]
 		}
 		e, known := schema[key]
 		if !known {
