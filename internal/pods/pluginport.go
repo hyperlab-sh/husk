@@ -50,8 +50,10 @@ func (h *Host) List(ctx context.Context, c contracts.Caller) ([]contracts.Plugin
 }
 
 // Log serves plugin.log: the stderr log path recorded for a plugin id, or a
-// not_found CodedError. Like List it is CLI-only and reads the loop-owned Pod
-// map through the Do seam (D57).
+// not_found CodedError. A Pod whose Wrapper never opened a log (not yet
+// started, or started through an injected Starter that owns no stderr file)
+// answers not_found as well, rather than an empty path. Like List it is
+// CLI-only and reads the loop-owned Pod map through the Do seam (D57).
 func (h *Host) Log(ctx context.Context, c contracts.Caller, pluginID string) (string, error) {
 	if c.Kind != contracts.CallerCLI {
 		return "", contracts.NewError(protocol.CodeDenied, "plugin.log reads a plugin's host-side stderr log; only the user's CLI may do it", nil)
@@ -69,6 +71,9 @@ func (h *Host) Log(ctx context.Context, c contracts.Caller, pluginID string) (st
 	}
 	if !found {
 		return "", contracts.NewError(protocol.CodeNotFound, "unknown plugin id "+pluginID, nil)
+	}
+	if path == "" {
+		return "", contracts.NewError(protocol.CodeNotFound, "plugin "+pluginID+" has no log yet", nil)
 	}
 	return path, nil
 }

@@ -966,3 +966,30 @@ func assertDocEqual(t *testing.T, what string, raw json.RawMessage, doc store.Do
 		t.Fatalf("%s mismatch\n want %v\n got  %v", what, want, doc)
 	}
 }
+
+// New wires the composed host and refuses the split-brain registry wiring
+// (round-1 note): Add's duplicate answer and the liveness writes must be the
+// same registry when both are wired.
+func TestNewRejectsSplitRegistries(t *testing.T) {
+	a := fakes.NewPods(fakes.NewRecorder())
+	l := launch.Loop{Context: t.Context(), Registry: a}
+	h, err := launch.New(l, pods.Options{Registry: a})
+	if err != nil || h == nil {
+		t.Fatal("agreeing registries rejected", err)
+	}
+
+	b := fakes.NewPods(fakes.NewRecorder())
+	if _, err := launch.New(l, pods.Options{Registry: b}); err == nil {
+		t.Fatal("split registries accepted")
+	} else if !strings.Contains(err.Error(), "same PodRegistry") {
+		t.Fatal("unexpected error", err)
+	}
+
+	// Either seam unwired is fine: only a disagreement is an error.
+	if _, err := launch.New(l, pods.Options{}); err != nil {
+		t.Fatal("loop-only registry rejected", err)
+	}
+	if _, err := launch.New(launch.Loop{Context: t.Context()}, pods.Options{Registry: b}); err != nil {
+		t.Fatal("options-only registry rejected", err)
+	}
+}
