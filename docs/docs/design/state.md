@@ -428,7 +428,7 @@ non-empty dot-free name — so nothing outside the plugin's authority commits.
 The remaining checks of today's registry are Pod responsibilities, applied
 before a request reaches the slice: a claim targets a defined host layout
 surface; a contribution targets a known published slot that is not the
-plugin's own; `on_click` names the plugin's own action. A contributions list
+plugin's own; `on_click` names the plugin's own action.
 The declarations carry no sequence: they define no combined order across
 plugins. A repeated contribution id replaces the earlier entry of its slot
 in place, and an identical value commits nothing; an entry's position in
@@ -450,10 +450,14 @@ stem-surfaces unit's to build; the slice and its shape are fixed here.
 
 Release travels the same narrow paths for every surface: the occupant's
 `surface.close`, the host's force-release through the same path, or the
-owner's declarations going away. A refused claim stays recorded in the
-declaration, the occupant is unchanged, and the refusal is counted; a
-returning plugin's re-registered declarations resolve again, first claim
-wins among the claims that arrive after the re-registration.
+owner's declarations going away. Each of the first two also retracts the
+claim declaration at its source — the engine asks the plugin's Pod to
+remove the surface from `<plugin_id>.occupants` — so a freed surface cannot
+be re-occupied by its own stale declaration, and a freed surface resolves
+its standing refused claims in namespace order. A refused claim stays
+recorded in the declaration, the occupant is unchanged, and the refusal is
+counted; a returning plugin's re-registered declarations resolve again,
+first claim wins among the claims that arrive after the re-registration.
 
 `husk.pods` status is one of `starting` (launch begun, process not yet
 started), `live` (process started), `exited` (clean exit, or stopped by Husk
