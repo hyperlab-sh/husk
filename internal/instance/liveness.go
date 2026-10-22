@@ -12,9 +12,16 @@ import (
 	"time"
 )
 
-// DiscoveryPingTimeout bounds one ping: a live local instance answers in
-// milliseconds, so discovery and stale checks wait no longer than this.
+// DiscoveryPingTimeout bounds one ping in the discovery fan-out: a live
+// local instance answers in milliseconds, so discovery and stale checks
+// wait no longer than this.
 const DiscoveryPingTimeout = 500 * time.Millisecond
+
+// LookupPingTimeout bounds one ping for an explicit target — a --socket
+// or --instance (or HUSK_SOCKET_PATH / HUSK_INSTANCE) step — where the
+// user named the instance and a slow answer beats a wrong "no instance".
+// The spec's 2 s.
+const LookupPingTimeout = 2 * time.Second
 
 // Deps holds the seams tests inject so that no test needs a real socket,
 // a real clock or the real process table. The zero value is production:
@@ -134,21 +141,24 @@ func pingAll(entries []Entry, d *Deps) []Status {
 // classify decides one entry's verdict. An injected ProcessAlive that
 // reports the pid dead marks the entry stale without a ping; that path
 // exists for tests only (see Deps.ProcessAlive). Otherwise the ping is
-// authoritative: a reply is live, a missing or refused socket is stale, and
-// a dial that succeeds without a reply — or any other failure — is
-// unresponsive, never stale.
+// authoritative, at the discovery timeout: a reply is live, a missing or
+// refused socket is stale, and a dial that succeeds without a reply — or
+// any other failure — is unresponsive, never stale.
 func (d *Deps) classify(e Entry) Verdict {
 	if d != nil && d.ProcessAlive != nil && !d.ProcessAlive(e.PID) {
 		return VerdictStale
 	}
-	return pingVerdict(d.ping(e.Socket))
+	return pingVerdict(d.pingFor(e.Socket, DiscoveryPingTimeout))
 }
 
-func (d *Deps) ping(socketPath string) error {
+// pingFor pings at an explicit timeout: an injected Ping always wins
+// (tests fix the outcome, not the timing); otherwise DefaultPing runs
+// with the given timeout.
+func (d *Deps) pingFor(socketPath string, timeout time.Duration) error {
 	if d != nil && d.Ping != nil {
 		return d.Ping(socketPath)
 	}
-	return DefaultPing(socketPath, DiscoveryPingTimeout)
+	return DefaultPing(socketPath, timeout)
 }
 
 // Sentinels DefaultPing (and any well-behaved injected Ping) wraps its

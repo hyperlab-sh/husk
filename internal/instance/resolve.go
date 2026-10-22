@@ -207,13 +207,13 @@ func Resolve(opts ResolveOptions) (Resolved, error) {
 		return Resolved{}, &Error{Kind: KindUsage, Message: "--socket and --instance are mutually exclusive"}
 	}
 	if opts.Socket != "" {
-		return Resolved{Socket: opts.Socket, Source: SourceSocketFlag}, nil
+		return lookupSocketPath(opts.Socket, SourceSocketFlag, opts.Deps)
 	}
 	if opts.Instance != "" {
 		return lookup(opts.Dir, opts.Instance, SourceFlag, opts.Deps)
 	}
 	if opts.EnvSocketPath != "" {
-		return Resolved{Socket: opts.EnvSocketPath, Source: SourceEnv}, nil
+		return lookupSocketPath(opts.EnvSocketPath, SourceEnv, opts.Deps)
 	}
 	if opts.EnvInstance != "" {
 		return lookup(opts.Dir, opts.EnvInstance, SourceEnv, opts.Deps)
@@ -221,10 +221,43 @@ func Resolve(opts ResolveOptions) (Resolved, error) {
 	return discover(opts.Dir, opts.Deps)
 }
 
+// lookupSocketPath applies a bare socket-path rule (--socket or
+// HUSK_SOCKET_PATH): no registration backs the path, so a ping is the only
+// proof anyone is listening. Missing or refused is exit 3 — for the env
+// step the spec's own wording, and it never falls through to discovery;
+// a path that does not answer is exit 5.
+func lookupSocketPath(path string, src Source, d *Deps) (Resolved, error) {
+	err := d.pingFor(path, LookupPingTimeout)
+	switch pingVerdict(err) {
+	case VerdictLive:
+		return Resolved{Socket: path, Source: src}, nil
+	case VerdictStale:
+		if src == SourceEnv {
+			return Resolved{}, &Error{
+				Kind:    KindNoInstance,
+				Message: "HUSK_SOCKET_PATH points at a socket nobody is listening on; unset it or pass --instance",
+				Err:     err,
+			}
+		}
+		return Resolved{}, &Error{
+			Kind:    KindNoInstance,
+			Message: fmt.Sprintf("socket %q points at a socket nobody is listening on", path),
+			Err:     err,
+		}
+	default:
+		return Resolved{}, &Error{
+			Kind:    KindTransport,
+			Message: fmt.Sprintf("socket %q did not answer within %s", path, LookupPingTimeout),
+			Err:     err,
+		}
+	}
+}
+
 // lookup resolves one id from the runtime directory: the --instance flag
 // and the HUSK_INSTANCE steps. The entry must exist and answer a ping; a
 // stale entry is removed and reported, an unresponsive one is kept and
-// reported as a transport failure.
+// reported as a transport failure. Explicit lookups wait the spec's 2 s
+// (LookupPingTimeout), not the discovery 500 ms.
 func lookup(dir, id string, src Source, d *Deps) (Resolved, error) {
 	if err := ValidID(id); err != nil {
 		return Resolved{}, &Error{Kind: KindUsage, Message: err.Error(), Err: err}
@@ -233,7 +266,7 @@ func lookup(dir, id string, src Source, d *Deps) (Resolved, error) {
 	if err != nil {
 		return Resolved{}, &Error{Kind: KindNoInstance, Message: fmt.Sprintf("instance %q is not running", id)}
 	}
-	switch d.classify(e) {
+	switch pingVerdict(d.pingFor(e.Socket, LookupPingTimeout)) {
 	case VerdictLive:
 		return Resolved{Entry: &e, Socket: e.Socket, Source: src}, nil
 	case VerdictStale:
@@ -245,7 +278,7 @@ func lookup(dir, id string, src Source, d *Deps) (Resolved, error) {
 	default:
 		return Resolved{}, &Error{
 			Kind:    KindTransport,
-			Message: fmt.Sprintf("instance %q did not answer a ping", id),
+			Message: fmt.Sprintf("instance %q did not answer within %s", id, LookupPingTimeout),
 		}
 	}
 }
