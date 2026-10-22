@@ -487,6 +487,41 @@ func TestContributionOrderWithinOneFlush(t *testing.T) {
 	}
 }
 
+func TestWithinTickOrderIsDeclarationNamespaceOrder(t *testing.T) {
+	st, eng, pods := newEngine(t, Options{Publications: publications{owners: map[string]string{"publisher.list": "publisher"}}})
+	pods.launch("git")
+	pods.launch("git-x")
+	pods.launch("a")
+	pods.launch("a.b")
+
+	// "git" < "git-x" as plugin ids, but "git-x.contributions" <
+	// "git.contributions" as namespaces ('-' sorts before '.'): the pass
+	// keys on the declaration namespace, not the bare id.
+	pods.declare("git", "publisher.list",
+		Contribution{ID: "git.one", Plugin: "git", Label: "one"})
+	pods.declare("git-x", "publisher.list",
+		Contribution{ID: "git-x.one", Plugin: "git-x", Label: "one"})
+	settle(st, eng)
+
+	if got := entryIDs(resolution(t, st).Contributions["publisher.list"]); !equalStrings(got, []string{"git-x.one", "git.one"}) {
+		t.Fatalf("git order = %v, want git-x before git (namespace order)", got)
+	}
+
+	// Same for dotted ids: "a.b.contributions" < "a.contributions".
+	pods.declare("a", "publisher.list",
+		Contribution{ID: "a.one", Plugin: "a", Label: "one"})
+	pods.declare("a.b", "publisher.list",
+		Contribution{ID: "a.b.one", Plugin: "a.b", Label: "one"})
+	settle(st, eng)
+
+	// The earlier tick's entries keep their first-observed positions; the
+	// new pair appends in its own namespace order (a.b before a).
+	want := []string{"git-x.one", "git.one", "a.b.one", "a.one"}
+	if got := entryIDs(resolution(t, st).Contributions["publisher.list"]); !equalStrings(got, want) {
+		t.Fatalf("dotted order = %v, want %v (a.b before a in its tick)", got, want)
+	}
+}
+
 func TestRemovedEntryLeavesSequence(t *testing.T) {
 	st, eng, pods := newEngine(t, Options{Publications: publications{owners: map[string]string{"publisher.list": "publisher"}}})
 	pods.launch("alpha.files")

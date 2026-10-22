@@ -273,7 +273,15 @@ func (e *Engine) Flush() {
 			plugins = append(plugins, plugin)
 		}
 	}
-	sort.Strings(plugins)
+	// New entries of one flush append in the plugins' pass order. The pass
+	// order is the declaration namespace order — key "<plugin_id>"
+	// + ".contributions" — not the bare plugin id: two dotted ids such as
+	// "git" and "git-x" order by their full namespaces
+	// ("git-x.contributions" < "git.contributions"), the order State itself
+	// reports changed namespaces in.
+	sort.Slice(plugins, func(i, j int) bool {
+		return plugins[i]+"."+contributionsSuffix < plugins[j]+"."+contributionsSuffix
+	})
 
 	for _, plugin := range plugins {
 		e.resolvePlugin(plugin, e.declsCache[plugin], next[plugin], &res, changedSlots)
