@@ -32,6 +32,8 @@ func TestAdmit(t *testing.T) {
 		{"plugin state.set", protocol.MethodStateSet, contracts.Caller{Kind: contracts.CallerPlugin, PluginID: "p"}, ""},
 		{"cli state.set denied", protocol.MethodStateSet, contracts.Caller{Kind: contracts.CallerCLI}, protocol.CodeDenied},
 		{"stem state.set denied", protocol.MethodStateSet, contracts.Caller{Kind: contracts.CallerStem}, protocol.CodeDenied},
+		{"unattributed caller denied", protocol.MethodStateSet, contracts.Caller{}, protocol.CodeDenied},
+		{"unattributed caller denied on an any-caller method", protocol.MethodSessionPing, contracts.Caller{}, protocol.CodeDenied},
 		{"cli settings.list", protocol.MethodSettingsList, contracts.Caller{Kind: contracts.CallerCLI}, ""},
 		{"plugin settings.list denied", protocol.MethodSettingsList, contracts.Caller{Kind: contracts.CallerPlugin}, protocol.CodeDenied},
 		{"unknown method", "nope.nope", contracts.Caller{Kind: contracts.CallerCLI}, protocol.CodeUnknownMethod},
