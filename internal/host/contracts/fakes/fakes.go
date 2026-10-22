@@ -131,6 +131,43 @@ func (w *watchers) count() int {
 	return len(w.byID)
 }
 
+// callLog gives a fake its call log. The zero value lazily creates a private
+// Recorder, so &fakes.State{} works; NewX(rec) shares rec instead.
+type callLog struct {
+	mu sync.Mutex
+	r  *Recorder
+}
+
+func (l *callLog) recorder() *Recorder {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.r == nil {
+		l.r = NewRecorder()
+	}
+	return l.r
+}
+
+// Recorder returns the log this fake writes to, so a zero-value fake's log can
+// be shared with others.
+func (l *callLog) Recorder() *Recorder { return l.recorder() }
+
+// Record appends a call that has no caller.
+func (l *callLog) Record(method string, args ...any) { l.recorder().Record(method, args...) }
+
+// RecordCaller appends a call attributed to c.
+func (l *callLog) RecordCaller(method string, c contracts.Caller, args ...any) {
+	l.recorder().RecordCaller(method, c, args...)
+}
+
+// Calls returns the recorded calls in order.
+func (l *callLog) Calls() []Call { return l.recorder().Calls() }
+
+// Methods returns the recorded method names in order.
+func (l *callLog) Methods() []string { return l.recorder().Methods() }
+
+// Reset empties the log.
+func (l *callLog) Reset() { l.recorder().Reset() }
+
 func orNew(r *Recorder) *Recorder {
 	if r == nil {
 		return NewRecorder()
@@ -140,16 +177,16 @@ func orNew(r *Recorder) *Recorder {
 
 // Handler echoes an empty successful reply (or Reply when set).
 type Handler struct {
-	*Recorder
+	callLog
 	Reply *protocol.Message
 }
 
 // NewHandler returns a Handler logging to rec.
-func NewHandler(rec *Recorder) *Handler { return &Handler{Recorder: orNew(rec)} }
+func NewHandler(rec *Recorder) *Handler { return &Handler{callLog: callLog{r: orNew(rec)}} }
 
 // Serve implements contracts.Handler.
 func (h *Handler) Serve(_ context.Context, c contracts.Caller, req protocol.Message, _ contracts.Notifier) protocol.Message {
-	h.RecordCaller("Serve", c, req.Method)
+	h.RecordCaller("Handler.Serve", c, req.Method)
 	if h.Reply != nil {
 		return *h.Reply
 	}
@@ -158,23 +195,23 @@ func (h *Handler) Serve(_ context.Context, c contracts.Caller, req protocol.Mess
 
 // Notifier records notifications.
 type Notifier struct {
-	*Recorder
+	callLog
 	Err error
 }
 
 // NewNotifier returns a Notifier logging to rec.
-func NewNotifier(rec *Recorder) *Notifier { return &Notifier{Recorder: orNew(rec)} }
+func NewNotifier(rec *Recorder) *Notifier { return &Notifier{callLog: callLog{r: orNew(rec)}} }
 
 // Notify implements contracts.Notifier.
 func (n *Notifier) Notify(m protocol.Message) error {
-	n.Record("Notify", m.Method)
+	n.Record("Notifier.Notify", m.Method)
 	return n.Err
 }
 
 // State fakes contracts.StatePort. Watch registers the notifier until ctx
 // ends and returns Snap at once; Push delivers to live watchers.
 type State struct {
-	*Recorder
+	callLog
 	Read     contracts.StateReadResult
 	Snap     contracts.StateSnapshotResult
 	Revision uint64
@@ -183,35 +220,35 @@ type State struct {
 }
 
 // NewState returns a State logging to rec.
-func NewState(rec *Recorder) *State { return &State{Recorder: orNew(rec)} }
+func NewState(rec *Recorder) *State { return &State{callLog: callLog{r: orNew(rec)}} }
 
 // Get implements contracts.StatePort.
 func (f *State) Get(_ context.Context, c contracts.Caller, slice, path string) (contracts.StateReadResult, error) {
-	f.RecordCaller("Get", c, slice, path)
+	f.RecordCaller("State.Get", c, slice, path)
 	return f.Read, f.Err
 }
 
 // Set implements contracts.StatePort.
 func (f *State) Set(_ context.Context, c contracts.Caller, slice string, _ json.RawMessage) (uint64, error) {
-	f.RecordCaller("Set", c, slice)
+	f.RecordCaller("State.Set", c, slice)
 	return f.Revision, f.Err
 }
 
 // Patch implements contracts.StatePort.
 func (f *State) Patch(_ context.Context, c contracts.Caller, slice string, _ json.RawMessage, ifRevision uint64) (uint64, error) {
-	f.RecordCaller("Patch", c, slice, ifRevision)
+	f.RecordCaller("State.Patch", c, slice, ifRevision)
 	return f.Revision, f.Err
 }
 
 // Snapshot implements contracts.StatePort.
 func (f *State) Snapshot(_ context.Context, c contracts.Caller, values bool) (contracts.StateSnapshotResult, error) {
-	f.RecordCaller("Snapshot", c, values)
+	f.RecordCaller("State.Snapshot", c, values)
 	return f.Snap, f.Err
 }
 
 // Watch implements contracts.StatePort.
 func (f *State) Watch(ctx context.Context, c contracts.Caller, slices []string, n contracts.Notifier) (contracts.StateSnapshotResult, error) {
-	f.RecordCaller("Watch", c, slices)
+	f.RecordCaller("State.Watch", c, slices)
 	if f.Err != nil {
 		return contracts.StateSnapshotResult{}, f.Err
 	}
@@ -227,52 +264,52 @@ func (f *State) Watching() int { return f.w.count() }
 
 // Clear implements contracts.StatePort.
 func (f *State) Clear(_ context.Context, c contracts.Caller, namespace string) error {
-	f.RecordCaller("Clear", c, namespace)
+	f.RecordCaller("State.Clear", c, namespace)
 	return f.Err
 }
 
 // Calls fakes contracts.CallsPort.
 type Calls struct {
-	*Recorder
+	callLog
 	Result  json.RawMessage
 	Actions []contracts.ActionInfo
 	Err     error
 }
 
 // NewCalls returns a Calls logging to rec.
-func NewCalls(rec *Recorder) *Calls { return &Calls{Recorder: orNew(rec)} }
+func NewCalls(rec *Recorder) *Calls { return &Calls{callLog: callLog{r: orNew(rec)}} }
 
 // ActionInvoke implements contracts.CallsPort.
 func (f *Calls) ActionInvoke(_ context.Context, c contracts.Caller, action string, _ json.RawMessage) (json.RawMessage, error) {
-	f.RecordCaller("ActionInvoke", c, action)
+	f.RecordCaller("Calls.ActionInvoke", c, action)
 	return f.Result, f.Err
 }
 
 // ActionList implements contracts.CallsPort.
 func (f *Calls) ActionList(_ context.Context, c contracts.Caller) ([]contracts.ActionInfo, error) {
-	f.RecordCaller("ActionList", c)
+	f.RecordCaller("Calls.ActionList", c)
 	return f.Actions, f.Err
 }
 
 // Session fakes contracts.SessionPort.
 type Session struct {
-	*Recorder
+	callLog
 	Result protocol.SessionPingResult
 	Err    error
 }
 
 // NewSession returns a Session logging to rec.
-func NewSession(rec *Recorder) *Session { return &Session{Recorder: orNew(rec)} }
+func NewSession(rec *Recorder) *Session { return &Session{callLog: callLog{r: orNew(rec)}} }
 
 // Ping implements contracts.SessionPort.
 func (f *Session) Ping(_ context.Context, c contracts.Caller) (protocol.SessionPingResult, error) {
-	f.RecordCaller("Ping", c)
+	f.RecordCaller("Session.Ping", c)
 	return f.Result, f.Err
 }
 
 // Settings fakes contracts.SettingsPort.
 type Settings struct {
-	*Recorder
+	callLog
 	Value      any
 	Source     string
 	Values     map[string]any
@@ -282,150 +319,150 @@ type Settings struct {
 }
 
 // NewSettings returns a Settings logging to rec.
-func NewSettings(rec *Recorder) *Settings { return &Settings{Recorder: orNew(rec)} }
+func NewSettings(rec *Recorder) *Settings { return &Settings{callLog: callLog{r: orNew(rec)}} }
 
 // Get implements contracts.SettingsPort.
 func (f *Settings) Get(_ context.Context, c contracts.Caller, key string) (any, string, error) {
-	f.RecordCaller("Get", c, key)
+	f.RecordCaller("Settings.Get", c, key)
 	return f.Value, f.Source, f.Err
 }
 
 // List implements contracts.SettingsPort.
 func (f *Settings) List(_ context.Context, c contracts.Caller) (map[string]any, error) {
-	f.RecordCaller("List", c)
+	f.RecordCaller("Settings.List", c)
 	return f.Values, f.Err
 }
 
 // Schema implements contracts.SettingsPort.
 func (f *Settings) Schema(_ context.Context, c contracts.Caller, owner string) ([]contracts.SettingEntry, error) {
-	f.RecordCaller("Schema", c, owner)
+	f.RecordCaller("Settings.Schema", c, owner)
 	return f.Entries, f.Err
 }
 
 // Validate implements contracts.SettingsPort.
 func (f *Settings) Validate(_ context.Context, c contracts.Caller) (contracts.ValidationResult, error) {
-	f.RecordCaller("Validate", c)
+	f.RecordCaller("Settings.Validate", c)
 	return f.Validation, f.Err
 }
 
 // Secrets fakes contracts.SecretsPort.
 type Secrets struct {
-	*Recorder
+	callLog
 	Value []byte
 	Infos []contracts.SecretInfo
 	Err   error
 }
 
 // NewSecrets returns a Secrets logging to rec.
-func NewSecrets(rec *Recorder) *Secrets { return &Secrets{Recorder: orNew(rec)} }
+func NewSecrets(rec *Recorder) *Secrets { return &Secrets{callLog: callLog{r: orNew(rec)}} }
 
 // Get implements contracts.SecretsPort.
 func (f *Secrets) Get(_ context.Context, c contracts.Caller, name string) ([]byte, error) {
-	f.RecordCaller("Get", c, name)
+	f.RecordCaller("Secrets.Get", c, name)
 	return f.Value, f.Err
 }
 
 // Names implements contracts.SecretsPort.
 func (f *Secrets) Names(_ context.Context, c contracts.Caller) ([]contracts.SecretInfo, error) {
-	f.RecordCaller("Names", c)
+	f.RecordCaller("Secrets.Names", c)
 	return f.Infos, f.Err
 }
 
 // Set implements contracts.SecretsPort.
 func (f *Secrets) Set(_ context.Context, c contracts.Caller, name string, _ []byte) error {
-	f.RecordCaller("Set", c, name)
+	f.RecordCaller("Secrets.Set", c, name)
 	return f.Err
 }
 
 // Grant implements contracts.SecretsPort.
 func (f *Secrets) Grant(_ context.Context, c contracts.Caller, plugin, name string) error {
-	f.RecordCaller("Grant", c, plugin, name)
+	f.RecordCaller("Secrets.Grant", c, plugin, name)
 	return f.Err
 }
 
 // Revoke implements contracts.SecretsPort.
 func (f *Secrets) Revoke(_ context.Context, c contracts.Caller, plugin, name string) error {
-	f.RecordCaller("Revoke", c, plugin, name)
+	f.RecordCaller("Secrets.Revoke", c, plugin, name)
 	return f.Err
 }
 
 // Reveal implements contracts.SecretsPort.
 func (f *Secrets) Reveal(_ context.Context, c contracts.Caller, name string) ([]byte, error) {
-	f.RecordCaller("Reveal", c, name)
+	f.RecordCaller("Secrets.Reveal", c, name)
 	return f.Value, f.Err
 }
 
 // Profile fakes contracts.ProfilePort.
 type Profile struct {
-	*Recorder
+	callLog
 	Profiles []contracts.ProfileInfo
 	Err      error
 }
 
 // NewProfile returns a Profile logging to rec.
-func NewProfile(rec *Recorder) *Profile { return &Profile{Recorder: orNew(rec)} }
+func NewProfile(rec *Recorder) *Profile { return &Profile{callLog: callLog{r: orNew(rec)}} }
 
 // List implements contracts.ProfilePort.
 func (f *Profile) List(_ context.Context, c contracts.Caller) ([]contracts.ProfileInfo, error) {
-	f.RecordCaller("List", c)
+	f.RecordCaller("Profile.List", c)
 	return f.Profiles, f.Err
 }
 
 // Use implements contracts.ProfilePort.
 func (f *Profile) Use(_ context.Context, c contracts.Caller, name string) error {
-	f.RecordCaller("Use", c, name)
+	f.RecordCaller("Profile.Use", c, name)
 	return f.Err
 }
 
 // Theme fakes contracts.ThemePort.
 type Theme struct {
-	*Recorder
+	callLog
 	Palette     protocol.Palette
 	CheckResult contracts.ThemeCheckResult
 	Err         error
 }
 
 // NewTheme returns a Theme logging to rec.
-func NewTheme(rec *Recorder) *Theme { return &Theme{Recorder: orNew(rec)} }
+func NewTheme(rec *Recorder) *Theme { return &Theme{callLog: callLog{r: orNew(rec)}} }
 
 // Get implements contracts.ThemePort.
 func (f *Theme) Get(_ context.Context, c contracts.Caller) (protocol.Palette, error) {
-	f.RecordCaller("Get", c)
+	f.RecordCaller("Theme.Get", c)
 	return f.Palette, f.Err
 }
 
 // Check implements contracts.ThemePort.
 func (f *Theme) Check(_ context.Context, c contracts.Caller) (contracts.ThemeCheckResult, error) {
-	f.RecordCaller("Check", c)
+	f.RecordCaller("Theme.Check", c)
 	return f.CheckResult, f.Err
 }
 
 // Keybinding fakes contracts.KeybindingPort.
 type Keybinding struct {
-	*Recorder
+	callLog
 	Listing contracts.KeyListing
 	Err     error
 }
 
 // NewKeybinding returns a Keybinding logging to rec.
-func NewKeybinding(rec *Recorder) *Keybinding { return &Keybinding{Recorder: orNew(rec)} }
+func NewKeybinding(rec *Recorder) *Keybinding { return &Keybinding{callLog: callLog{r: orNew(rec)}} }
 
 // List implements contracts.KeybindingPort.
 func (f *Keybinding) List(_ context.Context, c contracts.Caller) (contracts.KeyListing, error) {
-	f.RecordCaller("List", c)
+	f.RecordCaller("Keybinding.List", c)
 	return f.Listing, f.Err
 }
 
 // Pods fakes contracts.PodRegistry. It rejects duplicates like the real one
 // and keeps the merged status per id in Entries.
 type Pods struct {
-	*Recorder
+	callLog
 	mu      sync.Mutex
 	entries map[string]contracts.PodStatusUpdate
 }
 
 // NewPods returns a Pods logging to rec.
-func NewPods(rec *Recorder) *Pods { return &Pods{Recorder: orNew(rec)} }
+func NewPods(rec *Recorder) *Pods { return &Pods{callLog: callLog{r: orNew(rec)}} }
 
 // Entry returns the merged update for id.
 func (f *Pods) Entry(id string) (contracts.PodStatusUpdate, bool) {
@@ -437,7 +474,7 @@ func (f *Pods) Entry(id string) (contracts.PodStatusUpdate, bool) {
 
 // Reserve implements contracts.PodRegistry.
 func (f *Pods) Reserve(_ context.Context, id string) error {
-	f.Record("Reserve", id)
+	f.Record("Pods.Reserve", id)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.entries == nil {
@@ -452,7 +489,7 @@ func (f *Pods) Reserve(_ context.Context, id string) error {
 
 // SetStatus implements contracts.PodRegistry.
 func (f *Pods) SetStatus(_ context.Context, id string, u contracts.PodStatusUpdate) error {
-	f.Record("SetStatus", id, u.Status)
+	f.Record("Pods.SetStatus", id, u.Status)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	e, ok := f.entries[id]
@@ -480,7 +517,7 @@ func (f *Pods) SetStatus(_ context.Context, id string, u contracts.PodStatusUpda
 
 // Release implements contracts.PodRegistry.
 func (f *Pods) Release(_ context.Context, id string) {
-	f.Record("Release", id)
+	f.Record("Pods.Release", id)
 	f.mu.Lock()
 	delete(f.entries, id)
 	f.mu.Unlock()
@@ -488,41 +525,41 @@ func (f *Pods) Release(_ context.Context, id string) {
 
 // Catalog fakes contracts.CatalogDeclarer.
 type Catalog struct {
-	*Recorder
+	callLog
 	Err error
 }
 
 // NewCatalog returns a Catalog logging to rec.
-func NewCatalog(rec *Recorder) *Catalog { return &Catalog{Recorder: orNew(rec)} }
+func NewCatalog(rec *Recorder) *Catalog { return &Catalog{callLog: callLog{r: orNew(rec)}} }
 
 // Declare implements contracts.CatalogDeclarer.
 func (f *Catalog) Declare(id string, _, _ json.RawMessage) error {
-	f.Record("Declare", id)
+	f.Record("Catalog.Declare", id)
 	return f.Err
 }
 
 // Undeclare implements contracts.CatalogDeclarer.
-func (f *Catalog) Undeclare(id string) { f.Record("Undeclare", id) }
+func (f *Catalog) Undeclare(id string) { f.Record("Catalog.Undeclare", id) }
 
 // Reloader fakes contracts.Reloader.
 type Reloader struct {
-	*Recorder
+	callLog
 	Applied  bool
 	Problems []contracts.Problem
 }
 
 // NewReloader returns a Reloader logging to rec.
-func NewReloader(rec *Recorder) *Reloader { return &Reloader{Recorder: orNew(rec)} }
+func NewReloader(rec *Recorder) *Reloader { return &Reloader{callLog: callLog{r: orNew(rec)}} }
 
 // Reload implements contracts.Reloader.
 func (f *Reloader) Reload(context.Context) (bool, []contracts.Problem) {
-	f.Record("Reload")
+	f.Record("Reloader.Reload")
 	return f.Applied, f.Problems
 }
 
 // Slice fakes contracts.SliceHandle.
 type Slice struct {
-	*Recorder
+	callLog
 	ns       string
 	Revision uint64
 	Err      error
@@ -530,33 +567,33 @@ type Slice struct {
 
 // Set implements contracts.SliceHandle.
 func (f *Slice) Set(json.RawMessage) (uint64, error) {
-	f.Record("SliceSet", f.ns)
+	f.Record("Slice.Set", f.ns)
 	return f.Revision, f.Err
 }
 
 // Patch implements contracts.SliceHandle.
 func (f *Slice) Patch(_ json.RawMessage, ifRevision uint64) (uint64, error) {
-	f.Record("SlicePatch", f.ns, ifRevision)
+	f.Record("Slice.Patch", f.ns, ifRevision)
 	return f.Revision, f.Err
 }
 
 // Unregister implements contracts.SliceHandle.
-func (f *Slice) Unregister() { f.Record("SliceUnregister", f.ns) }
+func (f *Slice) Unregister() { f.Record("Slice.Unregister", f.ns) }
 
 // Slices fakes contracts.SliceRegistrar, handing out one Slice per namespace.
 type Slices struct {
-	*Recorder
+	callLog
 	mu      sync.Mutex
 	Handles map[string]*Slice
 	Err     error
 }
 
 // NewSlices returns a Slices logging to rec.
-func NewSlices(rec *Recorder) *Slices { return &Slices{Recorder: orNew(rec)} }
+func NewSlices(rec *Recorder) *Slices { return &Slices{callLog: callLog{r: orNew(rec)}} }
 
 // RegisterSlice implements contracts.SliceRegistrar.
 func (f *Slices) RegisterSlice(spec state.Spec) (contracts.SliceHandle, error) {
-	f.Record("RegisterSlice", spec.Namespace)
+	f.Record("Slices.RegisterSlice", spec.Namespace)
 	if f.Err != nil {
 		return nil, f.Err
 	}
@@ -568,23 +605,23 @@ func (f *Slices) RegisterSlice(spec state.Spec) (contracts.SliceHandle, error) {
 	if _, dup := f.Handles[spec.Namespace]; dup {
 		return nil, state.ErrDuplicate
 	}
-	h := &Slice{Recorder: f.Recorder, ns: spec.Namespace}
+	h := &Slice{callLog: callLog{r: f.recorder()}, ns: spec.Namespace}
 	f.Handles[spec.Namespace] = h
 	return h, nil
 }
 
 // Wrapper fakes contracts.WrapperStarter.
 type Wrapper struct {
-	*Recorder
+	callLog
 	Err error
 }
 
 // NewWrapper returns a Wrapper logging to rec.
-func NewWrapper(rec *Recorder) *Wrapper { return &Wrapper{Recorder: orNew(rec)} }
+func NewWrapper(rec *Recorder) *Wrapper { return &Wrapper{callLog: callLog{r: orNew(rec)}} }
 
 // Start implements contracts.WrapperStarter.
 func (f *Wrapper) Start(id string, opening []protocol.Message) error {
-	f.Record("Start", id, len(opening))
+	f.Record("Wrapper.Start", id, len(opening))
 	return f.Err
 }
 
@@ -642,55 +679,55 @@ func (l *Limiter) Allow(key string) bool {
 
 // Host fakes contracts.Host.
 type Host struct {
-	*Recorder
+	callLog
 	RunErr, CloseErr error
 }
 
 // NewHost returns a Host logging to rec.
-func NewHost(rec *Recorder) *Host { return &Host{Recorder: orNew(rec)} }
+func NewHost(rec *Recorder) *Host { return &Host{callLog: callLog{r: orNew(rec)}} }
 
 // Run implements contracts.Host.
-func (f *Host) Run(context.Context) error { f.Record("Run"); return f.RunErr }
+func (f *Host) Run(context.Context) error { f.Record("Host.Run"); return f.RunErr }
 
 // Close implements contracts.Host.
-func (f *Host) Close() error { f.Record("Close"); return f.CloseErr }
+func (f *Host) Close() error { f.Record("Host.Close"); return f.CloseErr }
 
 // Config fakes contracts.ConfigPort.
 type Config struct {
-	*Recorder
+	callLog
 	Reports []contracts.ReloadReport
 	Err     error
 }
 
 // NewConfig returns a Config logging to rec.
-func NewConfig(rec *Recorder) *Config { return &Config{Recorder: orNew(rec)} }
+func NewConfig(rec *Recorder) *Config { return &Config{callLog: callLog{r: orNew(rec)}} }
 
 // Reload implements contracts.ConfigPort.
 func (f *Config) Reload(_ context.Context, c contracts.Caller) ([]contracts.ReloadReport, error) {
-	f.RecordCaller("ConfigReload", c)
+	f.RecordCaller("Config.Reload", c)
 	return f.Reports, f.Err
 }
 
 // Events fakes contracts.EventPort. Watch registers the notifier until ctx
 // ends and returns at once, like the real port; Push delivers to watchers.
 type Events struct {
-	*Recorder
+	callLog
 	Err error
 	w   watchers
 }
 
 // NewEvents returns an Events logging to rec.
-func NewEvents(rec *Recorder) *Events { return &Events{Recorder: orNew(rec)} }
+func NewEvents(rec *Recorder) *Events { return &Events{callLog: callLog{r: orNew(rec)}} }
 
 // Emit implements contracts.EventPort.
 func (f *Events) Emit(_ context.Context, c contracts.Caller, name string, _ json.RawMessage) error {
-	f.RecordCaller("Emit", c, name)
+	f.RecordCaller("Events.Emit", c, name)
 	return f.Err
 }
 
 // Watch implements contracts.EventPort.
 func (f *Events) Watch(ctx context.Context, c contracts.Caller, pattern string, n contracts.Notifier) error {
-	f.RecordCaller("EventWatch", c, pattern)
+	f.RecordCaller("Events.Watch", c, pattern)
 	if f.Err != nil {
 		return f.Err
 	}
@@ -706,72 +743,72 @@ func (f *Events) Watching() int { return f.w.count() }
 
 // Hooks fakes contracts.HookPort.
 type Hooks struct {
-	*Recorder
+	callLog
 	Results []contracts.HookResult
 	Err     error
 }
 
 // NewHooks returns a Hooks logging to rec.
-func NewHooks(rec *Recorder) *Hooks { return &Hooks{Recorder: orNew(rec)} }
+func NewHooks(rec *Recorder) *Hooks { return &Hooks{callLog: callLog{r: orNew(rec)}} }
 
 // HookCall implements contracts.HookPort.
 func (f *Hooks) HookCall(_ context.Context, c contracts.Caller, hook string, _ json.RawMessage) ([]contracts.HookResult, error) {
-	f.RecordCaller("HookCall", c, hook)
+	f.RecordCaller("Hooks.HookCall", c, hook)
 	return f.Results, f.Err
 }
 
 // Plugins fakes contracts.PluginPort.
 type Plugins struct {
-	*Recorder
+	callLog
 	Infos []contracts.PluginInfo
 	Path  string
 	Err   error
 }
 
 // NewPlugins returns a Plugins logging to rec.
-func NewPlugins(rec *Recorder) *Plugins { return &Plugins{Recorder: orNew(rec)} }
+func NewPlugins(rec *Recorder) *Plugins { return &Plugins{callLog: callLog{r: orNew(rec)}} }
 
 // List implements contracts.PluginPort.
 func (f *Plugins) List(_ context.Context, c contracts.Caller) ([]contracts.PluginInfo, error) {
-	f.RecordCaller("PluginList", c)
+	f.RecordCaller("Plugins.List", c)
 	return f.Infos, f.Err
 }
 
 // Log implements contracts.PluginPort.
 func (f *Plugins) Log(_ context.Context, c contracts.Caller, id string) (string, error) {
-	f.RecordCaller("PluginLog", c, id)
+	f.RecordCaller("Plugins.Log", c, id)
 	return f.Path, f.Err
 }
 
 // Surfaces fakes contracts.SurfacePort.
 type Surfaces struct {
-	*Recorder
+	callLog
 	Err error
 }
 
 // NewSurfaces returns a Surfaces logging to rec.
-func NewSurfaces(rec *Recorder) *Surfaces { return &Surfaces{Recorder: orNew(rec)} }
+func NewSurfaces(rec *Recorder) *Surfaces { return &Surfaces{callLog: callLog{r: orNew(rec)}} }
 
 // SurfaceUpdate implements contracts.SurfacePort.
 func (f *Surfaces) SurfaceUpdate(_ context.Context, c contracts.Caller, p protocol.SurfaceUpdateParams) error {
-	f.RecordCaller("SurfaceUpdate", c, p.Surface)
+	f.RecordCaller("Surfaces.SurfaceUpdate", c, p.Surface)
 	return f.Err
 }
 
 // SurfaceClose implements contracts.SurfacePort.
 func (f *Surfaces) SurfaceClose(_ context.Context, c contracts.Caller, p protocol.SurfaceCloseParams) error {
-	f.RecordCaller("SurfaceClose", c, p.Surface)
+	f.RecordCaller("Surfaces.SurfaceClose", c, p.Surface)
 	return f.Err
 }
 
 // SlotContribute implements contracts.SurfacePort.
 func (f *Surfaces) SlotContribute(_ context.Context, c contracts.Caller, p protocol.SlotContributeParams) error {
-	f.RecordCaller("SlotContribute", c, p.SlotID)
+	f.RecordCaller("Surfaces.SlotContribute", c, p.SlotID)
 	return f.Err
 }
 
 // ToastShow implements contracts.SurfacePort.
 func (f *Surfaces) ToastShow(_ context.Context, c contracts.Caller, p protocol.ToastShowParams) error {
-	f.RecordCaller("ToastShow", c, p.Title)
+	f.RecordCaller("Surfaces.ToastShow", c, p.Title)
 	return f.Err
 }
