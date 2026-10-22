@@ -174,6 +174,8 @@ func (r *programRef) post(msg any) bool {
 	defer r.waiting.Add(-1)
 	select {
 	case <-r.ready:
+	case <-r.gate:
+		return false
 	}
 	r.mu.RLock()
 	p := r.p
