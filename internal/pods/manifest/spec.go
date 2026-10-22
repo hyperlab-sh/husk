@@ -1,6 +1,5 @@
-// Package manifest defines the plugin configuration shared by Pods. The
-// converter task extends Spec with declarations and supplies manifest parsing;
-// this process-side slice deliberately implements no file-format conversion.
+// Package manifest converts plugin packages into process configuration and
+// plain declaration data. It imports no Stem, Services or Substrate code.
 package manifest
 
 import (
@@ -13,21 +12,33 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
-// Spec is the minimal process configuration. Command is resolved argv; WorkDir
-// is the absolute manifest directory. The converter task extends this struct
-// with actions, surfaces, bindings and other declarations from the Pods spec.
+// Spec is the converted process configuration and plugin declaration catalog.
+// Command is resolved argv; WorkDir is the absolute manifest directory.
 type Spec struct {
-	ID          string
-	Name        string
-	Version     string
-	Description string
-	Protocol    int
-	Command     []string
-	WorkDir     string
+	ID                string             `json:"id"`
+	Name              string             `json:"name"`
+	Version           string             `json:"version"`
+	Description       string             `json:"description"`
+	Protocol          int                `json:"protocol"`
+	Command           []string           `json:"command"`
+	WorkDir           string             `json:"work_dir"`
+	Actions           []ActionDecl       `json:"actions,omitempty"`
+	Surfaces          []SurfaceDecl      `json:"surfaces,omitempty"`
+	FocusBindings     []FocusBinding     `json:"focus_bindings,omitempty"`
+	Subscriptions     []string           `json:"subscriptions,omitempty"`
+	EventsDeclared    []EventDecl        `json:"events_declared,omitempty"`
+	HooksDeclared     []HookDecl         `json:"hooks_declared,omitempty"`
+	HookRegistrations []HookRegistration `json:"hook_registrations,omitempty"`
+	PublishedSlots    []SlotDecl         `json:"published_slots,omitempty"`
+	Slice             *SliceDecl         `json:"slice,omitempty"`
+	SecretRequests    []SecretRequest    `json:"secret_requests,omitempty"`
+	SettingsDeclared  []SettingDecl      `json:"settings_declared,omitempty"`
+	BindingProblems   []BindingProblem   `json:"binding_problems,omitempty"`
+	Suggestions       []Suggestion       `json:"suggestions,omitempty"`
 }
 
-// Clone detaches mutable command arguments. Extend it alongside future fields.
-func (s Spec) Clone() Spec { s.Command = slices.Clone(s.Command); return s }
+// Clone detaches every mutable slice, raw JSON buffer and declaration pointer.
+func (s Spec) Clone() Spec { return cloneSpec(s) }
 
 // Validate checks only fields needed to launch a process.
 func (s Spec) Validate() error {
