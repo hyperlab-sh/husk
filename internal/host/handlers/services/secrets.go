@@ -48,15 +48,17 @@ func (h Secrets) Serve(ctx context.Context, c contracts.Caller, req protocol.Mes
 	}
 	switch req.Method {
 	case protocol.MethodSecretsGet:
+		// The cap counts requests, not valid requests (services.md, Limits):
+		// check before decoding so malformed params still consume budget.
+		if deny := admitRateLimited(req, c, h.Limiter); deny != nil {
+			return *deny
+		}
 		var p secretsNameParams
 		if bad := decodeParams(req, &p); bad != nil {
 			return *bad
 		}
 		if bad := requireString(req, "params.name", p.Name); bad != nil {
 			return *bad
-		}
-		if deny := admitRateLimited(req, c, h.Limiter); deny != nil {
-			return *deny
 		}
 		value, err := h.Port.Get(ctx, c, p.Name)
 		if err != nil {
