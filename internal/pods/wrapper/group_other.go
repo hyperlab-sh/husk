@@ -16,3 +16,6 @@ func configureGroup(*exec.Cmd) error {
 func signalGroup(int, bool) error {
 	return errors.New("wrapper: process groups unsupported on this platform")
 }
+
+// logOpenNoFollow has no portable equivalent here.
+const logOpenNoFollow = 0
