@@ -634,8 +634,30 @@ func (m *WorkbenchModel) applyLayout(raw json.RawMessage) {
 // podsDoc is the part of husk.pods the model reads.
 type podsDoc struct {
 	Plugins map[string]struct {
-		Status contracts.PodStatus `json:"status"`
+		Status    contracts.PodStatus `json:"status"`
+		LastError string              `json:"last_error"`
 	} `json:"plugins"`
+}
+
+// notePodTransition reports a Pod's move to a terminal status: a failure or
+// crash raises a warning toast with the recorded cause, a clean exit only
+// logs (pods.md, failure table). Only a transition counts, so a Pod that
+// stays failed across refreshes toasts once.
+func (m *WorkbenchModel) notePodTransition(id string, from, to contracts.PodStatus, lastError string) {
+	if from == to {
+		return
+	}
+	switch to {
+	case contracts.PodFailed:
+		msg := id + ": " + lastError
+		if lastError == "" {
+			msg = id + ": failed"
+		}
+		m.logf("plugin %s failed: %s", id, lastError)
+		m.cmds = append(m.cmds, m.showLocalToast("warn", "Plugin failed", msg))
+	case contracts.PodExited:
+		m.logf("plugin %s exited", id)
+	}
 }
 
 // derived is everything refresh rebuilds from the host; a change in any of it
@@ -672,6 +694,7 @@ func (m *WorkbenchModel) refresh() bool {
 	status := map[string]contracts.PodStatus{}
 	for id, p := range pods.Plugins {
 		status[id] = p.Status
+		m.notePodTransition(id, m.podStatus[id], p.Status, p.LastError)
 		if p.Status == contracts.PodLive {
 			live[id] = true
 		}

@@ -354,3 +354,42 @@ func TestPaletteListsLivePluginActions(t *testing.T) {
 		t.Fatalf("enter did not invoke the action: %v", fe.Invoked)
 	}
 }
+
+// A Pod that fails raises one warning toast with the recorded cause; a clean
+// exit raises none; a Pod that stays failed does not toast again.
+func TestPodFailureToastsAndCleanExitDoesNot(t *testing.T) {
+	m := goldenModel()
+	fe := withFE(m)
+	fe.pods, fe.occ, fe.podErr = map[string]string{}, map[protocol.SurfaceID]string{}, map[string]string{}
+	step := func(id, status, lastErr string) {
+		fe.pods[id], fe.podErr[id] = status, lastErr
+		fe.publish()
+		m.activeToast = nil
+		m.refresh()
+	}
+	step("bad", "starting", "")
+	step("bad", "live", "")
+	if m.activeToast != nil {
+		t.Fatalf("toast while healthy: %+v", m.activeToast)
+	}
+	step("bad", "failed", "crashed (exit status 2): boom")
+	if tt := m.activeToast; tt == nil || tt.Level != "warn" || tt.Title != "Plugin failed" || tt.Message != "bad: crashed (exit status 2): boom" {
+		t.Fatalf("failure toast = %+v", m.activeToast)
+	}
+	// Another refresh with the same status is not a transition.
+	step("bad", "failed", "crashed (exit status 2): boom")
+	if m.activeToast != nil {
+		t.Fatalf("repeated failure toasted again: %+v", m.activeToast)
+	}
+	// A launch failure seen for the first time still toasts.
+	step("never", "failed", "start: no such file")
+	if m.activeToast == nil || m.activeToast.Message != "never: start: no such file" {
+		t.Fatalf("launch failure toast = %+v", m.activeToast)
+	}
+	// A clean exit is a log line only.
+	step("good", "live", "")
+	step("good", "exited", "")
+	if m.activeToast != nil {
+		t.Fatalf("clean exit toasted: %+v", m.activeToast)
+	}
+}
