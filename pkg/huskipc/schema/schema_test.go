@@ -50,7 +50,7 @@ func TestCommittedSchemaIsCurrent(t *testing.T) {
 		t.Fatalf("read committed schema: %v (run `go generate ./pkg/huskipc`)", err)
 	}
 	if !bytes.Equal(committed, mustGenerate(t)) {
-		t.Fatal("docs/docs/wire-schema.json is stale: run `go generate ./pkg/huskipc` and commit the result")
+		t.Fatal("docs/docs/wire-schema.json is stale: the v1 schema is frozen and has no generator; do not change the huskipc wire types")
 	}
 }
 

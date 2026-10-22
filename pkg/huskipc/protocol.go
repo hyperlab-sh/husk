@@ -6,11 +6,8 @@ import (
 	"sync"
 )
 
-// The wire JSON Schema is generated from the structs in this package. Run
-// `go generate ./pkg/huskipc` after changing any wire type;
-// TestCommittedSchemaIsCurrent fails while the committed file is stale.
-//
-//go:generate go run ../../cmd/genschema -o ../../docs/docs/wire-schema.json
+// The v1 wire JSON Schema is frozen with this package until it is retired;
+// cmd/genschema generates the v2 schema only, so there is no go:generate here.
 
 type SlotID string
 
