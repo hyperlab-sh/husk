@@ -8,7 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/hyperlab-sh/husk/internal/host"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
 // planHost is a stepHost that plans plugins and optionally fails to run.
@@ -89,5 +91,32 @@ func TestDumpFrameMainExitsZeroOnSuccess(t *testing.T) {
 	var out, errOut bytes.Buffer
 	if code := dumpFrameMain(m, planHost{stepHost: stepHost{fe: withFE(m)}}, prog, "", &out, &errOut); code != 0 {
 		t.Fatalf("exit code = %d, stderr %q", code, errOut.String())
+	}
+}
+
+// --rail with a placement no loaded plugin declares exits 1, with the cause
+// once on stderr and the frame still on stdout.
+func TestDumpFrameMainExitsNonZeroWhenNoRailItemMatches(t *testing.T) {
+	for _, mode := range []string{"modal", "full-canvas", "stage"} {
+		t.Run(mode, func(t *testing.T) {
+			m, prog := dumpModel()
+			h := planHost{stepHost: stepHost{fe: withFE(m)}, planned: 1}
+			m.attach(h, nil)
+			feed(prog,
+				register(m, "alpha", []protocol.SurfaceID{protocol.SurfaceMainStage}),
+				slotMsg(m, "alpha", protocol.SurfaceMainStage, "ONLY-STAGE"),
+			)
+			var out, errOut bytes.Buffer
+			if code := dumpFrameMain(m, h, prog, mode, &out, &errOut); code != 1 {
+				t.Fatalf("exit code = %d, want 1", code)
+			}
+			want := "no loaded plugin declares a " + mode + " rail item"
+			if n := strings.Count(errOut.String(), want); n != 1 {
+				t.Errorf("stderr %q has the cause %d times, want once", errOut.String(), n)
+			}
+			if !strings.Contains(ansi.Strip(out.String()), "ONLY-STAGE") {
+				t.Errorf("the frame must still be printed:\n%s", out.String())
+			}
+		})
 	}
 }
