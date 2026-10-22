@@ -435,11 +435,11 @@ Decoration takes one surface's content (the cells or lines the plugin supplied t
 | Unknown method prefix | Server | Error reply `unknown_method` | CLI prints it |
 | `state.set` on another owner's slice | Server | Error reply `denied` | CLI prints it |
 | Socket client stops reading replies | Reply queue | Connection closed | Client sees EOF |
-| Manifest invalid | Converter | That plugin is not launched; others are | Log and error toast `failed to launch plugin <id>: ...` |
+| Manifest invalid | Converter | That plugin is not launched; others are | Log; the error toast is not yet produced (husk-nb3) |
 | Duplicate plugin id | Pod | Second plugin not launched | Same toast, `duplicate plugin id` |
 | Protocol major mismatch | Converter | Not launched | Same toast, versions named |
-| `cmd.Start` fails | Wrapper | Liveness `failed`; the catalog stays declared | Error toast with the start error |
-| Plugin exits non-zero or by a foreign signal | Wrapper | Pending calls failed via `Closed`, liveness `failed`, token revoked; the catalog stays declared | Warning toast with status and last stderr line; log has the last 3 stderr lines |
+| `cmd.Start` fails | Wrapper | Liveness `failed`; the catalog stays declared | Warning toast `<id>: <last_error>` (the frontend toasts on the transition into `failed`) |
+| Plugin exits non-zero or by a foreign signal | Wrapper | Pending calls failed via `Closed`, liveness `failed`, token revoked; the catalog stays declared | Warning toast `<id>: <last_error>`; log has the last 3 stderr lines |
 | Plugin exits 0 | Wrapper | Same cleanup, liveness `exited` | Info-level log line, no toast |
 | Plugin stops reading stdin | Stdin queue | Rule 4: immediate once-only `Closed` for overflow/deadline, kill, `failed` with `last_error` prefixed `stopped reading: ` | Warning toast `stopped reading: send queue full (1024 messages)` or `stopped reading: write timed out after 5s` |
 | EOF/EPIPE or closed pipe/file | Wrapper | Credentials revoked immediately; once-only `Closed` after Wait and final replies, or at reap-grace expiry; pending calls fail at most 100 ms later | Final reason `exited`, `crashed` with status, or `stopped reading: ...` while the child survives |
