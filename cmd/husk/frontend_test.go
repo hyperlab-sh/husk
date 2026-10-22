@@ -1,6 +1,10 @@
 package main
 
 import (
+	"context"
+	"errors"
+	"time"
+
 	"slices"
 	"testing"
 
@@ -185,5 +189,65 @@ func TestEngineToastShowsAndClears(t *testing.T) {
 	m.pollToast()
 	if m.activeToast.Title != "local" {
 		t.Fatal("an engine toast displaced a local one")
+	}
+}
+
+// A host worker may post before the program exists. The post waits for it and
+// is delivered once the program runs; it is not reported as a gone loop.
+func TestPostBeforeProgramIsDeliveredAfterSet(t *testing.T) {
+	prog := newProgramRef()
+	m, _ := dumpModel()
+	posted := make(chan bool, 1)
+	reg := register(m, "a", []protocol.SurfaceID{protocol.SurfaceMainStage})
+	put := slotMsg(m, "a", protocol.SurfaceMainStage, "EARLY")
+	go func() { posted <- prog.post(hostStep(func() { reg(); put() })) }()
+	// Launched>0 keeps the run open until the early post has landed.
+	_, err := runDumpFrame(m, dumpFrameOptions{Program: prog, Launched: 1, Quiet: 1, Timeout: 30 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := <-posted; !got {
+		t.Fatal("an early post was refused")
+	}
+	if su := m.slotUpdates[protocol.SurfaceMainStage]; su == nil || su.Lines[0] != "EARLY" {
+		t.Fatal("the early post never reached the loop")
+	}
+}
+
+// Once the gate closes a post is refused at once, before or after the program.
+func TestPostAfterGateIsRefusedWithoutBlocking(t *testing.T) {
+	prog := newProgramRef()
+	prog.closeGate()
+	if prog.post(struct{}{}) {
+		t.Fatal("post succeeded through a closed gate")
+	}
+	prog.closeGate() // idempotent
+}
+
+// failRunHost is a host whose Run fails at once, like a socket that cannot bind.
+type failRunHost struct{ stepHost }
+
+func (failRunHost) Run(context.Context) error { return errors.New("bind failed") }
+
+// A host that dies on its own ends the program, and main reads the cause.
+func TestHostRunFailureQuitsTheProgram(t *testing.T) {
+	m := goldenModel()
+	fe := withFE(m)
+	m.attach(failRunHost{stepHost{fe: fe}}, nil)
+	_, cmd := m.Update(hostRunEndedMsg{err: errors.New("bind failed")})
+	if m.hostErr == nil || cmd == nil {
+		t.Fatalf("hostErr=%v cmd=%v, want the program to quit", m.hostErr, cmd)
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		if b, ok := cmd().(tea.BatchMsg); !ok || len(b) == 0 {
+			t.Fatalf("not a quit: %T", cmd())
+		}
+	}
+	// A clean end after Close is not an error.
+	m2 := goldenModel()
+	m2.attach(stepHost{fe: withFE(m2)}, nil)
+	m2.shutdownHost()
+	if _, cmd := m2.Update(hostRunEndedMsg{err: context.Canceled}); cmd != nil || m2.hostErr != nil {
+		t.Fatal("a Run that ended because of Close was treated as a failure")
 	}
 }

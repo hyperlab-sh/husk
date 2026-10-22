@@ -103,7 +103,8 @@ type WorkbenchModel struct {
 	closeGate func()          // closes the post gate before Host.Close (D62)
 	runCtx    context.Context // ends host.Run
 	stopRun   context.CancelFunc
-	closed    bool // Host.Close ran; no further host calls
+	closed    bool  // Host.Close ran; no further host calls
+	hostErr   error // why host.Run ended, when it ended on its own
 
 	slices      contracts.FrontendSlices
 	slicesOwned bool
@@ -419,9 +420,13 @@ func (m *WorkbenchModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case hostRunEndedMsg:
-		if msg.err != nil {
+		if msg.err != nil && !m.closed {
+			// A host that cannot listen or register leaves nothing to
+			// show: stop, and let main print the cause once the terminal is
+			// restored.
+			m.hostErr = msg.err
 			m.logf("host stopped: %v", msg.err)
-			return m, m.showLocalToast("error", "Host stopped", msg.err.Error())
+			return m, m.quitCmd()
 		}
 		return m, nil
 
