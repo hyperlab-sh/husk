@@ -390,7 +390,7 @@ Error codes come from the [Protocol](protocol.md) registry:
 | `husk.store` | Store | instance | no | | Store's own health: last 50 diagnostics, quarantined files, keyring fallback flag ([Store](store.md)). |
 | `<plugin_id>.state` | that plugin's Pod | instance, or user if the manifest asks | per manifest | per manifest | Plugin-defined. Registered at launch, before the plugin starts. |
 | `<plugin_id>.occupants` | that plugin's Pod | instance | no | | The plugin's occupancy declarations, one entry per claimed surface. The plugin cannot write it. Registered at launch with `<plugin_id>.state`. |
-| `<plugin_id>.contributions` | that plugin's Pod | instance | no | | The plugin's contribution declarations grouped by target slot, arrival order within each slot. The plugin cannot write it. |
+| `<plugin_id>.contributions` | that plugin's Pod | instance | no | | The plugin's contribution declarations grouped by target slot. The value carries no sequence; the Surfaces engine records the cross-plugin order. The plugin cannot write it. |
 | `<owner>.workspace` | the workspace owner the distribution names | workspace | yes, named instances only | keep-latest | Application-defined workspace content. |
 
 Value shapes:
@@ -429,17 +429,24 @@ The remaining checks of today's registry are Pod responsibilities, applied
 before a request reaches the slice: a claim targets a defined host layout
 surface; a contribution targets a known published slot that is not the
 plugin's own; `on_click` names the plugin's own action. A contributions list
-keeps arrival order within its slot; a repeated contribution id replaces the
-earlier entry of its slot in place, and an identical value commits nothing.
+The declarations carry no sequence: they define no combined order across
+plugins. A repeated contribution id replaces the earlier entry of its slot
+in place, and an identical value commits nothing; an entry's position in
+the value is only a tiebreaker for the engine, below.
 
 `husk.surfaces` is the resolution the declarations feed. The Surfaces engine
 is its only writer, and it is the only slice the host renders from. The
 engine keeps the registry's invariants: one occupant per surface, first
-claim wins, conflicting later claims refused, known host surfaces only;
-per-slot contributions combined across plugins in arrival order; a removed
-slot owner's entries dropped, as `removePlugin` filters contributions today.
-The engine itself is the stem-surfaces unit's to build; the slice and its
-shape are fixed here.
+claim wins, conflicting later claims refused, known host surfaces only. It
+also records the cross-plugin contribution order itself, since the
+declarations carry no sequence: each slot's combined list follows a
+per-slot sequence of `(plugin, id)` pairs in the order the engine first
+observes each entry across ticks; within one tick, new entries are ordered
+by namespace (State's deterministic change order), then by position in the
+plugin's entries array. A replaced entry keeps its position; a removed
+entry — including every entry of a removed slot owner, as `removePlugin`
+filters contributions today — leaves the sequence. The engine itself is the
+stem-surfaces unit's to build; the slice and its shape are fixed here.
 
 `husk.pods` status is one of `starting` (launch begun, process not yet
 started), `live` (process started), `exited` (clean exit, or stopped by Husk
