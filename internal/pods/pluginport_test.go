@@ -4,7 +4,9 @@ import (
 	"context"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
+	"github.com/hyperlab-sh/husk/internal/pods/manifest"
 	"github.com/hyperlab-sh/husk/internal/pods/wrapper"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
@@ -47,4 +49,56 @@ func TestPluginPortListAndLog(t *testing.T) {
 	if _, err := port.Log(context.Background(), contracts.Caller{Kind: contracts.CallerCLI}, "missing"); contracts.CodeOf(err) != string(protocol.CodeNotFound) {
 		t.Fatal("unknown plugin log code", err)
 	}
+}
+
+// plugin.list and plugin.log are the user's own: a plugin caller is denied,
+// and a zero-kind caller is denied too — the Caller must be explicit (D57).
+func TestPluginPortDeniesNonCLICallers(t *testing.T) {
+	h, _, _, _ := hostFixture(t)
+	addPod(t, h, "a")
+	var port contracts.PluginPort = h
+	for _, kind := range []struct {
+		name string
+		c    contracts.Caller
+	}{
+		{"plugin", contracts.Caller{Kind: contracts.CallerPlugin, PluginID: "a"}},
+		{"stem", contracts.Caller{Kind: contracts.CallerStem}},
+		{"zero", contracts.Caller{}},
+	} {
+		if _, err := port.List(context.Background(), kind.c); contracts.CodeOf(err) != string(protocol.CodeDenied) {
+			t.Fatalf("%s list caller: %v", kind.name, err)
+		}
+		if _, err := port.Log(context.Background(), kind.c, "a"); contracts.CodeOf(err) != string(protocol.CodeDenied) {
+			t.Fatalf("%s log caller: %v", kind.name, err)
+		}
+	}
+}
+
+// When the loop's Do seam refuses (no loop runs, or its Post answered
+// false), the port answers unavailable instead of reading loop-owned maps
+// off-loop (D57).
+func TestPluginPortUnavailableWithoutLoop(t *testing.T) {
+	h, _, _, _ := hostFixture(t)
+	addPod(t, h, "a")
+	h.loop = deadLoop{}
+	var port contracts.PluginPort = h
+	if _, err := port.List(context.Background(), contracts.Caller{Kind: contracts.CallerCLI}); contracts.CodeOf(err) != string(protocol.CodeUnavailable) {
+		t.Fatal("list without a loop", err)
+	}
+	if _, err := port.Log(context.Background(), contracts.Caller{Kind: contracts.CallerCLI}, "a"); contracts.CodeOf(err) != string(protocol.CodeUnavailable) {
+		t.Fatal("log without a loop", err)
+	}
+}
+
+// deadLoop answers Do like a real loop whose Post returned false: the loop
+// no longer runs, so nothing executes.
+type deadLoop struct{}
+
+func (deadLoop) Post(tea.Msg)                                         {}
+func (deadLoop) Opening(string) []protocol.Message                    { return nil }
+func (deadLoop) Liveness(LivenessMsg)                                 {}
+func (deadLoop) Log(LogMsg)                                           {}
+func (deadLoop) Prepare(context.Context, []manifest.Spec) Preparation { return Preparation{} }
+func (deadLoop) Do(context.Context, func()) error {
+	return context.Canceled
 }

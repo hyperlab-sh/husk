@@ -72,7 +72,7 @@ type recordedLoop struct {
 	work   chan func()
 }
 
-func newRecordedLoop(ctx context.Context, registry contracts.PodRegistry, preparer launch.Preparer, starter contracts.WrapperStarter, opening []protocol.Message) (*recordedLoop, *pods.Host) {
+func newRecordedLoop(t *testing.T, ctx context.Context, registry contracts.PodRegistry, preparer launch.Preparer, starter contracts.WrapperStarter, opening []protocol.Message) (*recordedLoop, *pods.Host) {
 	l := &recordedLoop{work: make(chan func(), 128)}
 	var h *pods.Host
 	l.Loop = launch.Loop{
@@ -90,7 +90,8 @@ func newRecordedLoop(ctx context.Context, registry contracts.PodRegistry, prepar
 	}
 	h, err := pods.New(l, pods.Options{Registry: registry, Starter: starter})
 	if err != nil {
-		panic(err)
+		t.Fatal(err)
+		return nil, nil
 	}
 	go func() {
 		for f := range l.work {
@@ -150,7 +151,7 @@ func TestLaunchSequenceOrder(t *testing.T) {
 	starter := fakes.NewWrapper(rec)
 
 	opening := []protocol.Message{{Method: protocol.MethodThemeChanged}, {Method: protocol.MethodSurfaceResized}}
-	_, h := newRecordedLoop(t.Context(), registry, launch.Preparer{Catalog: catalog, Slices: slices, Reload: reload}, starter, opening)
+	_, h := newRecordedLoop(t, t.Context(), registry, launch.Preparer{Catalog: catalog, Slices: slices, Reload: reload}, starter, opening)
 
 	if _, err := h.Add(specWithSlice("files")); err != nil {
 		t.Fatal(err)
@@ -208,7 +209,7 @@ func TestFailedReloadStillOpensGate(t *testing.T) {
 	reload.Problems = []contracts.Problem{{Severity: "error", Layer: "theme", Message: "contrast below floor"}}
 	starter := fakes.NewWrapper(rec)
 
-	loop, h := newRecordedLoop(t.Context(), fakes.NewPods(rec), launch.Preparer{Reload: reload}, starter, nil)
+	loop, h := newRecordedLoop(t, t.Context(), fakes.NewPods(rec), launch.Preparer{Reload: reload}, starter, nil)
 	added, err := h.Add(spec("files"))
 	if err != nil {
 		t.Fatal(err)
@@ -253,7 +254,7 @@ func TestRegisterFailureFailsOnlyThatPlugin(t *testing.T) {
 	reload.Applied = true
 	starter := fakes.NewWrapper(rec)
 
-	loop, h := newRecordedLoop(t.Context(), fakes.NewPods(rec), launch.Preparer{Slices: slices, Reload: reload}, starter, nil)
+	loop, h := newRecordedLoop(t, t.Context(), fakes.NewPods(rec), launch.Preparer{Slices: slices, Reload: reload}, starter, nil)
 	declared, err := h.Add(specWithSlice("files"))
 	if err != nil {
 		t.Fatal(err)
@@ -313,7 +314,7 @@ func TestDeclareFailureFailsOnlyThatPlugin(t *testing.T) {
 	reload.Applied = true
 	starter := fakes.NewWrapper(rec)
 
-	_, h := newRecordedLoop(t.Context(), fakes.NewPods(rec), launch.Preparer{Catalog: catalog, Reload: reload}, starter, nil)
+	_, h := newRecordedLoop(t, t.Context(), fakes.NewPods(rec), launch.Preparer{Catalog: catalog, Reload: reload}, starter, nil)
 	broken, err := h.Add(spec("broken"))
 	if err != nil {
 		t.Fatal(err)
@@ -505,7 +506,7 @@ func TestLaunchIntegrationRealSeams(t *testing.T) {
 	rec := fakes.NewRecorder()
 	starter := fakes.NewWrapper(rec)
 	opening := []protocol.Message{{Method: protocol.MethodThemeChanged}}
-	_, h := newRecordedLoop(t.Context(), registry, launch.Preparer{
+	_, h := newRecordedLoop(t, t.Context(), registry, launch.Preparer{
 		Catalog: launch.CatalogDeclarer{Store: st},
 		Slices:  launch.SliceRegistrar{State: tree},
 		Reload:  launch.Reloader{Coordinator: co},
@@ -628,7 +629,7 @@ func TestRelaunchRedeclaresAndReregisters(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec := fakes.NewRecorder()
-	_, h1 := newRecordedLoop(t.Context(), registry1, launch.Preparer{
+	_, h1 := newRecordedLoop(t, t.Context(), registry1, launch.Preparer{
 		Catalog: launch.CatalogDeclarer{Store: st},
 		Slices:  launch.SliceRegistrar{State: first},
 		Reload:  launch.Reloader{Coordinator: svc1.runtime.Coordinator},
@@ -652,7 +653,7 @@ func TestRelaunchRedeclaresAndReregisters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, h2 := newRecordedLoop(t.Context(), registry2, launch.Preparer{
+	_, h2 := newRecordedLoop(t, t.Context(), registry2, launch.Preparer{
 		Catalog: launch.CatalogDeclarer{Store: st},
 		Slices:  launch.SliceRegistrar{State: second},
 		Reload:  launch.Reloader{Coordinator: svc2.runtime.Coordinator},
@@ -730,7 +731,7 @@ func TestTeardownUnregistersSliceAndReleasesId(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec := fakes.NewRecorder()
-	_, h := newRecordedLoop(t.Context(), registry, launch.Preparer{
+	_, h := newRecordedLoop(t, t.Context(), registry, launch.Preparer{
 		Catalog: launch.CatalogDeclarer{Store: st},
 		Slices:  launch.SliceRegistrar{State: tree},
 		Reload:  launch.Reloader{Coordinator: svc.runtime.Coordinator},

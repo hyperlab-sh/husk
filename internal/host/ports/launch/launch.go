@@ -333,6 +333,10 @@ type Loop struct {
 	OpeningFn func(pluginID string) []protocol.Message
 	// LogFn receives host log notices; nil drops them.
 	LogFn func(pods.LogMsg)
+	// DoFn runs fn on the host loop and returns once it has run; nil means
+	// no loop runs, and every Do call answers that error. Off-loop callers
+	// (Server handlers) read loop-owned state through it.
+	DoFn func(context.Context, func()) error
 }
 
 var _ pods.Loop = Loop{}
@@ -360,6 +364,16 @@ func (l Loop) Prepare(ctx context.Context, specs []manifest.Spec) pods.Preparati
 		p.Post = l.PostFn
 	}
 	return p.Prepare(ctx, specs)
+}
+
+// Do implements pods.Loop.Do: fn runs on the host loop when a loop is
+// wired; without one, nothing runs and the error says so, so ports answer
+// unavailable rather than reading loop-owned state off-loop.
+func (l Loop) Do(ctx context.Context, fn func()) error {
+	if l.DoFn == nil {
+		return errors.New("launch: no loop Do seam wired")
+	}
+	return l.DoFn(ctx, fn)
 }
 
 // Liveness implements pods.Loop.Liveness by writing husk.pods.
