@@ -439,6 +439,7 @@ func TestRefusedPluginToastsLikeALaunchFailure(t *testing.T) {
 func TestFailuresInOneSettleAllReachTheUser(t *testing.T) {
 	m := goldenModel()
 	fe := withFE(m)
+	fe.pods, fe.occ, fe.podErr = map[string]string{}, map[protocol.SurfaceID]string{}, map[string]string{}
 	m.settle()
 	fe.Refused = []contracts.PluginRefusal{
 		{Plugin: "dup", Reason: "duplicate plugin id"},
