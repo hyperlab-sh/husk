@@ -55,8 +55,9 @@ func (h Surface) Serve(ctx context.Context, c contracts.Caller, req protocol.Mes
 			return *bad
 		}
 		// slot_id and id identify the contribution; content stays free — neither
-		// protocol.md nor message-kinds.md marks it required, and an empty content
-		// is how v1 withdrew a slot_contribute, so the port decides what it means.
+		// protocol.md nor message-kinds.md marks it required, and no spec gives
+		// an empty content a meaning (v1 stored it as a normal update), so the
+		// port decides what it means.
 		if bad := requireString(req, "params.slot_id", p.SlotID); bad != nil {
 			return *bad
 		}
