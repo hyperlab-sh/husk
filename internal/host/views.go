@@ -72,15 +72,38 @@ func (p publisher) Publish(name string, data any) {
 		key, _ = obj["plugin_id"].(string)
 	}
 	publish := func() {
+		if name == pods.PluginExitedEvent {
+			obj = p.r.podEntry(key, obj)
+		}
 		p.r.bus.Publish(eventbus.Event{Name: name, Key: key, Source: eventbus.SourceHost, Data: obj})
 	}
 	// Pods publish pods.plugin-exited from inside Update, where a blocking
 	// Post would wait on the loop it runs on; publish inline there.
-	if g := p.r.loopGID.Load(); g != 0 && g == goroutineID() {
+	if p.r.onLoop() {
 		publish()
 		return
 	}
 	p.r.post(publish)
+}
+
+// podEntry is the event data for a Pod's exit: its husk.pods entry as State
+// holds it after the exit's liveness write (the merge keeps fields an earlier
+// write set), plus plugin_id. fallback is used when the entry is missing.
+// Loop only.
+func (r *Root) podEntry(id string, fallback map[string]any) map[string]any {
+	e, ok := r.st.Get(state.PodsNamespace)
+	if !ok {
+		return fallback
+	}
+	var doc struct {
+		Plugins map[string]map[string]any `json:"plugins"`
+	}
+	if json.Unmarshal(e.Value, &doc) != nil || doc.Plugins[id] == nil {
+		return fallback
+	}
+	entry := doc.Plugins[id]
+	entry["plugin_id"] = id
+	return entry
 }
 
 // storeClock adapts the protocol Clock the host is configured with to the
