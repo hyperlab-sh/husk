@@ -4,6 +4,8 @@ package theme
 import (
 	"context"
 	"fmt"
+	"strings"
+
 	c "github.com/hyperlab-sh/husk/internal/services/contracts"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 	palette "github.com/hyperlab-sh/husk/pkg/theme"
@@ -11,10 +13,9 @@ import (
 )
 
 type snapshot struct {
-	gen         c.Generation
-	palette     palette.Palette
-	overrides   map[string]string
-	settingsGen c.Generation
+	gen       c.Generation
+	palette   palette.Palette
+	overrides map[string]string
 }
 
 // Service publishes a palette only after format and contrast checks succeed.
@@ -68,10 +69,11 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 		}
 		key := "theme.palette." + role
 		if in.Settings.Source(key) != "default" {
-			overrides[role] = in.Settings.String(key)
-			if _, err := palette.RelativeLuminance(overrides[role]); err != nil {
+			hex := in.Settings.String(key)
+			if _, err := palette.RelativeLuminance(hex); err != nil {
 				c.Issue(&r.Problems, "error", in.Settings.Source(key), key, "role "+role+": want #RRGGBB")
 			}
+			overrides[role] = strings.ToLower(hex)
 		}
 	}
 	overrides["name"] = in.Settings.String("theme.name")
@@ -110,6 +112,6 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 	if ctx.Err() != nil {
 		return c.ContextError(ctx, r)
 	}
-	next := &snapshot{old.gen + 1, p, overrides, in.Settings.Generation()}
+	next := &snapshot{old.gen + 1, p, overrides}
 	return c.Prepare(ctx, r, func() bool { return s.current.CompareAndSwap(old, next) }, s.Generation), r, nil
 }
