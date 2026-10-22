@@ -261,7 +261,7 @@ type Channel interface {
 // calls.ReplyMsg and Closed posts the exit message that makes the Loop call
 // calls.DropPlugin; the Wrapper never touches the Calls table.
 type ReplySink interface {
-    Reply(pluginID string, r protocol.Message) // a line with an id and result or error
+    Reply(pluginID string, r protocol.Message) // a parsed reply, or a salvaged bare-id malformed reply
     Closed(pluginID string, reason error)      // the stdin channel is gone: fail every pending call
 }
 
@@ -335,7 +335,7 @@ Transitions:
 
 1. The Wrapper is the only writer of a plugin's stdin and the only reader of its stdout.
 2. `Send` never blocks the caller. It marshals on the caller's goroutine and enqueues on the bounded queue from `pkg/huskipc/queue.go` (capacity 1,024, 5 s write timeout, watchdog close on pipes).
-3. Stdout carries replies only. A stdout line that is a reply goes to `ReplySink.Reply`. Any other valid line is logged as `plugin <id> sent a non-reply on stdout` and answered with a `protocol.error` notification on stdin; the plugin stays up. The one exception is a major-1 `hello`, which gets one major-1 `protocol_error` line and stops the plugin ([Protocol](protocol.md)).
+3. Stdout carries replies only. A stdout line that is a reply goes to `ReplySink.Reply`. For a malformed reply, the Wrapper salvages the protocol reader's `LineError.ID` and forwards a bare-id message through `ReplySink.Reply`, so the Loop posts `ReplyMsg` and Calls fails a matching call with `internal` / `data.reason: "invalid_reply"` instead of waiting for its timeout. Any other valid line is logged as `plugin <id> sent a non-reply on stdout` and answered with a `protocol.error` notification on stdin; the plugin stays up. The one exception is a major-1 `hello`, which gets one major-1 `protocol_error` line and stops the plugin ([Protocol](protocol.md)).
 4. A stdin failure (queue overflow, write timeout, write error) is fatal for the launch: `ReplySink.Closed` is called, the process group gets SIGTERM, then SIGKILL after the stop grace, and liveness becomes `failed`. A plugin that cannot read its stdin cannot be reached any other way, so keeping it alive only hides the fault.
 5. `ReplySink.Closed` is called exactly once per launch, before liveness leaves `live`, so the Dispatcher never sees a `live` owner whose pending calls are already orphaned.
 6. Stdout EOF without process exit (the plugin closed stdout) is treated as a stdin failure (rule 4): the reply channel is gone.
