@@ -174,12 +174,17 @@ var (
 // means a live instance, and the CLI's real session.ping owns the protocol
 // check. Dial and read failures are wrapped in the sentinels above.
 func DefaultPing(socketPath string, timeout time.Duration) error {
-	conn, err := net.DialTimeout("unix", socketPath, timeout)
+	// One deadline covers dial, write and read: a slow dial consumes the
+	// budget instead of leaving a fresh read window, so the total wait is
+	// never more than timeout.
+	deadline := time.Now().Add(timeout)
+	d := net.Dialer{Deadline: deadline}
+	conn, err := d.Dial("unix", socketPath)
 	if err != nil {
 		return classifyDialError(err)
 	}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(timeout))
+	_ = conn.SetDeadline(deadline)
 	req := []byte(`{"id":1,"method":"session.ping","params":{}}` + "\n")
 	if _, err := conn.Write(req); err != nil {
 		return fmt.Errorf("%w: %v", ErrPingTimeout, err)
