@@ -119,10 +119,11 @@ type Resolver interface {
 var builtin []byte
 
 type snapshot struct {
-	gen       c.Generation
-	listing   Listing
-	index     map[string][]Binding
-	documents map[string]store.Doc
+	gen          c.Generation
+	listing      Listing
+	index        map[string][]Binding
+	documents    map[string]store.Doc
+	actionOwners map[string]string
 }
 
 // Service swaps a complete key index at publication.
@@ -212,11 +213,11 @@ func (s *Service) Resolve(ctx KeyContext, keys []string) Result {
 		if ctx.ModalOpen && b.Focus != "modal-surface" && !(b.Focus == "" && (b.Action == "husk.modal.close" || ctx.ModalAction != "" && b.Action == ctx.ModalAction)) {
 			continue
 		}
-		if len(b.Keys) > len(keys) {
-			return Result{Outcome: Prefix}
-		}
 		if b.Disable {
 			return Result{}
+		}
+		if len(b.Keys) > len(keys) {
+			return Result{Outcome: Prefix}
 		}
 		copy := c.Clone(b)
 		return Result{Match, &copy}
@@ -271,7 +272,8 @@ func (s *Service) Listing() Listing { return c.Clone(s.current.Load().listing) }
 
 // ListFor filters keys.list to a plugin's own actions/declarations when needed.
 func (s *Service) ListFor(caller c.Caller) Listing {
-	out := s.Listing()
+	snap := s.current.Load()
+	out := c.Clone(snap.listing)
 	if caller.User() {
 		return out
 	}
@@ -280,7 +282,7 @@ func (s *Service) ListFor(caller c.Caller) Listing {
 	}
 	var entries []Entry
 	for _, e := range out.Entries {
-		if e.Plugin == caller.PluginID || strings.HasPrefix(e.Action, caller.PluginID+".") {
+		if e.Plugin == caller.PluginID || snap.actionOwners[e.Action] == caller.PluginID {
 			entries = append(entries, e)
 		}
 	}
@@ -402,11 +404,26 @@ func parse(raw map[string]any, src Source) (Binding, string) {
 	return b, ""
 }
 
+func invalidKeyDetail(raw map[string]any) (string, string) {
+	var keys []string
+	if key, ok := raw["key"].(string); ok {
+		keys = []string{key}
+	} else {
+		c.Decode(raw["keys"], &keys)
+	}
+	for _, key := range keys {
+		if _, err := keyspelling.Normalize(key); err != nil {
+			return key, err.Error()
+		}
+	}
+	return "", ""
+}
+
 // Rebuild parses every layer and prepares a complete immutable index.
 func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c.Report, error) {
 	old := s.current.Load()
 	r := c.Report{Service: "keybinding", Gen: old.gen}
-	next := &snapshot{gen: old.gen + 1, index: map[string][]Binding{}, documents: map[string]store.Doc{}}
+	next := &snapshot{gen: old.gen + 1, index: map[string][]Binding{}, documents: map[string]store.Doc{}, actionOwners: map[string]string{}}
 	issue := func(code string, src Source, key string) {
 		layer := string(src.Layer)
 		if src.Plugin != "" {
@@ -417,6 +434,15 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 	}
 	catalog, catalogProblems := c.Catalogs(in)
 	r.Problems = append(r.Problems, catalogProblems...)
+	for owner, plugin := range catalog {
+		for _, action := range plugin.Actions {
+			if previous, exists := next.actionOwners[action.ID]; exists && previous != owner {
+				next.actionOwners[action.ID] = ""
+			} else {
+				next.actionOwners[action.ID] = owner
+			}
+		}
+	}
 	var layers []struct {
 		doc store.Doc
 		src Source
@@ -463,6 +489,12 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 				name = *in.Profile
 			}
 			file = "profiles/" + name + "/" + file
+			if in.Profile == nil && l.File != "" {
+				file = strings.ReplaceAll(l.File, "\\", "/")
+				if at := strings.LastIndex(file, "/profiles/"); at >= 0 {
+					file = file[at+1:]
+				}
+			}
 		}
 		layers = append(layers, struct {
 			doc store.Doc
@@ -476,6 +508,13 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 		}
 		doc, src := layer.doc, layer.src
 		cacheKey := string(src.Layer) + src.Plugin
+		if src.Layer == LayerProfile {
+			identity := src.File
+			if in.Profile != nil {
+				identity = *in.Profile
+			}
+			cacheKey += "\x00" + identity
+		}
 		if code := layerProblem(doc); code != "" {
 			issue(code, src, "")
 			doc = old.documents[cacheKey]
@@ -530,6 +569,17 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 					code = "unparsable_key"
 				}
 				issue(code, src, "")
+				if code == "invalid_key" || code == "unparsable_key" {
+					key, message := invalidKeyDetail(raw)
+					if message != "" {
+						last := len(next.listing.Problems) - 1
+						next.listing.Problems[last].Key = key
+						next.listing.Problems[last].Message = message
+						last = len(r.Problems) - 1
+						r.Problems[last].Key = key
+						r.Problems[last].Message = message
+					}
+				}
 				continue
 			}
 			if src.Layer == LayerFocusLocal {
