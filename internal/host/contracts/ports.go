@@ -26,7 +26,6 @@ type StateReadResult struct {
 type StateRetention struct {
 	Policy string `json:"policy"`
 	N      int    `json:"n,omitempty"`
-	TTL    string `json:"ttl,omitempty"`
 }
 
 // StateSlice is one slice descriptor as the state.snapshot and state.watch
