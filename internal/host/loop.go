@@ -60,7 +60,9 @@ func (r *Root) do(ctx context.Context, fn func()) error {
 // exec runs loop-confined fn: directly when the caller is the loop goroutine
 // itself (Close called from Update), on the loop otherwise, and inline only
 // when no loop can be running: before New returns nothing consumes the loop,
-// and after the loop ended (Post refuses) no one else touches the modules. A
+// and after the loop ended no one else touches the modules. "Ended" is read
+// from Config.Post, whose contract is that once it returns false Update is
+// never called again. A
 // loop that is alive but does not run fn within loopWait is wedged; fn is then
 // not run at all and the error says so.
 func (r *Root) exec(fn func()) error {

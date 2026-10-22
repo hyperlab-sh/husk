@@ -454,10 +454,16 @@ func (r *Root) spawn(cmd tea.Cmd) {
 		// Shutdown is waiting on (or past) wg: a late worker would race
 		// Wait and run against a closed Runtime and a cancelled ctx.
 		r.mu.Unlock()
+		if r.opts.onSpawn != nil {
+			r.opts.onSpawn(false)
+		}
 		return
 	}
 	r.wg.Add(1)
 	r.mu.Unlock()
+	if r.opts.onSpawn != nil {
+		r.opts.onSpawn(true)
+	}
 	go func() {
 		defer r.wg.Done()
 		if msg := cmd(); msg != nil {
@@ -476,10 +482,18 @@ func (r *Root) spawn(cmd tea.Cmd) {
 // Update): loop-confined steps run directly when the caller is the loop
 // goroutine and are posted to the loop otherwise. If the loop is alive but
 // does not run a posted step within loopWait it is wedged; Close then skips
-// the step and returns an error saying so (plugin processes may outlive the
-// host in that case), rather than racing the loop. Stopping the loop before
-// Close is also fine: nothing else touches the modules then, so the steps run
-// inline.
+// that step and the final flush (one wait, not two) and returns an error
+// saying so (plugin processes may outlive the host in that case), rather than
+// racing the loop. Stopping the loop before Close is also fine: nothing else
+// touches the modules then, so the steps run inline.
+//
+// Close from Update blocks the loop goroutine while the plugin processes stop
+// and the workers finish, and those workers end by calling Config.Post. So the
+// loop owner must close its post gate before calling Close from Update: Post
+// then refuses (false) instead of blocking, which is what Config.Post
+// requires. A Post that blocks anyway cannot deadlock Close for good: the wait
+// for workers is bounded by storeCloseTimeout and Close returns an error
+// naming the workers it did not wait for.
 func (r *Root) Close() error {
 	r.closeOnce.Do(func() {
 		r.closeErr = r.shutdown()
@@ -503,6 +517,7 @@ func (r *Root) shutdown() error {
 	}
 
 	var stop tea.Cmd
+	wedged := false
 	if r.table != nil || r.pods != nil {
 		if err := r.exec(func() {
 			if r.table != nil {
@@ -512,6 +527,7 @@ func (r *Root) shutdown() error {
 				stop = r.pods.Stop()
 			}
 		}); err != nil {
+			wedged = true
 			errs = append(errs, fmt.Errorf("calls and pods not stopped: %w", err))
 		}
 		note("calls")
@@ -528,7 +544,7 @@ func (r *Root) shutdown() error {
 		}
 		note("pods")
 	}
-	if r.st != nil {
+	if r.st != nil && !wedged { // a loop that did not answer once will not answer again
 		if err := r.exec(r.tick); err != nil { // final flush: Store sees the last writes before it closes
 			errs = append(errs, fmt.Errorf("final state flush skipped: %w", err))
 		}
@@ -537,7 +553,15 @@ func (r *Root) shutdown() error {
 	if r.rt != nil {
 		r.rt.Close()
 	}
-	r.wg.Wait()
+	workersDone := make(chan struct{})
+	go func() { r.wg.Wait(); close(workersDone) }()
+	wctx, wcancel := context.WithTimeout(context.Background(), r.opts.workerWaitOr(storeCloseTimeout))
+	select {
+	case <-workersDone:
+	case <-wctx.Done():
+		errs = append(errs, fmt.Errorf("workers still running after %v: a Config.Post that blocks keeps them from finishing", r.opts.workerWaitOr(storeCloseTimeout)))
+	}
+	wcancel()
 	if r.store != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), storeCloseTimeout)
 		if err := r.store.Close(ctx); err != nil {

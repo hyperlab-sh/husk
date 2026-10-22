@@ -26,6 +26,15 @@ type options struct {
 	onClose    func(step string)
 	loopWait   time.Duration // overrides the package loopWait when set
 	afterFail  func(*Root)   // called with the partial root after New's cleanup
+	onSpawn    func(accepted bool)
+	workerWait time.Duration // overrides storeCloseTimeout for the worker wait when set
+}
+
+func (o *options) workerWaitOr(d time.Duration) time.Duration {
+	if o.workerWait > 0 {
+		return o.workerWait
+	}
+	return d
 }
 
 func (o *options) loopWaitOr(d time.Duration) time.Duration {

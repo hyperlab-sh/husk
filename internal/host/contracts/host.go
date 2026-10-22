@@ -37,7 +37,12 @@ type Config struct {
 	Plugins []string
 	// PluginDirs are the --plugin-dir arguments, in order.
 	PluginDirs []string
-	// Post posts a notice to the loop from any goroutine; false after shutdown.
+	// Post posts a notice to the loop from any goroutine. It must never
+	// block: workers end by calling it, and Close from Update waits for them
+	// on the loop goroutine. Once it returns false (shutdown), Update is never
+	// called again and no Update is in flight; the host runs its remaining
+	// shutdown steps inline on that evidence. A loop owner that calls Close
+	// from Update closes this gate first.
 	Post func(any) bool
 	// Clock drives every host deadline (Calls, Surfaces, the Server, the
 	// wrappers, Store and Services); nil is system time. protocol.Clock is used
