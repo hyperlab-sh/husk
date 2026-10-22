@@ -43,7 +43,7 @@ func dumpModel() (*WorkbenchModel, *programRef) {
 	fe := withFE(m)
 	fe.pods, fe.occ = map[string]string{}, map[protocol.SurfaceID]string{}
 	m.attach(stepHost{fe: fe}, nil)
-	return m, &programRef{}
+	return m, newProgramRef()
 }
 
 // starting declares a Pod that has not registered yet.

@@ -80,21 +80,22 @@ func main() {
 		model.logOut = os.Stderr
 	}
 
-	prog := &programRef{}
-	h, err := newHost(prog, model, []string(*pluginPaths), []string(*pluginDirs))
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "husk: %v\n", err)
-		os.Exit(1)
-	}
-	model.attach(h, prog.closeGate)
-
+	prog := newProgramRef()
 	if *dumpFrame {
+		// runDumpFrame builds the headless program; a host Post waits for it.
+		h, err := newHost(prog, model, []string(*pluginPaths), []string(*pluginDirs))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "husk: %v\n", err)
+			os.Exit(1)
+		}
+		model.attach(h, prog.closeGate)
 		frame, err := runDumpFrame(model, dumpFrameOptions{
 			Launched: len(*pluginPaths) + len(*pluginDirs),
 			RailMode: *railMode,
 			Stderr:   os.Stderr,
 			Program:  prog,
 		})
+		prog.closeGate()
 		model.shutdownHost()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "husk: --dump-frame: %v\n", err)
@@ -103,46 +104,77 @@ func main() {
 		return
 	}
 
+	// The program exists before the host, so a Post from any host worker finds
+	// it. The model attaches the host before the program runs.
 	p := tea.NewProgram(model)
 	prog.set(p)
+	h, err := newHost(prog, model, []string(*pluginPaths), []string(*pluginDirs))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "husk: %v\n", err)
+		os.Exit(1)
+	}
+	model.attach(h, prog.closeGate)
 	_, err = p.Run()
+	prog.closeGate()     // whatever ended the program, nothing is read from here on
 	model.shutdownHost() // stop plugins before printing, so their exit lines are included
 	_, _ = os.Stderr.Write(tuiLog.Bytes())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "husk error: %v\n", err)
 		os.Exit(1)
 	}
+	if model.hostErr != nil {
+		fmt.Fprintf(os.Stderr, "husk: host stopped: %v\n", model.hostErr)
+		os.Exit(1)
+	}
 }
 
-// programRef lets the host's Post reach the tea.Program, which exists only
-// after the host (the model needs the host to be built first). Post returns
-// false without blocking once the gate is closed (D62).
+// programRef lets the host's Post reach the tea.Program. The host is built
+// around Post, so a worker may post before the program is set: post waits for
+// set or for the gate. Once the gate closes (the program stopped reading, or
+// shutdown began) post returns false without blocking, which Config.Post
+// defines as "the loop is gone" (D62).
 type programRef struct {
 	mu     sync.RWMutex
 	p      *tea.Program
+	ready  chan struct{}
+	gate   chan struct{}
+	once   sync.Once
 	closed atomic.Bool
+}
+
+func newProgramRef() *programRef {
+	return &programRef{ready: make(chan struct{}), gate: make(chan struct{})}
 }
 
 func (r *programRef) set(p *tea.Program) {
 	r.mu.Lock()
 	r.p = p
 	r.mu.Unlock()
+	select {
+	case <-r.ready:
+	default:
+		close(r.ready)
+	}
 }
 
-func (r *programRef) closeGate() { r.closed.Store(true) }
+// closeGate is idempotent and safe from any goroutine.
+func (r *programRef) closeGate() {
+	r.closed.Store(true)
+	r.once.Do(func() { close(r.gate) })
+}
 
-// post hands a host notice to the program loop. Before the program exists
-// (the host is built first) a notice cannot be delivered and is refused.
 func (r *programRef) post(msg any) bool {
 	if r.closed.Load() {
+		return false
+	}
+	select {
+	case <-r.ready:
+	case <-r.gate:
 		return false
 	}
 	r.mu.RLock()
 	p := r.p
 	r.mu.RUnlock()
-	if p == nil {
-		return false
-	}
 	p.Send(msg)
 	return !r.closed.Load()
 }
