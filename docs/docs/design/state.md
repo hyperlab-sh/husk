@@ -145,7 +145,7 @@ func New(opts Options) *State
 // Registration and writes: loop goroutine only.
 func (s *State) Register(spec Spec) (*Handle, error)
 func (s *State) OnFlush(l Listener)
-func (s *State) Flush() // called by the Stem loop once after every processed message
+func (s *State) Flush() // called by the Stem loop at the end of every Update call
 
 // Reads.
 func (s *State) Get(namespace string) (Entry, bool) // loop only: sees this tick's writes
@@ -187,7 +187,10 @@ var (
 `Register[T]` decodes a hydrated value into `T`. If decoding fails, the slice
 starts at `initial`, `Hydrated` is false, and the error is returned wrapped
 together with a valid `*Slice[T]` so the owner logs it and continues; the
-persisted copy is replaced on the owner's first write.
+persisted copy is replaced on the owner's first write. The same typed fallback
+applies if a hydrated document is not an object or exceeds the registered cap.
+Untyped `State.Register` instead rejects invalid hydration atomically with
+`ErrInvalidValue` or `ErrTooLarge`, without registering a slice.
 
 ### Invariants
 
@@ -209,22 +212,26 @@ persisted copy is replaced on the owner's first write.
 6. Every value is a JSON object. `Initial` nil means `{}`. A write whose result
    is not a JSON object fails with `ErrInvalidValue` and changes nothing.
 7. Every write is atomic per slice: it commits fully or fails with no effect on
-   value, revision or snapshot.
+   value, revision or snapshot. `Clear` is an explicit reset: it commits a
+   revision bump and change even if the value already equals `Initial`.
 8. All registration, writes and `Flush` run on the Bubble Tea loop goroutine.
    Other goroutines read only through `Snapshot`. Violations are programming
    errors caught by the race detector in tests, not runtime errors.
 9. Revisions are per slice, start at 1 at registration (with the initial or
-   hydrated value), and grow by 1 per committed write. A write whose encoding
-   equals the current bytes commits nothing: no revision bump, no change. After
+   hydrated value), and grow by 1 per committed write. A `Set` or `Patch` whose
+   encoding equals the current bytes commits nothing: no revision bump, no change. After
    `Unregister` the namespace keeps a tombstone revision, so a later
    re-registration continues above it and no reader ever sees a revision go
-   backwards within one process. Revisions are not persisted.
+   backwards within one process. Unregistration retains the last value revision
+   as its tombstone and removal revision; re-registration starts at that revision
+   plus one. Revisions are not persisted.
 10. A committed write publishes a new `Snapshot` before the write call returns,
     so a reply sent after a write is never overtaken by a read of the older
     value (read-your-writes for socket callers).
 11. `Flush` emits at most one `Change` per slice per tick: the slice's latest
     revision, or `Removed`. Changes in one tick are ordered by namespace. A tick
-    is one message processed by the loop's `Update`.
+    ends at the end of one `Update` call: the loop flushes State first, then
+    the Event bus. Follow-up messages run in separate ticks.
 12. `Retention` is set if and only if `Persistent` is true. Retention is Store's
     policy; State never expires a value in memory.
 13. Only owner `husk` and `Options.WorkspaceOwner` may register a `workspace`
@@ -263,6 +270,11 @@ Three listeners exist:
 - the Server's `state.watch` fan-out, which enqueues one `state.changed`
   notification with the value per changed slice on each watching connection
   (see Plugin requests). It only enqueues on bounded writers and never blocks.
+
+Registration is also a change, so watchers and Store see newly registered
+slices. Unregistering and re-registering the same namespace in one tick emits
+only the new registration's latest revision, not a removal. A `Flush` with no
+changes calls no listeners.
 
 The event carries no value. Subscribers that need the value read it, which
 keeps fan-out cheap when a large slice changes. On the wire it is an
@@ -523,12 +535,14 @@ With one:
    compare-and-set.
 6. Size caps: 64 KiB core, 256 KiB plugin, 1 MiB workspace, 1 MiB hard
    ceiling; at most 512 slices.
-7. A tick is one `Update`; the loop calls `Flush` after each. Snapshots are
-   published on every committed write (read-your-writes); events are emitted
-   once per slice per tick.
+7. A tick ends at the end of one `Update` call; the loop calls State's `Flush`
+   first, then the Event bus's `Flush`. Follow-up messages are separate ticks.
+   Snapshots are published on every committed write (read-your-writes); events
+   are emitted once per slice per tick.
 8. `state.changed` on the Event bus carries no value; `state.watch` on the
    socket does.
-9. No-op writes (identical encoding) commit nothing. Revisions are per slice,
+9. No-op `Set` and `Patch` writes (identical encoding) commit nothing; explicit
+   `Clear` resets always commit. Revisions are per slice,
    survive unregistration as tombstones, and are not persisted.
 10. State notifies through in-process `Listener`s; the Event bus adapter,
     Store retention and the Server's `state.watch` fan-out are the three

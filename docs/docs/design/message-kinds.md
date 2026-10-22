@@ -343,9 +343,9 @@ type Event struct {
 type EventBus interface {
     // Publish never blocks and never reports delivery. Called on the loop.
     Publish(e Event)
-    // Flush delivers the coalesced batch. The loop calls it once at the
-    // end of each tick (a flushEventsMsg posted when the first event of
-    // the tick arrives).
+    // Flush delivers the coalesced batch. A tick ends at the end of one
+    // Update call; the loop flushes State first, then the Event bus.
+    // Follow-up messages are separate ticks, not part of this batch.
     Flush()
     // Subscribe adds a connection-lifetime subscription (CLI watch, socket
     // client). Manifest subscriptions come from the table, not from here.
@@ -417,9 +417,10 @@ Coalescing. Within one loop tick, for one subscriber, events with the same
 the first. Events with different names or keys never collapse. A publisher
 may declare `"coalesce": false` for an event whose every occurrence matters;
 those are queued in full, up to 256 per subscriber per tick, and the excess
-is dropped with one log line per tick. The tick boundary is the loop's: all
-events published while one `Update` pass and its follow-up messages run
-before `flushEventsMsg` are one burst.
+is dropped with one log line per tick. A tick ends at the end of one `Update`
+call. The loop flushes State first, so its change events join that call's
+batch, then flushes the Event bus. Follow-up messages are separate ticks;
+there is no posted `flushEventsMsg` extending the coalescing window.
 
 CLI surface: `husk event emit <name> [--data json]`, and `husk event watch
 <pattern>`, which keeps the socket open and prints each event as a JSON line
