@@ -1,6 +1,7 @@
 package wrapper
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"strings"
@@ -14,10 +15,20 @@ func tailLines(path string, n int) []string {
 		return nil
 	}
 	defer f.Close()
+	seeked := false
 	if st, err := f.Stat(); err == nil && st.Size() > 8<<10 {
-		_, _ = f.Seek(st.Size()-(8<<10), io.SeekStart)
+		_, serr := f.Seek(st.Size()-(8<<10), io.SeekStart)
+		seeked = serr == nil
 	}
 	data, _ := io.ReadAll(io.LimitReader(f, 8<<10))
+	if seeked {
+		// The window starts mid-line: drop the cut fragment. When no whole
+		// line follows it, the window is the end of one long last line and
+		// that end is the best evidence there is, so it is kept.
+		if i := bytes.IndexByte(data, '\n'); i >= 0 && len(bytes.TrimSpace(data[i+1:])) > 0 {
+			data = data[i+1:]
+		}
+	}
 	var lines []string
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(strings.Map(func(r rune) rune {
