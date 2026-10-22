@@ -50,6 +50,11 @@ func fixture(t *testing.T, build func(dir string) []Entry) (string, *fakeNet) {
 		}
 		net.live[e.Socket] = true
 	}
+	// The bare socket paths the order tests name (--socket,
+	// HUSK_SOCKET_PATH) answer by default; the dead/unresponsive cases
+	// delete or redirect them.
+	net.live["/explicit.sock"] = true
+	net.live["/env.sock"] = true
 	return dir, net
 }
 
@@ -74,6 +79,50 @@ func TestResolveSocketFlag(t *testing.T) {
 	}
 	if got.Entry != nil {
 		t.Fatalf("entry = %+v, want nil: a bare socket path carries no registration", got.Entry)
+	}
+}
+
+func TestResolveSocketFlagDeadIsNoInstance(t *testing.T) {
+	dir, net := fixture(t, func(dir string) []Entry {
+		return []Entry{namedEntry(dir, "notes", 5120)} // discovery would find this
+	})
+	_, err := Resolve(ResolveOptions{Dir: dir, Socket: "/absent.sock", Deps: net.deps()})
+	var e *Error
+	if !errors.As(err, &e) || e.Kind != KindNoInstance {
+		t.Fatalf("error = %v, want KindNoInstance", err)
+	}
+	if !strings.Contains(err.Error(), `socket "/absent.sock" points at a socket nobody is listening on`) {
+		t.Fatalf("message = %q, want the dead-socket sentence", err.Error())
+	}
+}
+
+func TestResolveEnvSocketPathDeadIsNoInstance(t *testing.T) {
+	// A stale HUSK_SOCKET_PATH is an error with the spec's wording and
+	// never falls through to discovery, even when an instance is running.
+	dir, net := fixture(t, func(dir string) []Entry {
+		return []Entry{namedEntry(dir, "notes", 5120)}
+	})
+	_, err := Resolve(ResolveOptions{Dir: dir, EnvSocketPath: "/absent.sock", Deps: net.deps()})
+	var e *Error
+	if !errors.As(err, &e) || e.Kind != KindNoInstance {
+		t.Fatalf("error = %v, want KindNoInstance", err)
+	}
+	if want := "HUSK_SOCKET_PATH points at a socket nobody is listening on; unset it or pass --instance"; err.Error() != want {
+		t.Fatalf("message = %q, want %q", err.Error(), want)
+	}
+}
+
+func TestResolveSocketPathUnresponsiveIsTransport(t *testing.T) {
+	dir, net := fixture(t, func(dir string) []Entry { return nil })
+	net.live["/slow.sock"] = false
+	net.unresponsive["/slow.sock"] = true
+	_, err := Resolve(ResolveOptions{Dir: dir, Socket: "/slow.sock", Deps: net.deps()})
+	var e *Error
+	if !errors.As(err, &e) || e.Kind != KindTransport {
+		t.Fatalf("error = %v, want KindTransport", err)
+	}
+	if !strings.Contains(err.Error(), `"/slow.sock" did not answer within 2s`) {
+		t.Fatalf("message = %q, want the no-answer sentence", err.Error())
 	}
 }
 
