@@ -14,6 +14,9 @@ import (
 // CLI maps to services' "cli"; the host's Stem engine is trusted like the
 // host itself and maps to "host", the unfiltered view D34a gives it; a plugin
 // keeps its exact id (case and dots included) as services' plugin identity.
+// Any other kind maps to "plugin": it invents no privileges, because Admit
+// and admitCall have already denied unattributed callers upstream before a
+// port is ever reached.
 func hostCallerKind(k host.CallerKind) string {
 	switch k {
 	case host.CallerCLI:
