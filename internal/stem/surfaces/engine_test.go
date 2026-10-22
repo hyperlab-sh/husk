@@ -31,6 +31,11 @@ func (p publications) Owner(slot string) (string, bool) {
 	return owner, ok
 }
 
+// testLogger routes engine diagnostics to the test log.
+type testLogger struct{ t *testing.T }
+
+func (l testLogger) Printf(format string, v ...any) { l.t.Logf(format, v...) }
+
 // sink captures notifications for assertions.
 type sink struct {
 	msgs []protocol.Message
@@ -98,15 +103,6 @@ func (p *pod) decl(plugin string) *podDecl {
 		p.t.Fatalf("pod for %q not launched", plugin)
 	}
 	return d
-}
-
-func mustJSON(t *testing.T, v any) json.RawMessage {
-	t.Helper()
-	b, err := json.Marshal(v)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	return b
 }
 
 // launch registers both declaration slices, as the Pod does for a live plugin.
@@ -233,6 +229,18 @@ func newEngine(t *testing.T, opts Options) (*state.State, *Engine, *pod) {
 	t.Helper()
 	st := state.New(state.Options{})
 	pods := newPod(t, st)
+	if opts.Clock == nil {
+		opts.Clock = &fakeClock{now: time.Unix(0, 0)}
+	}
+	if opts.Logger == nil {
+		opts.Logger = testLogger{t: t}
+	}
+	if opts.Liveness == nil {
+		opts.Liveness = liveness{}
+	}
+	if opts.Publications == nil {
+		opts.Publications = publications{owners: map[string]string{}}
+	}
 	if opts.Declarations == nil {
 		opts.Declarations = pods // the pod stand-in serves the seam by default
 	}
@@ -241,6 +249,43 @@ func newEngine(t *testing.T, opts Options) (*state.State, *Engine, *pod) {
 		t.Fatalf("New: %v", err)
 	}
 	return st, eng, pods
+}
+
+func TestNewRejectsMissingSeams(t *testing.T) {
+	st := state.New(state.Options{})
+	pods := newPod(t, st)
+	full := Options{
+		Clock:        &fakeClock{now: time.Unix(0, 0)},
+		Logger:       testLogger{t: t},
+		Liveness:     liveness{},
+		Publications: publications{owners: map[string]string{}},
+		Declarations: pods,
+	}
+	for _, seam := range []string{"Clock", "Logger", "Liveness", "Publications", "Declarations"} {
+		opts := full
+		switch seam {
+		case "Clock":
+			opts.Clock = nil
+		case "Logger":
+			opts.Logger = nil
+		case "Liveness":
+			opts.Liveness = nil
+		case "Publications":
+			opts.Publications = nil
+		case "Declarations":
+			opts.Declarations = nil
+		}
+		eng, err := New(st, opts)
+		if err == nil {
+			t.Fatalf("New with nil %s: expected an error, got engine %v", seam, eng)
+		}
+		if want := "surfaces: Options is missing " + seam; err.Error() != want {
+			t.Fatalf("New with nil %s error = %q, want %q", seam, err, want)
+		}
+	}
+	if _, err := New(st, full); err != nil {
+		t.Fatalf("New with all seams: %v", err)
+	}
 }
 
 func TestOccupancyFirstWinsAndConflictRefused(t *testing.T) {
@@ -646,6 +691,9 @@ func TestSlotContribute(t *testing.T) {
 	st := state.New(state.Options{})
 	pods := newPod(t, st)
 	eng, err := New(st, Options{
+		Clock:        &fakeClock{now: time.Unix(0, 0)},
+		Logger:       testLogger{t: t},
+		Liveness:     liveness{},
 		Publications: publications{owners: map[string]string{"publisher.list": "publisher"}},
 		Declarations: pods,
 	})
@@ -866,7 +914,13 @@ func TestInitialSweepResolvesPreRegisteredDeclarations(t *testing.T) {
 	pods.claim("alpha.files", string(protocol.SurfaceMainStage))
 	st.Flush()
 
-	eng, err := New(st, Options{})
+	eng, err := New(st, Options{
+		Clock:        &fakeClock{now: time.Unix(0, 0)},
+		Logger:       testLogger{t: t},
+		Liveness:     liveness{},
+		Publications: publications{owners: map[string]string{}},
+		Declarations: pods,
+	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
