@@ -20,6 +20,7 @@ import (
 	"go.uber.org/goleak"
 
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
+	"github.com/hyperlab-sh/husk/internal/services"
 	"github.com/hyperlab-sh/husk/internal/instance"
 	"github.com/hyperlab-sh/husk/internal/pods"
 	"github.com/hyperlab-sh/husk/internal/pods/manifest"
@@ -1084,5 +1085,22 @@ func TestPlannedCountsResolvedPlugins(t *testing.T) {
 	}
 	if got := h2.root.Planned(); got != 1 {
 		t.Fatalf("one-plugin dir planned %d plugins", got)
+	}
+}
+
+// A freshly built host reloads its services cleanly: the settings service
+// already carries the built-in schema, so the host must not register it again
+// (every key came back as a duplicate and the launch reload warned).
+func TestFreshHostReloadsServicesWithoutProblems(t *testing.T) {
+	h, err := boot(t, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reports, err := h.root.rt.Coordinator.Reload(t.Context(), services.ReasonPlugin)
+	if err != nil {
+		for _, r := range reports {
+			t.Logf("%s applied=%v problems=%+v", r.Service, r.Applied, r.Problems)
+		}
+		t.Fatal(err)
 	}
 }
