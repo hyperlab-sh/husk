@@ -17,6 +17,7 @@ type memoryKeyring struct {
 	mu          sync.Mutex
 	value       string
 	unavailable bool
+	setFailure  bool
 	sets        int
 }
 
@@ -37,7 +38,7 @@ func (r *memoryKeyring) Get(service, account string) (string, error) {
 func (r *memoryKeyring) Set(_, _, value string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.unavailable {
+	if r.unavailable || r.setFailure {
 		return errors.New("no keyring")
 	}
 	r.value = value
@@ -49,7 +50,7 @@ func TestSecretRoundTripRandomCiphertextAndLazyIdentity(t *testing.T) {
 	for _, fallback := range []bool{false, true} {
 		t.Run(map[bool]string{false: "keyring", true: "fallback"}[fallback], func(t *testing.T) {
 			e := fixture(t)
-			ring := &memoryKeyring{unavailable: fallback}
+			ring := &memoryKeyring{setFailure: fallback}
 			s := e.open(t, "notes", true, func(o *Options) { o.Keyring = ring })
 			doc, err := s.Secrets("secrets")
 			if err != nil {

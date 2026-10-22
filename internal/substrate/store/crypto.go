@@ -106,6 +106,10 @@ func (s *Store) identity(create bool) (Sealer, error) {
 				return nil, fmt.Errorf("store: invalid keyring identity; reset-secrets required")
 			}
 		} else {
+			if !errors.Is(ringErr, keyring.ErrNotFound) {
+				s.diagnostic(Problem{Code: "unavailable", Message: "OS keyring could not be read; no new identity was created"}, "")
+				return nil, fmt.Errorf("%w: OS keyring could not be read", ErrUnavailable)
+			}
 			if !create {
 				return nil, ErrNotFound
 			}
@@ -113,9 +117,7 @@ func (s *Store) identity(create bool) (Sealer, error) {
 			if err != nil {
 				return nil, err
 			}
-			if errors.Is(ringErr, keyring.ErrNotFound) {
-				ringErr = ring.Set("husk", "store-identity", identity.String())
-			}
+			ringErr = ring.Set("husk", "store-identity", identity.String())
 			if ringErr != nil {
 				path, err = pathInside(s.paths.Data, []string{"keys", "identity.txt"}, true)
 				if err != nil {
@@ -131,6 +133,34 @@ func (s *Store) identity(create bool) (Sealer, error) {
 	s.sealer = ageSealer{identity}
 	return s.sealer, nil
 }
+
+// detectFallback observes existing private identity metadata at startup without
+// consulting the OS keyring or eagerly loading secret key material.
+func (s *Store) detectFallback() {
+	path, err := pathInside(s.paths.Data, []string{"keys", "identity.txt"}, false)
+	if errors.Is(err, fs.ErrNotExist) {
+		return
+	}
+	if err == nil {
+		var info fs.FileInfo
+		info, err = os.Lstat(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			return
+		}
+		if err == nil {
+			stat, ok := info.Sys().(*syscall.Stat_t)
+			if !info.Mode().IsRegular() || info.Mode().Perm() != 0600 || !ok || int(stat.Uid) != os.Getuid() {
+				err = fmt.Errorf("fallback identity is not private regular data")
+			}
+		}
+	}
+	if err != nil {
+		s.diagnostic(Problem{Code: "unavailable", Message: "fallback identity metadata is unavailable"}, "")
+		return
+	}
+	s.markFallback()
+}
+
 func (s *Store) markFallback() {
 	s.mu.Lock()
 	first := !s.health.KeyringFallback
@@ -188,20 +218,20 @@ func (d *secretDoc) access(write bool, fn func(map[string][]byte) (bool, error))
 		sealed, _, err := readFile(path, maxSecretNamespaceBytes+65536, true)
 		exists := err == nil
 		if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("store: encrypted namespace unreadable; consider husk store reset-secrets")
+			return fmt.Errorf("%w: encrypted namespace unreadable; consider husk store reset-secrets", ErrUnavailable)
 		}
 		values := map[string][]byte{}
 		if exists {
 			sealer, err := s.identity(false)
 			if err != nil {
-				return fmt.Errorf("store: encrypted namespace unreadable; consider husk store reset-secrets")
+				return fmt.Errorf("%w: encrypted namespace unreadable; consider husk store reset-secrets", ErrUnavailable)
 			}
 			plain, err := sealer.Open(sealed)
 			if err != nil || len(plain) > maxSecretNamespaceBytes {
-				return fmt.Errorf("store: encrypted namespace unreadable; consider husk store reset-secrets")
+				return fmt.Errorf("%w: encrypted namespace unreadable; consider husk store reset-secrets", ErrUnavailable)
 			}
 			if json.Unmarshal(plain, &values) != nil || values == nil {
-				return fmt.Errorf("store: encrypted namespace unreadable; consider husk store reset-secrets")
+				return fmt.Errorf("%w: encrypted namespace unreadable; consider husk store reset-secrets", ErrUnavailable)
 			}
 		}
 		changed, err := fn(values)

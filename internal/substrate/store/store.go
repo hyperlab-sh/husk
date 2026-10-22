@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -32,10 +33,12 @@ type savedRecord struct {
 	modified time.Time
 }
 type pendingWrite struct {
-	entry       state.Entry
-	first, last time.Time
-	epoch       uint64
-	failed      bool
+	entry        state.Entry
+	first, last  time.Time
+	epoch        uint64
+	failed       bool
+	unregistered bool
+	registeredAt time.Time
 }
 type health struct {
 	// Diagnostics contains the most recent 50 Store problems.
@@ -55,6 +58,8 @@ type Store struct {
 	opts           Options
 	paths          Paths
 	source         *LocalSource
+	writeSource    Source                             // LocalSource in production; injected by failure tests.
+	walkDir        func(string, fs.WalkDirFunc) error // filepath.WalkDir in production.
 	clock          Clock
 	mu             sync.Mutex
 	ioMu           sync.Mutex
@@ -65,6 +70,8 @@ type Store struct {
 	resolved       map[docKey]Resolved
 	lastGood       map[docKey]Resolved
 	loaded         map[string][]savedRecord
+	baseline       map[string]json.RawMessage
+	inflight       map[string]bool
 	blocked        map[string]bool
 	policies       map[string]state.Spec
 	registered     map[string]time.Time
@@ -143,7 +150,7 @@ func openStore(opts Options, runtimeDir func() (string, error)) (*Store, error) 
 	if paths.Runtime, err = runtimeDir(); err != nil {
 		return nil, err
 	}
-	if err = privateExistingDir(paths.Runtime); err != nil {
+	if err = privateRuntimeDir(paths.Runtime); err != nil {
 		return nil, err
 	}
 	source, err := NewLocalSource(paths.State)
@@ -166,10 +173,11 @@ func openStore(opts Options, runtimeDir func() (string, error)) (*Store, error) 
 		docs[name] = doc
 	}
 	opts.InstanceDocs = docs
-	s := &Store{opts: opts, paths: paths, source: source, clock: opts.Clock, started: opts.Clock.Now(), declared: map[DocName]map[string]Doc{}, layerCache: map[docKey]layerLoad{}, resolved: map[docKey]Resolved{}, lastGood: map[docKey]Resolved{}, loaded: map[string][]savedRecord{}, blocked: map[string]bool{}, policies: map[string]state.Spec{}, registered: map[string]time.Time{}, dirty: map[string]pendingWrite{}, epochs: map[string]uint64{}, wake: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{}), barriers: make(chan flushRequest)}
+	s := &Store{opts: opts, paths: paths, source: source, writeSource: source, walkDir: filepath.WalkDir, clock: opts.Clock, started: opts.Clock.Now(), declared: map[DocName]map[string]Doc{}, layerCache: map[docKey]layerLoad{}, resolved: map[docKey]Resolved{}, lastGood: map[docKey]Resolved{}, loaded: map[string][]savedRecord{}, baseline: map[string]json.RawMessage{}, inflight: map[string]bool{}, blocked: map[string]bool{}, policies: map[string]state.Spec{}, registered: map[string]time.Time{}, dirty: map[string]pendingWrite{}, epochs: map[string]uint64{}, wake: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{}), barriers: make(chan flushRequest)}
 	if err = s.preload(); err != nil {
 		return nil, err
 	}
+	s.detectFallback()
 	if opts.Instance.Named {
 		if err = s.loadMeta(); err != nil {
 			return nil, err
@@ -237,7 +245,7 @@ func (s *Store) OpenPluginLog(pluginID string) (*os.File, error) {
 	return nil, fmt.Errorf("store: log name attempts exhausted")
 }
 func (s *Store) loadMeta() error {
-	data, _, err := s.source.Get(context.Background(), Key{Scope: state.ScopeInstance, Instance: s.opts.Instance.ID, Path: []string{"meta.json"}})
+	data, entry, err := s.source.Get(context.Background(), Key{Scope: state.ScopeInstance, Instance: s.opts.Instance.ID, Path: []string{"meta.json"}})
 	if errors.Is(err, ErrNotFound) {
 		return nil
 	}
@@ -247,8 +255,12 @@ func (s *Store) loadMeta() error {
 	var previous struct {
 		LastClean time.Time `json:"last_clean_exit"`
 	}
-	if err = json.Unmarshal(data, &previous); err != nil {
-		return fmt.Errorf("store: unreadable instance metadata: %w", err)
+	err = json.Unmarshal(data, &previous)
+	if err == nil && (len(bytes.TrimSpace(data)) == 0 || bytes.TrimSpace(data)[0] != '{') {
+		err = fmt.Errorf("metadata must be a JSON object")
+	}
+	if err != nil {
+		return s.quarantineFile(entry, "instance metadata", "metadata_reset", err)
 	}
 	s.lastClean = previous.LastClean
 	return nil
@@ -355,7 +367,8 @@ func (s *Store) signal() {
 	}
 }
 
-// Close flushes dirty registered slices and stops the worker, bounded by ctx.
+// Close flushes persistent pending changes (including removed owners' values)
+// and stops the worker, bounded by ctx.
 // It is idempotent. A timed-out caller can call again to await worker completion.
 func (s *Store) Close(ctx context.Context) error {
 	s.mu.Lock()

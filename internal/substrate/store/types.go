@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"time"
 
+	"github.com/hyperlab-sh/husk/internal/instance"
 	"github.com/hyperlab-sh/husk/internal/substrate/state"
 )
 
@@ -145,6 +146,8 @@ type Options struct {
 	Post func(func()) bool
 	// Keyring overrides the OS keyring, normally only in tests.
 	Keyring Keyring
+	// InstanceDeps injects log-GC liveness probes; nil uses instance defaults.
+	InstanceDeps *instance.Deps
 }
 
 // Paths contains every resolved base directory Store owns.
@@ -196,6 +199,8 @@ var (
 	ErrNotFound = errors.New("store: not found")
 	// ErrClosed means the Store has begun shutdown.
 	ErrClosed = errors.New("store: closed")
+	// ErrUnavailable means a persisted value or identity cannot currently be read.
+	ErrUnavailable = errors.New("store: unavailable")
 	// ErrInvalidPath means a source key or document name is unsafe.
 	ErrInvalidPath = errors.New("store: invalid path")
 )
