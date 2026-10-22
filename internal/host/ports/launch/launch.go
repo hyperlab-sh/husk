@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"reflect"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -37,16 +38,37 @@ var _ contracts.PodRegistry = (*PodRegistry)(nil)
 
 // New assembles the composed host: pods.New over the Loop, with the two
 // registry seams required to agree. Options.Registry answers Add's duplicate
-// question while Loop.Registry receives the liveness writes; two different
-// registries would reserve an id in one place and record its liveness in
-// another, so New fails on that mismatch instead of launching a host that
-// double-tracks ids (round-1 note). Either seam may be unwired (tests run
-// with only one, or none); only a disagreement is an error.
+// question while Loop.Registry receives the liveness writes; a host wired
+// with only one of them reserves ids in one place and records liveness in
+// another (the round-1 failure mode), and two different registries split
+// the same way. New fails on either disagreement instead of launching a
+// host that double-tracks ids (round-2 finding 4): both seams must be wired,
+// or neither, and when both are they must be the same registry. Registry
+// implementations are compared by pointer (or by value only when the
+// dynamic type is comparable) because interface equality panics on
+// uncomparable dynamic types.
 func New(l Loop, opts pods.Options) (*pods.Host, error) {
-	if opts.Registry != nil && l.Registry != nil && opts.Registry != l.Registry {
+	lSet, oSet := l.Registry != nil, opts.Registry != nil
+	if lSet != oSet {
+		return nil, errors.New("launch: Options.Registry and Loop.Registry must be wired together, both or neither")
+	}
+	if lSet && !sameRegistry(opts.Registry, l.Registry) {
 		return nil, errors.New("launch: Options.Registry and Loop.Registry must be the same PodRegistry")
 	}
 	return pods.New(l, opts)
+}
+
+// sameRegistry reports whether two PodRegistry values are the same registry,
+// without interface equality on uncomparable dynamic types.
+func sameRegistry(a, b contracts.PodRegistry) bool {
+	va, vb := reflect.ValueOf(a), reflect.ValueOf(b)
+	if va.Kind() == reflect.Pointer && vb.Kind() == reflect.Pointer {
+		return va.Pointer() == vb.Pointer()
+	}
+	if va.Comparable() && vb.Comparable() {
+		return a == b
+	}
+	return false // uncomparable and not both pointers: identity cannot be proven
 }
 
 // NewPodRegistry registers husk.pods (owner husk, instance scope, not
