@@ -274,7 +274,7 @@ func (m *WorkbenchModel) renderTopWorkbenchBar() string {
 				Background(lipgloss.Color(m.palette.SurfaceSelected)).
 				Bold(true).
 				Padding(0, 1).
-				Render(fmt.Sprintf("%s %s (%s)", b.icon, b.label, b.shortcut)) + " "
+				Render(strings.TrimSpace(fmt.Sprintf("%s %s %s", b.icon, b.label, parenthesized(b.shortcut)))) + " "
 		}
 	} else if m.modifiers.Alt {
 		dragPill = lipgloss.NewStyle().
@@ -837,4 +837,12 @@ func fitLineWidth(s string, width int) string {
 		return s + strings.Repeat(" ", width-sw)
 	}
 	return s
+}
+
+// parenthesized wraps a key label for the hover pill; no key, no parentheses.
+func parenthesized(key string) string {
+	if key == "" {
+		return ""
+	}
+	return "(" + key + ")"
 }
