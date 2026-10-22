@@ -27,6 +27,8 @@ The standalone v2 Calls package is tested with `go test -race ./internal/stem/ca
 
 Store consumes State's hooks; run `go test -race ./internal/substrate/...` for substrate changes. Store disk methods run off the loop; `Attach`, `Hydrate` and its listener do no I/O, and worker health updates use `Options.Post`. Tests inject a Clock and Keyring, plus `Options.InstanceDeps` for log-GC liveness: never use sleeps, the real OS keyring or real liveness pings. Layer documents (`keymap`) and declared focus-local bindings (`focus-keymap`) are separate APIs.
 
+The standalone v2 process side is tested with `go test -race ./internal/pods/...`. `pods.Host` owns Pods; `pods.Loop` is the single loop-service seam. Prepare commands run off-loop and marshal State mutations back; `Host.Handle` applies lifecycle/log notices on-loop. Handle `pods.ClosedMsg` with Calls cleanup before later exit liveness. Credentials revoke on reap while final replies drain before normal Closed. Wrapper queue/deadline/reap-grace tests use injected clocks; process tests re-execute the test binary with an argv mode because all inherited `HUSK_*` variables (including fake-mode variables) are stripped. `EOFReapGrace` is one 100 ms default for stdout EOF and closed stdin pipes. Log paths come from the Store-owned `LogPath` seam; wrappers do not delete logs. `internal/pods/manifest.Spec` is the minimal process contract for the converter task to extend; decoration remains pass-through boundary types. The current host is not yet wired to Pods. Spec: `docs/docs/design/pods.md`.
+
 ## Charm v2
 
 - Import `charm.land/bubbletea/v2` and `charm.land/lipgloss/v2`; stable v2 uses these canonical vanity paths, not the old GitHub module paths. Bubbles is not currently used.
