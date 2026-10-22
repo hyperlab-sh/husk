@@ -1,22 +1,36 @@
-package stem
+package stem_test
 
 import (
 	"context"
 	"encoding/json"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
+	"github.com/hyperlab-sh/husk/internal/host/ports/stem"
 	"github.com/hyperlab-sh/husk/internal/stem/surfaces"
 	"github.com/hyperlab-sh/husk/internal/substrate/state"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
-// portClock, portLiveness, portPublications and portLogger are the minimal
-// seams the port tests inject: the engine takes no defaults.
-type portClock struct{ now time.Time }
+// portClock, portLiveness, portPublications, portLogger and portDeclarations
+// are the minimal seams the port tests inject: the engine takes no defaults.
+// portClock is a fixed clock. When probe is set (the queue loop's inLoop
+// flag), each Now() records its answer so a test can prove the engine body
+// ran on the loop goroutine.
+type portClock struct {
+	now    time.Time
+	probe  func() bool
+	onLoop atomic.Bool
+}
 
-func (c *portClock) Now() time.Time { return c.now }
+func (c *portClock) Now() time.Time {
+	if c.probe != nil {
+		c.onLoop.Store(c.probe())
+	}
+	return c.now
+}
 
 type portLiveness struct{}
 
@@ -41,7 +55,10 @@ func (portDeclarations) Contribute(string, string, surfaces.Contribution) error 
 
 func (portDeclarations) Release(string, protocol.SurfaceID) error { return nil }
 
-func newPort(t *testing.T) (*SurfacePort, *state.State) {
+// newPort wires a real engine behind the port, crossing the shared queue
+// loop (calls_test.go) exactly as the host loop would. It returns the clock
+// so tests can observe loop placement through the engine's Now() calls.
+func newPort(t *testing.T) (*stem.SurfacePort, *surfaces.Engine, *state.State, *loop, *portClock) {
 	t.Helper()
 	st := state.New(state.Options{})
 	occ, err := st.Register(state.Spec{
@@ -53,8 +70,10 @@ func newPort(t *testing.T) (*SurfacePort, *state.State) {
 	if _, err := occ.Set(json.RawMessage(`{"main-stage":{"surface":"main-stage","plugin":"alpha.files"}}`)); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
+	l := newLoop(t)
+	clk := &portClock{now: time.Unix(0, 0), probe: l.inLoop.Load}
 	eng, err := surfaces.New(st, surfaces.Options{
-		Clock:        &portClock{now: time.Unix(0, 0)},
+		Clock:        clk,
 		Logger:       portLogger{t: t},
 		Liveness:     portLiveness{},
 		Publications: portPublications{owners: map[string]string{}},
@@ -65,11 +84,11 @@ func newPort(t *testing.T) (*SurfacePort, *state.State) {
 	}
 	st.Flush()
 	eng.Flush()
-	return NewSurfacePort(eng), st
+	return stem.NewSurfacePort(eng, l), eng, st, l, clk
 }
 
 func TestCallerKindsEnforced(t *testing.T) {
-	port, _ := newPort(t)
+	port, _, _, _, _ := newPort(t)
 	ctx := context.Background()
 	plugin := contracts.Caller{Kind: contracts.CallerPlugin, PluginID: "alpha.files"}
 	other := contracts.Caller{Kind: contracts.CallerPlugin, PluginID: "beta.notes"}
@@ -112,7 +131,7 @@ func TestCallerKindsEnforced(t *testing.T) {
 }
 
 func TestErrorsAreCoded(t *testing.T) {
-	port, _ := newPort(t)
+	port, _, _, _, _ := newPort(t)
 	ctx := context.Background()
 	other := contracts.Caller{Kind: contracts.CallerPlugin, PluginID: "beta.notes"}
 
@@ -139,15 +158,65 @@ func TestErrorsAreCoded(t *testing.T) {
 }
 
 func TestToastAttributionFromCaller(t *testing.T) {
-	port, _ := newPort(t)
+	port, eng, _, _, _ := newPort(t)
 	cli := contracts.Caller{Kind: contracts.CallerCLI}
 	if err := port.ToastShow(context.Background(), cli, protocol.ToastShowParams{
 		Level: "info", Title: "from CLI", PluginID: "spoofed",
 	}); err != nil {
 		t.Fatalf("CLI toast: %v", err)
 	}
-	active, ok := port.engine.ActiveToast()
+	active, ok := eng.ActiveToast()
 	if !ok || active.Title != "from CLI" || active.Plugin != "" {
 		t.Fatalf("active = %+v, want host-attributed toast", active)
+	}
+}
+
+// TestEngineCallsRunOnTheLoop pins the seam: a port call made off the loop
+// still runs its engine body on the loop goroutine, observed where the
+// engine's own clock tick runs.
+func TestEngineCallsRunOnTheLoop(t *testing.T) {
+	port, _, _, _, clk := newPort(t)
+	plugin := contracts.Caller{Kind: contracts.CallerPlugin, PluginID: "alpha.files"}
+	if err := port.ToastShow(context.Background(), plugin, protocol.ToastShowParams{
+		Level: "info", Title: "t",
+	}); err != nil {
+		t.Fatalf("toast: %v", err)
+	}
+	// The reply is already back, so the observation is ordered after the
+	// engine call without touching the loop again.
+	if !clk.onLoop.Load() {
+		t.Fatal("engine body ran off the loop goroutine")
+	}
+}
+
+// TestLoopShutdownAnswersUnavailable pins the Post-false path: once the loop
+// no longer runs, every method answers unavailable and never touches the
+// engine.
+func TestLoopShutdownAnswersUnavailable(t *testing.T) {
+	port, eng, _, l, _ := newPort(t)
+	l.closed.Store(true)
+	plugin := contracts.Caller{Kind: contracts.CallerPlugin, PluginID: "alpha.files"}
+	ctx := context.Background()
+	calls := map[string]func() error{
+		"surface.update": func() error {
+			return port.SurfaceUpdate(ctx, plugin, protocol.SurfaceUpdateParams{Surface: protocol.SurfaceMainStage})
+		},
+		"surface.close": func() error {
+			return port.SurfaceClose(ctx, plugin, protocol.SurfaceCloseParams{Surface: protocol.SurfaceMainStage})
+		},
+		"slot.contribute": func() error {
+			return port.SlotContribute(ctx, plugin, protocol.SlotContributeParams{SlotID: "s", ID: "x"})
+		},
+		"toast.show": func() error {
+			return port.ToastShow(ctx, plugin, protocol.ToastShowParams{Level: "info", Title: "t"})
+		},
+	}
+	for name, call := range calls {
+		if code := contracts.CodeOf(call()); code != string(protocol.CodeUnavailable) {
+			t.Fatalf("%s after shutdown: code = %q, want unavailable", name, code)
+		}
+	}
+	if _, ok := eng.ActiveToast(); ok {
+		t.Fatal("toast.show ran on the engine after shutdown")
 	}
 }
