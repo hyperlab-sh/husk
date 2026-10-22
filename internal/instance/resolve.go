@@ -229,7 +229,7 @@ func lookup(dir, id string, src Source, d *Deps) (Resolved, error) {
 	if err := ValidID(id); err != nil {
 		return Resolved{}, &Error{Kind: KindUsage, Message: err.Error(), Err: err}
 	}
-	e, err := readEntry(EntryPath(dir, id))
+	e, err := readEntry(dir, id+".json")
 	if err != nil {
 		return Resolved{}, &Error{Kind: KindNoInstance, Message: fmt.Sprintf("instance %q is not running", id)}
 	}

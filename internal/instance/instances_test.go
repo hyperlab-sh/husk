@@ -302,7 +302,7 @@ func TestRegisterStampsZeroStartedAt(t *testing.T) {
 	if err := Register(dir, e); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	got, err := readEntry(EntryPath(dir, "notes"))
+	got, err := readEntry(dir, "notes.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -317,7 +317,7 @@ func TestRegisterKeepsSetStartedAt(t *testing.T) {
 	if err := Register(dir, e); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	got, err := readEntry(EntryPath(dir, "notes"))
+	got, err := readEntry(dir, "notes.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,7 +369,7 @@ func TestRegisterReplacesStaleEntry(t *testing.T) {
 	if err := Register(dir, next); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	got, err := readEntry(EntryPath(dir, "notes"))
+	got, err := readEntry(dir, "notes.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -387,7 +387,7 @@ func TestRegisterReplacesCorruptEntry(t *testing.T) {
 	if err := Register(dir, e); err != nil {
 		t.Fatalf("Register over a corrupt entry: %v", err)
 	}
-	if _, err := readEntry(EntryPath(dir, "notes")); err != nil {
+	if _, err := readEntry(dir, "notes.json"); err != nil {
 		t.Fatalf("entry should be readable now: %v", err)
 	}
 }
@@ -405,7 +405,7 @@ func TestRegisterSamePidOverLiveEntryReplaces(t *testing.T) {
 	if err := Register(dir, next); err != nil {
 		t.Fatalf("Register over own live entry: %v", err)
 	}
-	got, err := readEntry(EntryPath(dir, "notes"))
+	got, err := readEntry(dir, "notes.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -543,5 +543,51 @@ func TestListMissingDirIsEmpty(t *testing.T) {
 	}
 	if got != nil {
 		t.Fatalf("List = %+v, want empty", got)
+	}
+}
+
+func TestListSkipsSelfInconsistentEntries(t *testing.T) {
+	// A syntactically valid JSON document whose id does not match the
+	// file name, whose id is not a valid id, or whose socket is not the
+	// instance's own SocketPath is corrupt: List skips it, Register may
+	// replace it, stale cleanup may remove it.
+	dir := t.TempDir()
+	plant := func(base, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, base), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	plant("other.json", `{"id":"x","pid":1,"socket":"`+SocketPath(dir, "x")+`"}`)
+	plant("notes.json", `{"id":"notes","pid":1,"socket":"/somewhere/else.sock"}`)
+	plant("Foo_1.json", `{"id":"Foo_1","pid":1,"socket":"`+SocketPath(dir, "Foo_1")+`"}`)
+	good := Entry{ID: "4242", PID: 4242, Socket: SocketPath(dir, "4242"), StartedAt: fixedTime(), ProtocolVersion: "2.0"}
+	if err := writeEntryFile(dir, good); err != nil {
+		t.Fatal(err)
+	}
+	got, err := List(dir)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "4242" {
+		t.Fatalf("List = %+v, want only the consistent 4242 entry", got)
+	}
+}
+
+func TestUnregisterRejectsBadID(t *testing.T) {
+	// Ids become file names; a mangled id must be refused, never joined
+	// onto the directory.
+	dir := t.TempDir()
+	outside := filepath.Join(dir, "..", "escape.json")
+	if err := os.WriteFile(outside, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"../escape", "", "Foo_1", "notes/x"} {
+		if err := Unregister(dir, id); err == nil {
+			t.Errorf("Unregister(%q) should be refused", id)
+		}
+	}
+	if _, err := os.Lstat(outside); err != nil {
+		t.Error("the file outside dir must still exist")
 	}
 }

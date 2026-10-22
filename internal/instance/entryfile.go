@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -83,7 +84,12 @@ func Register(dir string, e Entry) error {
 // Unregister removes the instance's entry and then its socket. A missing
 // file is not an error, so Unregister is idempotent and safe to call when a
 // crash already removed one of the files. It is the Server's Close step.
+// The id is validated first: ids become file names, so a mangled id must
+// be refused, not joined onto dir.
 func Unregister(dir, id string) error {
+	if err := ValidID(id); err != nil {
+		return err
+	}
 	for _, path := range []string{EntryPath(dir, id), SocketPath(dir, id)} {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return err
@@ -99,7 +105,7 @@ func Unregister(dir, id string) error {
 // this call becomes a no-op. A missing or corrupt file is not an error and
 // is left alone.
 func RemoveIfStale(dir string, e Entry) error {
-	cur, err := readEntry(EntryPath(dir, e.ID))
+	cur, err := readEntry(dir, e.ID+".json")
 	if err != nil {
 		return nil // missing or corrupt: nothing that holds e is on disk
 	}
@@ -126,7 +132,7 @@ func List(dir string) ([]Entry, error) {
 		if name.IsDir() || filepath.Ext(name.Name()) != ".json" {
 			continue
 		}
-		e, err := readEntry(filepath.Join(dir, name.Name()))
+		e, err := readEntry(dir, name.Name())
 		if err != nil {
 			continue // corrupt or unreadable: ignored as corrupt
 		}
@@ -136,10 +142,17 @@ func List(dir string) ([]Entry, error) {
 	return out, nil
 }
 
-// readEntry reads and validates one registration entry file. Every failure
-// mode — missing, not a regular file, over MaxEntryBytes, bad JSON,
-// incomplete fields — is an error; callers treat them as "no usable entry".
-func readEntry(path string) (Entry, error) {
+// readEntry reads and validates one registration entry file named base
+// ("notes.json") in dir. Beyond the file-level checks — a regular file
+// within MaxEntryBytes holding valid JSON with a positive pid and a
+// socket — the entry must be self-consistent: its id must be a valid id
+// equal to the base name, and its socket must be this instance's own
+// SocketPath. Every mismatch is corrupt: replaceable by Register,
+// removable by stale cleanup. Deriving the paths from the validated id is
+// also what keeps a mangled id in a hand-edited entry from steering
+// callers outside dir.
+func readEntry(dir, base string) (Entry, error) {
+	path := filepath.Join(dir, base)
 	st, err := os.Lstat(path)
 	if err != nil {
 		return Entry{}, err
@@ -155,8 +168,15 @@ func readEntry(path string) (Entry, error) {
 	if err := json.Unmarshal(data, &e); err != nil {
 		return Entry{}, fmt.Errorf("%s: corrupt entry: %w", path, err)
 	}
-	if e.ID == "" || e.PID <= 0 || e.Socket == "" {
+	if e.PID <= 0 || e.Socket == "" {
 		return Entry{}, fmt.Errorf("%s: incomplete entry", path)
+	}
+	id := strings.TrimSuffix(base, ".json")
+	if err := ValidID(id); err != nil || e.ID != id {
+		return Entry{}, fmt.Errorf("%s: corrupt entry: id %q does not match the file name %q", path, e.ID, id)
+	}
+	if want := SocketPath(dir, e.ID); e.Socket != want {
+		return Entry{}, fmt.Errorf("%s: corrupt entry: socket %q is not the instance's socket %q", path, e.Socket, want)
 	}
 	return e, nil
 }
