@@ -80,5 +80,23 @@ func Normalize(text string) (string, error) {
 		}
 		code = r
 	}
+	if mods != 0 && unicode.IsLetter(code) {
+		code = unicode.ToLower(code)
+	}
+	if mods.Contains(tea.ModShift) && unicode.IsPrint(code) && !unicode.IsLetter(code) && !unicode.IsSpace(code) {
+		// A symbol's produced text is layout-dependent; require that text,
+		// rather than silently binding its unshifted physical key.
+		shifted := code
+		const bases = "`1234567890-=[]\\;',./"
+		const symbols = "~!@#$%^&*()_+{}|:\"<>?"
+		for i, r := range bases {
+			if r == code {
+				shifted = rune(symbols[i])
+				break
+			}
+		}
+		hint := Format(tea.Key{Code: shifted, Mod: mods &^ tea.ModShift})
+		return "", fmt.Errorf("invalid_key: shifted key produces %q; bind produced character %q", string(shifted), hint)
+	}
 	return Format(tea.Key{Code: code, Mod: mods}), nil
 }
