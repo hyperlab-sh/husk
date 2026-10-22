@@ -2,6 +2,7 @@ package calls
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -102,7 +103,7 @@ func (t *Table) Send(plugin PluginID, method string, params json.RawMessage, opt
 	msg := protocol.Message{ID: &wireID, Method: method, Params: params}
 	var err error
 	if t.out == nil {
-		err = fmt.Errorf("no outbox configured")
+		err = errors.New("no outbox configured")
 	} else {
 		err = t.out.Send(plugin, msg)
 	}
@@ -115,8 +116,9 @@ func (t *Table) Send(plugin PluginID, method string, params json.RawMessage, opt
 
 // CanSend preflights one additional request per argument, including repeated
 // plugins. It neither reserves capacity nor burns ids; it checks caps and the
-// remaining numeric id space, not liveness or transport availability. No other loop work may interleave between
-// this check and the fan-out if its capacity guarantee is to hold.
+// remaining numeric id space, not liveness or transport availability. No other
+// loop work may interleave between this check and the fan-out if its capacity
+// guarantee is to hold.
 func (t *Table) CanSend(plugins ...PluginID) error {
 	if t.closed {
 		return ErrClosed
@@ -161,7 +163,7 @@ func (t *Table) Resolve(plugin PluginID, reply protocol.Message) (Result, bool) 
 	r := p.result(t.clock.Now())
 	kind, invalid := reply.Kind()
 	if invalid == nil && kind != protocol.KindReply {
-		invalid = fmt.Errorf("expected a reply, not a request or notification")
+		invalid = errors.New("expected a reply, not a request or notification")
 	}
 	if invalid == nil {
 		invalid = reply.Validate()
@@ -190,7 +192,8 @@ func (t *Table) Expire(now time.Time) []Result {
 // diagnostic reason appears in Message; Data carries the stable plugin_exited
 // reason used by programs. Other plugins' calls and the id counter are untouched.
 func (t *Table) DropPlugin(plugin PluginID, reason string) []Result {
-	calls := t.selectCalls(func(p pendingCall) bool { return p.handle.Plugin == plugin })
+	delete(t.orphanLogs, plugin)
+	calls := t.matchingCalls(func(p pendingCall) bool { return p.handle.Plugin == plugin })
 	slices.SortFunc(calls, func(a, b pendingCall) int { return compareID(a.handle.ID, b.handle.ID) })
 	return t.fail(calls, t.clock.Now(), func(p pendingCall) *Error {
 		return &Error{Code: protocol.CodeCancelled, Data: json.RawMessage(`{"reason":"plugin_exited"}`), Message: fmt.Sprintf("plugin %s exited: %s", plugin, reason)}
@@ -257,13 +260,18 @@ func (p pendingCall) result(now time.Time) Result {
 	return Result{Handle: p.handle, Requester: p.requester, Method: p.method, Elapsed: now.Sub(p.started)}
 }
 
-func (t *Table) selectCalls(match func(pendingCall) bool) []pendingCall {
+func (t *Table) matchingCalls(match func(pendingCall) bool) []pendingCall {
 	var calls []pendingCall
 	for _, p := range t.pending {
 		if match(p) {
 			calls = append(calls, p)
 		}
 	}
+	return calls
+}
+
+func (t *Table) selectCalls(match func(pendingCall) bool) []pendingCall {
+	calls := t.matchingCalls(match)
 	slices.SortFunc(calls, func(a, b pendingCall) int {
 		if c := a.deadline.Compare(b.deadline); c != 0 {
 			return c
