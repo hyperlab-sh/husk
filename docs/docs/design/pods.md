@@ -399,7 +399,7 @@ Transitions:
 | `live` | `exited` | status 0, or killed by Husk during shutdown |
 | `live` | `failed` | non-zero status, a signal Husk did not send, or Husk killed it after a stdin failure (`last_error`: `stopped reading: ...`) |
 
-`exited` and `failed` are terminal for that launch. There is no restart in v1: a failed plugin stays failed until the instance restarts. The Pod also publishes `pods.plugin-exited` with the same payload through the publisher interface the loop injects at construction (the same way State and Services publish; Pods import nothing from Stem), so a notifier can toast it as today.
+`exited` and `failed` are terminal for that launch. There is no restart in v1: a failed plugin stays failed until the instance restarts. The Pod also publishes `pods.plugin-exited`, whose data is the Pod's `husk.pods` entry plus `plugin_id`, through the publisher interface the loop injects at construction (the same way State and Services publish; Pods import nothing from Stem), so a notifier can toast it as today.
 
 #### Wrapper invariants
 
@@ -527,7 +527,7 @@ Removed behaviour, stated for the changelog: the socket transport for plugins (p
 13. Secrets are never injected into the environment; a plugin fetches granted secrets over `secrets.get` with its token.
 14. The protocol version reaches the plugin as `HUSK_PROTOCOL_VERSION` and is checked against the manifest's declared major at conversion; this replaces `hello.protocol_version`.
 15. `husk-plugin.json` gains `"manifest_version": 2`; files without it go through the v1 converter, which ignores `transport` and `language` with a warning.
-16. Exit with status 0 produces no toast; non-zero or a foreign signal produces a warning toast through a `pods.plugin-exited` event.
+16. Exit with status 0 produces no toast; non-zero or a foreign signal produces a warning toast (the frontend toasts the `husk.pods` transition into `failed`; `pods.plugin-exited` carries the same entry for other watchers).
 17. Logs live at `$XDG_STATE_HOME/husk/logs/<instance-id>/<plugin-id>.log`, opened through Store, so the runtime directory holds only sockets and entries.
 18. `HUSK_BIN_PATH` is injected so a plugin calls the same build's CLI; the environment variable names for socket, instance and binary are Instances' (`HUSK_SOCKET_PATH`, `HUSK_INSTANCE`, `HUSK_BIN_PATH`).
 

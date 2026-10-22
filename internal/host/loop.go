@@ -70,7 +70,7 @@ func (r *Root) exec(fn func()) error {
 		fn()
 		return nil
 	}
-	if g := r.loopGID.Load(); g != 0 && g == goroutineID() {
+	if r.onLoop() {
 		fn()
 		return nil
 	}
@@ -87,8 +87,16 @@ func (r *Root) exec(fn func()) error {
 	return fmt.Errorf("the loop is wedged (no run within %v): %w", r.opts.loopWaitOr(loopWait), err)
 }
 
+// onLoop reports whether the caller is the loop goroutine, learned on its
+// first Update.
+func (r *Root) onLoop() bool {
+	g := r.loopGID.Load()
+	return g != 0 && g == goroutineID()
+}
+
 // goroutineID reads the current goroutine's id from its stack header. It is
-// used only to recognize the loop goroutine in exec, never on a hot path.
+// used only to recognize the loop goroutine (onLoop: exec and the event
+// publisher), never per message on a hot path.
 func goroutineID() int64 {
 	var buf [32]byte
 	b := buf[:runtime.Stack(buf[:], false)]

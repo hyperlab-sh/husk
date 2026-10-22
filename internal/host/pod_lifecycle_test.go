@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
 	"github.com/hyperlab-sh/husk/internal/pods/manifest"
@@ -185,9 +186,8 @@ func TestPluginExitedEventReachesAWatcher(t *testing.T) {
 	<-f.started // beta
 
 	h.root.cfg.Post(wrapper.ExitMsg{Info: wrapper.Info{PluginID: "beta", Status: wrapper.Failed, LastError: "crashed (exit status 3)"}})
-	// The publish is posted from inside the exit's Update, so it runs one
-	// loop turn later, and the bus delivers at the end of that turn.
-	h.loop(func() {})
+	// The exit's Update publishes inline and the bus delivers at the end of
+	// that tick; one loop turn makes sure the posted ExitMsg was applied.
 	h.loop(func() {})
 
 	watcher.mu.Lock()
@@ -234,7 +234,7 @@ func TestPluginExitedIsNotPostedFromTheLoop(t *testing.T) {
 		c.Plugins = []string{broken, good}
 		next := c.Post
 		c.Post = func(m any) bool {
-			if g := h.root.loopGID.Load(); g != 0 && g == goroutineID() {
+			if h.root.onLoop() {
 				onLoop.Store(true)
 				return false
 			}
@@ -252,5 +252,48 @@ func TestPluginExitedIsNotPostedFromTheLoop(t *testing.T) {
 	}
 	if onLoop.Load() {
 		t.Error("Post was called from the loop goroutine")
+	}
+}
+
+// D71a: the event is the Pod's husk.pods entry. An exit report that lacks
+// fields an earlier write set leaves them in the entry (the write merges), so
+// the event must keep them too.
+func TestPluginExitedEventCarriesTheMergedEntry(t *testing.T) {
+	good := writeFrontendPlugin(t, "beta", []string{"sidebar-list"}, nil)
+	f := newFakes()
+	hook, ready := readyHook("")
+	h, err := boot(t, func(c *contracts.Config) { c.Plugins = []string{good} }, withHook(hook), WithFactory(f.factory))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var watcher recNotifier
+	h.loop(func() {
+		if _, err := h.root.bus.Subscribe(&watcher, "pods.plugin-exited"); err != nil {
+			t.Error(err)
+		}
+	})
+	runHost(t, ready, h)
+	<-f.started
+
+	started := time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC)
+	h.root.cfg.Post(wrapper.ExitMsg{Info: wrapper.Info{PluginID: "beta", Status: wrapper.Failed, PID: 4242, StartedAt: started, LogPath: "/logs/beta.log", LastError: "crashed (exit status 3)"}})
+	h.loop(func() {})
+	// A later report with none of pid, started_at or log.
+	h.root.cfg.Post(wrapper.ExitMsg{Info: wrapper.Info{PluginID: "beta", Status: wrapper.Failed, LastError: "stdout closed"}})
+	h.loop(func() {})
+
+	watcher.mu.Lock()
+	defer watcher.mu.Unlock()
+	if len(watcher.msgs) < 2 {
+		t.Fatalf("events = %d, want 2", len(watcher.msgs))
+	}
+	var p struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(watcher.msgs[len(watcher.msgs)-1].Params, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Data["last_error"] != "stdout closed" || p.Data["log"] != "/logs/beta.log" || p.Data["pid"] != float64(4242) || p.Data["started_at"] != started.Format(time.RFC3339Nano) || p.Data["plugin_id"] != "beta" {
+		t.Errorf("event = %+v, want the merged entry plus plugin_id", p.Data)
 	}
 }
