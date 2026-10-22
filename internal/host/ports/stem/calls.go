@@ -58,7 +58,12 @@ func callerOf(c contracts.Caller) (dispatcher.Caller, bool) {
 }
 
 // parseArgs decodes args as a JSON object. Absent, empty and null are nil.
-func parseArgs(raw json.RawMessage) (map[string]any, error) {
+func parseArgs(raw json.RawMessage) (map[string]any, error) { return parseObject(raw, "args") }
+
+// parseObject decodes one JSON object parameter, preserving number lexemes;
+// what names the parameter in the error messages. Absent, empty and null
+// are nil.
+func parseObject(raw json.RawMessage, what string) (map[string]any, error) {
 	raw = bytes.TrimSpace(raw)
 	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
 		return nil, nil
@@ -67,10 +72,10 @@ func parseArgs(raw json.RawMessage) (map[string]any, error) {
 	dec.UseNumber()
 	var m map[string]any
 	if err := dec.Decode(&m); err != nil || m == nil {
-		return nil, coded(protocol.CodeInvalidParams, "args must be a JSON object")
+		return nil, coded(protocol.CodeInvalidParams, what+" must be a JSON object")
 	}
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
-		return nil, coded(protocol.CodeInvalidParams, "args must be a JSON object")
+		return nil, coded(protocol.CodeInvalidParams, what+" must be a JSON object")
 	}
 	return m, nil
 }

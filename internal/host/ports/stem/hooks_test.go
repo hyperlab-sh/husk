@@ -16,17 +16,13 @@ import (
 
 // --- fixture ---------------------------------------------------------------
 
-type hookClock struct{ now time.Time }
-
-func (c *hookClock) Now() time.Time { return c.now }
-
-func (c *hookClock) advance(d time.Duration) { c.now = c.now.Add(d) }
-
+// hookSend records one leg on the wire: which plugin, which message.
 type hookSend struct {
 	plugin calls.PluginID
 	msg    protocol.Message
 }
 
+// hookOutbox is the transport the rig's call table sends through.
 type hookOutbox struct{ sent chan hookSend }
 
 func (b *hookOutbox) Send(p calls.PluginID, m protocol.Message) error {
@@ -41,46 +37,62 @@ func (s hookSubs) Subscribers(hook string) ([]string, bool) {
 	return list, ok
 }
 
-type hookLive map[string]bool
-
-func (l hookLive) Live(pluginID string) bool { return l[pluginID] }
-
-// hookRig wires the port over a real runner on a real call table with fake
-// transport views and a post that runs on the calling goroutine.
+// hookRig wires the port over a real runner on a real call table, driven by
+// the same loop helper the Calls port tests use: every runner and table
+// touch runs on the loop goroutine, exactly as the host would touch them.
 type hookRig struct {
-	port    *stemports.Hooks
-	runner  *hooks.Runner
-	table   *calls.Table
-	clock   *hookClock
-	sent    chan hookSend
-	started chan struct{}
-	post    func(fn func()) bool
+	loop   *loop
+	port   *stemports.Hooks
+	runner *hooks.Runner
+	table  *calls.Table
+	clk    *clock
+	sent   chan hookSend
 }
 
-func newHookRig(t *testing.T, subs hookSubs, live hookLive) *hookRig {
+func newHookRig(t *testing.T, subs hookSubs, alive live) *hookRig {
 	t.Helper()
 	r := &hookRig{
-		clock:   &hookClock{now: time.Unix(1000, 0)},
-		sent:    make(chan hookSend, 16),
-		started: make(chan struct{}, 16),
-		table:   nil,
+		loop: newLoop(t),
+		clk:  &clock{t: time.Unix(1000, 0)},
+		sent: make(chan hookSend, 16),
 	}
-	box := &hookOutbox{sent: r.sent}
-	r.table = calls.New(box, calls.TableOptions{Clock: r.clock})
-	r.runner = hooks.New(hooks.Options{Subscriptions: subs, Liveness: live, Calls: r.table})
-	// started fires once the posted fn has fully returned, giving the test a
-	// happens-before edge over the fan-out before it drives the table.
-	r.post = func(fn func()) bool {
-		fn()
-		r.started <- struct{}{}
-		return true
-	}
-	r.port = stemports.NewHooks(r.runner, r.post)
+	r.table = calls.New(&hookOutbox{sent: r.sent}, calls.TableOptions{Clock: r.clk})
+	r.runner = hooks.New(hooks.Options{Subscriptions: subs, Liveness: alive, Calls: r.table})
+	r.port = stemports.NewHooks(r.runner, r.loop.post)
 	return r
 }
 
-// awaitStarted waits for the last posted fn to finish.
-func (r *hookRig) awaitStarted() { <-r.started }
+// resolve replies for plugin's leg, on the loop, and completes the runner.
+func (r *hookRig) resolve(t *testing.T, plugin calls.PluginID, id *protocol.ID, result json.RawMessage) {
+	t.Helper()
+	var n int
+	r.loop.do(func() {
+		if res, ok := r.table.Resolve(plugin, protocol.Message{ID: id, Result: result}); ok {
+			n = r.runner.Complete(res)
+		}
+	})
+	if n != 1 {
+		t.Fatalf("%s's reply resolved %d legs", plugin, n)
+	}
+}
+
+// sweep advances the clock past every deadline — on the loop, so every
+// earlier fan-out has finished reading it — and completes what expired.
+func (r *hookRig) sweep() int {
+	var n int
+	r.loop.do(func() {
+		r.clk.t = r.clk.t.Add(calls.DefaultTimeout + time.Nanosecond)
+		n = r.runner.Complete(r.table.Sweep()...)
+	})
+	return n
+}
+
+// pending reports the runner's pending legs, read on the loop.
+func (r *hookRig) pending() int {
+	var n int
+	r.loop.do(func() { n = r.runner.Pending() })
+	return n
+}
 
 type hookOutcome struct {
 	results []contracts.HookResult
@@ -124,19 +136,16 @@ func hookCodeOf(t *testing.T, err error) string {
 // --- HookCall --------------------------------------------------------------
 
 func TestHookCallAggregatesThroughThePort(t *testing.T) {
-	r := newHookRig(t, hookSubs{"notes.before-refresh": {"b", "c"}}, hookLive{"b": true, "c": true})
+	r := newHookRig(t, hookSubs{"notes.before-refresh": {"b", "c"}}, live{"b": true, "c": true})
 	out := hookInvoke(context.Background(), r.port, "notes.before-refresh", json.RawMessage(`{"reason":"manual"}`))
-	r.awaitStarted()
 	bID := hookWaitFor(t, r, "b")
 	cID := hookWaitFor(t, r, "c")
-	// b answers with a payload; c stays silent until its deadline.
-	if res, ok := r.table.Resolve("b", protocol.Message{ID: bID, Result: json.RawMessage(`{"data":{"ready":true}}`)}); !ok {
-		t.Fatal("b's reply refused")
-	} else if n := r.runner.Complete(res); n != 1 {
-		t.Fatalf("b resolved %d legs", n)
+	if bID.String() == cID.String() {
+		t.Fatal("legs share one request id")
 	}
-	r.clock.advance(calls.DefaultTimeout + time.Nanosecond)
-	if n := r.runner.Complete(r.table.Sweep()...); n != 1 {
+	// b answers with a payload; c stays silent until its deadline.
+	r.resolve(t, "b", bID, json.RawMessage(`{"data":{"ready":true}}`))
+	if n := r.sweep(); n != 1 {
 		t.Fatalf("expiry resolved %d legs", n)
 	}
 	select {
@@ -159,17 +168,16 @@ func TestHookCallAggregatesThroughThePort(t *testing.T) {
 		if err != nil || string(blob) != `{"plugin_id":"b","data":{"ready":true}}` {
 			t.Fatalf("entry JSON %s (%v)", blob, err)
 		}
-		_ = cID
 	case <-time.After(5 * time.Second):
 		t.Fatal("HookCall never returned")
 	}
-	if n := r.runner.Pending(); n != 0 {
+	if n := r.pending(); n != 0 {
 		t.Fatalf("%d legs leaked through the port", n)
 	}
 }
 
 func TestHookCallWithoutSubscribersReturnsEmptyReply(t *testing.T) {
-	r := newHookRig(t, hookSubs{"a.h": nil}, hookLive{})
+	r := newHookRig(t, hookSubs{"a.h": nil}, live{})
 	results, err := r.port.HookCall(context.Background(), contracts.Caller{Kind: contracts.CallerCLI}, "a.h", json.RawMessage(`{"x":1}`))
 	if err != nil {
 		t.Fatalf("HookCall: %v", err)
@@ -180,7 +188,7 @@ func TestHookCallWithoutSubscribersReturnsEmptyReply(t *testing.T) {
 }
 
 func TestHookCallUnknownHookIsNotFound(t *testing.T) {
-	r := newHookRig(t, hookSubs{"a.h": nil}, hookLive{})
+	r := newHookRig(t, hookSubs{"a.h": nil}, live{})
 	_, err := r.port.HookCall(context.Background(), contracts.Caller{Kind: contracts.CallerCLI}, "nope.h", nil)
 	if code := hookCodeOf(t, err); code != "not_found" {
 		t.Fatalf("want not_found, got %s", code)
@@ -188,19 +196,19 @@ func TestHookCallUnknownHookIsNotFound(t *testing.T) {
 }
 
 func TestHookCallWhenTheLoopIsDown(t *testing.T) {
-	r := newHookRig(t, hookSubs{"a.h": {"b"}}, hookLive{"b": true})
+	r := newHookRig(t, hookSubs{"a.h": {"b"}}, live{"b": true})
 	r.port = stemports.NewHooks(r.runner, func(fn func()) bool { return false })
 	_, err := r.port.HookCall(context.Background(), contracts.Caller{Kind: contracts.CallerCLI}, "a.h", nil)
 	if code := hookCodeOf(t, err); code != "unavailable" {
 		t.Fatalf("want unavailable, got %s", code)
 	}
-	if n := r.runner.Pending(); n != 0 {
+	if n := r.pending(); n != 0 {
 		t.Fatalf("refused call left %d legs", n)
 	}
 }
 
 func TestHookCallValidatesData(t *testing.T) {
-	r := newHookRig(t, hookSubs{"a.h": nil}, hookLive{})
+	r := newHookRig(t, hookSubs{"a.h": nil}, live{})
 	for _, tc := range []struct {
 		name string
 		data json.RawMessage
@@ -229,20 +237,20 @@ func TestHookCallValidatesData(t *testing.T) {
 }
 
 func TestHookCallRefusesUnknownCallers(t *testing.T) {
-	r := newHookRig(t, hookSubs{"a.h": nil}, hookLive{})
+	r := newHookRig(t, hookSubs{"a.h": nil}, live{})
 	if _, err := r.port.HookCall(context.Background(), contracts.Caller{}, "a.h", nil); err == nil {
 		t.Fatal("empty caller accepted")
 	}
 	if _, err := r.port.HookCall(context.Background(), contracts.Caller{Kind: contracts.CallerPlugin}, "a.h", nil); err == nil {
 		t.Fatal("plugin caller without id accepted")
 	}
-	if n := r.runner.Pending(); n != 0 {
+	if n := r.pending(); n != 0 {
 		t.Fatalf("refused calls left %d legs", n)
 	}
 }
 
 func TestHookCallCallerGoneDropsContinuationButConsumesReplies(t *testing.T) {
-	r := newHookRig(t, hookSubs{"a.h": {"b"}}, hookLive{"b": true})
+	r := newHookRig(t, hookSubs{"a.h": {"b"}}, live{"b": true})
 	ctx, cancel := context.WithCancel(context.Background())
 	out := hookInvoke(ctx, r.port, "a.h", nil)
 	bID := hookWaitFor(t, r, "b")
@@ -258,34 +266,31 @@ func TestHookCallCallerGoneDropsContinuationButConsumesReplies(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("HookCall never returned")
 	}
-	if n := r.runner.Pending(); n != 1 {
+	if n := r.pending(); n != 1 {
 		t.Fatalf("leg vanished before its reply: %d pending", n)
 	}
 	// The loop still consumes the leg: the aggregate is discarded, not lost.
-	res, ok := r.table.Resolve("b", protocol.Message{ID: bID, Result: json.RawMessage(`{"data":{"late":true}}`)})
-	if !ok {
-		t.Fatal("b's late reply refused")
-	}
-	if n := r.runner.Complete(res); n != 1 {
-		t.Fatalf("late reply resolved %d legs", n)
-	}
-	if n := r.runner.Pending(); n != 0 {
+	r.resolve(t, "b", bID, json.RawMessage(`{"data":{"late":true}}`))
+	if n := r.pending(); n != 0 {
 		t.Fatalf("dropped continuation leaked %d legs", n)
 	}
 }
 
 func TestHookCallCallerDeadlineIsTimeout(t *testing.T) {
-	r := newHookRig(t, hookSubs{"a.h": {"b"}}, hookLive{"b": true})
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	r := newHookRig(t, hookSubs{"a.h": {"b"}}, live{"b": true})
+	// A deadline already in the past expires the context at once: the branch
+	// is exercised without a real timer.
+	ctx, cancel := context.WithDeadline(context.Background(), time.Unix(1, 0))
 	defer cancel()
 	_, err := r.port.HookCall(ctx, contracts.Caller{Kind: contracts.CallerCLI}, "a.h", nil)
 	if code := hookCodeOf(t, err); code != "timeout" {
 		t.Fatalf("want timeout, got %s (%v)", code, err)
 	}
 	// Abandoned, not leaked: sweep the leg once its deadline passes.
-	r.clock.advance(calls.DefaultTimeout + time.Nanosecond)
-	r.runner.Complete(r.table.Sweep()...)
-	if n := r.runner.Pending(); n != 0 {
+	if n := r.sweep(); n != 1 {
+		t.Fatalf("sweep resolved %d legs", n)
+	}
+	if n := r.pending(); n != 0 {
 		t.Fatalf("%d legs leaked after caller deadline", n)
 	}
 }
@@ -294,7 +299,7 @@ func TestHookCallCallerDeadlineIsTimeout(t *testing.T) {
 
 func TestHookCallerMapping(t *testing.T) {
 	// CallerStem is a Host caller for the runner, as the Calls port maps it.
-	r := newHookRig(t, hookSubs{"a.h": nil}, hookLive{})
+	r := newHookRig(t, hookSubs{"a.h": nil}, live{})
 	results, err := r.port.HookCall(context.Background(), contracts.Caller{Kind: contracts.CallerStem}, "a.h", nil)
 	if err != nil || len(results) != 0 {
 		t.Fatalf("stem caller refused: %v (%d results)", err, len(results))
