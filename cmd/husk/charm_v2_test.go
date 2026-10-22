@@ -8,12 +8,13 @@ import (
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
+
 	"github.com/hyperlab-sh/husk/pkg/frame"
-	"github.com/hyperlab-sh/husk/pkg/huskipc"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
 func TestCharmV2ViewDeclaresTerminalModes(t *testing.T) {
-	m := newWorkbenchModel("", nil, t.TempDir())
+	m := newWorkbenchModel()
 	m.recomputeLayout()
 	m.seedPubslotsDemo()
 	view := m.View()
@@ -26,7 +27,7 @@ func TestCharmV2ViewDeclaresTerminalModes(t *testing.T) {
 }
 
 func TestViewRequestsKeyEventTypes(t *testing.T) {
-	m := newWorkbenchModel("", nil, t.TempDir())
+	m := newWorkbenchModel()
 	m.recomputeLayout()
 	if !m.View().KeyboardEnhancements.ReportEventTypes {
 		t.Fatal("View must request kitty key event types or KeyReleaseMsg never fires")
@@ -34,9 +35,9 @@ func TestViewRequestsKeyEventTypes(t *testing.T) {
 }
 
 func TestKeyReleaseClearsHeldKeyWithoutTimer(t *testing.T) {
-	m := newWorkbenchModel("", nil, t.TempDir())
-	m.pollMods = func() (huskipc.ModifierState, bool) { return huskipc.ModifierState{}, false }
-	_, out := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "p"})
+	m := newWorkbenchModel()
+	m.pollMods = func() (protocol.ModifierState, bool) { return protocol.ModifierState{}, false }
+	_, out := addPublicationTestPlugin(m, hello{PluginID: "p"})
 	m.Update(tea.KeyboardEnhancementsMsg{Flags: ansi.KittyReportEventTypes})
 	if !m.keyReleases {
 		t.Fatal("event-type support not recorded")
@@ -61,8 +62,8 @@ func TestKeyReleaseClearsHeldKeyWithoutTimer(t *testing.T) {
 }
 
 func TestHeldKeyTimerStillExpiresWithoutEventTypes(t *testing.T) {
-	m := newWorkbenchModel("", nil, t.TempDir())
-	m.pollMods = func() (huskipc.ModifierState, bool) { return huskipc.ModifierState{}, false }
+	m := newWorkbenchModel()
+	m.pollMods = func() (protocol.ModifierState, bool) { return protocol.ModifierState{}, false }
 	m.Update(tea.KeyboardEnhancementsMsg{Flags: 1})
 	m.heldKeys["x"] = time.Now().Add(-time.Second)
 	m.Update(modifierTickMsg{})
@@ -72,8 +73,8 @@ func TestHeldKeyTimerStillExpiresWithoutEventTypes(t *testing.T) {
 }
 
 func TestHeldKeySafetyExpiryWithEventTypes(t *testing.T) {
-	m := newWorkbenchModel("", nil, t.TempDir())
-	m.pollMods = func() (huskipc.ModifierState, bool) { return huskipc.ModifierState{}, false }
+	m := newWorkbenchModel()
+	m.pollMods = func() (protocol.ModifierState, bool) { return protocol.ModifierState{}, false }
 	m.Update(tea.KeyboardEnhancementsMsg{Flags: ansi.KittyReportEventTypes})
 	m.heldKeys["x"] = time.Now().Add(-2 * time.Second)
 	m.Update(modifierTickMsg{})
@@ -83,8 +84,8 @@ func TestHeldKeySafetyExpiryWithEventTypes(t *testing.T) {
 }
 
 func TestKeyboardEnhancementsFallbackResumesShortExpiry(t *testing.T) {
-	m := newWorkbenchModel("", nil, t.TempDir())
-	m.pollMods = func() (huskipc.ModifierState, bool) { return huskipc.ModifierState{}, false }
+	m := newWorkbenchModel()
+	m.pollMods = func() (protocol.ModifierState, bool) { return protocol.ModifierState{}, false }
 	m.Update(tea.KeyboardEnhancementsMsg{Flags: ansi.KittyReportEventTypes})
 	m.Update(tea.KeyboardEnhancementsMsg{Flags: 1})
 	m.heldKeys["x"] = time.Now().Add(-500 * time.Millisecond)
@@ -95,7 +96,7 @@ func TestKeyboardEnhancementsFallbackResumesShortExpiry(t *testing.T) {
 }
 
 func TestViewRequestsAlternateKeys(t *testing.T) {
-	m := newWorkbenchModel("", nil, t.TempDir())
+	m := newWorkbenchModel()
 	m.recomputeLayout()
 	if !m.View().KeyboardEnhancements.ReportAlternateKeys {
 		t.Fatal("View must request alternate keys so shifted-symbol releases match their press")
@@ -145,14 +146,14 @@ func TestCharmV2KeyWireSpellings(t *testing.T) {
 		{"enter", tea.KeyPressMsg{Code: tea.KeyEnter}, "enter"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			m := newWorkbenchModel("", nil, t.TempDir())
-			_, out := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "p", Slots: []huskipc.SlotID{huskipc.SlotSidebarList}})
+			m := newWorkbenchModel()
+			_, out := addPublicationTestPlugin(m, hello{PluginID: "p", Slots: []protocol.SurfaceID{protocol.SurfaceSidebarList}})
 			out.Reset()
 			m.Update(tc.key)
 			var keys []string
 			for _, msg := range envelopes(t, out) {
 				if msg.SlotKey != nil {
-					if msg.SlotKey.Slot != huskipc.SlotSidebarList {
+					if msg.SlotKey.Slot != protocol.SurfaceSidebarList {
 						t.Fatal("key routed to the wrong surface")
 					}
 					keys = append(keys, msg.SlotKey.Key)
@@ -169,8 +170,8 @@ func TestCharmV2KeyWireSpellings(t *testing.T) {
 }
 
 func TestCharmV2PastePreservesWireAndDoesNotRunShortcuts(t *testing.T) {
-	m := newWorkbenchModel("", nil, t.TempDir())
-	_, out := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "p", Slots: []huskipc.SlotID{huskipc.SlotSidebarList}})
+	m := newWorkbenchModel()
+	_, out := addPublicationTestPlugin(m, hello{PluginID: "p", Slots: []protocol.SurfaceID{protocol.SurfaceSidebarList}})
 	out.Reset()
 	_, cmd := m.Update(tea.PasteMsg{Content: "q"})
 	if cmd != nil {
@@ -193,8 +194,8 @@ func TestCharmV2PastePreservesWireAndDoesNotRunShortcuts(t *testing.T) {
 }
 
 func TestCharmV2KeyReleaseDoesNotRepeatShortcut(t *testing.T) {
-	m := newWorkbenchModel("", nil, t.TempDir())
-	_, out := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "p"})
+	m := newWorkbenchModel()
+	_, out := addPublicationTestPlugin(m, hello{PluginID: "p"})
 	m.Update(tea.KeyPressMsg{Code: '[', Text: "["})
 	if m.showSidebar {
 		t.Fatal("press did not toggle sidebar")
@@ -219,8 +220,8 @@ func TestCharmV2KeyReleaseDoesNotRepeatShortcut(t *testing.T) {
 }
 
 func TestCharmV2KeyRepeatState(t *testing.T) {
-	m := newWorkbenchModel("", nil, t.TempDir())
-	_, out := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "p"})
+	m := newWorkbenchModel()
+	_, out := addPublicationTestPlugin(m, hello{PluginID: "p"})
 	for _, key := range []tea.KeyPressMsg{
 		{Code: 'x', Text: "x"},
 		{Code: 'x', Text: "x", IsRepeat: true},
@@ -239,7 +240,7 @@ func TestCharmV2KeyRepeatState(t *testing.T) {
 }
 
 func TestCharmV2DockAndPaletteKeys(t *testing.T) {
-	m := newWorkbenchModel("", nil, t.TempDir())
+	m := newWorkbenchModel()
 	m.recomputeLayout()
 	m.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
 	if m.showSidePane {
@@ -270,19 +271,19 @@ func TestCharmV2DockAndPaletteKeys(t *testing.T) {
 }
 
 func TestCharmV2ModalKeyRouting(t *testing.T) {
-	m := newWorkbenchModel("", nil, t.TempDir())
-	_, out := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "p", Slots: []huskipc.SlotID{huskipc.SlotModalSurface}})
+	m := newWorkbenchModel()
+	_, out := addPublicationTestPlugin(m, hello{PluginID: "p", Slots: []protocol.SurfaceID{protocol.SurfaceModal}})
 	m.openModal("p", "modal")
 	m.recomputeLayout()
 	out.Reset()
 	m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
-	var keys []*huskipc.SlotKeyPayload
+	var keys []*slotKey
 	for _, msg := range envelopes(t, out) {
 		if msg.SlotKey != nil {
 			keys = append(keys, msg.SlotKey)
 		}
 	}
-	if len(keys) != 1 || keys[0].Slot != huskipc.SlotModalSurface || keys[0].Key != " " {
+	if len(keys) != 1 || keys[0].Slot != protocol.SurfaceModal || keys[0].Key != " " {
 		t.Fatalf("modal key routing = %+v", keys)
 	}
 	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
@@ -292,11 +293,11 @@ func TestCharmV2ModalKeyRouting(t *testing.T) {
 }
 
 func TestCharmV2MouseResizeLifecycle(t *testing.T) {
-	m := newWorkbenchModel("", nil, t.TempDir())
-	addTestPlugin(m, "p", map[huskipc.SlotID]frame.Spec{huskipc.SlotSidebarList: {Border: true}})
-	m.registry.Occupants[huskipc.SlotSidebarList] = "p"
+	m := newWorkbenchModel()
+	addTestPlugin(m, "p", map[protocol.SurfaceID]frame.Spec{protocol.SurfaceSidebarList: {Border: true}})
+	m.catalog.Occupants[protocol.SurfaceSidebarList] = "p"
 	m.recomputeLayout()
-	r := m.slotRects[huskipc.SlotSidebarList]
+	r := m.slotRects[protocol.SurfaceSidebarList]
 	x, y := r.X+r.Width-1, r.Y+2
 	m.Update(tea.MouseMotionMsg{X: x, Y: y})
 	if m.hoverDivider != "sidebar-width" {
@@ -308,7 +309,7 @@ func TestCharmV2MouseResizeLifecycle(t *testing.T) {
 	}
 	before := m.sidebarWidth
 	m.Update(tea.MouseMotionMsg{X: x + 4, Y: y, Button: tea.MouseLeft})
-	if m.sidebarWidth != before+4 || m.slotRects[huskipc.SlotSidebarList].Width != before+4 {
+	if m.sidebarWidth != before+4 || m.slotRects[protocol.SurfaceSidebarList].Width != before+4 {
 		t.Fatal("motion did not resize/recompute framed sidebar")
 	}
 	m.Update(tea.MouseReleaseMsg{X: x + 4, Y: y, Button: tea.MouseLeft})
@@ -340,7 +341,7 @@ func TestPalettePasteInsertsTextWithoutBrackets(t *testing.T) {
 		{"empty", "", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			m := newWorkbenchModel("", nil, t.TempDir())
+			m := newWorkbenchModel()
 			m.showPalette = true
 			_, cmd := m.Update(tea.PasteMsg{Content: tc.paste})
 			if cmd != nil {
@@ -357,7 +358,7 @@ func TestPalettePasteInsertsTextWithoutBrackets(t *testing.T) {
 }
 
 func TestPalettePasteAppendsToTypedTextAndResetsCursor(t *testing.T) {
-	m := newWorkbenchModel("", nil, t.TempDir())
+	m := newWorkbenchModel()
 	m.showPalette = true
 	m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	m.paletteCursor = 2
@@ -372,7 +373,7 @@ func TestPalettePasteAppendsToTypedTextAndResetsCursor(t *testing.T) {
 }
 
 func TestPaletteTypedSingleCharsStillWork(t *testing.T) {
-	m := newWorkbenchModel("", nil, t.TempDir())
+	m := newWorkbenchModel()
 	m.showPalette = true
 	for _, r := range "q[é" {
 		m.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
@@ -383,7 +384,7 @@ func TestPaletteTypedSingleCharsStillWork(t *testing.T) {
 }
 
 func TestPaletteKeepsBracketedExtendedKeyText(t *testing.T) {
-	m := newWorkbenchModel("", nil, t.TempDir())
+	m := newWorkbenchModel()
 	m.showPalette = true
 	m.Update(tea.KeyPressMsg{Code: tea.KeyExtended, Text: "[é]"})
 	if m.paletteQuery != "[é]" {

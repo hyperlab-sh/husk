@@ -5,7 +5,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/hyperlab-sh/husk/pkg/huskipc"
+
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
 // With ReportAlternateKeys the wire spelling of a chord follows the
@@ -41,10 +42,10 @@ func TestUnreportedEnterTabBackspaceReleaseLapsesAtSafetyNet(t *testing.T) {
 		{"backspace", "\x1b[127u", "backspace"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			m := newWorkbenchModel("", nil, t.TempDir())
-			m.pollMods = func() (huskipc.ModifierState, bool) { return huskipc.ModifierState{}, false }
+			m := newWorkbenchModel()
+			m.pollMods = func() (protocol.ModifierState, bool) { return protocol.ModifierState{}, false }
 			m.keyReleases = true
-			_, out := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "p"})
+			_, out := addPublicationTestPlugin(m, hello{PluginID: "p"})
 			m.Update(decodeCharmEvent(t, tc.press))
 			if _, held := m.heldKeys[tc.held]; !held {
 				t.Fatalf("press held %v, want %s", m.heldKeys, tc.held)
@@ -64,7 +65,7 @@ func TestUnreportedEnterTabBackspaceReleaseLapsesAtSafetyNet(t *testing.T) {
 			m.Update(modifierTickMsg{})
 			msgs := envelopes(t, out)
 			if len(m.heldKeys) != 0 || len(msgs) != 1 || msgs[0].KeyState == nil ||
-				msgs[0].KeyState.Phase != huskipc.KeyPhaseUp || msgs[0].KeyState.Key != tc.held {
+				msgs[0].KeyState.Phase != protocol.KeyPhaseUp || msgs[0].KeyState.Key != tc.held {
 				t.Fatalf("safety net: held %v, sent %+v", m.heldKeys, msgs)
 			}
 		})
@@ -80,10 +81,10 @@ func TestFlag8EnterTabBackspaceReleaseClearsHeldKey(t *testing.T) {
 		{"backspace", "\x1b[127u", "\x1b[127;1:3u", "backspace"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			m := newWorkbenchModel("", nil, t.TempDir())
-			m.pollMods = func() (huskipc.ModifierState, bool) { return huskipc.ModifierState{}, false }
+			m := newWorkbenchModel()
+			m.pollMods = func() (protocol.ModifierState, bool) { return protocol.ModifierState{}, false }
 			m.keyReleases = true
-			_, out := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "p"})
+			_, out := addPublicationTestPlugin(m, hello{PluginID: "p"})
 			m.Update(decodeCharmEvent(t, tc.press))
 			if _, held := m.heldKeys[tc.held]; !held {
 				t.Fatalf("press held %v, want %s", m.heldKeys, tc.held)
@@ -92,7 +93,7 @@ func TestFlag8EnterTabBackspaceReleaseClearsHeldKey(t *testing.T) {
 			m.Update(decodeCharmEvent(t, tc.release))
 			msgs := envelopes(t, out)
 			if len(m.heldKeys) != 0 || len(msgs) != 1 || msgs[0].KeyState == nil ||
-				msgs[0].KeyState.Phase != huskipc.KeyPhaseUp || msgs[0].KeyState.Key != tc.held {
+				msgs[0].KeyState.Phase != protocol.KeyPhaseUp || msgs[0].KeyState.Key != tc.held {
 				t.Fatalf("release: held %v, sent %+v", m.heldKeys, msgs)
 			}
 		})

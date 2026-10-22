@@ -2,55 +2,97 @@ package main
 
 import (
 	"bytes"
-	"io"
+	"context"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/hyperlab-sh/husk/pkg/huskipc"
+
+	"github.com/hyperlab-sh/husk/internal/host/contracts"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
-// dumpModel is a hermetic workbench for the --dump-frame driver tests.
-func dumpModel() *WorkbenchModel {
+// hostStep is a message the fake host runs on the program loop, the way real
+// Pod notices and surface updates reach the model.
+type hostStep func()
+
+// stepHost is a host.Looped that runs hostStep messages and does nothing else.
+type stepHost struct {
+	contracts.Host
+	fe contracts.Frontend
+}
+
+func (h stepHost) Run(ctx context.Context) error { <-ctx.Done(); return nil }
+func (h stepHost) Close() error                  { return nil }
+func (h stepHost) Frontend() contracts.Frontend  { return h.fe }
+func (h stepHost) Tick()                         {}
+func (h stepHost) Update(msg any) bool {
+	st, ok := msg.(hostStep)
+	if ok {
+		st()
+	}
+	return ok
+}
+
+// dumpModel is a hermetic workbench for the --dump-frame driver tests, wired
+// to a stepHost and the program reference runDumpFrame fills in.
+func dumpModel() (*WorkbenchModel, *programRef) {
 	m := goldenModel()
-	return m
+	fe := withFE(m)
+	fe.pods, fe.occ = map[string]string{}, map[protocol.SurfaceID]string{}
+	m.attach(stepHost{fe: fe}, nil)
+	return m, &programRef{}
 }
 
-func registerMsg(id string, slots []huskipc.SlotID, rail ...huskipc.RailItemSpec) tea.Msg {
-	return pluginRegisteredMsg{&ConnectedPlugin{
-		Info: huskipc.HelloPayload{
-			PluginID: id, Name: id, Version: "0.1.0", Language: "go",
-			Slots: slots, RailItems: rail,
-		},
-		Writer: huskipc.NewConnWriter(io.Discard),
-	}}
+// starting declares a Pod that has not registered yet.
+func starting(m *WorkbenchModel, id string) hostStep {
+	fe := withFE(m)
+	return func() {
+		fe.pods[id] = "starting"
+		fe.publish()
+	}
 }
 
-func slotMsg(id string, slot huskipc.SlotID, line string) tea.Msg {
-	return ipcEventMsg{pluginID: id, env: huskipc.Envelope{Type: "slot_update", SlotUpdate: &huskipc.SlotUpdatePayload{
-		PluginID: id, Slot: slot, Title: string(slot), Lines: []string{line},
-	}}}
+// register brings a plugin live with its surfaces and optional rail items.
+func register(m *WorkbenchModel, id string, slots []protocol.SurfaceID, rail ...contracts.RailItem) hostStep {
+	fe := withFE(m)
+	return func() {
+		fe.pods[id] = "live"
+		for _, s := range slots {
+			fe.occ[s] = id
+		}
+		fe.Rails = append(fe.Rails, rail...)
+		fe.publish()
+	}
 }
 
-// feed delivers msgs through the same channel transport goroutines use.
-func feed(m *WorkbenchModel, msgs ...tea.Msg) {
+func slotMsg(m *WorkbenchModel, id string, slot protocol.SurfaceID, line string) hostStep {
+	return func() {
+		m.content(id, protocol.SurfaceUpdateParams{Surface: slot, Title: string(slot), Lines: []string{line}})
+	}
+}
+
+// feed delivers steps to the running program from a goroutine, in order.
+func feed(prog *programRef, steps ...hostStep) {
 	go func() {
-		for _, msg := range msgs {
-			m.subChan <- msg
+		for _, st := range steps {
+			for !prog.post(st) {
+				runtime.Gosched()
+			}
 		}
 	}()
 }
 
 func TestDumpFrameSettlesOnPublishedContentWithoutDeadline(t *testing.T) {
-	m := dumpModel()
-	feed(m,
-		registerMsg("alpha", []huskipc.SlotID{huskipc.SlotMainStage}),
-		slotMsg("alpha", huskipc.SlotMainStage, "ALPHA-STAGE-LINE"),
+	m, prog := dumpModel()
+	feed(prog,
+		register(m, "alpha", []protocol.SurfaceID{protocol.SurfaceMainStage}),
+		slotMsg(m, "alpha", protocol.SurfaceMainStage, "ALPHA-STAGE-LINE"),
 	)
 	start := time.Now()
-	frame, err := runDumpFrame(m, dumpFrameOptions{Launched: 1, Quiet: 20 * time.Millisecond, Timeout: 30 * time.Second})
+	frame, err := runDumpFrame(m, dumpFrameOptions{Program: prog, Launched: 1, Quiet: 20 * time.Millisecond, Timeout: 30 * time.Second})
 	if err != nil {
 		t.Fatalf("runDumpFrame: %v", err)
 	}
@@ -66,16 +108,17 @@ func TestDumpFrameSettlesOnPublishedContentWithoutDeadline(t *testing.T) {
 }
 
 func TestDumpFrameWaitsForEveryLaunchedPlugin(t *testing.T) {
-	m := dumpModel()
+	m, prog := dumpModel()
 	// The second plugin registers after the first has already published; the
 	// frame must still include the second plugin's slot.
-	feed(m,
-		registerMsg("alpha", []huskipc.SlotID{huskipc.SlotMainStage}),
-		slotMsg("alpha", huskipc.SlotMainStage, "FROM-ALPHA"),
-		registerMsg("beta", []huskipc.SlotID{huskipc.SlotSidebarList}),
-		slotMsg("beta", huskipc.SlotSidebarList, "FROM-BETA"),
+	feed(prog,
+		starting(m, "alpha"), starting(m, "beta"),
+		register(m, "alpha", []protocol.SurfaceID{protocol.SurfaceMainStage}),
+		slotMsg(m, "alpha", protocol.SurfaceMainStage, "FROM-ALPHA"),
+		register(m, "beta", []protocol.SurfaceID{protocol.SurfaceSidebarList}),
+		slotMsg(m, "beta", protocol.SurfaceSidebarList, "FROM-BETA"),
 	)
-	frame, err := runDumpFrame(m, dumpFrameOptions{Launched: 2, Quiet: 20 * time.Millisecond, Timeout: 30 * time.Second})
+	frame, err := runDumpFrame(m, dumpFrameOptions{Program: prog, Launched: 2, Quiet: 20 * time.Millisecond, Timeout: 30 * time.Second})
 	if err != nil {
 		t.Fatalf("runDumpFrame: %v", err)
 	}
@@ -92,9 +135,9 @@ func TestDumpFrameWaitsForEveryLaunchedPlugin(t *testing.T) {
 }
 
 func TestDumpFrameNoPluginsReturnsImmediately(t *testing.T) {
-	m := dumpModel()
+	m, prog := dumpModel()
 	start := time.Now()
-	frame, err := runDumpFrame(m, dumpFrameOptions{Quiet: 20 * time.Millisecond, Timeout: 30 * time.Second})
+	frame, err := runDumpFrame(m, dumpFrameOptions{Program: prog, Quiet: 20 * time.Millisecond, Timeout: 30 * time.Second})
 	if err != nil {
 		t.Fatalf("runDumpFrame: %v", err)
 	}
@@ -107,12 +150,12 @@ func TestDumpFrameNoPluginsReturnsImmediately(t *testing.T) {
 }
 
 func TestDumpFrameTimeoutReportsWhatIsMissing(t *testing.T) {
-	m := dumpModel()
-	frame, err := runDumpFrame(m, dumpFrameOptions{Launched: 2, Timeout: 100 * time.Millisecond})
+	m, prog := dumpModel()
+	frame, err := runDumpFrame(m, dumpFrameOptions{Program: prog, Launched: 2, Timeout: 100 * time.Millisecond})
 	if err == nil {
 		t.Fatal("expected a timeout error when no plugin ever registers")
 	}
-	for _, want := range []string{"timed out", "2 plugin(s)", "registered 0"} {
+	for _, want := range []string{"timed out", "pods map[]"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q lacks %q", err, want)
 		}
@@ -123,16 +166,16 @@ func TestDumpFrameTimeoutReportsWhatIsMissing(t *testing.T) {
 }
 
 func TestDumpFrameRailModalWaitsForModalSurface(t *testing.T) {
-	m := dumpModel()
-	rail := huskipc.RailItemSpec{ID: "alpha.open", PluginID: "alpha", Icon: "A", Label: "Alpha", Placement: huskipc.PlacementModal}
-	feed(m,
-		registerMsg("alpha", []huskipc.SlotID{huskipc.SlotMainStage, huskipc.SlotModalSurface}, rail),
-		slotMsg("alpha", huskipc.SlotMainStage, "BACKGROUND-LINE"),
+	m, prog := dumpModel()
+	rail := contracts.RailItem{ID: "alpha.open", Plugin: "alpha", Icon: "A", Label: "Alpha", Placement: contracts.PlacementModal}
+	feed(prog,
+		register(m, "alpha", []protocol.SurfaceID{protocol.SurfaceMainStage, protocol.SurfaceModal}, rail),
+		slotMsg(m, "alpha", protocol.SurfaceMainStage, "BACKGROUND-LINE"),
 		// The modal content arrives only after the stage content: the driver
 		// must not settle on the stage update alone.
-		slotMsg("alpha", huskipc.SlotModalSurface, "MODAL-BODY-LINE"),
+		slotMsg(m, "alpha", protocol.SurfaceModal, "MODAL-BODY-LINE"),
 	)
-	frame, err := runDumpFrame(m, dumpFrameOptions{Launched: 1, RailMode: "modal", Quiet: 20 * time.Millisecond, Timeout: 30 * time.Second})
+	frame, err := runDumpFrame(m, dumpFrameOptions{Program: prog, Launched: 1, RailMode: "modal", Quiet: 20 * time.Millisecond, Timeout: 30 * time.Second})
 	if err != nil {
 		t.Fatalf("runDumpFrame: %v", err)
 	}
@@ -145,13 +188,13 @@ func TestDumpFrameRailModalWaitsForModalSurface(t *testing.T) {
 }
 
 func TestDumpFrameRailWithoutMatchingItemWarnsAndStillSettles(t *testing.T) {
-	m := dumpModel()
-	feed(m,
-		registerMsg("alpha", []huskipc.SlotID{huskipc.SlotMainStage}),
-		slotMsg("alpha", huskipc.SlotMainStage, "ONLY-STAGE"),
+	m, prog := dumpModel()
+	feed(prog,
+		register(m, "alpha", []protocol.SurfaceID{protocol.SurfaceMainStage}),
+		slotMsg(m, "alpha", protocol.SurfaceMainStage, "ONLY-STAGE"),
 	)
 	var stderr bytes.Buffer
-	frame, err := runDumpFrame(m, dumpFrameOptions{Launched: 1, RailMode: "full-canvas", Quiet: 20 * time.Millisecond, Timeout: 30 * time.Second, Stderr: &stderr})
+	frame, err := runDumpFrame(m, dumpFrameOptions{Program: prog, Launched: 1, RailMode: "full-canvas", Quiet: 20 * time.Millisecond, Timeout: 30 * time.Second, Stderr: &stderr})
 	if err != nil {
 		t.Fatalf("runDumpFrame: %v", err)
 	}
@@ -164,18 +207,18 @@ func TestDumpFrameRailWithoutMatchingItemWarnsAndStillSettles(t *testing.T) {
 }
 
 func TestDumpFrameLateUpdateInsideQuietWindowIsIncluded(t *testing.T) {
-	m := dumpModel()
-	feed(m,
-		registerMsg("alpha", []huskipc.SlotID{huskipc.SlotMainStage}),
-		slotMsg("alpha", huskipc.SlotMainStage, "FIRST-PAINT"),
+	m, prog := dumpModel()
+	feed(prog,
+		register(m, "alpha", []protocol.SurfaceID{protocol.SurfaceMainStage}),
+		slotMsg(m, "alpha", protocol.SurfaceMainStage, "FIRST-PAINT"),
 	)
 	// A live-data refinement arrives after the first update, well inside the
 	// quiet window; the frame must show it, not the first paint.
 	go func() {
 		time.Sleep(50 * time.Millisecond)
-		m.subChan <- slotMsg("alpha", huskipc.SlotMainStage, "LIVE-DATA")
+		prog.post(slotMsg(m, "alpha", protocol.SurfaceMainStage, "LIVE-DATA"))
 	}()
-	frame, err := runDumpFrame(m, dumpFrameOptions{Launched: 1, Quiet: 500 * time.Millisecond, Timeout: 30 * time.Second})
+	frame, err := runDumpFrame(m, dumpFrameOptions{Program: prog, Launched: 1, Quiet: 500 * time.Millisecond, Timeout: 30 * time.Second})
 	if err != nil {
 		t.Fatalf("runDumpFrame: %v", err)
 	}
@@ -186,10 +229,10 @@ func TestDumpFrameLateUpdateInsideQuietWindowIsIncluded(t *testing.T) {
 }
 
 func TestDumpFrameStreamingPluginSettlesBeforeDeadline(t *testing.T) {
-	m := dumpModel()
-	feed(m,
-		registerMsg("alpha", []huskipc.SlotID{huskipc.SlotMainStage}),
-		slotMsg("alpha", huskipc.SlotMainStage, "STREAM-0"),
+	m, prog := dumpModel()
+	feed(prog,
+		register(m, "alpha", []protocol.SurfaceID{protocol.SurfaceMainStage}),
+		slotMsg(m, "alpha", protocol.SurfaceMainStage, "STREAM-0"),
 	)
 	// A plugin that never goes quiet: an update every quiet/2, like the real
 	// Rust plugin's live data. The quiet window alone would never elapse.
@@ -204,16 +247,12 @@ func TestDumpFrameStreamingPluginSettlesBeforeDeadline(t *testing.T) {
 			case <-done:
 				return
 			case <-tick.C:
-				select {
-				case m.subChan <- slotMsg("alpha", huskipc.SlotMainStage, "STREAM-N"):
-				case <-done:
-					return
-				}
+				prog.post(slotMsg(m, "alpha", protocol.SurfaceMainStage, "STREAM-N"))
 			}
 		}
 	}()
 	start := time.Now()
-	frame, err := runDumpFrame(m, dumpFrameOptions{
+	frame, err := runDumpFrame(m, dumpFrameOptions{Program: prog,
 		Launched: 1, Quiet: quiet, MaxSettle: 400 * time.Millisecond, Timeout: 10 * time.Second,
 	})
 	if err != nil {
@@ -228,9 +267,9 @@ func TestDumpFrameStreamingPluginSettlesBeforeDeadline(t *testing.T) {
 }
 
 func TestDumpFramePanicIsNotReportedAsTimeout(t *testing.T) {
-	m := dumpModel()
-	feed(m, pluginRegisteredMsg{}) // nil plugin: Update dereferences it and panics
-	_, err := runDumpFrame(m, dumpFrameOptions{Launched: 1, Timeout: 10 * time.Second})
+	m, prog := dumpModel()
+	feed(prog, func() { panic("boom") })
+	_, err := runDumpFrame(m, dumpFrameOptions{Program: prog, Launched: 1, Timeout: 10 * time.Second})
 	if err == nil || strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("err = %v, want a panic error, not a timeout", err)
 	}

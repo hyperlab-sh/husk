@@ -1,7 +1,6 @@
 package main
 
 import (
-	"io"
 	"strings"
 	"testing"
 	"time"
@@ -10,7 +9,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/golden"
 	"github.com/charmbracelet/x/exp/teatest/v2"
-	"github.com/hyperlab-sh/husk/pkg/huskipc"
+
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
 // Golden frame tests run the real WorkbenchModel under a tea.Program (via
@@ -29,30 +29,18 @@ const (
 // goldenModel is a hermetic workbench: no socket, no OS modifier polling, no
 // log output, fixed size.
 func goldenModel() *WorkbenchModel {
-	m := newWorkbenchModel("", nil, "/demo")
+	m := newWorkbenchModel()
 	m.logOut = nil
-	m.pollMods = func() (huskipc.ModifierState, bool) { return huskipc.ModifierState{}, false }
+	m.pollMods = func() (protocol.ModifierState, bool) { return protocol.ModifierState{}, false }
 	m.width, m.height = goldenW, goldenH
 	m.recomputeLayout()
 	return m
 }
 
 // goldenPlugin registers a plugin occupying the given slots with one line of
-// content each, through the same Update path real plugins use.
-func goldenPlugin(m *WorkbenchModel, id string, slots map[huskipc.SlotID][]string) {
-	var ids []huskipc.SlotID
-	for s := range slots {
-		ids = append(ids, s)
-	}
-	m.Update(pluginRegisteredMsg{&ConnectedPlugin{
-		Info:   huskipc.HelloPayload{PluginID: id, Name: id, Version: "0.1.0", Language: "go", Slots: ids},
-		Writer: huskipc.NewConnWriter(io.Discard),
-	}})
-	for slot, lines := range slots {
-		m.Update(ipcEventMsg{pluginID: id, env: huskipc.Envelope{Type: "slot_update", SlotUpdate: &huskipc.SlotUpdatePayload{
-			PluginID: id, Slot: slot, Title: string(slot), Lines: lines,
-		}}})
-	}
+// content each, through the same content sink a real host feeds.
+func goldenPlugin(m *WorkbenchModel, id string, slots map[protocol.SurfaceID][]string) {
+	addPlugin(m, id, slots)
 }
 
 // runGolden runs m under teatest, sends msgs in order, quits, and returns the
@@ -93,15 +81,15 @@ var goldenFrames = map[string]func(t *testing.T) string{
 	"TestGoldenFrameEmptyWorkbench": func(t *testing.T) string { return runGolden(t, goldenModel()) },
 	"TestGoldenFrameOnePlugin": func(t *testing.T) string {
 		m := goldenModel()
-		goldenPlugin(m, "p.one", map[huskipc.SlotID][]string{
-			huskipc.SlotMainStage: {"stage line one", "stage line two"},
+		goldenPlugin(m, "p.one", map[protocol.SurfaceID][]string{
+			protocol.SurfaceMainStage: {"stage line one", "stage line two"},
 		})
 		return runGolden(t, m)
 	},
 	"TestGoldenFramePaletteOpen": func(t *testing.T) string {
 		m := goldenModel()
-		goldenPlugin(m, "p.one", map[huskipc.SlotID][]string{
-			huskipc.SlotMainStage: {"stage line one"},
+		goldenPlugin(m, "p.one", map[protocol.SurfaceID][]string{
+			protocol.SurfaceMainStage: {"stage line one"},
 		})
 		return runGolden(t, m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	},
@@ -110,13 +98,13 @@ var goldenFrames = map[string]func(t *testing.T) string{
 
 func fullSlotsModel() *WorkbenchModel {
 	m := goldenModel()
-	goldenPlugin(m, "p.full", map[huskipc.SlotID][]string{
-		huskipc.SlotSidebarNavigation: {"nav"},
-		huskipc.SlotSidebarList:       {"list"},
-		huskipc.SlotSidebarFooter:     {"foot"},
-		huskipc.SlotMainHeader:        {strings.Repeat("HEADER ", 30)},
-		huskipc.SlotMainStage:         {"stage"},
-		huskipc.SlotSidePanel:         {"SIDEPANEL"},
+	goldenPlugin(m, "p.full", map[protocol.SurfaceID][]string{
+		protocol.SurfaceSidebarNavigation: {"nav"},
+		protocol.SurfaceSidebarList:       {"list"},
+		protocol.SurfaceSidebarFooter:     {"foot"},
+		protocol.SurfaceMainHeader:        {strings.Repeat("HEADER ", 30)},
+		protocol.SurfaceMainStage:         {"stage"},
+		protocol.SurfaceSidePanel:         {"SIDEPANEL"},
 	})
 	return m
 }
@@ -146,8 +134,8 @@ func TestGoldenFramePaletteOpen(t *testing.T) {
 		}
 	}
 	closed := goldenModel()
-	goldenPlugin(closed, "p.one", map[huskipc.SlotID][]string{
-		huskipc.SlotMainStage: {"stage line one"},
+	goldenPlugin(closed, "p.one", map[protocol.SurfaceID][]string{
+		protocol.SurfaceMainStage: {"stage line one"},
 	})
 	if frame == runGolden(t, closed) {
 		t.Error("ctrl+p did not change the frame: palette not drawn")
@@ -162,7 +150,7 @@ func TestGoldenFrameFullSlots(t *testing.T) {
 	frame := runGolden(t, m)
 	requireFrameGeometry(t, frame)
 
-	hdr, side := m.slotRects[huskipc.SlotMainHeader], m.slotRects[huskipc.SlotSidePanel]
+	hdr, side := m.slotRects[protocol.SurfaceMainHeader], m.slotRects[protocol.SurfaceSidePanel]
 	if side.Width == 0 {
 		t.Fatal("side panel not laid out at 144x40")
 	}

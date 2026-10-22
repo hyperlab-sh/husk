@@ -6,7 +6,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/hyperlab-sh/husk/pkg/huskipc"
+
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
 // decodeCharmEvent decodes one terminal event with the pinned decoder and
@@ -28,7 +29,7 @@ func decodeCharmEvent(t *testing.T, input string) tea.Msg {
 }
 
 func TestViewRequestsAllKeysAsEscapeCodes(t *testing.T) {
-	m := newWorkbenchModel("", nil, t.TempDir())
+	m := newWorkbenchModel()
 	m.recomputeLayout()
 	ke := m.View().KeyboardEnhancements
 	if !ke.ReportAllKeysAsEscapeCodes {
@@ -46,12 +47,12 @@ func TestViewRequestsAllKeysAsEscapeCodes(t *testing.T) {
 // Lock keys are reported only in all-keys mode. They are swallowed, so the
 // plugin sees no new key names, while an ordinary key still reaches it.
 func TestLockKeysAreSwallowed(t *testing.T) {
-	m := newWorkbenchModel("", nil, t.TempDir())
-	m.pollMods = func() (huskipc.ModifierState, bool) { return huskipc.ModifierState{}, false }
+	m := newWorkbenchModel()
+	m.pollMods = func() (protocol.ModifierState, bool) { return protocol.ModifierState{}, false }
 	m.width, m.height = 144, 40
 	m.recomputeLayout()
-	_, out := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "p", Slots: []huskipc.SlotID{huskipc.SlotSidebarList}})
-	m.focusedSlot = huskipc.SlotSidebarList
+	_, out := addPublicationTestPlugin(m, hello{PluginID: "p", Slots: []protocol.SurfaceID{protocol.SurfaceSidebarList}})
+	m.focusedSlot = protocol.SurfaceSidebarList
 	for _, in := range []string{
 		"\x1b[57358u", "\x1b[57358;65:3u", // caps lock press, release (lock now on)
 		"\x1b[57360u", "\x1b[57360;129:3u", // num lock
@@ -62,7 +63,7 @@ func TestLockKeysAreSwallowed(t *testing.T) {
 		if msgs := envelopes(t, out); len(msgs) != 0 {
 			t.Fatalf("%q: lock key produced messages %+v", in, msgs)
 		}
-		if len(m.heldKeys) != 0 || m.modifiers != (huskipc.ModifierState{}) {
+		if len(m.heldKeys) != 0 || m.modifiers != (protocol.ModifierState{}) {
 			t.Fatalf("%q: held %+v, modifiers %+v", in, m.heldKeys, m.modifiers)
 		}
 	}
@@ -84,53 +85,53 @@ func TestLockKeysAreSwallowed(t *testing.T) {
 func TestDecodedBareModifiersDriveModifierState(t *testing.T) {
 	type step struct {
 		input string
-		want  huskipc.ModifierState
+		want  protocol.ModifierState
 		up    string // key_state key expected, "" for none
-		phase huskipc.KeyPhase
+		phase protocol.KeyPhase
 	}
 	for _, tc := range []struct {
 		name  string
 		steps []step
 	}{
 		{"shift", []step{
-			{"\x1b[57441;2u", huskipc.ModifierState{Shift: true}, "shift", huskipc.KeyPhaseDown},
-			{"\x1b[57441;2:2u", huskipc.ModifierState{Shift: true}, "", ""}, // repeat
-			{"\x1b[57441;1:3u", huskipc.ModifierState{}, "shift", huskipc.KeyPhaseUp},
+			{"\x1b[57441;2u", protocol.ModifierState{Shift: true}, "shift", protocol.KeyPhaseDown},
+			{"\x1b[57441;2:2u", protocol.ModifierState{Shift: true}, "", ""}, // repeat
+			{"\x1b[57441;1:3u", protocol.ModifierState{}, "shift", protocol.KeyPhaseUp},
 		}},
 		{"ctrl", []step{
-			{"\x1b[57442;5u", huskipc.ModifierState{Ctrl: true}, "ctrl", huskipc.KeyPhaseDown},
-			{"\x1b[57442;1:3u", huskipc.ModifierState{}, "ctrl", huskipc.KeyPhaseUp},
+			{"\x1b[57442;5u", protocol.ModifierState{Ctrl: true}, "ctrl", protocol.KeyPhaseDown},
+			{"\x1b[57442;1:3u", protocol.ModifierState{}, "ctrl", protocol.KeyPhaseUp},
 		}},
 		{"alt", []step{
-			{"\x1b[57443;3u", huskipc.ModifierState{Alt: true}, "alt", huskipc.KeyPhaseDown},
-			{"\x1b[57443;1:3u", huskipc.ModifierState{}, "alt", huskipc.KeyPhaseUp},
+			{"\x1b[57443;3u", protocol.ModifierState{Alt: true}, "alt", protocol.KeyPhaseDown},
+			{"\x1b[57443;1:3u", protocol.ModifierState{}, "alt", protocol.KeyPhaseUp},
 		}},
 		{"super", []step{
-			{"\x1b[57444;9u", huskipc.ModifierState{Super: true}, "super", huskipc.KeyPhaseDown},
-			{"\x1b[57444;1:3u", huskipc.ModifierState{}, "super", huskipc.KeyPhaseUp},
+			{"\x1b[57444;9u", protocol.ModifierState{Super: true}, "super", protocol.KeyPhaseDown},
+			{"\x1b[57444;1:3u", protocol.ModifierState{}, "super", protocol.KeyPhaseUp},
 		}},
 		{"left-and-right-shift-overlap", []step{
-			{"\x1b[57441;2u", huskipc.ModifierState{Shift: true}, "shift", huskipc.KeyPhaseDown},
-			{"\x1b[57447;2u", huskipc.ModifierState{Shift: true}, "", ""},
-			{"\x1b[57441;2:3u", huskipc.ModifierState{Shift: true}, "", ""},
-			{"\x1b[57447;1:3u", huskipc.ModifierState{}, "shift", huskipc.KeyPhaseUp},
+			{"\x1b[57441;2u", protocol.ModifierState{Shift: true}, "shift", protocol.KeyPhaseDown},
+			{"\x1b[57447;2u", protocol.ModifierState{Shift: true}, "", ""},
+			{"\x1b[57441;2:3u", protocol.ModifierState{Shift: true}, "", ""},
+			{"\x1b[57447;1:3u", protocol.ModifierState{}, "shift", protocol.KeyPhaseUp},
 		}},
 		{"ctrl-then-shift", []step{
-			{"\x1b[57442;5u", huskipc.ModifierState{Ctrl: true}, "ctrl", huskipc.KeyPhaseDown},
-			{"\x1b[57441;6u", huskipc.ModifierState{Ctrl: true, Shift: true}, "shift", huskipc.KeyPhaseDown},
-			{"\x1b[57442;2:3u", huskipc.ModifierState{Shift: true}, "ctrl", huskipc.KeyPhaseUp},
-			{"\x1b[57441;1:3u", huskipc.ModifierState{}, "shift", huskipc.KeyPhaseUp},
+			{"\x1b[57442;5u", protocol.ModifierState{Ctrl: true}, "ctrl", protocol.KeyPhaseDown},
+			{"\x1b[57441;6u", protocol.ModifierState{Ctrl: true, Shift: true}, "shift", protocol.KeyPhaseDown},
+			{"\x1b[57442;2:3u", protocol.ModifierState{Shift: true}, "ctrl", protocol.KeyPhaseUp},
+			{"\x1b[57441;1:3u", protocol.ModifierState{}, "shift", protocol.KeyPhaseUp},
 		}},
 		{"hyper-meta-dropped", []step{
-			{"\x1b[57445;17u", huskipc.ModifierState{}, "", ""},
-			{"\x1b[57446;33u", huskipc.ModifierState{}, "", ""},
-			{"\x1b[57446;1:3u", huskipc.ModifierState{}, "", ""},
+			{"\x1b[57445;17u", protocol.ModifierState{}, "", ""},
+			{"\x1b[57446;33u", protocol.ModifierState{}, "", ""},
+			{"\x1b[57446;1:3u", protocol.ModifierState{}, "", ""},
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			m := newWorkbenchModel("", nil, t.TempDir())
-			m.pollMods = func() (huskipc.ModifierState, bool) { return huskipc.ModifierState{}, false }
-			_, out := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "p", Slots: []huskipc.SlotID{huskipc.SlotSidebarList}})
+			m := newWorkbenchModel()
+			m.pollMods = func() (protocol.ModifierState, bool) { return protocol.ModifierState{}, false }
+			_, out := addPublicationTestPlugin(m, hello{PluginID: "p", Slots: []protocol.SurfaceID{protocol.SurfaceSidebarList}})
 			for _, s := range tc.steps {
 				out.Reset()
 				m.Update(decodeCharmEvent(t, s.input))
@@ -165,8 +166,8 @@ func TestDecodedBareModifiersDriveModifierState(t *testing.T) {
 }
 
 func TestBareAltReleaseKeepsLatchedAlt(t *testing.T) {
-	m := newWorkbenchModel("", nil, t.TempDir())
-	m.pollMods = func() (huskipc.ModifierState, bool) { return huskipc.ModifierState{}, false }
+	m := newWorkbenchModel()
+	m.pollMods = func() (protocol.ModifierState, bool) { return protocol.ModifierState{}, false }
 	m.altLatched = true
 	m.modifiers.Alt = true
 	m.Update(decodeCharmEvent(t, "\x1b[57443;3u"))
@@ -177,8 +178,8 @@ func TestBareAltReleaseKeepsLatchedAlt(t *testing.T) {
 }
 
 func TestBlurDropsTerminalModifierKeys(t *testing.T) {
-	m := newWorkbenchModel("", nil, t.TempDir())
-	m.pollMods = func() (huskipc.ModifierState, bool) { return huskipc.ModifierState{}, false }
+	m := newWorkbenchModel()
+	m.pollMods = func() (protocol.ModifierState, bool) { return protocol.ModifierState{}, false }
 	m.Update(decodeCharmEvent(t, "\x1b[57441;2u")) // left shift down
 	m.Update(tea.BlurMsg{})                        // its release goes to another window
 	if m.modifiers.Shift {
@@ -257,8 +258,8 @@ func TestAllKeysAsEscapeCodesKeepTextInput(t *testing.T) {
 		}
 	}
 
-	m := newWorkbenchModel("", nil, t.TempDir())
-	m.pollMods = func() (huskipc.ModifierState, bool) { return huskipc.ModifierState{}, false }
+	m := newWorkbenchModel()
+	m.pollMods = func() (protocol.ModifierState, bool) { return protocol.ModifierState{}, false }
 	m.width, m.height = 144, 40
 	m.recomputeLayout()
 	m.showPalette = true
@@ -292,10 +293,10 @@ func TestLayoutTextReleaseClearsHeldKey(t *testing.T) {
 		{"shifted", "\x1b[97:65;2;65u", "\x1b[97:65;2:3u", "A"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			m := newWorkbenchModel("", nil, t.TempDir())
-			m.pollMods = func() (huskipc.ModifierState, bool) { return huskipc.ModifierState{}, false }
+			m := newWorkbenchModel()
+			m.pollMods = func() (protocol.ModifierState, bool) { return protocol.ModifierState{}, false }
 			m.keyReleases = true
-			_, out := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "p"})
+			_, out := addPublicationTestPlugin(m, hello{PluginID: "p"})
 			m.Update(decodeCharmEvent(t, tc.press))
 			if _, held := m.heldKeys[tc.held]; !held || len(m.heldKeys) != 1 {
 				t.Fatalf("press held %v, want [%s]", m.heldKeys, tc.held)
@@ -306,7 +307,7 @@ func TestLayoutTextReleaseClearsHeldKey(t *testing.T) {
 				t.Fatalf("release left held %v, aliases %v", m.heldKeys, m.heldAliases)
 			}
 			msgs := envelopes(t, out)
-			if len(msgs) != 1 || msgs[0].KeyState == nil || msgs[0].KeyState.Phase != huskipc.KeyPhaseUp || msgs[0].KeyState.Key != tc.held {
+			if len(msgs) != 1 || msgs[0].KeyState == nil || msgs[0].KeyState.Phase != protocol.KeyPhaseUp || msgs[0].KeyState.Key != tc.held {
 				t.Fatalf("release sent %+v, want one key_state up for %q", msgs, tc.held)
 			}
 		})
@@ -316,10 +317,10 @@ func TestLayoutTextReleaseClearsHeldKey(t *testing.T) {
 // An alias whose key expired must not swallow a later plain release, and
 // expiry and blur drop aliases with their keys.
 func TestLayoutTextAliasDoesNotOutliveItsKey(t *testing.T) {
-	m := newWorkbenchModel("", nil, t.TempDir())
-	m.pollMods = func() (huskipc.ModifierState, bool) { return huskipc.ModifierState{}, false }
+	m := newWorkbenchModel()
+	m.pollMods = func() (protocol.ModifierState, bool) { return protocol.ModifierState{}, false }
 	m.keyReleases = true
-	_, out := addPublicationTestPlugin(m, huskipc.HelloPayload{PluginID: "p"})
+	_, out := addPublicationTestPlugin(m, hello{PluginID: "p"})
 	m.Update(decodeCharmEvent(t, "\x1b[113;1;64u"))
 	m.heldKeys["@"] = time.Now().Add(-2 * time.Second)
 	m.Update(modifierTickMsg{})

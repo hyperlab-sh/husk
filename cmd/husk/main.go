@@ -5,11 +5,17 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/hyperlab-sh/husk/pkg/manifest"
+	"github.com/hyperlab-sh/husk/internal/host"
+	"github.com/hyperlab-sh/husk/internal/host/contracts"
+	"github.com/hyperlab-sh/husk/internal/instance"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
 // stringFlag is a repeatable string flag.
@@ -38,61 +44,29 @@ func main() {
 	pluginDirs := repeatable("plugin-dir", "Load every immediate subdirectory containing a husk-plugin.json (repeatable)")
 	demo := flag.String("demo", "", "In-process frame demo: pubslots (requires --dump-frame)")
 	flag.Parse()
-	cwd, _ := os.Getwd()
 	if *demo != "" {
 		if *demo != "pubslots" || !*dumpFrame {
 			fmt.Fprintln(os.Stderr, "--demo supports pubslots with --dump-frame")
 			os.Exit(2)
 		}
-		model := newWorkbenchModel("", nil, cwd)
+		model := newWorkbenchModel()
 		model.recomputeLayout()
 		model.seedPubslotsDemo()
 		fmt.Println(model.View().Content)
 		return
 	}
 
-	listener, sockPath, err := listenSocket()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to listen on IPC socket: %v\n", err)
-		os.Exit(1)
-	}
-
-	model := newWorkbenchModel(sockPath, listener, cwd)
+	model := newWorkbenchModel()
 	if *holdAlt {
 		model.altLatched = true
 		model.modifiers.Alt = true
 	}
-	model.startAcceptLoop()
-	defer model.cleanup()
 
 	if *demoFrame {
 		model.demoFrame = true
 		model.setupDemoFrame(*railMode)
 		fmt.Println(model.View().Content)
 		return
-	}
-
-	var manifestPlugins []*manifest.Plugin
-	loadPlugin := func(p *manifest.Plugin) {
-		manifestPlugins = append(manifestPlugins, p)
-	}
-	for _, path := range *pluginPaths {
-		p, err := manifest.Load(path)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "husk: %v\n", err)
-			os.Exit(1)
-		}
-		loadPlugin(p)
-	}
-	for _, dir := range *pluginDirs {
-		ps, err := manifest.LoadDir(dir)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "husk: --plugin-dir %s: %v\n", dir, err)
-			os.Exit(1)
-		}
-		for _, p := range ps {
-			loadPlugin(p)
-		}
 	}
 
 	// Writing to stderr while the TUI owns the terminal corrupts the screen
@@ -102,21 +76,26 @@ func main() {
 	var tuiLog bytes.Buffer
 	if !*dumpFrame {
 		model.logOut = &tuiLog
+	} else {
+		model.logOut = os.Stderr
 	}
 
-	launched := 0
-	for _, p := range manifestPlugins {
-		if model.launchPlugin(p) == nil {
-			launched++
-		}
+	prog := &programRef{}
+	h, err := newHost(prog, model, []string(*pluginPaths), []string(*pluginDirs))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "husk: %v\n", err)
+		os.Exit(1)
 	}
+	model.attach(h, prog.closeGate)
 
 	if *dumpFrame {
 		frame, err := runDumpFrame(model, dumpFrameOptions{
-			Launched: launched,
+			Launched: len(*pluginPaths) + len(*pluginDirs),
 			RailMode: *railMode,
 			Stderr:   os.Stderr,
+			Program:  prog,
 		})
+		model.shutdownHost()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "husk: --dump-frame: %v\n", err)
 		}
@@ -125,11 +104,77 @@ func main() {
 	}
 
 	p := tea.NewProgram(model)
+	prog.set(p)
 	_, err = p.Run()
-	model.cleanup() // stop plugins before printing, so their exit lines are included
+	model.shutdownHost() // stop plugins before printing, so their exit lines are included
 	_, _ = os.Stderr.Write(tuiLog.Bytes())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "husk error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// programRef lets the host's Post reach the tea.Program, which exists only
+// after the host (the model needs the host to be built first). Post returns
+// false without blocking once the gate is closed (D62).
+type programRef struct {
+	mu     sync.RWMutex
+	p      *tea.Program
+	closed atomic.Bool
+}
+
+func (r *programRef) set(p *tea.Program) {
+	r.mu.Lock()
+	r.p = p
+	r.mu.Unlock()
+}
+
+func (r *programRef) closeGate() { r.closed.Store(true) }
+
+// post hands a host notice to the program loop. Before the program exists
+// (the host is built first) a notice cannot be delivered and is refused.
+func (r *programRef) post(msg any) bool {
+	if r.closed.Load() {
+		return false
+	}
+	r.mu.RLock()
+	p := r.p
+	r.mu.RUnlock()
+	if p == nil {
+		return false
+	}
+	p.Send(msg)
+	return !r.closed.Load()
+}
+
+// newHost builds the v2 host over a private runtime directory. Nothing
+// listens until the model's Init runs the host.
+func newHost(prog *programRef, model *WorkbenchModel, plugins, dirs []string) (host.Looped, error) {
+	dir, err := instance.RuntimeDir()
+	if err != nil {
+		return nil, fmt.Errorf("runtime directory: %w", err)
+	}
+	id := strconv.Itoa(os.Getpid())
+	h, err := host.New(contracts.Config{
+		InstanceID: id,
+		RuntimeDir: dir,
+		Entry: instance.Entry{
+			ID:              id,
+			PID:             os.Getpid(),
+			Socket:          instance.SocketPath(dir, id),
+			ProtocolVersion: protocol.Version,
+		},
+		Plugins:    plugins,
+		PluginDirs: dirs,
+		Post:       prog.post,
+		Content:    model.content,
+	}, host.WithLogger(func(level, msg string) { model.logf("%s: %s", level, msg) }))
+	if err != nil {
+		return nil, err
+	}
+	looped, ok := h.(host.Looped)
+	if !ok {
+		return nil, fmt.Errorf("host does not run on a loop")
+	}
+	return looped, nil
 }

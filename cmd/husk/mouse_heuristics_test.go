@@ -6,12 +6,12 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/hyperlab-sh/husk/pkg/frame"
-	"github.com/hyperlab-sh/husk/pkg/huskipc"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
 func TestDividerOnlyOnBorderedEdges(t *testing.T) {
 	m := borderedSidebarModel(t, 120, 40)
-	sb := m.slotRects[huskipc.SlotSidebarList]
+	sb := m.slotRects[protocol.SurfaceSidebarList]
 	y := sb.Y + 2
 	right := sb.X + sb.Width - 1
 
@@ -31,10 +31,10 @@ func TestDividerOnlyOnBorderedEdges(t *testing.T) {
 
 func TestDividerSkippedWhenSurfaceHasNoBorder(t *testing.T) {
 	m := sizedModel(t, 120, 40)
-	addTestPlugin(m, "p", map[huskipc.SlotID]frame.Spec{huskipc.SlotSidebarList: {Border: false, Label: "x"}})
-	m.registry.Occupants[huskipc.SlotSidebarList] = "p"
+	addTestPlugin(m, "p", map[protocol.SurfaceID]frame.Spec{protocol.SurfaceSidebarList: {Border: false, Label: "x"}})
+	m.catalog.Occupants[protocol.SurfaceSidebarList] = "p"
 	m.recomputeLayout()
-	sb := m.slotRects[huskipc.SlotSidebarList]
+	sb := m.slotRects[protocol.SurfaceSidebarList]
 	for dx := -1; dx <= 1; dx++ {
 		if got := m.detectDividerAt(sb.X+sb.Width-1+dx, sb.Y+2); got != "" {
 			t.Fatalf("unbordered sidebar edge dx=%d = %q, want no divider", dx, got)
@@ -48,10 +48,10 @@ func TestDividerSkippedWhenSurfaceHasNoBorder(t *testing.T) {
 
 func TestMainHeaderDividerOnItsOwnBottomBorderOnly(t *testing.T) {
 	m := sizedModel(t, 120, 40)
-	addTestPlugin(m, "p", map[huskipc.SlotID]frame.Spec{huskipc.SlotMainHeader: {Border: true}})
-	m.registry.Occupants[huskipc.SlotMainHeader] = "p"
+	addTestPlugin(m, "p", map[protocol.SurfaceID]frame.Spec{protocol.SurfaceMainHeader: {Border: true}})
+	m.catalog.Occupants[protocol.SurfaceMainHeader] = "p"
 	m.recomputeLayout()
-	h, ok := m.slotRects[huskipc.SlotMainHeader]
+	h, ok := m.slotRects[protocol.SurfaceMainHeader]
 	if !ok {
 		t.Fatal("no main header rect")
 	}
@@ -66,7 +66,7 @@ func TestMainHeaderDividerOnItsOwnBottomBorderOnly(t *testing.T) {
 }
 
 func TestPaletteAcceptsUnicodeQuery(t *testing.T) {
-	m := newWorkbenchModel("", nil, t.TempDir())
+	m := newWorkbenchModel()
 	m.showPalette = true
 	for _, r := range "aé日🙂" {
 		m.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
@@ -106,7 +106,7 @@ func TestPaletteRejectsNonASCIIChords(t *testing.T) {
 		{Code: '日', Mod: tea.ModCtrl},
 		{Code: 'ö', Text: "ö", Mod: tea.ModSuper},
 	} {
-		m := newWorkbenchModel("", nil, t.TempDir())
+		m := newWorkbenchModel()
 		m.showPalette = true
 		m.paletteQuery = "x"
 		m.Update(msg)
@@ -115,7 +115,7 @@ func TestPaletteRejectsNonASCIIChords(t *testing.T) {
 		}
 	}
 	// Shift alone is still text.
-	m := newWorkbenchModel("", nil, t.TempDir())
+	m := newWorkbenchModel()
 	m.showPalette = true
 	m.Update(tea.KeyPressMsg{Code: 'ö', ShiftedCode: 'Ö', Text: "Ö", Mod: tea.ModShift})
 	if m.paletteQuery != "Ö" {
@@ -124,7 +124,7 @@ func TestPaletteRejectsNonASCIIChords(t *testing.T) {
 }
 
 func TestPaletteUnicodeFilterMatches(t *testing.T) {
-	m := newWorkbenchModel("", nil, t.TempDir())
+	m := newWorkbenchModel()
 	// Positive: a registered title contains non-ASCII text.
 	for _, q := range []string{"🏠", "⓪"} {
 		m.paletteQuery = q
@@ -143,16 +143,16 @@ func TestPaletteUnicodeFilterMatches(t *testing.T) {
 func sidePanelModel(t *testing.T, centreBorder, panelBorder bool) *WorkbenchModel {
 	t.Helper()
 	m := sizedModel(t, 144, 40)
-	addTestPlugin(m, "p", map[huskipc.SlotID]frame.Spec{
-		huskipc.SlotMainHeader: {Border: centreBorder},
-		huskipc.SlotMainStage:  {Border: centreBorder},
-		huskipc.SlotSidePanel:  {Border: panelBorder},
+	addTestPlugin(m, "p", map[protocol.SurfaceID]frame.Spec{
+		protocol.SurfaceMainHeader: {Border: centreBorder},
+		protocol.SurfaceMainStage:  {Border: centreBorder},
+		protocol.SurfaceSidePanel:  {Border: panelBorder},
 	})
-	for _, s := range []huskipc.SlotID{huskipc.SlotMainHeader, huskipc.SlotMainStage, huskipc.SlotSidePanel} {
-		m.registry.Occupants[s] = "p"
+	for _, s := range []protocol.SurfaceID{protocol.SurfaceMainHeader, protocol.SurfaceMainStage, protocol.SurfaceSidePanel} {
+		m.catalog.Occupants[s] = "p"
 	}
 	m.recomputeLayout()
-	if _, ok := m.slotRects[huskipc.SlotSidePanel]; !ok {
+	if _, ok := m.slotRects[protocol.SurfaceSidePanel]; !ok {
 		t.Fatal("side panel not laid out")
 	}
 	return m
@@ -169,8 +169,8 @@ func TestSidePanelDividerAcrossBorderCombinations(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := sidePanelModel(t, tc.centreBorder, tc.panelBd)
-			side := m.slotRects[huskipc.SlotSidePanel]
-			stage := m.slotRects[huskipc.SlotMainStage]
+			side := m.slotRects[protocol.SurfaceSidePanel]
+			stage := m.slotRects[protocol.SurfaceMainStage]
 			y := stage.Y + 3
 			stageRight := stage.X + stage.Width - 1
 			if side.X-stageRight != surfaceGutter+1 {
@@ -203,12 +203,12 @@ func TestSidePanelDividerAcrossBorderCombinations(t *testing.T) {
 // inert: no divider, no drag, and no surface under it.
 func TestSidePanelGutterIsInert(t *testing.T) {
 	m := sidePanelModel(t, true, true)
-	side := m.slotRects[huskipc.SlotSidePanel]
+	side := m.slotRects[protocol.SurfaceSidePanel]
 	gx := side.X - surfaceGutter
 	for y := 1; y < m.height-1; y += 7 {
 		for _, h := range m.hitOrder() {
 			r := h.Rect
-			if gx >= r.X && gx < r.X+r.Width && y >= r.Y && y < r.Y+r.Height && h.ID != huskipc.SlotActivityRail {
+			if gx >= r.X && gx < r.X+r.Width && y >= r.Y && y < r.Y+r.Height && h.ID != protocol.SurfaceActivityRail {
 				t.Fatalf("gutter (%d,%d) is inside slot %s", gx, y, h.ID)
 			}
 		}

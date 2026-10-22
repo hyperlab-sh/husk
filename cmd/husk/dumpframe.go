@@ -9,7 +9,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/hyperlab-sh/husk/pkg/huskipc"
+	"github.com/hyperlab-sh/husk/internal/host/contracts"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
 // dumpFrameTimeout bounds how long --dump-frame waits for the launched
@@ -32,8 +33,10 @@ const dumpFrameMaxSettle = time.Second
 
 // dumpFrameOptions describes what --dump-frame waits for.
 type dumpFrameOptions struct {
-	// Launched is the number of plugin processes started; the frame is taken
-	// once that many have registered and published.
+	// Launched is the number of --plugin/--plugin-dir arguments given. Zero
+	// means no plugin is awaited; otherwise the frame is taken once the host
+	// reported at least one Pod, none is still starting, and a live plugin
+	// published.
 	Launched int
 	// RailMode opens the first rail item with this placement (modal,
 	// full-canvas, stage) once every launched plugin has registered, and waits
@@ -45,6 +48,8 @@ type dumpFrameOptions struct {
 	MaxSettle time.Duration
 	// Timeout overrides dumpFrameTimeout when positive.
 	Timeout time.Duration
+	// Program receives the headless program so the host's Post reaches it.
+	Program *programRef
 	// Stderr receives host diagnostics (a --rail with no matching item).
 	Stderr io.Writer
 }
@@ -71,6 +76,14 @@ type dumpFrameDriver struct {
 	maxSettle    time.Duration
 	capArmed     bool
 	settled      bool
+	traffic      string // fingerprint of the last seen plugin traffic
+}
+
+// activity fingerprints what a plugin can change: its Pod status and the
+// content it published. A change restarts the quiet window.
+func (d *dumpFrameDriver) activity() string {
+	m := d.WorkbenchModel
+	return fmt.Sprintf("%d/%d/%v", m.totalIPCEvents, len(m.slotUpdates), m.podStatus)
 }
 
 func (d *dumpFrameDriver) Init() tea.Cmd {
@@ -94,9 +107,9 @@ func (d *dumpFrameDriver) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	_, cmd := d.WorkbenchModel.Update(msg)
 	d.advance()
-	switch msg.(type) {
-	case ipcEventMsg, pluginRegisteredMsg:
-		// Plugin traffic restarts the quiet window.
+	if d.traffic != d.activity() {
+		// Pod or content traffic restarts the quiet window.
+		d.traffic = d.activity()
 		return d, tea.Batch(cmd, d.arm())
 	}
 	return d, tea.Batch(cmd, d.armOnce())
@@ -138,15 +151,22 @@ func (d *dumpFrameDriver) arm() tea.Cmd {
 func (d *dumpFrameDriver) advance() {
 	m := d.WorkbenchModel
 	d.ready = false
-	if len(m.plugins) < d.opt.Launched {
-		return
+	if d.opt.Launched > 0 {
+		if len(m.podStatus) == 0 {
+			return
+		}
+		for _, st := range m.podStatus {
+			if st == "starting" {
+				return
+			}
+		}
 	}
 	if !d.railTriggers {
 		d.railTriggers = true
 		if d.mode != "" {
 			// Husk knows no specific plugin; open the first rail item with
 			// the requested placement.
-			if ri, ok := m.firstRailItemWithPlacement(huskipc.RailPlacement(d.mode)); ok {
+			if ri, ok := m.firstRailItemWithPlacement(contracts.RailPlacement(d.mode)); ok {
 				m.activateRailItem(ri)
 			} else {
 				if d.opt.Stderr != nil {
@@ -156,16 +176,16 @@ func (d *dumpFrameDriver) advance() {
 			}
 		}
 	}
-	if len(m.slotUpdates) < min(d.opt.Launched, 1) {
+	if len(m.plugins) > 0 && len(m.slotUpdates) == 0 {
 		return
 	}
 	switch d.mode {
 	case "modal":
-		d.ready = m.slotUpdates[huskipc.SlotModalSurface] != nil
+		d.ready = m.slotUpdates[protocol.SurfaceModal] != nil
 	case "full-canvas":
-		d.ready = m.slotUpdates[huskipc.SlotFullCanvas] != nil
+		d.ready = m.slotUpdates[protocol.SurfaceFullCanvas] != nil
 	case "stage":
-		d.ready = m.slotUpdates[huskipc.SlotWorkspaceStage] != nil
+		d.ready = m.slotUpdates[protocol.SurfaceWorkspaceStage] != nil
 	default:
 		d.ready = true
 	}
@@ -204,6 +224,9 @@ func runDumpFrame(m *WorkbenchModel, opt dumpFrameOptions) (string, error) {
 		tea.WithoutSignalHandler(),
 		tea.WithWindowSize(m.width, m.height),
 	)
+	if opt.Program != nil {
+		opt.Program.set(p)
+	}
 	_, err := p.Run()
 	frame := m.View().Content
 	switch {
@@ -216,8 +239,8 @@ func runDumpFrame(m *WorkbenchModel, opt dumpFrameOptions) (string, error) {
 		// streaming. That is not an error.
 		return frame, nil
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, tea.ErrProgramKilled):
-		return frame, fmt.Errorf("timed out after %s waiting for %d plugin(s) to publish (registered %d, slots %d)",
-			timeout, opt.Launched, len(m.plugins), len(m.slotUpdates))
+		return frame, fmt.Errorf("timed out after %s waiting for plugins to publish (pods %v, slots %d)",
+			timeout, m.podStatus, len(m.slotUpdates))
 	case err != nil:
 		return frame, err
 	}

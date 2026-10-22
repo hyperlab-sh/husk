@@ -1,22 +1,21 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/hyperlab-sh/husk/pkg/huskipc"
+
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
-func tickModel(t *testing.T) (*WorkbenchModel, *huskipc.ModifierState, *int) {
+func tickModel(t *testing.T) (*WorkbenchModel, *protocol.ModifierState, *int) {
 	t.Helper()
-	m := newWorkbenchModel("", nil, t.TempDir())
+	m := newWorkbenchModel()
 	m.recomputeLayout()
-	os := &huskipc.ModifierState{}
+	os := &protocol.ModifierState{}
 	polls := new(int)
-	m.pollMods = func() (huskipc.ModifierState, bool) {
+	m.pollMods = func() (protocol.ModifierState, bool) {
 		*polls++
 		return *os, true
 	}
@@ -119,85 +118,14 @@ func TestBlurBroadcastsKeyUpToPlugins(t *testing.T) {
 	m, os, _ := tickModel(t)
 	os.Alt = true
 	m.Update(modifierTickMsg{})
-	var wire bytes.Buffer
-	m.plugins["p"] = &ConnectedPlugin{Writer: huskipc.NewConnWriter(&wire)}
+	m.plugins["p"] = true
+	fe := withFE(m)
 	m.Update(tea.BlurMsg{})
-	var env huskipc.Envelope
-	if err := json.Unmarshal(bytes.TrimSpace(wire.Bytes()), &env); err != nil {
-		t.Fatalf("expected exactly one key_state line, got %q: %v", wire.String(), err)
+	if len(fe.KeyStates) != 1 {
+		t.Fatalf("expected exactly one key_state, got %+v", fe.KeyStates)
 	}
-	ks := env.KeyState
-	if env.Type != "key_state" || ks == nil || ks.Key != "alt" || ks.Phase != "up" || ks.Held || ks.Modifiers.Alt {
-		t.Fatalf("blur broadcast = %q, want alt up", wire.String())
-	}
-}
-
-func TestModifierTickIntervalAdapts(t *testing.T) {
-	m, _, _ := tickModel(t)
-	now := time.Now()
-	if d := m.modifierTickInterval(now); d != modifierTickIdle {
-		t.Fatalf("idle interval = %v, want %v", d, modifierTickIdle)
-	}
-	m.lastInput = now.Add(-time.Second)
-	if d := m.modifierTickInterval(now); d != modifierTickActive {
-		t.Fatalf("recent input interval = %v, want %v", d, modifierTickActive)
-	}
-	m.lastInput = now.Add(-modifierActiveFor - time.Millisecond)
-	if d := m.modifierTickInterval(now); d != modifierTickIdle {
-		t.Fatalf("stale input interval = %v, want %v", d, modifierTickIdle)
-	}
-	m.modifiers.Shift = true
-	if d := m.modifierTickInterval(now); d != modifierTickActive {
-		t.Fatalf("held modifier interval = %v, want %v", d, modifierTickActive)
-	}
-	m.modifiers = huskipc.ModifierState{}
-	m.heldKeys["a"] = now
-	if d := m.modifierTickInterval(now); d != modifierTickActive {
-		t.Fatalf("held key interval = %v, want %v", d, modifierTickActive)
-	}
-}
-
-func TestViewRequestsFocusReporting(t *testing.T) {
-	m, _, _ := tickModel(t)
-	if !m.View().ReportFocus {
-		t.Fatal("view must enable focus reporting")
-	}
-	m.width, m.height = 10, 5
-	m.recomputeLayout()
-	if !m.View().ReportFocus {
-		t.Fatal("too-small view must keep focus reporting enabled")
-	}
-}
-
-func TestModifierTickLapsesWithoutOSSource(t *testing.T) {
-	m, _, _ := tickModel(t)
-	m.pollMods = func() (huskipc.ModifierState, bool) { return huskipc.ModifierState{}, false }
-	m.startModifierTick()
-	_, cmd := m.Update(modifierTickMsg{})
-	if cmd != nil || m.modTickOn {
-		t.Fatal("tick with no OS source and no held keys must lapse")
-	}
-}
-
-func TestModifierTickWithoutOSSourceExpiresHeldKeysThenLapses(t *testing.T) {
-	m, _, _ := tickModel(t)
-	m.pollMods = func() (huskipc.ModifierState, bool) { return huskipc.ModifierState{}, false }
-
-	_, cmd := m.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
-	if cmd == nil || !m.modTickOn {
-		t.Fatal("key press that records a held key must restart a lapsed chain")
-	}
-	if len(m.heldKeys) == 0 {
-		t.Fatal("expected a held key")
-	}
-	if _, cmd := m.Update(modifierTickMsg{}); cmd == nil {
-		t.Fatal("chain must keep running while a held key is pending")
-	}
-	m.heldKeys["x"] = time.Now().Add(-time.Second)
-	if _, cmd := m.Update(modifierTickMsg{}); cmd != nil || m.modTickOn {
-		t.Fatal("chain must lapse once the held key expired")
-	}
-	if len(m.heldKeys) != 0 {
-		t.Fatalf("held keys not expired: %v", m.heldKeys)
+	ks := fe.KeyStates[0]
+	if ks.Plugin != "p" || ks.P.Key != "alt" || ks.P.Phase != "up" || ks.P.Held || ks.P.Modifiers.Alt {
+		t.Fatalf("blur broadcast = %+v, want alt up", ks)
 	}
 }

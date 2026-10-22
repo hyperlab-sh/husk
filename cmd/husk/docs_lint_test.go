@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
 // docFiles returns the repository documents that describe the host. They are
@@ -59,12 +61,15 @@ func TestDocsHaveNoApplicationResidue(t *testing.T) {
 // and that the documented total equals the registry's.
 func TestDocsSurfaceListMatchesRegistry(t *testing.T) {
 	docs := docFiles(t)
+	surfaces := []protocol.SurfaceID{
+		protocol.SurfaceActivityRail, protocol.SurfaceSidebarNavigation, protocol.SurfaceSidebarList,
+		protocol.SurfaceThreadRowStatus, protocol.SurfaceSidebarFooter, protocol.SurfaceMainHeader,
+		protocol.SurfaceMainStage, protocol.SurfaceSidePanel, protocol.SurfaceAppOverlay,
+		protocol.SurfaceModal, protocol.SurfaceFullCanvas, protocol.SurfaceWorkspaceStage,
+	}
 	var ids []string
-	for id, s := range newPublicationRegistry().Slots {
-		if s.Owner != "husk" {
-			continue
-		}
-		ids = append(ids, strings.TrimPrefix(id, "husk."))
+	for _, id := range surfaces {
+		ids = append(ids, string(id))
 	}
 	sort.Strings(ids)
 	if len(ids) != 12 {

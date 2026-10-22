@@ -17,11 +17,11 @@ unsigned int huskGetModifierFlags() {
 }
 */
 import "C"
-import "github.com/hyperlab-sh/husk/pkg/huskipc"
+import "github.com/hyperlab-sh/husk/pkg/protocol"
 
-func pollOSModifiers() (huskipc.ModifierState, bool) {
+func pollOSModifiers() (protocol.ModifierState, bool) {
 	bits := uint(C.huskGetModifierFlags())
-	return huskipc.ModifierState{
+	return protocol.ModifierState{
 		Alt:   (bits & 1) != 0,
 		Ctrl:  (bits & 2) != 0,
 		Shift: (bits & 4) != 0,

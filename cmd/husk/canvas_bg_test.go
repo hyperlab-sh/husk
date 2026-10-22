@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"charm.land/lipgloss/v2"
+
 	"github.com/hyperlab-sh/husk/pkg/theme"
 )
 

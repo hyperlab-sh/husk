@@ -6,19 +6,17 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-
-	"github.com/hyperlab-sh/husk/pkg/huskipc"
 )
 
 func paletteTestCmds() []paletteCommand {
-	cmds := builtinCommands()
-	for _, c := range []huskipc.CommandSpec{
+	cmds := goldenModel().builtinCommands()
+	for _, c := range []paletteCommand{
 		{ID: "x.cjk", Title: "日本語のとても長いコマンド名をここに書きます日本語のとても長いコマンド名", Category: "プラグイン", Shortcut: "ctrl+日"},
 		{ID: "x.long", Title: strings.Repeat("longword ", 30), Category: "A Very Long Category Name", Shortcut: "ctrl+shift+alt+super+x"},
 		{ID: "x.nohint", Title: "No hint here", Category: "Misc"},
 		{ID: "x.notag", Title: "No tag here", Shortcut: "z"},
 	} {
-		cmds = append(cmds, paletteCommand{CommandSpec: c})
+		cmds = append(cmds, c)
 	}
 	return cmds
 }
@@ -46,7 +44,7 @@ func TestPaletteRowsFillWidthExactly(t *testing.T) {
 // the hint column is dropped; narrower still the tag goes too.
 func TestPaletteHintKeptTitleTruncated(t *testing.T) {
 	m := goldenModel()
-	cmds := builtinCommands()
+	cmds := goldenModel().builtinCommands()
 	for _, iw := range []int{60, 80, 120} {
 		cols := paletteColumns(cmds, iw)
 		if cols.hint == 0 || cols.tag == 0 {
@@ -76,7 +74,7 @@ func TestPaletteHintKeptTitleTruncated(t *testing.T) {
 // Hints align on one column and titles start on one column.
 func TestPaletteColumnsAlign(t *testing.T) {
 	m := goldenModel()
-	cmds := builtinCommands()
+	cmds := goldenModel().builtinCommands()
 	iw := 80
 	cols := paletteColumns(cmds, iw)
 	for _, c := range cmds {

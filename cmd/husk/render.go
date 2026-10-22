@@ -9,8 +9,9 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/hyperlab-sh/husk/internal/host/contracts"
 	"github.com/hyperlab-sh/husk/pkg/frame"
-	"github.com/hyperlab-sh/husk/pkg/huskipc"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
 func (m *WorkbenchModel) View() tea.View {
@@ -35,9 +36,9 @@ func (m *WorkbenchModel) View() tea.View {
 	for i := len(order) - 1; i >= 0; i-- {
 		h := order[i]
 		switch {
-		case h.ID == huskipc.SlotActivityRail:
+		case h.ID == protocol.SurfaceActivityRail:
 			c.blitBlock(h.Rect.X, h.Rect.Y, m.renderActivityRailBox())
-		case h.ID == huskipc.SlotMainStage && m.stageMode == "hotspots":
+		case h.ID == protocol.SurfaceMainStage && m.stageMode == "hotspots":
 			m.drawHotspotArchitectureStage(c)
 		default:
 			m.drawSurface(c, h.ID, surfaceCallouts[h.ID], string(h.ID))
@@ -92,19 +93,19 @@ func (m *WorkbenchModel) View() tea.View {
 
 // surfaceCallouts are the hotspot badge numbers shown on each surface when
 // hotspots are toggled on ('h').
-var surfaceCallouts = map[huskipc.SlotID]string{
-	huskipc.SlotSidebarNavigation: "①",
-	huskipc.SlotSidebarList:       "②③",
-	huskipc.SlotSidebarFooter:     "④",
-	huskipc.SlotMainHeader:        "⑤",
-	huskipc.SlotMainStage:         "⑥",
-	huskipc.SlotSidePanel:         "⑦",
-	huskipc.SlotWorkspaceStage:    "⑤-⑦",
-	huskipc.SlotFullCanvas:        "②-⑦",
+var surfaceCallouts = map[protocol.SurfaceID]string{
+	protocol.SurfaceSidebarNavigation: "①",
+	protocol.SurfaceSidebarList:       "②③",
+	protocol.SurfaceSidebarFooter:     "④",
+	protocol.SurfaceMainHeader:        "⑤",
+	protocol.SurfaceMainStage:         "⑥",
+	protocol.SurfaceSidePanel:         "⑦",
+	protocol.SurfaceWorkspaceStage:    "⑤-⑦",
+	protocol.SurfaceFullCanvas:        "②-⑦",
 }
 
 func (m *WorkbenchModel) renderActivityRailBox() string {
-	rect := m.slotRects[huskipc.SlotActivityRail]
+	rect := m.slotRects[protocol.SurfaceActivityRail]
 	railW := rect.Width
 	bodyH := rect.Height
 
@@ -181,11 +182,11 @@ func (m *WorkbenchModel) drawModal(c *canvas) {
 	rect := m.modalRect
 	innerW, innerH := rect.InnerW, rect.InnerH
 
-	su := m.slotUpdates[huskipc.SlotModalSurface]
+	su := m.slotUpdates[protocol.SurfaceModal]
 	// A declared region composes over the blank canvas before slot_update too.
-	m.publishedContent(huskipc.SlotModalSurface, innerW, innerH).draw(c, rect.InnerX, rect.InnerY)
+	m.publishedContent(protocol.SurfaceModal, innerW, innerH).draw(c, rect.InnerX, rect.InnerY)
 
-	spec := m.frameFor(huskipc.SlotModalSurface)
+	spec := m.frameFor(protocol.SurfaceModal)
 	label := ""
 	if spec.Label != "" {
 		label = spec.Label
@@ -193,7 +194,7 @@ func (m *WorkbenchModel) drawModal(c *canvas) {
 			label = su.Title
 		}
 	}
-	m.drawChrome(c, huskipc.SlotModalSurface, rect, spec, label)
+	m.drawChrome(c, protocol.SurfaceModal, rect, spec, label)
 	m.fillSlotBg(c, rect)
 }
 
@@ -201,8 +202,8 @@ func (m *WorkbenchModel) drawModal(c *canvas) {
 // actually laid out (see leftSideShown/rightSideShown: dock on, plugin
 // occupied, and it fits), not by a nominal column count.
 func (m *WorkbenchModel) defaultLayoutLabel() string {
-	_, left := m.slotRects[huskipc.SlotSidebarList]
-	_, right := m.slotRects[huskipc.SlotSidePanel]
+	_, left := m.slotRects[protocol.SurfaceSidebarList]
+	_, right := m.slotRects[protocol.SurfaceSidePanel]
 	switch {
 	case left && right:
 		return " Workbench · Left + Right "
@@ -224,9 +225,9 @@ func (m *WorkbenchModel) renderTopWorkbenchBar() string {
 
 	modeLabel := m.defaultLayoutLabel()
 	switch m.activePlacement {
-	case huskipc.PlacementFullCanvas:
+	case contracts.PlacementFullCanvas:
 		modeLabel = "  Full-Canvas Mode "
-	case huskipc.PlacementStage:
+	case contracts.PlacementStage:
 		modeLabel = "  Stage-minus-Sidebar Mode "
 	}
 	if m.modalOwner().Open() {
@@ -289,10 +290,13 @@ func (m *WorkbenchModel) renderTopWorkbenchBar() string {
 	// Rail shortcuts come from the rail items plugins declared, spelled as the
 	// rail's own shortcut labels. Entries that do not fit beside the right-hand
 	// pills are dropped from the end rather than pushing those pills off.
-	railKeys := []string{"F1 home"}
+	var railKeys []string
+	if k := m.firstKey("husk.home"); k != "" {
+		railKeys = append(railKeys, keyLabel(k)+" home")
+	}
 	for _, ri := range m.orderedRailItems() {
-		if ri.Shortcut != "" {
-			railKeys = append(railKeys, railShortcutLabel(ri.Shortcut)+" "+ri.Label)
+		if k := m.firstKey(ri.ID); k != "" {
+			railKeys = append(railKeys, keyLabel(k)+" "+ri.Label)
 		}
 	}
 	railStyle := lipgloss.NewStyle().
@@ -354,7 +358,7 @@ func (m *WorkbenchModel) renderBottomKeybindBar() string {
 // canvas) wrapped in the frame the occupying plugin declared. Husk adds no
 // chrome of its own; calloutNum/slotName only appear as a label overlay when
 // hotspot badges are toggled on ('h').
-func (m *WorkbenchModel) drawSurface(c *canvas, slotID huskipc.SlotID, calloutNum, slotName string) {
+func (m *WorkbenchModel) drawSurface(c *canvas, slotID protocol.SurfaceID, calloutNum, slotName string) {
 	rect, ok := m.slotRects[slotID]
 	if !ok {
 		return
@@ -400,7 +404,7 @@ func (m *WorkbenchModel) fillSlotBg(c *canvas, rect SlotRect) {
 // docs/docs/architecture.md, "Content clipping"). Lines are not padded: the
 // canvas clears the rest of each row when it draws them, from a zero pen, so
 // a style a line leaves open stops at its last character.
-func (m *WorkbenchModel) surfaceContentLines(su *huskipc.SlotUpdatePayload, w, h int) []string {
+func (m *WorkbenchModel) surfaceContentLines(su *protocol.SurfaceUpdateParams, w, h int) []string {
 	lines := make([]string, h)
 	for i := 0; i < h && su != nil && i < len(su.Lines); i++ {
 		if ansi.StringWidth(su.Lines[i]) > w {
@@ -424,7 +428,7 @@ func (m *WorkbenchModel) closeStyle() lipgloss.Style {
 
 // drawFrame draws content lines into rect's inner area, then the declared
 // frame chrome around (or over) them.
-func (m *WorkbenchModel) drawFrame(c *canvas, slotID huskipc.SlotID, rect SlotRect, spec frame.Spec, label string, lines []string) {
+func (m *WorkbenchModel) drawFrame(c *canvas, slotID protocol.SurfaceID, rect SlotRect, spec frame.Spec, label string, lines []string) {
 	c.blitLines(rect.InnerX, rect.InnerY, rect.InnerW, rect.InnerH, lines)
 	m.drawChrome(c, slotID, rect, spec, label)
 	m.fillSlotBg(c, rect)
@@ -436,7 +440,7 @@ func (m *WorkbenchModel) drawFrame(c *canvas, slotID huskipc.SlotID, rect SlotRe
 // Without one, the label and close glyph are drawn as cells over the first
 // content row (no geometry change); the close glyph keeps the row's last
 // cell and the label is truncated to the cells before it.
-func (m *WorkbenchModel) drawChrome(c *canvas, slotID huskipc.SlotID, rect SlotRect, spec frame.Spec, label string) {
+func (m *WorkbenchModel) drawChrome(c *canvas, slotID protocol.SurfaceID, rect SlotRect, spec frame.Spec, label string) {
 	if !spec.Enabled() {
 		return
 	}
@@ -505,7 +509,7 @@ func (m *WorkbenchModel) drawChrome(c *canvas, slotID huskipc.SlotID, rect SlotR
 // dividerEdgeStyles returns the edge styles/glyphs for a bordered surface,
 // highlighting the divider being dragged or hovered (only visible when the
 // occupying plugin declared a border frame).
-func (m *WorkbenchModel) dividerEdgeStyles(slotID huskipc.SlotID) (left, right, top, bot lipgloss.Style, lG, rG, tG, bG string) {
+func (m *WorkbenchModel) dividerEdgeStyles(slotID protocol.SurfaceID) (left, right, top, bot lipgloss.Style, lG, rG, tG, bG string) {
 	borderCol := lipgloss.Color(m.palette.Border)
 	if m.focusedSlot == slotID {
 		borderCol = lipgloss.Color(m.palette.BorderFocused)
@@ -524,47 +528,47 @@ func (m *WorkbenchModel) dividerEdgeStyles(slotID huskipc.SlotID) (left, right, 
 
 	switch activeDiv {
 	case "sidebar-width":
-		if slotID == huskipc.SlotSidebarNavigation || slotID == huskipc.SlotSidebarList || slotID == huskipc.SlotSidebarFooter {
+		if slotID == protocol.SurfaceSidebarNavigation || slotID == protocol.SurfaceSidebarList || slotID == protocol.SurfaceSidebarFooter {
 			right = hlStyle
 			rG = "┃"
 		}
-		if slotID == huskipc.SlotMainHeader || slotID == huskipc.SlotMainStage || slotID == huskipc.SlotWorkspaceStage {
+		if slotID == protocol.SurfaceMainHeader || slotID == protocol.SurfaceMainStage || slotID == protocol.SurfaceWorkspaceStage {
 			left = hlStyle
 			lG = "┃"
 		}
 	case "sidepanel-width":
-		if slotID == huskipc.SlotMainHeader || slotID == huskipc.SlotMainStage {
+		if slotID == protocol.SurfaceMainHeader || slotID == protocol.SurfaceMainStage {
 			right = hlStyle
 			rG = "┃"
 		}
-		if slotID == huskipc.SlotSidePanel {
+		if slotID == protocol.SurfaceSidePanel {
 			left = hlStyle
 			lG = "┃"
 		}
 	case "sidebar-nav-height":
-		if slotID == huskipc.SlotSidebarNavigation {
+		if slotID == protocol.SurfaceSidebarNavigation {
 			bot = hlStyle
 			bG = "━"
 		}
-		if slotID == huskipc.SlotSidebarList {
+		if slotID == protocol.SurfaceSidebarList {
 			top = hlStyle
 			tG = "━"
 		}
 	case "sidebar-foot-height":
-		if slotID == huskipc.SlotSidebarList {
+		if slotID == protocol.SurfaceSidebarList {
 			bot = hlStyle
 			bG = "━"
 		}
-		if slotID == huskipc.SlotSidebarFooter {
+		if slotID == protocol.SurfaceSidebarFooter {
 			top = hlStyle
 			tG = "━"
 		}
 	case "main-header-height":
-		if slotID == huskipc.SlotMainHeader {
+		if slotID == protocol.SurfaceMainHeader {
 			bot = hlStyle
 			bG = "━"
 		}
-		if slotID == huskipc.SlotMainStage {
+		if slotID == protocol.SurfaceMainStage {
 			top = hlStyle
 			tG = "━"
 		}
@@ -575,7 +579,7 @@ func (m *WorkbenchModel) dividerEdgeStyles(slotID huskipc.SlotID) (left, right, 
 // drawHotspotArchitectureStage draws Husk's slot architecture explorer over
 // the main-stage slot rect.
 func (m *WorkbenchModel) drawHotspotArchitectureStage(c *canvas) {
-	rect := m.slotRects[huskipc.SlotMainStage]
+	rect := m.slotRects[protocol.SurfaceMainStage]
 	// The architecture explorer is Husk's own UI and always draws its own core
 	// frame: derive a fresh inner rect from the OUTER slot rect so the explorer
 	// spans the full slot whether or not the main-stage plugin declared a
@@ -599,7 +603,7 @@ func (m *WorkbenchModel) drawHotspotArchitectureStage(c *canvas) {
 		subtle.Render(strings.Repeat("─", innerW)),
 	)
 
-	for idx, slot := range huskipc.AllSlots {
+	for idx, slot := range allSurfaces {
 		selected := idx == m.hotspotCursor
 		owner := m.surfaceOwner(slot.ID)
 		if owner == "" {
@@ -639,15 +643,15 @@ func (m *WorkbenchModel) drawHotspotArchitectureStage(c *canvas) {
 	// The explorer is derived entirely from model state, so it is built here
 	// and never stored: View must not write the model, and storing it in
 	// slotUpdates would overwrite the main-stage plugin's last payload.
-	explorer := &huskipc.SlotUpdatePayload{
+	explorer := &protocol.SurfaceUpdateParams{
 		PluginID: "husk.core",
-		Slot:     huskipc.SlotMainStage,
+		Surface:  protocol.SurfaceMainStage,
 		Title:    coreFrame.Label,
 		Lines:    lines,
 	}
 	// The explorer renders through its own core rect, not the plugin's.
 	rows := m.surfaceContentLines(explorer, coreW, coreH)
-	m.drawFrame(c, huskipc.SlotMainStage, coreRect, coreFrame, coreFrame.Label, rows)
+	m.drawFrame(c, protocol.SurfaceMainStage, coreRect, coreFrame, coreFrame.Label, rows)
 }
 
 // drawToast draws the active toast near the top-right corner.
