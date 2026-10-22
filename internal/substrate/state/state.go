@@ -39,8 +39,9 @@ func New(opts Options) *State {
 
 // Register validates and registers spec, returning the sole write capability.
 // The initial or hydrated value is visible in Snapshot before this returns.
-// Invalid hydration fails atomically with ErrInvalidValue or ErrTooLarge;
-// typed Register additionally handles incompatible persisted owner types.
+// Invalid or over-cap hydration falls back to Initial, returning both a usable
+// handle and a wrapped error for the owner to log. Typed Register also falls
+// back when the persisted value cannot decode into the owner's type.
 func (s *State) Register(spec Spec) (*Handle, error) {
 	return s.register(spec, nil)
 }
@@ -66,14 +67,11 @@ func (s *State) register(spec Spec, acceptHydrated func(json.RawMessage) error) 
 		lookup := spec
 		lookup.Initial = copyJSON(spec.Initial)
 		if loaded, ok := s.opts.Hydrator.Hydrate(lookup); ok {
-			err := validateValue(loaded, spec.MaxBytes)
+			loaded, err := normalizeValue(loaded, spec.MaxBytes)
 			if err == nil && acceptHydrated != nil {
 				err = acceptHydrated(loaded)
 			}
 			if err != nil {
-				if acceptHydrated == nil {
-					return nil, fmt.Errorf("state: hydrate %s: %w", spec.Namespace, err)
-				}
 				discarded = fmt.Errorf("state: discarded persisted %s: %w", spec.Namespace, err)
 			} else {
 				value = loaded
@@ -145,10 +143,11 @@ func (s *State) Flush() {
 // without a Handle. Only the user-only state.clear Server handler may call it,
 // on the loop, after Store has deleted persisted copies. Authorization and disk
 // deletion belong to that handler, not to this in-memory capability package.
+// A missing namespace wraps ErrUnregistered; the Server maps it to not_found.
 func (s *State) Clear(namespace string) (uint64, error) {
 	r, ok := s.records[namespace]
 	if !ok {
-		return 0, ErrUnregistered
+		return 0, fmt.Errorf("%w: %s", ErrUnregistered, namespace)
 	}
 	return s.commit(r, r.entry.Initial), nil
 }
@@ -174,14 +173,16 @@ func (h *Handle) registered() bool {
 	return h != nil && h.state != nil && h.record != nil && h.state.records[h.Namespace()] == h.record
 }
 
-// Set atomically replaces the slice with a JSON object. Identical encoded bytes
-// are a no-op. The input is copied; its caller may reuse it after Set returns.
+// Set atomically replaces the slice with a JSON object, normalized to compact
+// JSON with sorted keys before size and equality checks. Identical normalized
+// bytes are a no-op. Its caller may reuse the input after Set returns.
 func (h *Handle) Set(value json.RawMessage) (uint64, error) {
 	if !h.registered() {
 		return 0, ErrUnregistered
 	}
 	r := h.record
-	if err := validateValue(value, r.entry.MaxBytes); err != nil {
+	value, err := normalizeValue(value, r.entry.MaxBytes)
+	if err != nil {
 		return r.entry.Revision, err
 	}
 	if bytes.Equal(value, r.entry.Value) {

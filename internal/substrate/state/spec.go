@@ -55,9 +55,9 @@ func validateSpec(spec Spec, workspaceOwner string) (Spec, error) {
 	if spec.Owner != spec.Namespace[:separator] {
 		return invalid("owner")
 	}
-	cap := PluginMaxBytes
+	classCap := PluginMaxBytes
 	if spec.Owner == OwnerHusk {
-		cap = CoreMaxBytes
+		classCap = CoreMaxBytes
 	}
 	switch spec.Scope {
 	case ScopeUser, ScopeInstance:
@@ -65,7 +65,7 @@ func validateSpec(spec Spec, workspaceOwner string) (Spec, error) {
 		if spec.Owner != OwnerHusk && (workspaceOwner == "" || spec.Owner != workspaceOwner) {
 			return invalid("scope: workspace owner")
 		}
-		cap = WorkspaceMaxBytes
+		classCap = WorkspaceMaxBytes
 	default:
 		return invalid("scope")
 	}
@@ -91,18 +91,19 @@ func validateSpec(spec Spec, workspaceOwner string) (Spec, error) {
 			return invalid("retention: policy")
 		}
 	}
-	if spec.MaxBytes < 0 || spec.MaxBytes > cap || spec.MaxBytes > HardMaxBytes {
+	if spec.MaxBytes < 0 || spec.MaxBytes > classCap || spec.MaxBytes > HardMaxBytes {
 		return invalid("max_bytes")
 	}
 	if spec.MaxBytes == 0 {
-		spec.MaxBytes = cap
+		spec.MaxBytes = classCap
 	}
 	if spec.Initial == nil {
 		spec.Initial = []byte("{}")
 	}
-	if err := validateValue(spec.Initial, spec.MaxBytes); err != nil {
+	initial, err := normalizeValue(spec.Initial, spec.MaxBytes)
+	if err != nil {
 		return Spec{}, fmt.Errorf("%w: initial: %w", ErrInvalidSpec, err)
 	}
-	spec.Initial = copyJSON(spec.Initial)
+	spec.Initial = initial
 	return spec, nil
 }

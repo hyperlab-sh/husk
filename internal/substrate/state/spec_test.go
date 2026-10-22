@@ -173,7 +173,8 @@ func TestScopeAndClassCaps(t *testing.T) {
 				t.Fatalf("at cap: %v", err)
 			}
 			before := s.Snapshot()
-			if _, err := h.Set(append(value, ' ')); !errors.Is(err, state.ErrTooLarge) {
+			tooLarge := []byte(`{"a":"` + strings.Repeat("x", tc.cap-7) + `"}`)
+			if _, err := h.Set(tooLarge); !errors.Is(err, state.ErrTooLarge) {
 				t.Fatalf("above cap: %v", err)
 			}
 			if s.Snapshot() != before {

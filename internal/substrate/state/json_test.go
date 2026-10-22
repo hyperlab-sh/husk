@@ -101,7 +101,7 @@ func TestJSONPointersRFC6901(t *testing.T) {
 	h := mustRegister(t, s, spec)
 	entry := s.Snapshot().Slices[h.Namespace()]
 	for _, tc := range []struct{ pointer, want string }{
-		{"", string(spec.Initial)}, {"/foo", `["bar","baz"]`}, {"/foo/0", `"bar"`}, {"/", "0"},
+		{"", string(entry.Value)}, {"/foo", `["bar","baz"]`}, {"/foo/0", `"bar"`}, {"/", "0"},
 		{"/a~1b", "1"}, {"/c%d", "2"}, {"/e^f", "3"}, {"/g|h", "4"}, {"/i\\j", "5"},
 		{"/k\"l", "6"}, {"/ ", "7"}, {"/m~0n", "8"}, {"/nil", "null"}, {"/~01/nested", "9007199254740993"},
 	} {
