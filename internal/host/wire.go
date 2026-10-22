@@ -67,7 +67,7 @@ func (r *Root) buildServer() error {
 		Calls:   portsstem.NewCalls(r.disp, r.loopSeam.Post),
 		Event:   portsstem.NewEvents(r.bus, r.loopSeam),
 		Hook:    portsstem.NewHooks(r.runner, r.loopSeam.Post),
-		Surface: portsstem.NewSurfacePort(r.engine, r.loopSeam),
+		Surface: portsstem.NewSurfacePort(r.engine, r.loopSeam, portsstem.WithContent(r.cfg.Content)),
 		State: portsstem.NewStatePort(portsstem.StatePortOptions{
 			State:   r.st,
 			Loop:    r.loopSeam,

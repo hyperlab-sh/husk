@@ -3,6 +3,7 @@ package surfaces
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -687,16 +688,7 @@ func (e *Engine) release(surface protocol.SurfaceID, only string) error {
 		}
 		return errf(protocol.CodeDenied, "surface %q is occupied by %s", surface, occupant)
 	}
-	// A revision mismatch means a foreign write landed between the
-	// engine's last commit and this release — state.clear in the same
-	// Update. markRev below would absorb it and Flush's guard would never
-	// fire, so clear the declarations cache here: the next pass treats
-	// every plugin as changed and re-resolves from the live declarations,
-	// the same response Flush's own guard has.
-	if ent, ok := e.st.Snapshot().Slices[state.SurfacesNamespace]; ok && ent.Revision != e.lastRev {
-		e.log.Printf("surfaces: husk.surfaces changed outside the engine; re-resolving")
-		e.declsCache = map[string]*pluginDecl{}
-	}
+	e.absorbForeign()
 	if err := e.slice.Update(func(v *Surfaces) { delete(v.Occupants, surface) }); err != nil {
 		return err
 	}
@@ -716,6 +708,43 @@ func (e *Engine) release(surface protocol.SurfaceID, only string) error {
 		return nil
 	}
 	e.freed[surface] = true
+	return nil
+}
+
+// absorbForeign handles a revision mismatch before an out-of-pass commit.
+// A mismatch means a foreign write landed between the engine's last commit
+// and this one — state.clear in the same Update. markRev after the commit
+// would absorb it and Flush's guard would never fire, so clear the
+// declarations cache here: the next pass treats every plugin as changed and
+// re-resolves from the live declarations, the same response Flush's own
+// guard has.
+func (e *Engine) absorbForeign() {
+	if ent, ok := e.st.Snapshot().Slices[state.SurfacesNamespace]; ok && ent.Revision != e.lastRev {
+		e.log.Printf("surfaces: husk.surfaces changed outside the engine; re-resolving")
+		e.declsCache = map[string]*pluginDecl{}
+	}
+}
+
+// UpdateView applies fn to the frontend-owned half of husk.surfaces
+// (visibility, placement, overlays) and commits it; occupants and
+// contributions stay the engine's. Visible entries must be host layout
+// surfaces: an invalid result is refused and nothing commits. Loop-only.
+func (e *Engine) UpdateView(fn func(*contracts.SurfaceView)) error {
+	cur := e.slice.Get()
+	view := contracts.SurfaceView{Visible: slices.Clone(cur.Visible), Placement: cur.Placement, Overlays: cur.Overlays}
+	fn(&view)
+	for _, id := range view.Visible {
+		if !id.Valid() {
+			return errf(protocol.CodeInvalidParams, "visible surface %q is not a host layout surface", id)
+		}
+	}
+	e.absorbForeign()
+	if err := e.slice.Update(func(v *Surfaces) {
+		v.Visible, v.Placement, v.Overlays = view.Visible, view.Placement, view.Overlays
+	}); err != nil {
+		return err
+	}
+	e.markRev()
 	return nil
 }
 

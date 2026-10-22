@@ -49,7 +49,17 @@ type Config struct {
 	// wrappers, Store and Services); nil is system time. protocol.Clock is used
 	// so it can also be handed to the Server.
 	Clock protocol.Clock
+	// Content receives every surface.update the Surfaces engine accepted, on
+	// the loop, with the plugin id and the params unchanged. It is the only
+	// route surface content takes to a renderer: buffers are not State. Nil
+	// drops content (a headless host). A denied or unoccupied update never
+	// reaches it. It must not block and must not retain the Lines slice
+	// beyond the call unless it copies it.
+	Content ContentSink
 }
+
+// ContentSink receives accepted surface content (see Config.Content).
+type ContentSink func(plugin string, params protocol.SurfaceUpdateParams)
 
 // Host is the composition root.
 type Host interface {
@@ -58,6 +68,9 @@ type Host interface {
 	Run(ctx context.Context) error
 	// Close stops everything in the order pods.md fixes; idempotent.
 	Close() error
+	// Frontend returns the seams a frontend drives the host through. The
+	// result is the same value for the host's lifetime.
+	Frontend() Frontend
 }
 
 // Occupant says which plugin occupies a surface (husk.surfaces occupants).

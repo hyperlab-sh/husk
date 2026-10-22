@@ -681,6 +681,8 @@ func (l *Limiter) Allow(key string) bool {
 type Host struct {
 	callLog
 	RunErr, CloseErr error
+	// FrontendValue is what Frontend returns.
+	FrontendValue contracts.Frontend
 }
 
 // NewHost returns a Host logging to rec.
@@ -691,6 +693,9 @@ func (f *Host) Run(context.Context) error { f.Record("Host.Run"); return f.RunEr
 
 // Close implements contracts.Host.
 func (f *Host) Close() error { f.Record("Host.Close"); return f.CloseErr }
+
+// Frontend implements contracts.Host.
+func (f *Host) Frontend() contracts.Frontend { return f.FrontendValue }
 
 // Config fakes contracts.ConfigPort.
 type Config struct {

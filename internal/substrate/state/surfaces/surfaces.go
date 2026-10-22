@@ -81,24 +81,15 @@ type Surfaces struct {
 	Overlays Overlays `json:"overlays"`
 }
 
-// Placement is the active placement, the shape state.md's example gives.
-type Placement struct {
-	RailItem string `json:"rail_item"`
-	Kind     string `json:"kind"`
-}
+// Placement is the active placement, the frozen contracts shape.
+type Placement = contracts.Placement
 
-// Overlays are the active host overlays.
-type Overlays struct {
-	Modal        ModalOverlay `json:"modal"`
-	Palette      bool         `json:"palette"`
-	SlotExplorer bool         `json:"slot_explorer"`
-}
+// Overlays are the active host overlays, the frozen contracts shape.
+type Overlays = contracts.Overlays
 
-// ModalOverlay is the modal overlay: which plugin's rail item is open.
-type ModalOverlay struct {
-	Plugin   string `json:"plugin"`
-	RailItem string `json:"rail_item"`
-}
+// ModalOverlay is the modal overlay: which plugin's rail item is open, the
+// frozen contracts shape.
+type ModalOverlay = contracts.ModalOverlay
 
 // OccupantsNamespace returns the occupants declaration namespace of pluginID:
 // "<plugin_id>.occupants". The plugin id is the namespace owner, so the Pod

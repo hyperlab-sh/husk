@@ -2,10 +2,12 @@ package surfaces
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
 
+	"github.com/hyperlab-sh/husk/internal/host/contracts"
 	"github.com/hyperlab-sh/husk/internal/host/contracts/fakes"
 	"github.com/hyperlab-sh/husk/internal/substrate/state"
 	statessurfaces "github.com/hyperlab-sh/husk/internal/substrate/state/surfaces"
@@ -1170,4 +1172,87 @@ func equalStrings(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// UpdateView writes only the frontend half of husk.surfaces; the engine's
+// resolution (occupants, contributions) survives it and the engine's next
+// pass keeps the view.
+func TestUpdateViewKeepsResolutionAndSurvivesNextPass(t *testing.T) {
+	st, eng, pods := newEngine(t, Options{})
+	pods.launch("alpha.files")
+	pods.claim("alpha.files", string(protocol.SurfaceMainStage))
+	settle(st, eng)
+
+	err := eng.UpdateView(func(v *contracts.SurfaceView) {
+		v.Visible = []protocol.SurfaceID{protocol.SurfaceMainStage, protocol.SurfaceSidebarList}
+		v.Placement = contracts.Placement{RailItem: "alpha.files.panel", Kind: "stage"}
+		v.Overlays.Modal = contracts.ModalOverlay{Plugin: "alpha.files", RailItem: "alpha.files.panel"}
+		v.Overlays.SlotExplorer = true
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	settle(st, eng)
+	res := resolution(t, st)
+	if got := res.Occupants[protocol.SurfaceMainStage].Plugin; got != "alpha.files" {
+		t.Fatalf("occupant lost by a view write: %q", got)
+	}
+	if len(res.Visible) != 2 || res.Placement.Kind != "stage" || res.Overlays.Modal.RailItem != "alpha.files.panel" || !res.Overlays.SlotExplorer {
+		t.Fatalf("view = %+v", res)
+	}
+
+	// A resolution pass (a new claim) must not wipe the view.
+	pods.launch("beta.notes")
+	pods.claim("beta.notes", string(protocol.SurfaceSidebarList))
+	settle(st, eng)
+	res = resolution(t, st)
+	if res.Occupants[protocol.SurfaceSidebarList].Plugin != "beta.notes" {
+		t.Fatalf("new claim not resolved: %+v", res.Occupants)
+	}
+	if len(res.Visible) != 2 || res.Placement.Kind != "stage" || !res.Overlays.SlotExplorer {
+		t.Fatalf("a resolution pass overwrote the frontend's view: %+v", res)
+	}
+}
+
+func TestUpdateViewRefusesInvalidSurfaceWithoutCommitting(t *testing.T) {
+	st, eng, _ := newEngine(t, Options{})
+	settle(st, eng)
+	before := st.Snapshot().Slices[state.SurfacesNamespace].Revision
+	err := eng.UpdateView(func(v *contracts.SurfaceView) {
+		v.Visible = []protocol.SurfaceID{protocol.SurfaceMainStage, "nope"}
+		v.Overlays.Palette = true
+	})
+	var serr *Error
+	if !errors.As(err, &serr) || serr.Code != protocol.CodeInvalidParams {
+		t.Fatalf("err = %v, want invalid_params", err)
+	}
+	if after := st.Snapshot().Slices[state.SurfacesNamespace].Revision; after != before {
+		t.Fatalf("a refused view committed: revision %d -> %d", before, after)
+	}
+	if res := resolution(t, st); res.Overlays.Palette || len(res.Visible) != 0 {
+		t.Fatalf("a refused view leaked: %+v", res)
+	}
+}
+
+// A foreign write (state.Clear) before a view write must still re-resolve
+// the occupants: the view write must not absorb it.
+func TestUpdateViewDoesNotAbsorbAForeignWrite(t *testing.T) {
+	st, eng, pods := newEngine(t, Options{})
+	pods.launch("alpha.files")
+	pods.claim("alpha.files", string(protocol.SurfaceMainStage))
+	settle(st, eng)
+	if _, err := st.Clear(state.SurfacesNamespace); err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.UpdateView(func(v *contracts.SurfaceView) { v.Overlays.Palette = true }); err != nil {
+		t.Fatal(err)
+	}
+	settle(st, eng)
+	res := resolution(t, st)
+	if res.Occupants[protocol.SurfaceMainStage].Plugin != "alpha.files" {
+		t.Fatalf("the cleared occupancy was not re-resolved after a view write: %+v", res.Occupants)
+	}
+	if !res.Overlays.Palette {
+		t.Fatalf("the view write was lost: %+v", res)
+	}
 }
