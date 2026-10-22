@@ -315,8 +315,8 @@ A plugin script can branch on 3, 4 and 5 without parsing text.
 | `cmd/husk/transport.go`: `startAcceptLoop`, `serveStreamOrigin` | Moves into the Pods Server. Behaviour that serves plugin traffic is specified in [Pods](pods.md). There is no `hello` any more: every connection is served from its first request, attributed by the request's token or its absence. |
 | `cmd/husk/lifecycle.go`: `pluginEnv` sets `HUSK_SOCKET_PATH` for socket plugins and removes it for stdio plugins | Always sets `HUSK_SOCKET_PATH`, `HUSK_INSTANCE` and `HUSK_BIN_PATH`, for every transport. The architecture rule "stdio removes `HUSK_SOCKET_PATH`" is dropped. |
 | `$XDG_RUNTIME_DIR/husk-*` with `logs/<id>.log` kept inside it | The runtime directory holds only sockets and entries and persists across runs. Plugin stderr logs move to `$XDG_STATE_HOME/husk/logs/<id>/<plugin>.log` ([Store](store.md)). |
-| `pkg/huskipc`: `ProtocolVersion` constant, `CheckProtocolVersion` | Kept as the source of the `protocol_version` field in the entry and of the CLI's major check, as `protocol.Version` in the package named in [Protocol](protocol.md). |
-| `pkg/manifest` | Unchanged by this spec. |
+| `pkg/huskipc`: `ProtocolVersion` constant, `CheckProtocolVersion` | **Done (v2-cutover-retire):** `pkg/huskipc` is deleted; the check lives on as the source of the `protocol_version` field in the entry and of the CLI's major check, as `protocol.Version` in the package named in [Protocol](protocol.md). |
+| `pkg/manifest` | Unchanged by this spec; deleted later in the retirement, replaced by `internal/pods/manifest`. |
 | No `instance` package | New leaf package (see Decisions). |
 | `docs/docs/architecture.md`, "Socket security" and "Plugin processes" sections | Updated when this lands: path layout, environment variables, stdio rule. |
 

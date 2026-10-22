@@ -31,7 +31,7 @@ Who depends on it: Calls, Dispatcher, Event bus, Hook runner, Server, Wrapper, t
 1. Every message is one JSON object encoded as UTF-8 on one line, terminated by `\n`. A trailing `\r` is stripped. Blank lines are skipped.
 2. The same framing applies on the plugin's stdin, the plugin's stdout and every socket connection. A plugin's stderr is not a protocol channel.
 3. A line is at most **4 MiB** (4,194,304 bytes) excluding the terminator. Reason: a full-surface render of a 500x200 cell area with truecolor SGR runs fits in about 1 MiB; 4x headroom covers wide terminals and hit-target payloads, and the bound keeps one bad peer from exhausting memory. A longer line is discarded up to its newline and answered with `line_too_long`; the stream stays in sync and the connection stays open.
-4. Readers use a 64 KiB buffered reader and grow a line only up to the limit, as `pkg/huskipc/read.go` does today.
+4. Readers use a 64 KiB buffered reader and grow a line only up to the limit, as `pkg/protocol/read.go` does.
 
 ### Envelopes
 
@@ -81,7 +81,7 @@ type LineError struct {
 	Method string // the method when it was still readable, else ""
 	Err  error
 }
-type Writer struct{ /* synchronous or queued, as huskipc.ConnWriter today */ }
+type Writer struct{ /* synchronous or queued */ }
 func NewWriter(w io.Writer) *Writer
 func NewQueuedWriter(w io.Writer, opts QueueOptions) *Writer
 func (w *Writer) Send(m Message) error
@@ -160,7 +160,7 @@ Invariants:
 
 ### Versioning
 
-The rule from `pkg/huskipc/version.go` and the current architecture doc stays:
+The rule (`pkg/protocol/version.go`) is:
 
 1. Versions are `"MAJOR.MINOR"`; `"MAJOR"` alone parses as minor 0.
 2. A minor bump only adds: optional params or result fields, methods, error codes, enum values. Receivers ignore what they do not know.
@@ -300,17 +300,19 @@ The CLI is a socket client speaking this protocol and nothing else. It connects,
 
 ## Level 2: Migration from today
 
+Done in the cutover and retirement: `pkg/huskipc` and `pkg/manifest` are deleted, `pkg/protocol` carries the wire types, reader, writer, queue and version rule, `internal/pods/manifest` replaces `pkg/manifest`, `plugins/reference` speaks 2.0, and `docs/docs/wire-schema.json` (with its guard test) is gone. The rows below stay as the record of where each piece went.
+
 - `pkg/huskipc/protocol.go`: `Envelope` and its per-type pointer fields are replaced by `protocol.Message`. Wire value types and params (`Palette`, `FrameSpec`, `SlotSize`, `ModifierState`, `KeyStatePayload`, `SlotKeyPayload`, `SlotMousePayload`, `SlotUpdatePayload`, `ToastPayload`) move to `pkg/protocol` using v2 surface vocabulary: `SlotSize` becomes `SurfaceSize`, key/mouse/update payloads become `SurfaceKeyParams`, `SurfaceMouseParams` and `SurfaceUpdateParams`, and every host-surface identifier field is renamed from `slot` to `surface`. `KeyStatePayload` becomes `KeyStateParams`, `ToastPayload` becomes `ToastShowParams`; shared value types retain their names. Resize batches become `SurfaceResizedParams` with a `surfaces` array of `SurfaceSize` entries, as defined in Level 1, replacing the old `slot_sizes` map and separate `focused_slot`. Other JSON fields retain their spelling. `HelloPayload`, `CommandSpec`, `RailItemSpec`, `KeybindSpec` leave the wire for the manifest ([Pods](pods.md), [Keybindings](keybindings.md)). `WorkspaceContextPayload` and `RailActivatedPayload` leave the wire. `ConnWriter` becomes `protocol.Writer`.
 - `pkg/huskipc/version.go`: parsing and the compatibility rule move unchanged; constants become `"2.0"` and `2`. The check runs at manifest conversion and in the CLI, not on the wire.
 - `pkg/huskipc/read.go`: the buffering and oversized-line skip move unchanged; `deliver` decodes `Message` and classifies its form; `LineError` gains `Code`, `ID` and `Method`; `Payload()` becomes a builder for `protocol.error` or an error reply.
 - `pkg/huskipc/wirevalid.go`: moves unchanged; `Validate()` errors map to `invalid_params`.
 - `pkg/huskipc/published.go`: params structs move; `HookCallPayload.RequestID` and `HookResultPayload.RequestID` are removed; `ProtocolErrorPayload` is replaced by `Error` and `protocol.error`.
 - `pkg/huskipc/queue.go`: moves into `pkg/protocol` behind `NewQueuedWriter`; limits stay.
-- `pkg/protocol/schema` and `cmd/genschema`: regenerate `docs/docs/wire-schema-v2.json` as the envelope schema plus one params and one result schema per method, keyed by method name (`go generate ./pkg/protocol`). The v1 schema `docs/docs/wire-schema.json` is frozen with `pkg/huskipc` and has no generator. `TestCommittedSchemaIsCurrent` keeps guarding it.
+- `pkg/protocol/schema` and `cmd/genschema`: regenerate `docs/docs/wire-schema-v2.json` as the envelope schema plus one params and one result schema per method, keyed by method name (`go generate ./pkg/protocol`). The v1 schema `docs/docs/wire-schema.json` was deleted with `pkg/huskipc`; `TestCommittedSchemaIsCurrent` in `pkg/protocol/schema` guards the v2 file.
 - `cmd/husk/transport.go` and `cmd/husk/publications.go`: the `switch env.Type` routing becomes a method router; hook `request_id` bookkeeping moves to [Calls](calls.md).
-- `pkg/manifest`: gains the declarations removed from `hello` (owned by [Pods](pods.md)).
-- `plugins/reference`: rewritten to 2.0 in the same change; `pkg/huskipc` is deleted once nothing imports it.
-- `docs/docs/architecture.md`: the Protocol, Versioning and Errors sections are rewritten from this spec when the change lands.
+- `pkg/manifest` (deleted; now `internal/pods/manifest`): gained the declarations removed from `hello` (owned by [Pods](pods.md)).
+- `plugins/reference`: rewritten to 2.0 in the same change; `pkg/huskipc` was deleted once nothing imported it.
+- `docs/docs/architecture.md`: the Protocol, Versioning and Errors sections were rewritten from this spec.
 
 ## Decisions made here
 
@@ -336,5 +338,5 @@ The CLI is a socket client speaking this protocol and nothing else. It connects,
 1. Resolved in the consistency pass: stdout carries replies only (decision 9). An earlier draft let stdout carry plugin requests so a render needs no CLI spawn; the per-request token in [Pods](pods.md) gives a long-lived socket connection the identity that argument said was missing, so a plugin that renders every frame keeps one socket connection open and pays one connect.
 2. Are input, surface and theme deliveries a fourth message kind, or events with one implicit subscriber? This spec gives them their own namespaces (decision 13) and leaves the classification to [Message kinds](message-kinds.md). Recommended: events with an implicit subscriber, so the Event bus carries them and coalescing applies to `input.key_state` and `surface.resized`.
 3. Aggregating `hook.call` into one reply (decision 11) delays the caller to the slowest subscriber, up to the 10 s hook timeout. Recommended: accept; no plugin uses hooks yet, and streaming can come back as a minor addition (`hook.result` notifications) if one needs it.
-4. Should Husk keep a major-1 compatibility shim for the external plugin crate that exists today? Recommended: no; update it in step with the change and rely on the one-line major-1 rejection to tell stale builds what happened.
-5. Deleting `pkg/huskipc` breaks Go plugins importing it by path. Recommended: delete; the only known importers are in this repository.
+4. Resolved (no shim): should Husk keep a major-1 compatibility shim for the external plugin crate that exists today? Recommended: no; update it in step with the change and rely on the one-line major-1 rejection to tell stale builds what happened.
+5. Resolved: `pkg/huskipc` was deleted; the only known importers were in this repository.

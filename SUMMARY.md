@@ -29,9 +29,9 @@ Husk is an extensible, minimalist TUI workbench that acts strictly as a shell. I
 - Plugin lifecycle (`lifecycle.go`): spawn from manifests, per-plugin stderr logs, exit and launch-failure reports, SIGTERM-then-kill shutdown.
 - Socket security: private `0700` directory, `0600` socket, peer uid check. Outbound writes go through a bounded per-connection queue with a write deadline.
 
-### B. IPC protocol (`pkg/huskipc`)
-- JSON lines: `hello`/`welcome`, `slot_update`, `slot_resize`, `slot_key`, `slot_mouse`, `key_state`, `workspace_context`, `command_invoke`, toasts and `protocol_error` (`protocol.go`), plus the published-slot, hook and event messages (`published.go`).
-- Protocol versioning (`MAJOR.MINOR`), a generated JSON Schema (`docs/docs/wire-schema.json`), and a wire package that imports the standard library only.
+### B. Wire protocol (`pkg/protocol`)
+- JSON lines, one request, reply or notification per line, with no handshake: a plugin is identified by the credential it receives at launch. The methods and their payloads are specified in `docs/docs/design/protocol.md` and `docs/docs/design/message-kinds.md`.
+- Protocol versioning (`MAJOR.MINOR`), a generated JSON Schema (`docs/docs/wire-schema-v2.json`), and a wire package that imports the standard library only.
 
 ### C. Activity rail and the three placements
 The rail opens a plugin's rail item in one of three placements: `modal` (floating overlay), `full-canvas` (everything right of the rail) and `stage` (the canvas with the sidebar kept visible). Husk binds no key to any plugin: an item opens from a rail click or from the `shortcut` its plugin declares.
@@ -49,3 +49,7 @@ Drag-to-resize for the sidebar width, side-panel width, sidebar navigation heigh
 
 ### G. Reference plugins (`plugins/reference`, `plugins/reference-actions`)
 One Go binary in two roles that exercises every extension point: a publisher (frame, inline published slot, hook, event) and a contributor that fills the slot. `plugins/reference/main_test.go` drives both over pipes.
+
+## 3. History
+
+- **2026-10-22, v1 wire retired.** The v1 wire package, the v1 manifest package and the frozen v1 schema were deleted once nothing imported them. `cmd/husk` runs on the v2 host, plugins speak `pkg/protocol`, and `husk-plugin.json` is read by `internal/pods/manifest`.
