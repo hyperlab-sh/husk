@@ -380,10 +380,10 @@ Error codes come from the [Protocol](protocol.md) registry:
 
 | Namespace | Owner module | Scope | Persistent | Retention | Contents |
 |---|---|---|---|---|---|
-| `husk.surfaces` | Stem: Surfaces | instance | no | | The occupancy resolution (one occupant per surface), the combined per-slot contributions, visibility, the active placement, overlays. The Surfaces engine is the only writer, and this is the only slice the host renders from. |
-| `husk.focus` | Stem: Surfaces | instance | no | | Focused surface, its fallback, terminal focus. |
-| `husk.layout` | Stem: Surfaces | instance | yes | keep-latest | Dock preferences the user set: shown flags and sizes. |
-| `husk.geometry` | Stem: Surfaces | instance | no | | Terminal size, too-small flag, computed surface rects. |
+| `husk.surfaces` | Stem: Surfaces (occupants, contributions) and the frontend (visible, placement, overlays) | instance | no | | The occupancy resolution (one occupant per surface), the combined per-slot contributions, visibility, the active placement, overlays. The Surfaces engine holds the only handle and commits every write: it resolves occupants and contributions itself, and applies the frontend's half through `Engine.UpdateView`. This is the only slice the host renders from. |
+| `husk.focus` | the frontend | instance | no | | Focused surface, its fallback, terminal focus. |
+| `husk.layout` | the frontend | instance | yes | keep-latest | Dock preferences the user set: shown flags and sizes. |
+| `husk.geometry` | the frontend | instance | no | | Terminal size, too-small flag, computed surface rects. |
 | `husk.pods` | Pods | instance | no | | Per plugin: status, pid, start time, last error, log path. |
 | `husk.profile` | Services: Profile | instance | yes | keep-latest | The active profile name. |
 | `husk.grants` | Services: Secrets | user | yes | manual | Secret grants: `(plugin, name, digest, at)`; never a value ([Services](services.md)). |
@@ -435,7 +435,7 @@ in place, and an identical value commits nothing; an entry's position in
 the value is only a tiebreaker for the engine, below.
 
 `husk.surfaces` is the resolution the declarations feed. The Surfaces engine
-is its only writer, and it is the only slice the host renders from. The
+holds its only handle, and it is the only slice the host renders from. The
 engine keeps the registry's invariants: one occupant per surface, first
 claim wins, conflicting later claims refused, known host surfaces only. It
 also records the cross-plugin contribution order itself, since the
@@ -458,6 +458,45 @@ its standing refused claims in namespace order. A refused claim stays
 recorded in the declaration, the occupant is unchanged, and the refusal is
 counted; a returning plugin's re-registered declarations resolve again,
 first claim wins among the claims that arrive after the re-registration.
+
+#### Frontend-owned slices
+
+`husk.layout`, `husk.geometry`, `husk.focus` and the view half of
+`husk.surfaces` (`visible`, `placement`, `overlays`) describe what the
+frontend shows, so the frontend writes them; no Stem module does. This
+resolves an earlier reading in which the Surfaces module owned the three
+namespaces while "Migration from today" had the TUI's `recomputeLayout` and
+`dropVanishedSides` write them.
+
+- **Owner handles.** The host root registers none of the three. The frontend
+  calls `Frontend.OwnSlices` once, before the loop runs or on it, and gets
+  untyped owner handles holding JSON objects: owner `husk`, instance scope;
+  `husk.layout` is persistent with `keep-latest` and is hydrated by Store
+  inside `Register`; `husk.geometry` and `husk.focus` are not persistent.
+  Their value shapes are the examples above; the frontend defines them.
+  A second call fails. Handle writes are loop-only like every State write.
+- **The view half of `husk.surfaces`.** A namespace has one registered
+  owner, so the frontend gets no second handle on it. The engine keeps the
+  handle and exposes `Engine.UpdateView`, reached through
+  `Frontend.UpdateSurfaceView(fn)`: `fn` edits a copy of `visible`,
+  `placement` and `overlays`, and the engine commits it, leaving occupants
+  and contributions as they are. An entry of `visible` that is not a host
+  layout surface refuses the whole update and nothing commits. The view
+  write takes the same foreign-write guard as a surface release, so a
+  `state.clear` of `husk.surfaces` in the same Update is still re-resolved
+  from the declarations at the next pass. A resolution pass never touches the
+  view half.
+- **`surface.resized` is driven by the frontend's writes.** The host
+  listens to State's flush for `husk.geometry`, `husk.focus` and
+  `husk.surfaces`. At the end of the tick, after the State flush and the
+  engine's resolution pass, it reads the committed snapshot, computes each
+  occupied surface's `SurfaceSize` (inner width and height from
+  `husk.geometry`, `focused` from `husk.focus`, `visible` from
+  `husk.surfaces`) and calls `Engine.Resized` with only the sizes that
+  changed since the last push. `Engine.Resized` then sends each plugin the
+  sizes of its own surfaces. A tick that wrote none of the three namespaces
+  does nothing, and an identical write pushes nothing. Geometry reaches
+  occupants, never the whole workbench.
 
 `husk.pods` status is one of `starting` (launch begun, process not yet
 started), `live` (process started), `exited` (clean exit, or stopped by Husk
@@ -554,9 +593,10 @@ With one:
 - `cmd/husk/model.go`, `WorkbenchModel` fields:
   - To `husk.focus`: `focusedSlot`, `focusFallback`, `blurred` (inverted as
     `terminal_focused`).
-  - To `husk.surfaces`: `modal` (`modalState` becomes `overlays.modal`, and
-    `modalOwner()` reads the slice), `activeRailID` and `activePlacement`,
-    `showPalette`, `showHotspots` and `stageMode`.
+  - To `husk.surfaces` (view half, written through `Frontend.UpdateSurfaceView`):
+    `modal` (`modalState` becomes `overlays.modal`, and `modalOwner()` reads
+    the slice), `activeRailID` and `activePlacement`, `showPalette`,
+    `showHotspots` and `stageMode`.
   - To `husk.pods`: `plugins` reduced to liveness (`Connected`, `PeerPID`) plus
     process status from `lifecycle.go` (`pluginProcess`, `pluginExitedMsg`).
     `Writer`, `Closer`, `FramesRecv` and `totalIPCEvents` stay with the
@@ -564,7 +604,9 @@ With one:
   - To the workspace slice: `wsContext`. The `workspace_context` message
     becomes a write by the workspace owner; `welcome.context` and the
     broadcast become reads of the slice and its `state.changed`.
-  - Stay out: `manifests`, `railItems`, `palette` (config); `slotUpdates`
+  - Stay out: `manifests`, `palette` (config); `railItems` (config too: the
+    manifest's `rail_items[]`, declared in the `plugins` document and read
+    through `Frontend.RailItems`, see [Pods](pods.md)); `slotUpdates`
     (Renderer); `modifiers`, `altLatched`, `heldKeys`, `heldAliases`,
     `keyReleases`, `termMods`, `lastInput`, `activeDrag`, `hoverDivider`,
     `hoverRailIdx`, `paletteQuery`, `paletteCursor`, `hotspotCursor`,
@@ -575,8 +617,12 @@ With one:
 - `cmd/husk/layout.go`: `showSidebar`, `sidebarWidth`, `sidebarNavH`,
   `sidebarFootH`, `mainHeaderH`, `showSidePane` and `sidePaneW` move to
   `husk.layout`; `width`, `height`, `slotRects`, `modalRect` and the result of
-  `tooSmall()` move to `husk.geometry`, written by `recomputeLayout`.
-  `dropVanishedSides` writes `husk.focus`. `minTermWidth`, `minTermHeight` and
+  `tooSmall()` move to `husk.geometry`, written by `recomputeLayout` through
+  the handle `cmd/husk` obtains from `Frontend.OwnSlices`.
+  `dropVanishedSides` writes `husk.focus` through its handle. `cmd/husk` owns
+  these three namespaces and the view half of `husk.surfaces` (see "Frontend-owned
+  slices"); the Surfaces engine owns none of them, and its `Resized` is
+  driven by the geometry writes. `minTermWidth`, `minTermHeight` and
   `surfaceGutter` stay as Surfaces constants. `leftSideShown` and
   `rightSideShown` become reads of `husk.layout` and `husk.surfaces`.
 - `pkg/huskipc`: keeps the existing messages during the transition.
@@ -641,6 +687,13 @@ With one:
     slices are separate records keyed by instance name; workspace slices of a
     named instance are written and restored together as one overwritten
     snapshot. Store owns the details.
+19. The frontend owns `husk.layout`, `husk.geometry`, `husk.focus` and the
+    view half of `husk.surfaces`. It gets the first three as owner handles
+    from `Frontend.OwnSlices`; the view half goes through
+    `Engine.UpdateView`, because a namespace has one handle and the engine
+    holds it. `surface.resized` follows the frontend's geometry, focus and
+    visibility writes: the host diffs the computed sizes at the end of each
+    tick and pushes only the changes.
 
 ## Open questions
 
