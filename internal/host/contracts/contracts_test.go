@@ -6,6 +6,7 @@ import (
 	"go/parser"
 	"go/token"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -81,14 +82,79 @@ func TestImportsStayWithinAllowList(t *testing.T) {
 	}
 }
 
+var portTypes = map[string]reflect.Type{
+	"SessionPort":    reflect.TypeFor[contracts.SessionPort](),
+	"CallsPort":      reflect.TypeFor[contracts.CallsPort](),
+	"EventPort":      reflect.TypeFor[contracts.EventPort](),
+	"HookPort":       reflect.TypeFor[contracts.HookPort](),
+	"StatePort":      reflect.TypeFor[contracts.StatePort](),
+	"SurfacePort":    reflect.TypeFor[contracts.SurfacePort](),
+	"PluginPort":     reflect.TypeFor[contracts.PluginPort](),
+	"SettingsPort":   reflect.TypeFor[contracts.SettingsPort](),
+	"SecretsPort":    reflect.TypeFor[contracts.SecretsPort](),
+	"ProfilePort":    reflect.TypeFor[contracts.ProfilePort](),
+	"ThemePort":      reflect.TypeFor[contracts.ThemePort](),
+	"KeybindingPort": reflect.TypeFor[contracts.KeybindingPort](),
+	"ConfigPort":     reflect.TypeFor[contracts.ConfigPort](),
+}
+
 func TestEveryWireMethodHasExactlyOneHome(t *testing.T) {
 	homes := contracts.MethodHomes()
 	for _, m := range protocol.Methods() {
-		if homes[m] == "" {
+		if _, ok := homes[m]; !ok {
 			t.Errorf("method %s has no home", m)
 		}
 	}
 	if len(homes) != len(protocol.Methods()) {
 		t.Errorf("%d homes for %d methods", len(homes), len(protocol.Methods()))
+	}
+}
+
+func TestHomesNameRealPortMethodsAndKinds(t *testing.T) {
+	used := map[string]bool{}
+	for m, h := range contracts.MethodHomes() {
+		switch h.Port {
+		case contracts.Outbound, contracts.Unrouted:
+			if h.Method != "" || len(h.Kinds) != 0 {
+				t.Errorf("%s: %s must have no method or kinds", m, h.Port)
+			}
+			continue
+		}
+		typ, ok := portTypes[h.Port]
+		if !ok {
+			t.Errorf("%s: unknown port %q", m, h.Port)
+			continue
+		}
+		used[h.Port+"."+h.Method] = true
+		if _, ok := typ.MethodByName(h.Method); !ok {
+			t.Errorf("%s: %s has no method %q", m, h.Port, h.Method)
+		}
+		if len(h.Kinds) == 0 {
+			t.Errorf("%s: empty caller kinds", m)
+		}
+	}
+	// Every port method is the home of some wire method.
+	for name, typ := range portTypes {
+		for i := 0; i < typ.NumMethod(); i++ {
+			if !used[name+"."+typ.Method(i).Name] {
+				t.Errorf("%s.%s serves no wire method", name, typ.Method(i).Name)
+			}
+		}
+	}
+}
+
+func TestCLIOnlyMethodsListOnlyCLI(t *testing.T) {
+	homes := contracts.MethodHomes()
+	for _, m := range []string{
+		protocol.MethodProfileList, protocol.MethodProfileUse, protocol.MethodPluginList,
+		protocol.MethodPluginLog, protocol.MethodConfigReload, protocol.MethodStateClear,
+		protocol.MethodSecretsSet, protocol.MethodSecretsGrant, protocol.MethodSecretsRevoke,
+		protocol.MethodSecretsReveal, protocol.MethodThemeCheck,
+		protocol.MethodSettingsSchema, protocol.MethodSettingsValidate,
+	} {
+		k := homes[m].Kinds
+		if len(k) != 1 || k[0] != contracts.CallerCLI {
+			t.Errorf("%s kinds = %v, want [CLI]", m, k)
+		}
 	}
 }
