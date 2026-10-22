@@ -114,6 +114,39 @@ func keyringAbsent(err error) bool {
 	return false
 }
 
+// ensureNoSealedNamespaces fails closed before generating a replacement key.
+// Backend absence can mean a provider has not started yet, not an empty store.
+func (s *Store) ensureNoSealedNamespaces() error {
+	reason := ""
+	dir, err := pathInside(s.paths.Data, []string{"secrets"}, false)
+	if err == nil {
+		err = privateExistingDir(dir)
+	}
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		reason = "cannot verify sealed namespaces; no new identity was created"
+	} else {
+		entries, readErr := os.ReadDir(dir)
+		if readErr != nil {
+			reason = "cannot inspect sealed namespaces; no new identity was created"
+		} else {
+			for _, entry := range entries {
+				if strings.HasSuffix(entry.Name(), ".age") {
+					reason = "sealed namespaces already exist; restore the keyring or reset-secrets before creating an identity"
+					break
+				}
+			}
+		}
+	}
+	if reason == "" {
+		return nil
+	}
+	s.diagnostic(Problem{Code: "unavailable", Message: reason}, "")
+	return fmt.Errorf("%w: %s", ErrUnavailable, reason)
+}
+
 func (s *Store) identity(create bool) (Sealer, error) {
 	if s.sealer != nil {
 		return s.sealer, nil
@@ -153,6 +186,9 @@ func (s *Store) identity(create bool) (Sealer, error) {
 			}
 			if !create {
 				return nil, ErrNotFound
+			}
+			if err = s.ensureNoSealedNamespaces(); err != nil {
+				return nil, err
 			}
 			identity, err = age.GenerateX25519Identity()
 			if err != nil {

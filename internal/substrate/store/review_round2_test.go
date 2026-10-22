@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -156,5 +158,60 @@ func TestPremergePatchLockIsHidden(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(s.paths.Config, "config.json.lock")); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatal("visible lock remains", err)
+	}
+}
+
+// A late-starting Secret Service is not permission to shadow an existing key.
+func TestPremergeSealedNamespacesPreventNewIdentity(t *testing.T) {
+	e := fixture(t)
+	ring := &memoryKeyring{}
+	first := e.open(t, "one", true, func(o *Options) { o.Keyring = ring })
+	original, _ := first.Secrets("old")
+	if err := original.Put("token", []byte("original")); err != nil {
+		t.Fatal(err)
+	}
+	sealedPath := filepath.Join(first.paths.Data, "secrets", "old.age")
+	before, err := os.ReadFile(sealedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = first.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	absent := &classifiedKeyring{getErr: dbus.NewError("org.freedesktop.DBus.Error.ServiceUnknown", nil)}
+	outage := e.open(t, "two", true, func(o *Options) { o.Keyring = absent })
+	fresh, _ := outage.Secrets("new")
+	if err = fresh.Put("token", []byte("new")); !errors.Is(err, ErrUnavailable) {
+		t.Errorf("late provider must fail unavailable, got %v", err)
+	}
+	if absent.sets != 0 {
+		t.Error("attempted to replace an identity while sealed files exist")
+	}
+	if _, err = os.Stat(filepath.Join(outage.paths.Data, "keys", "identity.txt")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("minted shadow fallback: %v", err)
+	}
+	after, err := os.ReadFile(sealedPath)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("existing sealed bytes changed", err)
+	}
+	outage.mu.Lock()
+	diagnosed := false
+	for _, problem := range outage.health.Diagnostics {
+		if problem.Code == "unavailable" && strings.Contains(problem.Message, "sealed namespaces") {
+			diagnosed = true
+		}
+	}
+	outage.mu.Unlock()
+	if !diagnosed {
+		t.Error("missing diagnostic explaining sealed-namespace guard")
+	}
+	if err = outage.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	recovered := e.open(t, "three", true, func(o *Options) { o.Keyring = ring })
+	old, _ := recovered.Secrets("old")
+	value, ok, err := old.Get("token")
+	if err != nil || !ok || string(value) != "original" {
+		t.Fatal("existing secret unreadable when provider recovered", err)
 	}
 }

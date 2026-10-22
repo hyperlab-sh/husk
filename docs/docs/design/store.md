@@ -301,8 +301,15 @@ type SecretDoc interface {
   identity or `identity.txt`: a transient outage must not shadow an existing
   key and strand its encrypted namespaces. An unclassified launcher exit error
   is uncertainty, not proof of absence.
-- If that definite absence permits creation but the subsequent keyring write
-  fails, the new identity falls back to
+- Before generating any new identity, Store checks for existing `secrets/*.age`
+  namespaces. Any sealed namespace means an identity already exists somewhere:
+  even `ServiceUnknown` may be a provider that has not started yet. Creation is
+  refused with `unavailable` and a diagnostic explaining the sealed namespaces;
+  neither the keyring identity nor `identity.txt` is replaced. An unreadable or
+  unsafe namespace directory also fails closed. Restore the provider/key, or
+  explicitly reset secrets before creating a different identity.
+- If definite absence and no sealed namespaces permit creation but the subsequent
+  keyring write fails, the new identity falls back to
   `$XDG_DATA_HOME/husk/keys/identity.txt`, mode 0600. An existing private fallback
   identity raises `keyring_fallback` at every `Open`, before any secret access;
   key material remains lazily loaded.
@@ -648,7 +655,9 @@ files or discards the internal diagnostic history.
    identity, supported keyring platform, Secret Service or session bus, followed
    by a failed keyring write. This supports headless Linux without treating a
    locked collection, timeout, NoReply or I/O failure as absence. Uncertain
-   lookups never replace a possibly existing identity. Existing fallback use is
+   lookups never replace a possibly existing identity. Existing sealed namespaces
+   also forbid creating a new identity, even when the provider reports absence.
+   Existing fallback use is
    diagnosed at Open, without waiting for the first secret request.
 5. Should the instance-layer flag mapping (`husk.layout.rail`, `husk.input.hold_alt`)
    keep `--rail` and `--hold-alt` at all, given they exist for frame dumps?
