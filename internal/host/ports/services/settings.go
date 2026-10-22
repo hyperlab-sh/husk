@@ -108,7 +108,7 @@ func (p Settings) dryInput(ctx context.Context, hc host.Caller) (services.Reload
 		return services.ReloadInput{}, coded(c.RequireUser(sc))
 	}
 	in, err := p.Inputs.Inputs(ctx, sc)
-	return in, coded(err)
+	return in, codedInput(err)
 }
 
 // narrowUndeclared maps the service's denied/undeclared_setting refusal to

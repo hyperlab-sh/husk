@@ -34,7 +34,7 @@ func (p Theme) Check(ctx context.Context, hc host.Caller) (host.ThemeCheckResult
 	}
 	in, err := p.Inputs.Inputs(ctx, sc)
 	if err != nil {
-		return host.ThemeCheckResult{}, coded(err)
+		return host.ThemeCheckResult{}, codedInput(err)
 	}
 	report, err := p.Svc.Check(ctx, sc, in)
 	if err != nil {
