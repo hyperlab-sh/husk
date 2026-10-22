@@ -53,9 +53,11 @@ Rules:
 
 ### Runtime directory
 
-```
-$XDG_RUNTIME_DIR/husk/        (when XDG_RUNTIME_DIR is set and usable)
-/tmp/husk-<uid>/              (otherwise; short on purpose, see sun_path limit)
+```text
+$XDG_RUNTIME_DIR/husk/        (when XDG_RUNTIME_DIR is set; if it fails the
+                              private-dir check, that is an error — no fallback)
+/tmp/husk-<uid>/              (only when XDG_RUNTIME_DIR is empty; short on
+                              purpose, see sun_path limit)
     <id>.sock                 the instance's listening socket, mode 0600
     <id>.json                 the registration entry, mode 0600
 ```

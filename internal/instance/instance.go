@@ -146,12 +146,15 @@ func CheckSocketPath(path string) error {
 }
 
 // RuntimeDir resolves and verifies the shared runtime directory:
-// $XDG_RUNTIME_DIR/husk/ when XDG_RUNTIME_DIR is set and usable, otherwise
+// $XDG_RUNTIME_DIR/husk/ when XDG_RUNTIME_DIR is set, otherwise
 // /tmp/husk-<uid>/ (short on purpose, so socket paths fit sun_path). The
 // directory is created with mode 0700 and shared by all instances of the
-// user; it is never removed. It is used only if it is a real directory (not
-// a symlink) owned by the current uid with no group or world bits; an
-// unusable candidate falls back to the other location, and a fallback that
+// user; it is never removed. It is used only if it is a real directory
+// (not a symlink) owned by the current uid with no group or world bits.
+// A set-but-unusable XDG_RUNTIME_DIR is an error, never a silent fallback:
+// the user pointed the session at a runtime root, and dropping to /tmp
+// would strand the instance where other sessions cannot see it. The /tmp
+// path is used only when XDG_RUNTIME_DIR is empty, and a fallback that
 // fails the same check is an error.
 func RuntimeDir() (string, error) {
 	return runtimeDir(os.Getenv("XDG_RUNTIME_DIR"), os.Getuid())
@@ -160,9 +163,10 @@ func RuntimeDir() (string, error) {
 func runtimeDir(xdg string, uid int) (string, error) {
 	if xdg != "" {
 		dir := filepath.Join(xdg, "husk")
-		if err := ensureDir(dir, uid); err == nil {
-			return dir, nil
+		if err := ensureDir(dir, uid); err != nil {
+			return "", fmt.Errorf("runtime dir: %w", err)
 		}
+		return dir, nil
 	}
 	dir := fmt.Sprintf("/tmp/husk-%d", uid)
 	if err := ensureDir(dir, uid); err != nil {

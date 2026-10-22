@@ -168,7 +168,11 @@ func TestRuntimeDirCreatesMissingXDGParents(t *testing.T) {
 	assertPrivateDir(t, dir)
 }
 
-func TestRuntimeDirUnsafeXDGFallsBackToTemp(t *testing.T) {
+// TestRuntimeDirUnsafeXDGIsRefused: a set-but-unusable XDG_RUNTIME_DIR is
+// fatal, never a silent drop to /tmp — the user pointed the session at a
+// runtime root, and falling back would strand the instance where other
+// sessions cannot see it.
+func TestRuntimeDirUnsafeXDGIsRefused(t *testing.T) {
 	cases := []struct {
 		label string
 		plant func(base string) error
@@ -180,19 +184,17 @@ func TestRuntimeDirUnsafeXDGFallsBackToTemp(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.label, func(t *testing.T) {
-			cleanupFakeRuntime(t)
 			base := t.TempDir()
 			if err := tc.plant(base); err != nil {
 				t.Fatal(err)
 			}
 			dir, err := runtimeDir(base, os.Getuid())
-			if err != nil {
-				t.Fatalf("runtimeDir: %v", err)
+			if err == nil {
+				t.Fatalf("runtimeDir = %q, want refusal", dir)
 			}
-			if dir != fallbackDir {
-				t.Fatalf("runtimeDir = %q, want the fallback %q", dir, fallbackDir)
+			if !strings.Contains(err.Error(), "runtime dir") {
+				t.Fatalf("error should name the directory, got: %v", err)
 			}
-			assertPrivateDir(t, dir)
 		})
 	}
 }
