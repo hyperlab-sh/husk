@@ -185,7 +185,7 @@ func TestPaletteColumnsStableWhileScrolling(t *testing.T) {
 		press(m, "down")
 	}
 	before := titleCol()
-	press(m, "up") // wraps to the top...
+	// walk up past the top so the window wraps to the bottom
 	for m.paletteCursor != len(cmds)-1 {
 		press(m, "up")
 	}

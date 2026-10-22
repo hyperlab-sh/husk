@@ -98,11 +98,7 @@ func (m *WorkbenchModel) dropVanishedSides() {
 	// from its first frame. The slot we left is remembered and restored when
 	// its column returns, unless focus has moved on since.
 	_, hadFocused := m.slotRects[m.focusedSlot]
-	// Under a stage placement the centre surface is the workspace stage.
-	centre := protocol.SurfaceMainStage
-	if m.activePlacement == contracts.PlacementStage {
-		centre = protocol.SurfaceWorkspaceStage
-	}
+	centre := m.centreSlot()
 	switch m.focusedSlot {
 	case protocol.SurfaceSidebarNavigation, protocol.SurfaceSidebarList, protocol.SurfaceSidebarFooter:
 		if !left && hadFocused {
@@ -113,11 +109,28 @@ func (m *WorkbenchModel) dropVanishedSides() {
 			m.focusFallback, m.focusedSlot = m.focusedSlot, centre
 		}
 	}
-	if fb := m.focusFallback; fb != "" && m.focusedSlot == centre {
-		if fb == protocol.SurfaceSidePanel && right || fb != protocol.SurfaceSidePanel && left {
-			m.focusedSlot, m.focusFallback = fb, ""
-		}
+}
+
+// centreSlot is the surface focus falls back to when a side column goes.
+func (m *WorkbenchModel) centreSlot() protocol.SurfaceID {
+	if m.activePlacement == contracts.PlacementStage {
+		return protocol.SurfaceWorkspaceStage
 	}
+	return protocol.SurfaceMainStage
+}
+
+// restoreFocusFallback gives focus back to the slot it was pushed off, once
+// that slot is actually drawn (it has a rect in the freshly built layout) and
+// focus has not moved on. A stage placement never draws the side panel.
+func (m *WorkbenchModel) restoreFocusFallback() {
+	fb := m.focusFallback
+	if fb == "" || m.focusedSlot != m.centreSlot() {
+		return
+	}
+	if _, drawn := m.slotRects[fb]; !drawn {
+		return
+	}
+	m.focusedSlot, m.focusFallback = fb, ""
 }
 
 func (m *WorkbenchModel) recomputeLayout() {
@@ -125,6 +138,12 @@ func (m *WorkbenchModel) recomputeLayout() {
 		return
 	}
 	m.dropVanishedSides()
+	m.placeSlots()
+	m.restoreFocusFallback()
+}
+
+// placeSlots rebuilds slotRects and the other layout rects.
+func (m *WorkbenchModel) placeSlots() {
 	totalW := max(minTermWidth, m.width)
 	bodyH := max(20, m.height-2)
 

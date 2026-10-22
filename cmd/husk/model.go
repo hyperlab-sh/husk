@@ -990,10 +990,10 @@ func (m *WorkbenchModel) hostActionTable() map[string]contracts.HostActionHandle
 			m.activePlacement = ""
 			if m.stageMode == "plugin" {
 				m.stageMode = "hotspots"
-				m.focusedSlot = protocol.SurfaceMainStage
+				m.setFocus(protocol.SurfaceMainStage)
 			} else {
 				m.stageMode = "plugin"
-				m.focusedSlot = protocol.SurfaceSidebarList
+				m.setFocus(protocol.SurfaceSidebarList)
 			}
 			m.recomputeLayout()
 		}),
@@ -1065,11 +1065,10 @@ func (m *WorkbenchModel) focusNext() {
 	if m.activePlacement == contracts.PlacementStage {
 		order = []protocol.SurfaceID{protocol.SurfaceSidebarList, protocol.SurfaceWorkspaceStage}
 	}
+	// A focused slot outside the order (a sidebar header or footer, say)
+	// starts the scan before the first entry.
 	cur := slices.Index(order, m.focusedSlot)
-	if cur < 0 {
-		return
-	}
-	for step := 1; step < len(order); step++ {
+	for step := 1; step <= len(order); step++ {
 		next := order[(cur+step)%len(order)]
 		if _, shown := m.slotRects[next]; shown {
 			m.setFocus(next)
@@ -1097,7 +1096,7 @@ func (m *WorkbenchModel) activateHomeWorkbench() {
 	m.activePlacement = ""
 	m.closeModal()
 	m.stageMode = "plugin"
-	m.focusedSlot = protocol.SurfaceSidebarList
+	m.setFocus(protocol.SurfaceSidebarList)
 	m.recomputeLayout()
 }
 
@@ -1126,7 +1125,7 @@ func (m *WorkbenchModel) activateRailItem(ri contracts.RailItem) {
 		m.closeModal()
 		m.activeRailID = ri.ID
 		m.activePlacement = contracts.PlacementFullCanvas
-		m.focusedSlot = protocol.SurfaceFullCanvas
+		m.setFocus(protocol.SurfaceFullCanvas)
 		m.recomputeLayout()
 
 	case contracts.PlacementStage:
@@ -1138,7 +1137,7 @@ func (m *WorkbenchModel) activateRailItem(ri contracts.RailItem) {
 		m.activeRailID = ri.ID
 		m.activePlacement = contracts.PlacementStage
 		m.showSidebar = true
-		m.focusedSlot = protocol.SurfaceWorkspaceStage
+		m.setFocus(protocol.SurfaceWorkspaceStage)
 		m.recomputeLayout()
 	}
 }
