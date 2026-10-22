@@ -444,6 +444,8 @@ No per-request timeout lives in the Server. A request waits as long as its handl
 
 ## Level 2: Migration from today
 
+Host contracts. `internal/host/contracts` holds the consumer-defined Go interfaces the host's adapters and composition root code against: the adapter `Handler`, `Caller` and `Notifier` (same shapes as the Server's, converted by a one-line adapter), one owner port per method family (`StatePort`, `CallsPort`, `SessionPort`, `SettingsPort`, `SecretsPort`, `ProfilePort`, `ThemePort`, `KeybindingPort`), the launch seams for the steps above (`PodRegistry`, `CatalogDeclarer`, `Reloader`, `SliceRegistrar`, `WrapperStarter`), the `Limiter` for the 20 calls per second per plugin rule, and the `Config` and `Host` of the composition root. Ports return errors that carry a wire code (`CodedError`); adapters map by code and never read error text. The package imports neither Services nor the Server.
+
 | File | Fate |
 | :--- | :--- |
 | `cmd/husk/transport.go` | Accept loop moves to `pods/server`. `serveStreamOrigin`, `streamOrigin`, the `hello` gate and `ConnectedPlugin` registration are removed: there is no hello and no plugin stream on the socket. `post` and `hostNoticeMsg` stay in `cmd/husk` as the loop's posting function the Server is configured with. |
