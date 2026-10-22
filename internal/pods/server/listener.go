@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 
 	"github.com/hyperlab-sh/husk/internal/instance"
@@ -27,6 +28,7 @@ type SocketServer struct {
 	closeErr                      error
 	nextID                        uint64
 	wg                            sync.WaitGroup
+	diagnosticPosting             atomic.Bool
 	peer                          func(*net.UnixConn) (uint32, error)
 	probe                         func(string) error
 	recoveryLock                  func(string) (func() error, error)
