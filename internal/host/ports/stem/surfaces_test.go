@@ -20,7 +20,7 @@ func newPort(t *testing.T) (*SurfacePort, *state.State) {
 	if err != nil {
 		t.Fatalf("register occupants: %v", err)
 	}
-	if _, err := occ.Set(json.RawMessage(`{"main-stage":"alpha.files"}`)); err != nil {
+	if _, err := occ.Set(json.RawMessage(`{"main-stage":{"surface":"main-stage","plugin":"alpha.files"}}`)); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 	eng, err := surfaces.New(st, surfaces.Options{})

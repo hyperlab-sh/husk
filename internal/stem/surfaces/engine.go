@@ -99,8 +99,8 @@ type Toast struct {
 // pluginDecl caches one plugin's decoded declaration slices. A nil map means
 // that declaration slice is not registered.
 type pluginDecl struct {
-	claims        map[string]string
-	contributions map[string][]Contribution
+	claims        Occupants
+	contributions Contributions
 }
 
 // watcher is one registered notification target. plugin is the watcher's
@@ -164,7 +164,7 @@ func New(st *state.State, opts Options) (*Engine, error) {
 		Namespace: state.SurfacesNamespace,
 		Owner:     state.SurfacesOwner,
 		Scope:     state.ScopeInstance,
-	}, Surfaces{Occupants: map[string]string{}, Contributions: map[string][]Entry{}})
+	}, Surfaces{Occupants: Occupants{}, Contributions: Contributions{}})
 	if err != nil {
 		return nil, err
 	}
@@ -258,10 +258,10 @@ func (e *Engine) Flush() {
 
 	res := e.slice.Get()
 	if res.Occupants == nil {
-		res.Occupants = map[string]string{}
+		res.Occupants = Occupants{}
 	}
 	if res.Contributions == nil {
-		res.Contributions = map[string][]Entry{}
+		res.Contributions = Contributions{}
 	}
 	changedSlots := map[string]bool{}
 
@@ -289,37 +289,36 @@ func (e *Engine) Flush() {
 	// Watchers are notified outside State's flush callback: the Notifier is
 	// a queued socket write and must not block the loop.
 	for slot := range changedSlots {
-		e.notifySlot(slot, res, next)
+		e.notifySlot(slot, res)
 	}
 }
 
-// resolvePlugin folds one plugin's declaration change into res. old or new
-// may be nil: nil old is a first arrival, nil new is a full removal.
+// resolvePlugin folds one plugin's declaration change into res. old or cur
+// may be nil: nil old is a first arrival, nil cur is a full removal.
 func (e *Engine) resolvePlugin(plugin string, old, cur *pluginDecl, res *Surfaces, changedSlots map[string]bool) {
-	oldClaims := map[string]string{}
-	if old != nil && old.claims != nil {
+	var oldClaims, newClaims Occupants
+	if old != nil {
 		oldClaims = old.claims
 	}
-	newClaims := map[string]string{}
-	if cur != nil && cur.claims != nil {
+	if cur != nil {
 		newClaims = cur.claims
 	}
 
 	// New claims, surface-sorted so one flush resolves deterministically.
-	fresh := make([]string, 0, len(newClaims))
+	fresh := make([]protocol.SurfaceID, 0, len(newClaims))
 	for surface := range newClaims {
 		if _, had := oldClaims[surface]; !had {
 			fresh = append(fresh, surface)
 		}
 	}
-	sort.Strings(fresh)
+	sort.Slice(fresh, func(i, j int) bool { return fresh[i] < fresh[j] })
 	for _, surface := range fresh {
-		if newClaims[surface] != plugin {
+		if occ := newClaims[surface]; occ.Plugin != plugin {
 			continue // a claim naming another plugin is not this plugin's
 		}
-		switch occupant := res.Occupants[surface]; occupant {
+		switch occupant := res.Occupants[surface].Plugin; occupant {
 		case "":
-			res.Occupants[surface] = plugin // first claim wins
+			res.Occupants[surface] = Occupant{Surface: surface, Plugin: plugin} // first claim wins
 		case plugin:
 			// Still ours from a release the Pod has not re-declared; no-op.
 		default:
@@ -333,19 +332,22 @@ func (e *Engine) resolvePlugin(plugin string, old, cur *pluginDecl, res *Surface
 		if _, still := newClaims[surface]; still {
 			continue
 		}
-		if res.Occupants[surface] == plugin {
+		if res.Occupants[surface].Plugin == plugin {
 			delete(res.Occupants, surface)
 		}
 	}
 
-	// Contributions: upsert in place, new entries append in arrival order,
-	// gone entries drop.
-	oldSlots := map[string][]Contribution{}
-	if old != nil && old.contributions != nil {
+	// Contributions (D49): the engine records the per-slot order. An entry
+	// keeps its first-observed position across ticks; a re-declared entry
+	// updates its content in place; an entry gone from the declaration
+	// leaves the sequence, and observing it again appends anew. New entries
+	// of one flush append in this pass's plugin order (namespace order),
+	// each group in the plugin's declared array order.
+	var oldSlots, newSlots Contributions
+	if old != nil {
 		oldSlots = old.contributions
 	}
-	newSlots := map[string][]Contribution{}
-	if cur != nil && cur.contributions != nil {
+	if cur != nil {
 		newSlots = cur.contributions
 	}
 
@@ -363,14 +365,13 @@ func (e *Engine) resolvePlugin(plugin string, old, cur *pluginDecl, res *Surface
 	sort.Strings(slots)
 
 	for _, slot := range slots {
-		oldEntries := indexByID(oldSlots[slot], plugin)
 		newList := newSlots[slot]
 		changed := false
 
-		// Remove entries gone from the declaration.
+		// Entries gone from the declaration leave the sequence.
 		kept := res.Contributions[slot][:0:0]
 		for _, entry := range res.Contributions[slot] {
-			if entry.Plugin == plugin && !hasID(newList, plugin, entry.ID) {
+			if entry.Plugin == plugin && !hasID(newList, entry.ID) {
 				changed = true
 				continue
 			}
@@ -378,19 +379,25 @@ func (e *Engine) resolvePlugin(plugin string, old, cur *pluginDecl, res *Surface
 		}
 		res.Contributions[slot] = kept
 
-		// Upsert the declared entries in declaration list order.
+		// Declared entries in array order: a known id updates the stored
+		// entry in place, a newly observed id appends.
 		for _, entry := range newList {
-			if entry.Plugin != plugin {
-				continue
-			}
-			if old, exists := oldEntries[entry.ID]; exists {
-				if old.Label != entry.Label {
-					changed = true // content replaced in place
+			found := false
+			for i := range res.Contributions[slot] {
+				stored := &res.Contributions[slot][i]
+				if stored.Plugin == plugin && stored.ID == entry.ID {
+					if *stored != entry {
+						*stored = entry // replaced in place
+						changed = true
+					}
+					found = true
+					break
 				}
-				continue
 			}
-			res.Contributions[slot] = append(res.Contributions[slot], Entry{Plugin: plugin, ID: entry.ID})
-			changed = true
+			if !found {
+				res.Contributions[slot] = append(res.Contributions[slot], entry)
+				changed = true
+			}
 		}
 
 		if len(res.Contributions[slot]) == 0 {
@@ -408,20 +415,10 @@ func (e *Engine) resolvePlugin(plugin string, old, cur *pluginDecl, res *Surface
 	}
 }
 
-// indexByID maps the ids of entries owned by plugin, for quick membership.
-func indexByID(entries []Contribution, plugin string) map[string]Contribution {
-	ids := map[string]Contribution{}
+// hasID reports whether id is among entries.
+func hasID(entries []Contribution, id string) bool {
 	for _, entry := range entries {
-		if entry.Plugin == plugin {
-			ids[entry.ID] = entry
-		}
-	}
-	return ids
-}
-
-func hasID(entries []Contribution, plugin, id string) bool {
-	for _, entry := range entries {
-		if entry.Plugin == plugin && entry.ID == id {
+		if entry.ID == id {
 			return true
 		}
 	}
@@ -430,26 +427,19 @@ func hasID(entries []Contribution, plugin, id string) bool {
 
 // notifySlot pushes one slot.contributions notification, carrying the slot's
 // resolved order with each entry's declared content, to its watchers.
-func (e *Engine) notifySlot(slot string, res Surfaces, decls map[string]*pluginDecl) {
+func (e *Engine) notifySlot(slot string, res Surfaces) {
 	set := e.slotWatchers[slot]
 	if len(set) == 0 {
 		return
 	}
 	contribs := make([]protocol.SlotContribution, 0, len(res.Contributions[slot]))
 	for _, entry := range res.Contributions[slot] {
-		c := protocol.SlotContribution{
-			SlotContributeParams: protocol.SlotContributeParams{SlotID: slot, ID: entry.ID},
-			PluginID:             entry.Plugin,
-		}
-		if d := decls[entry.Plugin]; d != nil {
-			for _, declared := range d.contributions[slot] {
-				if declared.ID == entry.ID && declared.Plugin == entry.Plugin {
-					c.Content = declared.Label
-					break
-				}
-			}
-		}
-		contribs = append(contribs, c)
+		contribs = append(contribs, protocol.SlotContribution{
+			SlotContributeParams: protocol.SlotContributeParams{
+				SlotID: slot, ID: entry.ID, Content: entry.Label, OnClick: entry.OnClick,
+			},
+			PluginID: entry.Plugin,
+		})
 	}
 	msg, err := notification(protocol.MethodSlotContributions, protocol.SlotContributionsParams{
 		SlotID:        slot,
@@ -523,7 +513,7 @@ func (e *Engine) Resized(sizes []protocol.SurfaceSize) {
 	res := e.slice.Get()
 	byPlugin := map[string][]protocol.SurfaceSize{}
 	for _, size := range sizes {
-		if occupant := res.Occupants[string(size.Surface)]; occupant != "" {
+		if occupant := res.Occupants[size.Surface].Plugin; occupant != "" {
 			byPlugin[occupant] = append(byPlugin[occupant], size)
 		}
 	}
@@ -553,7 +543,7 @@ func (e *Engine) SurfaceUpdate(plugin string, p protocol.SurfaceUpdateParams) er
 	if !p.Surface.Valid() {
 		return errf(protocol.CodeInvalidParams, "surface %q is not a host layout surface", p.Surface)
 	}
-	if occupant := e.slice.Get().Occupants[string(p.Surface)]; occupant != plugin {
+	if occupant := e.slice.Get().Occupants[p.Surface].Plugin; occupant != plugin {
 		if occupant == "" {
 			return errf(protocol.CodeDenied, "surface %q is unoccupied; %s has no claim on it", p.Surface, plugin)
 		}
@@ -584,14 +574,14 @@ func (e *Engine) CloseSurface(surface protocol.SurfaceID) error {
 }
 
 func (e *Engine) release(surface protocol.SurfaceID, only string) error {
-	occupant := e.slice.Get().Occupants[string(surface)]
+	occupant := e.slice.Get().Occupants[surface].Plugin
 	if only != "" && occupant != only {
 		if occupant == "" {
 			return errf(protocol.CodeDenied, "surface %q is unoccupied", surface)
 		}
 		return errf(protocol.CodeDenied, "surface %q is occupied by %s", surface, occupant)
 	}
-	return e.slice.Update(func(v *Surfaces) { delete(v.Occupants, string(surface)) })
+	return e.slice.Update(func(v *Surfaces) { delete(v.Occupants, surface) })
 }
 
 // SlotContribute serves slot.contribute: it validates the namespace rules —
@@ -621,7 +611,9 @@ func (e *Engine) SlotContribute(plugin string, p protocol.SlotContributeParams) 
 	if publisher == plugin {
 		return errf(protocol.CodeDenied, "contributions must target another publisher")
 	}
-	return e.decls.Contribute(plugin, p.SlotID, Contribution{ID: p.ID, Plugin: plugin, Label: p.Content})
+	return e.decls.Contribute(plugin, p.SlotID, Contribution{
+		Slot: p.SlotID, ID: p.ID, Plugin: plugin, Label: p.Content, OnClick: p.OnClick,
+	})
 }
 
 // ToastShow serves toast.show from a plugin or the CLI (plugin "" attributes
