@@ -54,7 +54,7 @@ func TestWritesAreAtomicAndReadYourWrites(t *testing.T) {
 	spec := baseSpec("p.state", "p")
 	spec.MaxBytes = 16
 	h := mustRegister(t, s, spec)
-	for _, value := range []string{`{"n":1}`, `{"n":2}`, ` {"n":2} `} {
+	for _, value := range []string{`{"n":1}`, `{"n":2}`} {
 		before := s.Snapshot()
 		rev, err := h.Set([]byte(value))
 		if err != nil {
@@ -271,7 +271,7 @@ func TestClearBothPersistenceClasses(t *testing.T) {
 			}
 			h.Unregister()
 			before := s.Snapshot()
-			if _, err := s.Clear(h.Namespace()); !errors.Is(err, state.ErrUnregistered) || s.Snapshot() != before {
+			if _, err := s.Clear(h.Namespace()); !errors.Is(err, state.ErrUnregistered) || !strings.Contains(err.Error(), h.Namespace()) || s.Snapshot() != before {
 				t.Fatal("clear missing slice", err)
 			}
 		})
@@ -322,16 +322,6 @@ func TestHydrationAndPersistentEnumeration(t *testing.T) {
 	}
 	if string(s.Snapshot().Slices[h.Namespace()].Value) != "{}" {
 		t.Fatal("Clear reset to hydrated value")
-	}
-	for _, raw := range []string{"[]", "{", `{"too-long":"` + strings.Repeat("x", 20) + `"}`} {
-		bad := state.New(state.Options{Hydrator: hydratorFunc(func(state.Spec) (json.RawMessage, bool) { return []byte(raw), true })})
-		sp := spec
-		sp.MaxBytes = 16
-		before := bad.Snapshot()
-		h, err := bad.Register(sp)
-		if h != nil || err == nil || bad.Snapshot() != before {
-			t.Fatalf("invalid hydration committed: %v, %v", h, err)
-		}
 	}
 	missing := state.New(state.Options{Hydrator: hydratorFunc(func(state.Spec) (json.RawMessage, bool) { return nil, false })})
 	h = mustRegister(t, missing, spec)

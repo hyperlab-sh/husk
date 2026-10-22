@@ -12,15 +12,28 @@ func copyJSON(value json.RawMessage) json.RawMessage {
 	return bytes.Clone(value)
 }
 
-func validateValue(value json.RawMessage, maxBytes int) error {
+// normalizeValue uses one stable encoding for initial, hydrated and written
+// values: compact JSON with recursively sorted object keys. UseNumber preserves
+// number lexemes without float64 rounding, including integers above 2^53.
+func normalizeValue(value json.RawMessage, maxBytes int) (json.RawMessage, error) {
 	trimmed := bytes.TrimSpace(value)
 	if len(trimmed) == 0 || trimmed[0] != '{' || !json.Valid(value) {
-		return ErrInvalidValue
+		return nil, ErrInvalidValue
 	}
-	if len(value) > maxBytes {
-		return fmt.Errorf("%w: limit %d bytes", ErrTooLarge, maxBytes)
+	decoder := json.NewDecoder(bytes.NewReader(value))
+	decoder.UseNumber()
+	object := make(map[string]any)
+	if err := decoder.Decode(&object); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidValue, err)
 	}
-	return nil
+	normalized, err := json.Marshal(object)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidValue, err)
+	}
+	if len(normalized) > maxBytes {
+		return nil, fmt.Errorf("%w: limit %d bytes", ErrTooLarge, maxBytes)
+	}
+	return normalized, nil
 }
 
 // mergePatch implements RFC 7396 without decoding JSON numbers as floats.

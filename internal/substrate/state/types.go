@@ -42,34 +42,52 @@ const (
 
 // Retention is the persistence policy; it is zero for non-persistent slices.
 type Retention struct {
+	// Policy selects Store's retention behavior for persisted copies.
 	Policy Policy
-	N      int           // KeepLastN only: 2..20.
-	TTL    time.Duration // TTL only: 1m..8760h.
+	// N is the generation count for KeepLastN only: 2..20.
+	N int
+	// TTL is the expiration duration for TTL only: 1m..8760h.
+	TTL time.Duration
 }
 
 // Spec is a slice's immutable registration. Initial must be a JSON object;
 // nil means {}. MaxBytes zero selects the class cap; a positive value lowers it.
 type Spec struct {
-	Namespace  string
-	Owner      string
-	Scope      Scope
+	// Namespace is <owner>.<name>, with the final dot separating the name.
+	Namespace string
+	// Owner is husk for core modules, otherwise a plugin or workspace owner id.
+	Owner string
+	// Scope determines how Store shares or isolates persisted values.
+	Scope Scope
+	// Persistent asks Store to hydrate and persist the slice.
 	Persistent bool
-	Retention  Retention
-	MaxBytes   int
-	Initial    json.RawMessage
+	// Retention is set if and only if Persistent is true.
+	Retention Retention
+	// MaxBytes is the normalized value cap; zero selects the class default.
+	// A registration may lower, but never raise, the class default.
+	MaxBytes int
+	// Initial is a JSON object; nil means {}. State stores a normalized copy.
+	Initial json.RawMessage
 }
 
 // Descriptor is a slice's metadata as readers see it.
 type Descriptor struct {
+	// Spec is the immutable, normalized registration metadata.
 	Spec
+	// Revision starts at 1 and increases per committed write; tombstones keep
+	// re-registrations above their predecessor within this process.
 	Revision uint64
-	Bytes    int
+	// Bytes is the encoded size of the normalized Value.
+	Bytes int
+	// Hydrated reports that registration started from a persisted value.
 	Hydrated bool
 }
 
 // Entry is one slice in a snapshot. Value and Spec.Initial are read-only.
 type Entry struct {
+	// Descriptor is the slice metadata at this snapshot's revision.
 	Descriptor
+	// Value is a normalized JSON object, never mutated after publication.
 	Value json.RawMessage
 }
 
@@ -77,22 +95,29 @@ type Entry struct {
 // its entries' byte slices may be modified. Retaining a snapshot is safe: State
 // never mutates it, even after subsequent writes or unregistration.
 type Snapshot struct {
-	Seq    uint64
+	// Seq increments on every committed write or registration/unregistration.
+	Seq uint64
+	// Slices is the full read-only namespace-to-entry map at Seq.
 	Slices map[string]Entry
 }
 
 // Change describes one slice's latest change in an Update call.
 type Change struct {
+	// Namespace is the changed slice's registered name.
 	Namespace string
-	Owner     string
-	Revision  uint64
-	Removed   bool
+	// Owner is the capability owner of the changed slice.
+	Owner string
+	// Revision is the latest value revision in this Update call.
+	Revision uint64
+	// Removed reports that the slice was unregistered this tick.
+	Removed bool
 }
 
 // Hydrator supplies persisted values inside Register. It must be a preloaded
 // in-memory lookup: no blocking or I/O is allowed on the loop. It is called only
 // for persistent slices, including user-scope slices in anonymous instances.
 type Hydrator interface {
+	// Hydrate returns the preloaded persisted value for spec, if present.
 	Hydrate(spec Spec) (value json.RawMessage, ok bool)
 }
 
@@ -103,8 +128,12 @@ type Listener func(changes []Change, snap *Snapshot)
 
 // Options supplies preloaded hydration and the distribution's workspace owner.
 type Options struct {
-	Hydrator       Hydrator
-	WorkspaceOwner string // Empty permits only husk to register workspace scope.
+	// Hydrator supplies preloaded saved values; nil disables hydration.
+	// Anonymous instances still hydrate user scope when one is provided.
+	Hydrator Hydrator
+	// WorkspaceOwner is named by the distribution configuration; empty
+	// permits only husk to register workspace scope.
+	WorkspaceOwner string
 }
 
 var (

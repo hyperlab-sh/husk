@@ -22,7 +22,8 @@ func Register[T any](s *State, spec Spec, initial T) (*Slice[T], error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: initial: %v", ErrInvalidValue, err)
 	}
-	if err := validateValue(value, HardMaxBytes); err != nil {
+	value, err = normalizeValue(value, HardMaxBytes)
+	if err != nil {
 		return nil, err
 	}
 	if _, err := decode[T](value); err != nil {
