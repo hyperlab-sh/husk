@@ -448,6 +448,13 @@ entry — including every entry of a removed slot owner, as `removePlugin`
 filters contributions today — leaves the sequence. The engine itself is the
 stem-surfaces unit's to build; the slice and its shape are fixed here.
 
+Release travels the same narrow paths for every surface: the occupant's
+`surface.close`, the host's force-release through the same path, or the
+owner's declarations going away. A refused claim stays recorded in the
+declaration, the occupant is unchanged, and the refusal is counted; a
+returning plugin's re-registered declarations resolve again, first claim
+wins among the claims that arrive after the re-registration.
+
 `husk.pods` status is one of `starting` (launch begun, process not yet
 started), `live` (process started), `exited` (clean exit, or stopped by Husk
 at shutdown) and `failed` (launch error, crash, foreign signal or stdin
@@ -486,7 +493,9 @@ With one:
 - **Delivery bookkeeping**: event and hook subscriber lists (Event bus, Hook
   runner), pending hook calls and their deadlines ([Calls](calls.md)),
   per-connection queues and counters (Server, Wrapper).
-- **Transient notices**: the active toast.
+- **Transient notices**: the active toast. The engine bounds the queue at
+  32 — the oldest is dropped and the drop counted — and expires each toast
+  after 3200 ms.
 - **Secrets**: they go through the Secrets service and Store's encrypted
   namespace.
 
