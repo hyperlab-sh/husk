@@ -1,10 +1,14 @@
 // Package pods ties converted plugin specs to wrappers and loop-owned lifecycle
-// state. Store, Services and State are reached only through the Loop seam.
+// state. Store, Services and State are reached only through the Loop seam and
+// the host contracts launch seams (PodRegistry, WrapperStarter): Pods never
+// imports a State, Store or Services implementation.
 package pods
 
 import (
-	tea "charm.land/bubbletea/v2"
 	"context"
+
+	tea "charm.land/bubbletea/v2"
+	"github.com/hyperlab-sh/husk/internal/host/contracts"
 	"github.com/hyperlab-sh/husk/internal/pods/manifest"
 	"github.com/hyperlab-sh/husk/internal/pods/wrapper"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
@@ -34,9 +38,13 @@ type LivenessMsg = wrapper.LivenessMsg
 
 // Preparation separates fatal declaration/slice errors from a reload report.
 // A failed or timed-out reload is completed, so ReloadError does not block launch.
+// Register carries the State slice writes the worker marshaled back: Handle
+// applies them on the loop before opening the gate, because State writes are
+// loop-only. A write failure fails that plugin like a declaration failure.
 type Preparation struct {
 	Failed      map[string]error
 	ReloadError error
+	Register    map[string]func() error
 }
 
 // PreparedMsg is a preparation command's completion, handled on the loop.
@@ -68,7 +76,17 @@ type Factory func(manifest.Spec, wrapper.Options) (wrapper.Process, error)
 
 // Options supplies the wrapper configuration and optional fake-wrapper factory.
 // Context, Post and Replies are wired by Host, not by individual callers.
+// Registry is launch step 1 (duplicate id check) and Starter overrides launch
+// step 6's built-in Wrapper start; both default to the built-in behaviour.
 type Options struct {
 	Wrapper wrapper.Options
 	Factory Factory
+	// Registry, when set, replaces the local duplicate-id check: Add calls
+	// Reserve and accepts its conflict as the duplicate answer.
+	Registry contracts.PodRegistry
+	// Starter, when set, starts processes after the launch gate instead of
+	// the built-in Factory/Wrapper path (Host.Start).
+	Starter contracts.WrapperStarter
 }
+
+var _ contracts.WrapperStarter = (*Host)(nil)

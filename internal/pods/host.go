@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"slices"
 	"sync"
@@ -66,16 +67,21 @@ func New(loop Loop, opts Options) (*Host, error) {
 }
 
 // Add registers a starting Pod but never starts it. Duplicate ids fail without
-// replacing the first Pod. Call Prepare once after adding a startup batch.
+// replacing the first Pod; with a PodRegistry the Reserve conflict is that
+// answer. Call Prepare once after adding a startup batch.
 func (h *Host) Add(spec manifest.Spec) (*Pod, error) {
 	if h.closing {
 		return nil, errors.New("pods: host is stopping")
 	}
-	if _, ok := h.pods[spec.ID]; ok {
-		return nil, errors.New("duplicate plugin id")
-	}
 	if err := spec.Validate(); err != nil {
 		return nil, err
+	}
+	if h.opts.Registry != nil {
+		if err := h.opts.Registry.Reserve(h.ctx, spec.ID); err != nil {
+			return nil, err
+		}
+	} else if _, ok := h.pods[spec.ID]; ok {
+		return nil, errors.New("duplicate plugin id")
 	}
 	p := &Pod{spec: spec.Clone(), info: wrapper.Info{PluginID: spec.ID, Status: wrapper.Starting}, Decoration: decoration.PassThrough}
 	h.pods[spec.ID] = p
@@ -111,6 +117,40 @@ func (h *Host) Prepare() tea.Cmd {
 	return func() tea.Msg { return PreparedMsg{Gate: gate, Preparation: h.loop.Prepare(h.ctx, specs)} }
 }
 
+// Start is launch step 6's built-in WrapperStarter implementation, over the
+// Factory and the Wrapper: build the process, register its token before Start
+// so even an immediate exit revokes it, then report live when the Wrapper says
+// so. A Start failure is reported by the Wrapper's async LaunchFailedMsg, so
+// Start returns nil then; only construction failures return synchronously.
+// Loop-only.
+func (h *Host) Start(id string, opening []protocol.Message) error {
+	p, ok := h.pods[id]
+	if !ok {
+		return fmt.Errorf("pods: unknown plugin %q", id)
+	}
+	opts := h.opts.Wrapper
+	opts.Context = h.ctx
+	opts.Post = h.postWorker
+	opts.Replies = h
+	process, err := h.opts.Factory(p.spec.Clone(), opts)
+	if err != nil {
+		return err
+	}
+	p.process = process
+	h.register(id, process.Token()) // before Start: even an immediate exit revokes it
+	if err := process.Start(opening); err != nil {
+		h.revoke(id)
+		// Real wrappers post LaunchFailedMsg after Closed; fakes must obey
+		// the same contract. Do not bypass that message ordering here.
+		return nil
+	}
+	p.info = process.Info()
+	if p.info.Status == wrapper.Live {
+		h.loop.Liveness(LivenessMsg{Info: p.Info()})
+	}
+	return nil
+}
+
 // Handle applies lifecycle messages on the loop. ClosedMsg and calls.ReplyMsg
 // remain the caller's responsibility: fail/deliver Calls before applying a later
 // exit message. The ordering is enforced by the Wrapper's once-only Closed post.
@@ -128,32 +168,39 @@ func (h *Host) Handle(msg tea.Msg) bool {
 		if m.Preparation.ReloadError != nil {
 			h.loop.Log(LogMsg{Level: "warn", Message: "plugin preparation reload completed with errors: " + m.Preparation.ReloadError.Error()})
 		}
+		// Step 4 on the loop: apply the State writes the worker marshaled
+		// back. A write failure fails that plugin; the batch continues.
+		if len(m.Preparation.Register) > 0 {
+			for _, id := range slices.Sorted(maps.Keys(m.Preparation.Register)) {
+				if err := m.Preparation.Register[id](); err != nil {
+					if m.Preparation.Failed == nil {
+						m.Preparation.Failed = make(map[string]error)
+					}
+					m.Preparation.Failed[id] = fmt.Errorf("slice registration: %w", err)
+					h.Handle(LaunchFailedMsg{PluginID: id, Err: m.Preparation.Failed[id]})
+				}
+			}
+		}
 		for _, id := range ids {
 			p := h.pods[id]
 			if err := m.Preparation.Failed[id]; err != nil {
 				h.Handle(LaunchFailedMsg{PluginID: id, Err: err})
 				continue
 			}
-			opts := h.opts.Wrapper
-			opts.Context = h.ctx
-			opts.Post = h.postWorker
-			opts.Replies = h
-			process, err := h.opts.Factory(p.spec.Clone(), opts)
-			if err != nil {
-				h.Handle(LaunchFailedMsg{PluginID: id, Err: err})
-				continue
-			}
-			p.process = process
-			h.register(id, process.Token()) // before Start: even an immediate exit revokes it
-			if err := process.Start(h.loop.Opening(id)); err != nil {
-				h.revoke(id)
-				// Real wrappers post LaunchFailedMsg after Closed; fakes must obey
-				// the same contract. Do not bypass that message ordering here.
-				continue
-			}
-			p.info = process.Info()
-			if p.info.Status == wrapper.Live {
+			if h.opts.Starter != nil {
+				// An injected Starter owns the whole step: a nil error means the
+				// process started, so write live here because there is no
+				// Wrapper to report it.
+				if err := h.opts.Starter.Start(id, h.loop.Opening(id)); err != nil {
+					h.Handle(LaunchFailedMsg{PluginID: id, Err: err})
+					continue
+				}
+				p.info.Status = wrapper.Live
 				h.loop.Liveness(LivenessMsg{Info: p.Info()})
+				continue
+			}
+			if err := h.Start(id, h.loop.Opening(id)); err != nil {
+				h.Handle(LaunchFailedMsg{PluginID: id, Err: err})
 			}
 		}
 		return true
