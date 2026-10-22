@@ -112,6 +112,32 @@ func TestKillErrorTerminatesReapedGroupSupervision(t *testing.T) {
 	}
 }
 
+func TestShutdownKillFailureKeepsClosedReasonExited(t *testing.T) {
+	f := newFixture(t, "clean", nil)
+	f.w.groupExists = func(int) bool { return true }
+	f.w.signal = func(_ int, kill bool) error {
+		if kill {
+			return syscall.EPERM
+		}
+		return nil
+	}
+	f.start(t)
+	f.clock.Await(t, StopGrace)
+	f.w.MarkShutdown()
+	if !errors.Is(f.w.Kill(), syscall.EPERM) {
+		t.Fatal("expected injected kill failure")
+	}
+	exit := awaitNotice[ExitMsg](t, f)
+	if exit.Info.Status != Exited || exit.Info.LastError != "" || closedCount(f) != 1 {
+		t.Fatal(exit)
+	}
+	for _, notice := range f.notices {
+		if closed, ok := notice.(ClosedMsg); ok && closed.Reason.Error() != "exited" {
+			t.Fatal(closed.Reason)
+		}
+	}
+}
+
 func TestKillKeepsBufferedRepliesUntilStdoutEOF(t *testing.T) {
 	w, clock, events := groupFixture(t)
 	read, write, err := os.Pipe()
