@@ -24,9 +24,26 @@ import (
 //go:embed templates
 var templates embed.FS
 
+var nameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
+
 // Command returns the local create noun. Only bundle is currently supported.
 func Command(version string) output.Command {
 	return command(version, guide.Files, os.Getwd, writeFile)
+}
+
+// GuideCommand returns the hidden local entry point for scaffold guide launchers.
+func GuideCommand() output.Command {
+	return output.Command{Noun: "__guide-plugin", Usage: "husk __guide-plugin", Hidden: true,
+		Run: func(_ context.Context, args []string, _ output.Options) error {
+			if len(args) != 0 {
+				return output.Usage("husk __guide-plugin takes no arguments")
+			}
+			if err := guide.Run(); err != nil {
+				return output.Environment(err, "%v", err)
+			}
+			return nil
+		},
+	}
 }
 
 type file struct {
@@ -41,7 +58,7 @@ func command(_ string, guideFS fs.FS, getwd func() (string, error), write func(s
 			return output.Usage("usage: husk create bundle <name>")
 		}
 		name := args[1]
-		if !regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`).MatchString(name) {
+		if !nameRE.MatchString(name) {
 			return output.Usage("invalid name %q: use [a-z0-9][a-z0-9._-]{0,63}", name)
 		}
 		files, err := bundleFiles(name, guideFS)
@@ -102,15 +119,19 @@ func target(dir string) error {
 	return fmt.Errorf("%s exists and is not empty", dir)
 }
 
-// makeDirs explicitly sets permissions so the user's umask does not change the
-// scaffold. Every path is beneath the validated target, never its parent.
+// makeDirs explicitly sets permissions on newly created directories so the
+// user's umask does not change the scaffold. Existing directories keep their
+// permissions. Every path is beneath the validated target, never its parent.
 func makeDirs(root, dir string) error {
 	if dir != root {
 		if err := makeDirs(root, filepath.Dir(dir)); err != nil {
 			return err
 		}
 	}
-	if err := os.Mkdir(dir, 0755); err != nil && !os.IsExist(err) {
+	if err := os.Mkdir(dir, 0755); err != nil {
+		if os.IsExist(err) {
+			return nil
+		}
 		return err
 	}
 	return os.Chmod(dir, 0755)

@@ -117,6 +117,64 @@ func TestTargetStatesWriteNothingOnRefusal(t *testing.T) {
 	}
 }
 
+func TestExistingEmptyTargetKeepsPermissions(t *testing.T) {
+	for _, name := range []string{"success", "write failure"} {
+		t.Run(name, func(t *testing.T) {
+			fail := name == "write failure"
+			root := t.TempDir()
+			dir := filepath.Join(root, "app")
+			if err := os.Mkdir(dir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			failure := errors.New("injected write failure")
+			_, err := invoke(t, root, []string{"bundle", "app"}, output.JSON, func(p string, b []byte, mode fs.FileMode) error {
+				if fail {
+					return failure
+				}
+				return writeFile(p, b, mode)
+			})
+			if fail && !errors.Is(err, failure) || !fail && err != nil {
+				t.Fatalf("write: %v", err)
+			}
+			info, err := os.Stat(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if info.Mode().Perm() != 0700 {
+				t.Fatalf("existing target mode = %04o, want 0700", info.Mode().Perm())
+			}
+		})
+	}
+}
+
+func TestGuideCommandArgumentsAndEnvironment(t *testing.T) {
+	cmd := GuideCommand()
+	if cmd.Noun != "__guide-plugin" || !cmd.Hidden {
+		t.Fatalf("hidden command metadata: %+v", cmd)
+	}
+	for _, tc := range []struct {
+		name, path, token string
+		args              []string
+		code              string
+		exit              int
+	}{
+		{"missing environment", "", "", nil, output.CodeEnvironment, output.ExitEnvironment},
+		{"missing token", "unused", "", nil, output.CodeEnvironment, output.ExitEnvironment},
+		{"missing path", "", "token", nil, output.CodeEnvironment, output.ExitEnvironment},
+		{"arguments", "", "", []string{"extra"}, output.CodeUsage, output.ExitUsage},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HUSK_SOCKET_PATH", tc.path)
+			t.Setenv("HUSK_PLUGIN_TOKEN", tc.token)
+			err := cmd.Run(t.Context(), tc.args, output.Options{})
+			e := output.AsError(err)
+			if e.Code != tc.code || e.Exit != tc.exit {
+				t.Fatalf("guide failure = %#v, want %s/exit %d", e, tc.code, tc.exit)
+			}
+		})
+	}
+}
+
 func TestWriteFailureAtEveryFileLeavesEarlierFiles(t *testing.T) {
 	files, err := bundleFiles("app", fakeGuide)
 	if err != nil {
@@ -159,25 +217,121 @@ func tree(t *testing.T, root string) map[string]string {
 		if err != nil {
 			return err
 		}
-		info, err := d.Info()
-		if err != nil {
-			return err
-		}
-		content := ""
+		content := "directory:"
 		if !d.IsDir() {
 			b, err := os.ReadFile(p)
 			if err != nil {
 				return err
 			}
-			content = string(b)
+			content = "file:" + string(b)
 		}
-		result[filepath.ToSlash(rel)] = info.Mode().String() + ":" + content
+		result[filepath.ToSlash(rel)] = content
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return result
+}
+
+func assertWrittenModes(t *testing.T, root string) {
+	t.Helper()
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, p)
+		if err != nil {
+			return err
+		}
+		want := fs.FileMode(0644)
+		if d.IsDir() || filepath.ToSlash(rel) == "plugins/hello/hello" || filepath.ToSlash(rel) == "plugins/guide/guide" {
+			want = 0755
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if info.Mode().Perm() != want {
+			t.Errorf("written mode %s = %04o, want %04o", rel, info.Mode().Perm(), want)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeGolden(golden string, files []file) error {
+	if err := os.RemoveAll(golden); err != nil {
+		return err
+	}
+	for _, f := range files {
+		p := filepath.Join(golden, filepath.FromSlash(f.name))
+		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(p, f.data, f.mode); err != nil {
+			return err
+		}
+		if err := os.Chmod(p, f.mode); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func TestGoldenRegenerationRemovesStaleFiles(t *testing.T) {
+	golden := filepath.Join(t.TempDir(), "golden")
+	if err := os.Mkdir(golden, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(golden, "stale"), []byte("old"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	files, err := bundleFiles("demo", fakeGuide)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeGolden(golden, files); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(golden, "stale")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("stale golden retained: %v", err)
+	}
+	if len(tree(t, golden)) <= len(files) {
+		t.Fatal("golden tree was not regenerated")
+	}
+}
+
+func TestTreeComparisonIgnoresCheckoutPermissions(t *testing.T) {
+	var trees []map[string]string
+	for _, mode := range []fs.FileMode{0755, 0700} {
+		root := t.TempDir()
+		if err := os.Chmod(root, mode); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(filepath.Join(root, "nested"), mode); err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range []string{"plain", "executable"} {
+			fileMode := mode
+			if name == "plain" {
+				fileMode &= 0666
+			}
+			p := filepath.Join(root, "nested", name)
+			if err := os.WriteFile(p, []byte(name), fileMode); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(p, fileMode); err != nil {
+				t.Fatal(err)
+			}
+		}
+		trees = append(trees, tree(t, root))
+	}
+	if !reflect.DeepEqual(trees[0], trees[1]) {
+		t.Fatalf("checkout permissions affected content comparison: %v != %v", trees[0], trees[1])
+	}
 }
 
 func TestGoldenBundleTreeModesAndOutput(t *testing.T) {
@@ -198,7 +352,7 @@ func TestGoldenBundleTreeModesAndOutput(t *testing.T) {
 	}
 	var names []string
 	for name, content := range tree(t, dir) {
-		if strings.HasPrefix(content, "-") {
+		if strings.HasPrefix(content, "file:") {
 			names = append(names, name)
 		}
 	}
@@ -212,19 +366,11 @@ func TestGoldenBundleTreeModesAndOutput(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, f := range files {
-			p := filepath.Join(golden, filepath.FromSlash(f.name))
-			if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(p, f.data, f.mode); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.Chmod(p, f.mode); err != nil {
-				t.Fatal(err)
-			}
+		if err := writeGolden(golden, files); err != nil {
+			t.Fatal(err)
 		}
 	}
+	assertWrittenModes(t, dir)
 	if got, want := tree(t, dir), tree(t, golden); !reflect.DeepEqual(got, want) {
 		t.Fatalf("tree differs:\ngot %#v\nwant %#v", got, want)
 	}
