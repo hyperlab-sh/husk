@@ -46,6 +46,7 @@ func TestServicesCommands(t *testing.T) {
 		{"settings get", []string{"settings", "get", "theme.allow_low_contrast"}, protocol.MethodSettingsGet, `{"key":"theme.allow_low_contrast"}`, `{"key":"theme.allow_low_contrast","value":false,"source":"default"}`, "", "key theme.allow_low_contrast\nsource default\nvalue false"},
 		{"settings list", []string{"settings", "list"}, protocol.MethodSettingsList, `{}`, `{"entries":[{"key":"a","value":"line\nnext","source":"user"}]}`, "", "KEY VALUE\na \"line\\nnext\""},
 		{"settings source", []string{"settings", "list", "--source"}, protocol.MethodSettingsList, `{}`, `{"entries":[{"key":"a","value":true,"source":"user"}]}`, "", "KEY VALUE SOURCE\na true user"},
+		{"settings null", []string{"settings", "list"}, protocol.MethodSettingsList, `{}`, `{"entries":[{"key":"a","value":null,"source":"user"}]}`, "", "KEY VALUE\na null"},
 		{"settings schema", []string{"settings", "schema"}, protocol.MethodSettingsSchema, `{}`, `{"entries":[]}`, "", "entries []"},
 		{"schema host", []string{"settings", "schema", "--owner", "husk"}, protocol.MethodSettingsSchema, `{"owner":"husk"}`, `{"entries":[]}`, "", "entries []"},
 		{"schema plugin", []string{"settings", "schema", "--owner", "plugin:files"}, protocol.MethodSettingsSchema, `{"owner":"plugin:files"}`, `{"entries":[]}`, "", "entries []"},
@@ -57,8 +58,10 @@ func TestServicesCommands(t *testing.T) {
 		{"profile list", []string{"profile", "list"}, protocol.MethodProfileList, `{}`, `{"profiles":[]}`, "", "profiles []"},
 		{"profile current", []string{"profile", "current"}, protocol.MethodProfileList, `{}`, `{"profiles":[{"name":"work","source":"user","active":true}]}`, `{"name":"work","source":"user","active":true}`, "active true\nname work\nsource user"},
 		{"profile absent", []string{"profile", "current"}, protocol.MethodProfileList, `{}`, `{"profiles":[{"name":"work","active":false}]}`, `null`, ""},
+		{"profile use", []string{"profile", "use", "work"}, protocol.MethodProfileUse, `{"name":"work"}`, `{"active":"work","reports":[{"service":"profile","gen":3,"applied":true,"changed":true}]}`, "", "SERVICE GEN APPLIED CHANGED\nprofile 3 true true"},
 		{"profile clear", []string{"profile", "use", ""}, protocol.MethodProfileUse, `{"name":""}`, serviceReports, "", "SERVICE GEN APPLIED CHANGED\ntheme 2 false false\nSEVERITY CODE LAYER KEY MESSAGE\nerror low_contrast user theme.palette.ink too low"},
 		{"secrets list", []string{"secrets", "list"}, protocol.MethodSecretsNames, `{}`, `{"storage":"unavailable","secrets":[{"name":"demo.token","declared":["a","b"],"granted":["a"],"set":null,"required":true}]}`, "", "storage: unavailable\nNAME DECLARED GRANTED SET REQUIRED\ndemo.token a,b a true"},
+		{"secrets set metadata", []string{"secrets", "list"}, protocol.MethodSecretsNames, `{}`, `{"storage":"ok","secrets":[{"name":"a","declared":[],"granted":[],"set":true,"required":false},{"name":"b","declared":[],"granted":[],"set":false,"required":false}]}`, "", "storage: ok\nNAME DECLARED GRANTED SET REQUIRED\na true false\nb false false"},
 		{"secrets set", []string{"secrets", "set", "demo.token"}, protocol.MethodSecretsSet, `{"name":"demo.token","value":""}`, `{}`, "", ""},
 		{"secrets grant", []string{"secrets", "grant", "a", "demo.token"}, protocol.MethodSecretsGrant, `{"plugin":"a","name":"demo.token"}`, `{}`, "", ""},
 		{"secrets revoke", []string{"secrets", "revoke", "a", "demo.token"}, protocol.MethodSecretsRevoke, `{"plugin":"a","name":"demo.token"}`, `{}`, "", ""},
@@ -230,16 +233,18 @@ func TestServicesTimeouts(t *testing.T) {
 			}
 		}
 		for _, c := range commands {
-			want := 5 * time.Second
-			if noun == "config" {
-				want = 10 * time.Second
-			}
-			if c.timeout != want {
-				t.Fatalf("%s timeout", c.usage)
-			}
-			if got, _ := effectiveTimeout(123*time.Millisecond, c.timeout); got != 123*time.Millisecond {
-				t.Fatal("override lost")
-			}
+			t.Run(c.usage, func(t *testing.T) {
+				want := 5 * time.Second
+				if noun == "config" {
+					want = 10 * time.Second
+				}
+				if c.timeout != want {
+					t.Fatalf("%s timeout", c.usage)
+				}
+				if got, _ := effectiveTimeout(123*time.Millisecond, c.timeout); got != 123*time.Millisecond {
+					t.Fatal("override lost")
+				}
+			})
 		}
 	}
 }

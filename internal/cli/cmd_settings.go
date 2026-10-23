@@ -37,7 +37,7 @@ func renderSettingsList(inv *Invocation, raw json.RawMessage) error {
 	for _, e := range res.Entries {
 		value := string(e.Value)
 		var text string
-		if json.Unmarshal(e.Value, &text) == nil {
+		if len(e.Value) > 0 && e.Value[0] == '"' && json.Unmarshal(e.Value, &text) == nil {
 			value = text
 		}
 		row := []string{e.Key, value}
