@@ -39,6 +39,8 @@ type Env struct {
 	ReadPassword func() ([]byte, error)
 	// Getenv reads an environment variable.
 	Getenv func(string) string
+	// Getwd supplies the CLI working directory for plugin paths; nil uses os.Getwd.
+	Getwd func() (string, error)
 	// RuntimeDir looks up the runtime directory without creating it: the
 	// checked path, whether it exists, and an error when it is unusable.
 	RuntimeDir func() (dir string, found bool, err error)
@@ -162,6 +164,7 @@ type Invocation struct {
 	dir string
 	// The command-specific flags; flagSet says which were given.
 	owner, argsJSON, data, ifRevision string
+	pluginDir                         string
 	args                              []string
 	force                             bool
 	action, focus                     string
@@ -211,6 +214,7 @@ func Main(ctx context.Context, args []string, env Env) int {
 	fs.StringVar(&format, "format", "", "")
 	fs.DurationVar(&timeout, "timeout", 0, "")
 	fs.StringVar(&inv.owner, "owner", "", "")
+	fs.StringVar(&inv.pluginDir, "dir", "", "")
 	fs.StringVar(&inv.argsJSON, "args-json", "", "")
 	fs.StringVar(&inv.data, "data", "", "")
 	fs.StringVar(&inv.ifRevision, "if-revision", "", "")
