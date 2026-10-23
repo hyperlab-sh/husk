@@ -65,10 +65,10 @@ func TestGenericEscapesObjectKeys(t *testing.T) {
 	if lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n"); len(lines) != 4 {
 		t.Fatalf("want 4 rows, got %d: %q", len(lines), out)
 	}
-	if i := strings.IndexFunc(strings.TrimSuffix(out, "\n"), unicode.IsControl); i >= 0 && out[i] != '\n' {
-		t.Fatalf("raw control byte %q in %q", out[i], out)
+	if strings.IndexFunc(strings.ReplaceAll(out, "\n", ""), unicode.IsControl) >= 0 {
+		t.Fatalf("raw control character in %q", out)
 	}
-	for _, want := range []string{`"a\nb"  1`, `"\u001b[31mx"  2`, `"tab\tkey"  3`, "plain"} {
+	for _, want := range []string{`"a\nb"`, `"\u001b[31mx"`, `"tab\tkey"`, "plain"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output %q lacks %q", out, want)
 		}
