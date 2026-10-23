@@ -43,8 +43,8 @@ func shutdownCancelled() error {
 // loop, then step 8 off the loop under ctx. A ctx that ends after step 2
 // detaches this caller only; the removal runs to completion.
 func (h *Host) Remove(ctx context.Context, c contracts.Caller, pluginID string) (contracts.PluginRemoval, error) {
-	if c.Kind != contracts.CallerCLI {
-		return contracts.PluginRemoval{}, contracts.NewError(protocol.CodeDenied, "plugin.remove unloads a plugin from the user's instance; only the user's CLI may do it", nil)
+	if c.Kind != contracts.CallerCLI && c.Kind != contracts.CallerHost {
+		return contracts.PluginRemoval{}, contracts.NewError(protocol.CodeDenied, "plugin.remove unloads a plugin from the user's instance; only CLI and host callers may do it", nil)
 	}
 	if pluginID == "" {
 		return contracts.PluginRemoval{}, contracts.NewError(protocol.CodeInvalidParams, "params.plugin is required", nil)

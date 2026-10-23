@@ -34,7 +34,11 @@ type ClosedMsg = wrapper.ClosedMsg
 type LogMsg = wrapper.LogMsg
 
 // LivenessMsg is the explicit seam for writing husk.pods and publishing exits.
-type LivenessMsg = wrapper.LivenessMsg
+type LivenessMsg struct {
+	Info wrapper.Info
+	// Dir is supplied only with the initial starting entry, even when empty.
+	Dir *string
+}
 
 // Preparation separates fatal declaration/slice errors from a reload report.
 // A failed or timed-out reload is completed, so ReloadError does not block launch.

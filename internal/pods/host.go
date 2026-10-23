@@ -106,7 +106,7 @@ func (h *Host) AddPod(spec manifest.Spec) (*Pod, error) {
 	}
 	p := &Pod{spec: spec.Clone(), info: wrapper.Info{PluginID: spec.ID, Status: wrapper.Starting}, Decoration: decoration.PassThrough}
 	h.pods[spec.ID] = p
-	h.loop.Liveness(LivenessMsg{Info: p.Info()})
+	h.loop.Liveness(LivenessMsg{Info: p.Info(), Dir: &p.spec.Dir})
 	return p, nil
 }
 

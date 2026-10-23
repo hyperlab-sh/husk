@@ -393,6 +393,7 @@ type PluginInfo struct {
 	StartedAt   time.Time `json:"started_at"`
 	LastError   string    `json:"last_error"`
 	Log         string    `json:"log"`
+	Dir         string    `json:"dir"`
 }
 
 // PluginRemoval is the plugin.remove answer: the plugin's last husk.pods

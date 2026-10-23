@@ -526,6 +526,9 @@ func (f *Pods) SetStatus(_ context.Context, id string, u contracts.PodStatusUpda
 	if u.LogPath != nil {
 		e.LogPath = u.LogPath
 	}
+	if u.Dir != nil {
+		e.Dir = u.Dir
+	}
 	f.entries[id] = e
 	return nil
 }
