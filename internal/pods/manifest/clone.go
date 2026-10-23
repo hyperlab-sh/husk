@@ -56,6 +56,7 @@ func cloneSpec(s Spec) Spec {
 		v.Max = clonePtr(v.Max)
 	}
 	s.BindingProblems = slices.Clone(s.BindingProblems)
+	s.SubscriptionProblems = slices.Clone(s.SubscriptionProblems)
 	s.Suggestions = slices.Clone(s.Suggestions)
 	return s
 }

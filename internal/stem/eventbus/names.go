@@ -46,14 +46,6 @@ func IsCoreName(name string) bool {
 	return false
 }
 
-// CLIOnlyPattern reports whether pattern could match a secrets. or services.
-// event name: secrets.read and services.reloaded are delivered to cli watchers
-// only, so a plugin may neither declare nor watch such a pattern. Manifest
-// conversion applies the same rule to a plugin's declared subscriptions.
-func CLIOnlyPattern(pattern string) bool {
-	return strings.HasPrefix(pattern, "secrets.") || strings.HasPrefix(pattern, "services.")
-}
-
 func validComponent(c string) bool {
 	if c == "" {
 		return false

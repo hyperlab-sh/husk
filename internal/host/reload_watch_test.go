@@ -111,17 +111,17 @@ func TestConfigNoticesForUnattendedReloadsWithErrors(t *testing.T) {
 		{"cli reload shows nothing", "cli", []reportData{{Service: "theme", Problems: errs(4)}}, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			before := len(fe.ConfigNotices())
+			before, _ := fe.LatestConfigNotice()
 			reloaded(t, h, tc.reason, tc.reports...)
-			got := fe.ConfigNotices()[before:]
+			seq, last := fe.LatestConfigNotice()
 			if tc.want == 0 {
-				if len(got) != 0 {
-					t.Fatalf("notices = %+v, want none", got)
+				if seq != before {
+					t.Fatalf("notice %+v raised, want none", last)
 				}
 				return
 			}
-			if len(got) != 1 || got[0] != (contracts.ConfigNotice{Reason: tc.reason, Errors: tc.want}) {
-				t.Fatalf("notices = %+v, want one %s with %d errors", got, tc.reason, tc.want)
+			if seq != before+1 || last != (contracts.ConfigNotice{Reason: tc.reason, Errors: tc.want}) {
+				t.Fatalf("notice seq %d->%d last %+v, want one %s with %d errors", before, seq, last, tc.reason, tc.want)
 			}
 		})
 	}

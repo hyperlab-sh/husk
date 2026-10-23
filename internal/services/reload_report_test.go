@@ -186,9 +186,11 @@ func (h *holdService) Rebuild(ctx context.Context, in ReloadInput) (Candidate, R
 	return cand, r, err
 }
 
-// A Rebuild held past the flight's deadline, released and then applied by
-// someone else, can never change the Service's generation.
-func TestLateRebuildCanNeverMoveAGeneration(t *testing.T) {
+// A candidate handed back after the flight gave up on it and applied by
+// someone else can never change the Service's generation (the flight context
+// is cancelled by then; the deadline check itself is the "deadline passed"
+// case of TestChangedIsFalseWheneverNotApplied).
+func TestCandidateAppliedAfterTheFlightEndedSwapsNothing(t *testing.T) {
 	set := fakeServices()
 	real := newSet(settings.Options{})
 	hold := &holdService{Reloadable: real, entered: make(chan struct{}), gate: make(chan struct{}), cands: make(chan Candidate, 1)}
@@ -279,7 +281,8 @@ func TestCloseDuringAFlightReportsCancelled(t *testing.T) {
 	entered := make(chan struct{})
 	set["keybinding"].(*fakeService).run = func(ctx context.Context) { close(entered); <-ctx.Done() }
 	clk := clock()
-	co, _ := NewCoordinator(Options{Store: &fakeStore{}, Services: set, Clock: clk})
+	st := &fakeStore{}
+	co, _ := NewCoordinator(Options{Store: st, Services: set, Clock: clk})
 	type result struct {
 		reports []Report
 		err     error
@@ -310,6 +313,19 @@ func TestCloseDuringAFlightReportsCancelled(t *testing.T) {
 				t.Errorf("%s: %s = %+v, want applied=false with one cancelled", name, r.Service, r)
 			}
 		}
+	}
+	// The queued flight, started or not, never captured: one invalidate in all.
+	for {
+		co.mu.Lock()
+		idle := co.active == nil
+		co.mu.Unlock()
+		if idle {
+			break
+		}
+		runtime.Gosched()
+	}
+	if got := st.trace(); len(got) != 1 {
+		t.Errorf("store trace = %v, want the running flight's single invalidate", got)
 	}
 	for i, n := range order() {
 		want := Generation(0)
@@ -483,6 +499,43 @@ func TestDryRunsTakeTheCoordinatorsTurn(t *testing.T) {
 			t.Fatalf("err = %v", err)
 		}
 		close(gate)
+	})
+	t.Run("a timed-out gather keeps the turn until it returns", func(t *testing.T) {
+		gate := make(chan struct{})
+		st := &fakeStore{block: gate}
+		set := fakeServices()
+		clk := clock()
+		co, _ := NewCoordinator(Options{Store: st, Services: set, Clock: clk})
+		defer co.Close()
+		done := make(chan error, 1)
+		go func() { _, err := co.Inputs(context.Background(), user); done <- err }()
+		<-clk.created
+		clk.advance(2 * time.Second)
+		var coded *c.Error
+		if err := <-done; !errors.As(err, &coded) || coded.Reason != "input_deadline" {
+			t.Fatalf("err = %v", err)
+		}
+		reloaded := make(chan error, 1)
+		go func() { _, err := co.Reload(context.Background(), ReasonCLI); reloaded <- err }()
+		waitQueued(co, 1)
+		if got := st.trace(); len(got) != 1 {
+			t.Fatalf("store trace while the gather is still reading = %v, want its single invalidate", got)
+		}
+		for n, s := range set {
+			if s.(*fakeService).calls.Load() != 0 {
+				t.Fatalf("%s rebuilt before the gather returned", n)
+			}
+		}
+		close(gate)
+		if err := <-reloaded; err != nil {
+			t.Fatalf("reload after the gather: %v", err)
+		}
+		if got := st.trace(); len(got) != 2 {
+			t.Fatalf("store trace = %v, want two invalidates", got)
+		}
+		if set["settings"].(*fakeService).calls.Load() != 1 {
+			t.Fatal("the flight did not run")
+		}
 	})
 	t.Run("store failure is unavailable", func(t *testing.T) {
 		co, _ := NewCoordinator(Options{Store: &fakeStore{err: errors.New("x")}, Services: fakeServices(), Clock: clock()})

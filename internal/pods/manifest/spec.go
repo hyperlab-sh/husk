@@ -36,6 +36,9 @@ type Spec struct {
 	SettingsDeclared  []SettingDecl      `json:"settings_declared,omitempty"`
 	BindingProblems   []BindingProblem   `json:"binding_problems,omitempty"`
 	Suggestions       []Suggestion       `json:"suggestions,omitempty"`
+	// SubscriptionProblems records subscriptions dropped at conversion; they
+	// are served beside the binding problems in the declared keymap document.
+	SubscriptionProblems []BindingProblem `json:"subscription_problems,omitempty"`
 }
 
 // Clone detaches every mutable slice, raw JSON buffer and declaration pointer.

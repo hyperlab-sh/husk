@@ -385,6 +385,14 @@ func (co *Coordinator) reload(parent context.Context, reason Reason, f *flight) 
 		return ""
 	}
 	reports := []Report{}
+	if co.ctx.Err() != nil {
+		// A flight queued behind the one that was running when Close came:
+		// it touches nothing and publishes nothing.
+		for _, name := range order() {
+			reports = append(reports, stoppedReport(name, co.opts.Services[name].Generation(), "cancelled"))
+		}
+		return reports, stoppedError("cancelled")
+	}
 	publish := func() {
 		if co.opts.Publisher != nil {
 			co.opts.Publisher.Publish("services.reloaded", map[string]any{"reason": reason, "reports": c.Clone(reports)})
@@ -560,8 +568,8 @@ func (co *Coordinator) loadInput(f *flight) inputResult {
 // for a running flight to end, a flight requested meanwhile waits for it, and
 // it never coalesces. Step 2 (capture included) runs under the same 2 s
 // deadline as a flight, counted from when the turn is granted. The turn ends
-// when the input is gathered: the caller's Rebuild publishes nothing, so it
-// needs no exclusion. It never applies a candidate or publishes
+// when the gather returns, even if the caller already gave up on it; the
+// caller's Rebuild publishes nothing, so it needs no exclusion. It never applies a candidate or publishes
 // services.reloaded.
 func (co *Coordinator) Inputs(ctx context.Context, caller Caller) (ReloadInput, error) {
 	if err := c.RequireUser(caller); err != nil {
@@ -591,11 +599,14 @@ func (co *Coordinator) Inputs(ctx context.Context, caller Caller) (ReloadInput, 
 		co.abandon(f)
 		return ReloadInput{}, shutdown()
 	}
-	defer co.release(f)
 	timer := co.opts.Clock.NewTimer(2 * time.Second)
 	defer timer.Stop()
 	result := make(chan inputResult, 1)
-	go func() { result <- co.loadInput(nil) }()
+	// The gather owns the turn: on a timeout or cancellation the caller
+	// returns at once, but the next flight must not capture (Invalidate) and
+	// resolve while this gather is still reading, so the turn ends only when
+	// loadInput comes back.
+	go func() { result <- co.loadInput(nil); co.release(f) }()
 	select {
 	case loaded := <-result:
 		if loaded.err != nil {

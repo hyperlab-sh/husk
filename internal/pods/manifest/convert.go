@@ -123,6 +123,7 @@ func convert(src Source, modern bool) (*Spec, []Warning, error) {
 				return nil, nil, err
 			}
 		}
+		s.Subscriptions = dropCLIOnly(s, "subscriptions", s.Subscriptions)
 		// The catalog-form members take the same entry parsers as "hooks".
 		var rawDecls, rawRegs []json.RawMessage
 		if err := decodeField(fields, "hooks_declared", &rawDecls); err != nil {
@@ -158,20 +159,9 @@ func convert(src Source, modern bool) (*Spec, []Warning, error) {
 			if err := json.Unmarshal(b, &events); err != nil {
 				return nil, nil, err
 			}
-			s.Subscriptions = append(s.Subscriptions, events.Subscribe...)
+			s.Subscriptions = append(s.Subscriptions, dropCLIOnly(s, "events.subscribe", events.Subscribe)...)
 			s.EventsDeclared = append(s.EventsDeclared, events.Publish...)
 		}
-		// secrets.* and services.* events reach cli watchers only (services.md,
-		// Events): only the offending pattern is dropped, the rest stand.
-		kept := s.Subscriptions[:0:0]
-		for i, pattern := range s.Subscriptions {
-			if cliOnlyPattern(pattern) {
-				warnings = append(warnings, Warning{Code: "subscription_ignored", Field: "subscriptions", Index: i, Message: "event " + pattern + " is delivered to cli watchers only; subscription dropped"})
-				continue
-			}
-			kept = append(kept, pattern)
-		}
-		s.Subscriptions = kept
 		if b := fields["hooks"]; b != nil {
 			decls, regs, err := parseHooks(b)
 			if err != nil {
@@ -274,11 +264,23 @@ func ownedID(owner, id string) bool {
 	return at > 0 && id[:at] == owner && at < len(id)-1 && !strings.ContainsAny(id, " \t\r\n\x1b;=\\")
 }
 
-// cliOnlyPattern reports whether pattern could match a secrets. or services.
-// event name, which only cli watchers receive. The event bus port applies the
-// same rule to event.watch from a plugin (eventbus.CLIOnlyPattern).
-func cliOnlyPattern(pattern string) bool {
-	return strings.HasPrefix(pattern, "secrets.") || strings.HasPrefix(pattern, "services.")
+// dropCLIOnly returns the subscriptions a plugin may hold. secrets.* and
+// services.* events reach cli watchers only (services.md, Events), so only the
+// offending pattern is dropped and the rest stand. Each drop is a problem on
+// the declared document, like a bad binding, indexed into its own field.
+func dropCLIOnly(s *Spec, field string, patterns []string) []string {
+	kept := make([]string, 0, len(patterns))
+	for i, pattern := range patterns {
+		if protocol.CLIOnlyEventPattern(pattern) {
+			s.SubscriptionProblems = append(s.SubscriptionProblems, BindingProblem{Index: i, Code: "cli_only_event", Message: fmt.Sprintf("event %s is delivered to cli watchers only; subscription dropped (%s[%d])", pattern, field, i)})
+			continue
+		}
+		kept = append(kept, pattern)
+	}
+	if len(kept) == 0 {
+		return nil
+	}
+	return kept
 }
 
 func eventPattern(pattern string) bool {

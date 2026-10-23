@@ -84,8 +84,9 @@ type Root struct {
 	refusalsMu sync.Mutex                        // guards refusals
 	refusals   []contracts.PluginRefusal         // plugins refused before a Pod existed
 	reloadSeq  atomic.Uint64                     // keys services.reloaded events apart
-	noticesMu  sync.Mutex                        // guards notices
-	notices    []contracts.ConfigNotice          // reloads that ended with errors
+	noticesMu  sync.Mutex                        // guards noticeSeq and lastNotice
+	noticeSeq  uint64                            // reloads that ended with errors
+	lastNotice contracts.ConfigNotice            // the newest of them
 	declWarnMu sync.Mutex                        // guards declWarned
 	declWarned map[string]bool                   // plugins whose declared document failed to decode
 

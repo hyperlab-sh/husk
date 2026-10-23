@@ -329,43 +329,68 @@ func TestRailItemValidation(t *testing.T) {
 }
 
 // secrets.* and services.* events reach cli watchers only: a manifest that
-// subscribes to one loses just that pattern, with one subscription_ignored
-// warning per drop, and keeps the rest.
+// subscribes to one loses just that pattern, with one cli_only_event problem
+// per drop on the declared keymap document, indexed into its own field; the
+// rest are kept and conversion raises no warning.
 func TestCLIOnlySubscriptionsAreDropped(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
-		subs    string
+		events  string // the events member
+		legacy  string // the catalog-form subscriptions member
 		want    []string
 		dropped []int
 	}{
-		{"none", `["p.changed"]`, []string{"p.changed"}, nil},
-		{"secrets wildcard", `["p.changed","secrets.*"]`, []string{"p.changed"}, []int{1}},
-		{"services exact", `["services.reloaded","p.other"]`, []string{"p.other"}, []int{0}},
-		{"secrets exact and both", `["secrets.read","services.*","p.a"]`, []string{"p.a"}, []int{0, 1}},
-		{"lookalike prefix kept", `["secretsx.read","servicesy.*"]`, []string{"secretsx.read", "servicesy.*"}, nil},
+		{"none", `["p.changed"]`, `[]`, []string{"p.changed"}, nil},
+		{"secrets wildcard", `["p.changed","secrets.*"]`, `[]`, []string{"p.changed"}, []int{1}},
+		{"services exact", `["services.reloaded","p.other"]`, `[]`, []string{"p.other"}, []int{0}},
+		{"both dropped", `["secrets.read","services.*","p.a"]`, `[]`, []string{"p.a"}, []int{0, 1}},
+		{"lookalike prefix kept", `["secretsx.read","servicesy.*"]`, `[]`, []string{"secretsx.read", "servicesy.*"}, nil},
+		{"each field indexes itself", `["services.*","p.a"]`, `["p.b","secrets.*"]`, []string{"p.b", "p.a"}, []int{1, 0}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			raw := `{"manifest_version":2,"protocol":2,"id":"p","name":"P","version":"1","command":["plugin"],"events":{"subscribe":` + tc.subs + `}}`
+			raw := `{"manifest_version":2,"protocol":2,"id":"p","name":"P","version":"1","command":["plugin"],"subscriptions":` + tc.legacy + `,"events":{"subscribe":` + tc.events + `}}`
 			spec, warns, err := convertBytes(t, raw, true)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if len(warns) != 0 {
+				t.Fatalf("warnings = %+v, want none", warns)
 			}
 			if strings.Join(spec.Subscriptions, ",") != strings.Join(tc.want, ",") {
 				t.Fatalf("subscriptions = %v, want %v", spec.Subscriptions, tc.want)
 			}
 			var got []int
-			for _, w := range warns {
-				if w.Code != "subscription_ignored" || w.Field != "subscriptions" {
-					t.Fatalf("unexpected warning %+v", w)
+			for _, p := range spec.SubscriptionProblems {
+				if p.Code != "cli_only_event" || !strings.Contains(p.Message, "delivered to cli watchers only") {
+					t.Fatalf("unexpected problem %+v", p)
 				}
-				got = append(got, w.Index)
+				got = append(got, p.Index)
 			}
 			if len(got) != len(tc.dropped) {
-				t.Fatalf("warning indexes = %v, want %v", got, tc.dropped)
+				t.Fatalf("problem indexes = %v, want %v", got, tc.dropped)
 			}
 			for i := range got {
 				if got[i] != tc.dropped[i] {
-					t.Fatalf("warning indexes = %v, want %v", got, tc.dropped)
+					t.Fatalf("problem indexes = %v, want %v", got, tc.dropped)
+				}
+			}
+			// The problems reach the declared keymap document, not the catalog.
+			km, err := spec.KeymapJSON()
+			if err != nil {
+				t.Fatal(err)
+			}
+			var doc Keymap
+			if err := json.Unmarshal(km, &doc); err != nil || len(doc.Problems) != len(tc.dropped) {
+				t.Fatalf("keymap problems = %+v err=%v, want %d", doc.Problems, err, len(tc.dropped))
+			}
+			cat, err := spec.CatalogJSON()
+			if err != nil || bytes.Contains(cat, []byte("subscription_problems")) {
+				t.Fatalf("catalog carries the problems: %s err=%v", cat, err)
+			}
+			if c := spec.Clone(); len(c.SubscriptionProblems) > 0 {
+				c.SubscriptionProblems[0].Code = "x"
+				if spec.SubscriptionProblems[0].Code == "x" {
+					t.Fatal("Clone shares SubscriptionProblems")
 				}
 			}
 		})

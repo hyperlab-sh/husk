@@ -58,7 +58,8 @@ func (w reloadWatcher) Notify(n protocol.Message) error {
 	case services.ReasonStartup, services.ReasonProfile, services.ReasonPlugin:
 		if errCount > 0 {
 			w.r.noticesMu.Lock()
-			w.r.notices = append(w.r.notices, contracts.ConfigNotice{Reason: p.Data.Reason, Errors: errCount})
+			w.r.noticeSeq++
+			w.r.lastNotice = contracts.ConfigNotice{Reason: p.Data.Reason, Errors: errCount}
 			w.r.noticesMu.Unlock()
 		}
 	}

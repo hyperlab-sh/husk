@@ -57,7 +57,7 @@ func (e *Events) Emit(ctx context.Context, c contracts.Caller, name string, data
 // (the adapter replies {}), and removes the registration when ctx ends. A
 // refused pattern is invalid_params and registers nothing.
 func (e *Events) Watch(ctx context.Context, c contracts.Caller, pattern string, n contracts.Notifier) error {
-	if c.Kind == contracts.CallerPlugin && eventbus.CLIOnlyPattern(pattern) {
+	if c.Kind == contracts.CallerPlugin && protocol.CLIOnlyEventPattern(pattern) {
 		return contracts.NewError(protocol.CodeDenied, "events matching "+pattern+" are delivered to cli watchers only", nil)
 	}
 	cancel, err := e.bus.Subscribe(n, pattern)

@@ -354,11 +354,11 @@ func (r *Root) Refusals() []contracts.PluginRefusal {
 	return slices.Clone(r.refusals)
 }
 
-// ConfigNotices implements contracts.Frontend.
-func (r *Root) ConfigNotices() []contracts.ConfigNotice {
+// LatestConfigNotice implements contracts.Frontend.
+func (r *Root) LatestConfigNotice() (uint64, contracts.ConfigNotice) {
 	r.noticesMu.Lock()
 	defer r.noticesMu.Unlock()
-	return slices.Clone(r.notices)
+	return r.noticeSeq, r.lastNotice
 }
 
 // ActiveToast implements contracts.Frontend.
