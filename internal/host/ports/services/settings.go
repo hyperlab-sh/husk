@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"errors"
 
 	host "github.com/hyperlab-sh/husk/internal/host/contracts"
 	services "github.com/hyperlab-sh/husk/internal/services"
@@ -13,14 +12,13 @@ import (
 
 // Settings implements contracts.SettingsPort over the settings service.
 //
-// The caller view is the service's own (D34/D34a): a plugin sees exactly the
-// keys its manifest declared plus public husk.* keys, read-only, and a user
-// sees everything. Because Get consults the service's filtered snapshot, a
-// textual plugins.a.* prefix is never authorization: for a plugin named "a",
-// a key owned by a plugin named "a.b" is not the caller's. When the service
-// refuses an out-of-declaration read, this wrapper narrows its
-// denied/undeclared_setting refusal to the port contract's not_found, so a
-// plugin cannot even learn whether another owner's key exists.
+// The caller view is the service's own: a plugin sees exactly the keys its
+// manifest declared plus host and distribution keys marked public, read-only,
+// and a user sees everything. A textual plugins.a.* prefix is never
+// authorization: for a plugin named "a", a key owned by a plugin named "a.b"
+// is not the caller's. A key unknown to the caller is the service's own
+// not_found/unknown_setting, so a plugin cannot learn whether another owner's
+// key exists.
 type Settings struct {
 	Svc *settings.Service
 	// Inputs feeds settings.validate its dry rebuild input. Required.
@@ -34,15 +32,22 @@ var _ host.SettingsPort = Settings{}
 func (p Settings) Get(ctx context.Context, hc host.Caller, key string) (any, string, error) {
 	value, source, err := p.Svc.Get(hc, key)
 	if err != nil {
-		return nil, "", narrowUndeclared(err)
+		return nil, "", coded(err)
 	}
 	return value, source, nil
 }
 
-// List implements contracts.SettingsPort: the caller's filtered value map.
-func (p Settings) List(ctx context.Context, hc host.Caller) (map[string]any, error) {
-	values, err := p.Svc.List(hc)
-	return values, coded(err)
+// List implements contracts.SettingsPort: every known and retained key.
+func (p Settings) List(ctx context.Context, hc host.Caller) ([]host.SettingValue, error) {
+	rows, err := p.Svc.List(hc)
+	if err != nil {
+		return nil, coded(err)
+	}
+	out := make([]host.SettingValue, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, host.SettingValue{Key: r.Key, Value: r.Value, Source: r.Source})
+	}
+	return out, nil
 }
 
 // Schema implements contracts.SettingsPort. An empty owner lists the whole
@@ -64,6 +69,7 @@ func (p Settings) Schema(ctx context.Context, hc host.Caller, owner string) ([]h
 			Doc:     e.Doc,
 			Owner:   e.Owner,
 			Apply:   e.Apply,
+			Public:  e.Public,
 		})
 	}
 	return out, nil
@@ -77,19 +83,17 @@ func (p Settings) Validate(ctx context.Context, hc host.Caller) (host.Validation
 	if err != nil {
 		return host.ValidationResult{}, err
 	}
-	report, err := p.Svc.Validate(ctx, hc, in)
+	check, err := p.Svc.Validate(ctx, hc, in)
 	if err != nil {
 		return host.ValidationResult{}, coded(err)
 	}
-	return validationResult(report), nil
+	return validationResult(check.OK, check.Problems), nil
 }
 
-// validationResult copies a services report into the host's validation
-// shape, cloning the problems so the reply shares no slice with a snapshot.
-func validationResult(r c.Report) host.ValidationResult {
-	out := host.ValidationResult{Applied: r.Applied}
-	out.Problems = append(out.Problems, r.Problems...)
-	return out
+// validationResult builds the dry-run reply, cloning the problems so the reply
+// shares no slice with a snapshot. Problems is never nil: the wire says [].
+func validationResult(ok bool, problems []protocol.Problem) host.ValidationResult {
+	return host.ValidationResult{OK: ok, Problems: append([]protocol.Problem{}, problems...)}
 }
 
 func (p Settings) dryInput(ctx context.Context, hc host.Caller) (services.ReloadInput, error) {
@@ -99,19 +103,4 @@ func (p Settings) dryInput(ctx context.Context, hc host.Caller) (services.Reload
 	}
 	in, err := p.Inputs.Inputs(ctx, sc)
 	return in, codedInput(err)
-}
-
-// narrowUndeclared maps the service's denied/undeclared_setting refusal to
-// not_found with the same reason, per the SettingsPort contract; every other
-// error passes through coded unchanged.
-func narrowUndeclared(err error) error {
-	var serr *c.Error
-	if errors.As(err, &serr) && serr != nil && serr.Code == "denied" && serr.Reason == "undeclared_setting" {
-		return &codedError{
-			code: protocol.CodeNotFound,
-			data: map[string]any{"reason": "undeclared_setting"},
-			msg:  "setting key not visible to this caller",
-		}
-	}
-	return coded(err)
 }

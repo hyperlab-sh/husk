@@ -28,6 +28,12 @@ type settingsSchemaParams struct {
 	Owner string `json:"owner"`
 }
 
+// settingsEntries is the {"entries":[...]} shape of settings.list and
+// settings.schema.
+type settingsEntries[T any] struct {
+	Entries []T `json:"entries"`
+}
+
 type settingsGetResult struct {
 	Key    string `json:"key"`
 	Value  any    `json:"value"`
@@ -59,14 +65,14 @@ func (h Settings) Serve(ctx context.Context, c contracts.Caller, req protocol.Me
 		}
 		return handlers.Reply(req, settingsGetResult{Key: p.Key, Value: value, Source: source})
 	case protocol.MethodSettingsList:
-		values, err := h.Port.List(ctx, c)
+		rows, err := h.Port.List(ctx, c)
 		if err != nil {
 			return handlers.ErrorReply(req, err)
 		}
-		if values == nil {
-			values = map[string]any{}
+		if rows == nil {
+			rows = []contracts.SettingValue{}
 		}
-		return handlers.Reply(req, values)
+		return handlers.Reply(req, settingsEntries[contracts.SettingValue]{Entries: rows})
 	case protocol.MethodSettingsSchema:
 		var p settingsSchemaParams
 		if bad := handlers.DecodeParams(req, &p); bad != nil {
@@ -79,7 +85,7 @@ func (h Settings) Serve(ctx context.Context, c contracts.Caller, req protocol.Me
 		if entries == nil {
 			entries = []contracts.SettingEntry{}
 		}
-		return handlers.Reply(req, entries)
+		return handlers.Reply(req, settingsEntries[contracts.SettingEntry]{Entries: entries})
 	case protocol.MethodSettingsValidate:
 		res, err := h.Port.Validate(ctx, c)
 		if err != nil {

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	c "github.com/hyperlab-sh/husk/internal/services/contracts"
 	"github.com/hyperlab-sh/husk/internal/services/keybinding"
-	"github.com/hyperlab-sh/husk/internal/services/profile"
 	"github.com/hyperlab-sh/husk/internal/services/secrets"
 	"github.com/hyperlab-sh/husk/internal/services/settings"
 	stheme "github.com/hyperlab-sh/husk/internal/services/theme"
@@ -54,7 +53,7 @@ func catalog(plugin string) ReloadInput {
 	return in
 }
 func TestSettingsAtomicValidationAndAccess(t *testing.T) {
-	s := settings.New(settings.Options{Schema: []settings.Entry{{Key: "dist.count", Type: "int", Default: int64(1), Owner: "dist", Apply: "live"}, {Key: "dist.wait", Type: "duration", Default: json.Number("250"), Owner: "dist", Apply: "live"}}})
+	s := newSet(settings.Options{Schema: []settings.Entry{{Key: "dist.count", Type: "int", Default: int64(1), Owner: "dist", Apply: "live"}, {Key: "dist.wait", Type: "duration", Default: json.Number("250"), Owner: "dist", Apply: "live"}}})
 	in := catalog("Upper.ID")
 	in.Doc.Doc = doc(`{"plugins":{"Upper":{"ID":{"enabled":true}}},"dist":{"count":2}}`)
 	apply(t, s, in)
@@ -85,7 +84,7 @@ func TestSettingsAtomicValidationAndAccess(t *testing.T) {
 	}
 }
 func TestSettingsRestartSchemaRawAndSecretRejection(t *testing.T) {
-	s := settings.New(settings.Options{})
+	s := newSet(settings.Options{})
 	in := catalog("files")
 	in.Doc.Doc = doc(`{"profile":{"default":"one"}}`)
 	apply(t, s, in)
@@ -95,16 +94,16 @@ func TestSettingsRestartSchemaRawAndSecretRejection(t *testing.T) {
 		t.Fatal("restart not held")
 	}
 	raw, _ := s.Snapshot().Raw("profile.default")
-	if raw != "two" {
-		t.Fatal("raw not as written")
+	if raw != "one" {
+		t.Fatal("raw follows the in-force value on a held restart key")
 	}
 	in.Doc.Doc = doc(`{"git":{"token":"DO_NOT_REPORT_VALUE"}}`)
 	_, r, err := s.Rebuild(context.Background(), in)
 	b, _ := json.Marshal(r)
-	if err == nil || strings.Contains(string(b), "DO_NOT_REPORT_VALUE") {
-		t.Fatal("secret treated as settings or reported")
+	if err != nil || !hasProblem(r.Problems, "unknown_key", "warning") || strings.Contains(string(b), "DO_NOT_REPORT_VALUE") {
+		t.Fatal("secret-shaped key not an unknown_key warning, or its value reported", r, err)
 	}
-	s = settings.New(settings.Options{})
+	s = newSet(settings.Options{})
 	in = catalog("raw")
 	delete(in.Declared[store.DeclaredPlugins]["raw"], "settings_declared")
 	in.Doc.Doc = doc(`{"plugins":{"raw":{"anything":17}}}`)
@@ -122,7 +121,7 @@ func TestThemeContrastAllPairsAndHex(t *testing.T) {
 	}
 	for _, value := range []string{"#123", "17", "#xyzxyz"} {
 		t.Run(value, func(t *testing.T) {
-			s := settings.New(settings.Options{})
+			s := newSet(settings.Options{})
 			in := input(fmt.Sprintf(`{"theme":{"palette":{"ink":%q}}}`, value))
 			apply(t, s, in)
 			in.Settings = s.Snapshot()
@@ -133,7 +132,7 @@ func TestThemeContrastAllPairsAndHex(t *testing.T) {
 			}
 		})
 	}
-	s := settings.New(settings.Options{})
+	s := newSet(settings.Options{})
 	in := input(`{"theme":{"palette":{"ink":"#000000","border":"#000000"}}}`)
 	apply(t, s, in)
 	in.Settings = s.Snapshot()
@@ -156,42 +155,6 @@ func TestThemeContrastAllPairsAndHex(t *testing.T) {
 	_, _, err = th.Rebuild(context.Background(), in)
 	if err == nil {
 		t.Fatal("distribution optout accepted")
-	}
-}
-func TestProfileFlagsUnknownDeletedAndLoopPost(t *testing.T) {
-	tree := state.New(state.Options{})
-	posts := make(chan func(), 8)
-	source := &fakeStore{profiles: []string{"work", "other"}}
-	p, err := profile.New(profile.Options{Store: source, State: tree, Post: func(f func()) bool { posts <- f; return true }})
-	if err != nil {
-		t.Fatal(err)
-	}
-	apply(t, p, input(`{}`))
-	if err = p.Use(Caller{PluginID: "plugin"}, "work"); err == nil {
-		t.Fatal("plugin profile use")
-	}
-	if err = p.Use(Caller{Kind: "cli"}, "missing"); err == nil {
-		t.Fatal("unknown profile")
-	}
-	if err = p.Use(Caller{Kind: "cli"}, "work"); err != nil {
-		t.Fatal(err)
-	}
-	if p.Active() != "" {
-		t.Fatal("Use changed cache before State/reload")
-	}
-	(<-posts)()
-	apply(t, p, input(`{}`))
-	if p.Active() != "work" {
-		t.Fatal("selection not applied")
-	}
-	source.profiles = []string{"other"}
-	r := apply(t, p, input(`{}`))
-	if p.Active() != "" || len(r.Problems) != 1 {
-		t.Fatal("deleted active profile not reset")
-	}
-	(<-posts)()
-	if raw := string(tree.Snapshot().Slices[state.ProfileNamespace].Value); raw != `{"active":""}` {
-		t.Fatal(raw)
 	}
 }
 func TestKeybindingLayersFirstWinsDisableAndFocus(t *testing.T) {

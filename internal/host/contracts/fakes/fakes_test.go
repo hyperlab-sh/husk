@@ -173,14 +173,14 @@ func TestPortsRecordCallerAndReturn(t *testing.T) {
 	sg := fakes.NewSettings(rec)
 	sg.Value, sg.Source = 3, "user"
 	sg.Entries = []contracts.SettingEntry{{Key: "k"}}
-	sg.Validation = contracts.ValidationResult{Applied: true}
+	sg.Validation = contracts.ValidationResult{OK: true}
 	if v, s, _ := sg.Get(ctx, plugin, "k"); v != 3 || s != "user" {
 		t.Fatal(v, s)
 	}
 	if e, _ := sg.Schema(ctx, cli, "plugin:a"); len(e) != 1 {
 		t.Fatal(e)
 	}
-	if v, _ := sg.Validate(ctx, cli); !v.Applied {
+	if v, _ := sg.Validate(ctx, cli); !v.OK {
 		t.Fatal(v)
 	}
 	sc := fakes.NewSecrets(rec)

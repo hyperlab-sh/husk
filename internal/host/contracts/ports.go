@@ -108,9 +108,20 @@ type SettingEntry struct {
 	Enum    []string `json:"enum,omitempty"`
 	Min     *int64   `json:"min,omitempty"`
 	Max     *int64   `json:"max,omitempty"`
-	Doc     string   `json:"doc"`
+	Doc     string   `json:"doc,omitempty"`
 	Owner   string   `json:"owner"`
 	Apply   string   `json:"apply"`
+	// Public marks a host or distribution entry plugins may read.
+	Public bool `json:"public,omitempty"`
+}
+
+// SettingValue is one settings.list row: a known key or a retained unknown
+// key, its value as written (durations in milliseconds) and the layer that
+// supplied it, or "default".
+type SettingValue struct {
+	Key    string `json:"key"`
+	Value  any    `json:"value"`
+	Source string `json:"source"`
 }
 
 // SettingsPort serves settings.get, settings.list, settings.schema and
@@ -126,8 +137,9 @@ type SettingEntry struct {
 type SettingsPort interface {
 	// Get returns the effective value and the layer it came from.
 	Get(ctx context.Context, c Caller, key string) (value any, source string, err error)
-	// List returns every key with its effective value (CLI only).
-	List(ctx context.Context, c Caller) (map[string]any, error)
+	// List returns every known key and every retained unknown key, sorted by
+	// key (CLI only).
+	List(ctx context.Context, c Caller) ([]SettingValue, error)
 	// Schema serves settings.schema. owner "" means every owner.
 	Schema(ctx context.Context, c Caller, owner string) ([]SettingEntry, error)
 	// Validate serves settings.validate: a dry rebuild of the current
@@ -176,15 +188,23 @@ type ProfileInfo struct {
 type ProfilePort interface {
 	// List serves profile.list.
 	List(ctx context.Context, c Caller) ([]ProfileInfo, error)
-	// Use serves profile.use (user only).
-	Use(ctx context.Context, c Caller, name string) error
+	// Use serves profile.use (user only): it returns once the reload the
+	// change caused has ended, with that flight's reports.
+	Use(ctx context.Context, c Caller, name string) (ProfileUseResult, error)
 }
 
-// ValidationResult is the outcome of a dry build: whether the candidate would
-// apply and every problem found (all of them, not the first).
+// ProfileUseResult is the profile.use reply.
+type ProfileUseResult struct {
+	Active  string         `json:"active"`
+	Reports []ReloadReport `json:"reports"`
+}
+
+// ValidationResult is the outcome of a dry build: whether a reload now would
+// publish that Service's candidate, and every problem found (all of them, not
+// the first).
 type ValidationResult struct {
-	Applied  bool               `json:"applied"`
-	Problems []protocol.Problem `json:"problems,omitempty"`
+	OK       bool               `json:"ok"`
+	Problems []protocol.Problem `json:"problems"`
 }
 
 // ThemeCheckResult is what theme.check reports: every violated pair.

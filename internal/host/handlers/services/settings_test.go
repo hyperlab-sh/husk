@@ -108,36 +108,35 @@ func TestSettingsCLIMethodsDeniedToPluginBeforePort(t *testing.T) {
 func TestSettingsListSchemaValidateForCLI(t *testing.T) {
 	rec := fakes.NewRecorder()
 	port := fakes.NewSettings(rec)
-	port.Values = map[string]any{"theme.name": "mono"}
-	port.Entries = []contracts.SettingEntry{{Key: "theme.name", Type: "string", Owner: "husk", Apply: "live", Doc: "theme"}}
-	port.Validation = contracts.ValidationResult{Applied: true}
+	port.Values = []contracts.SettingValue{{Key: "nope.x", Value: json.Number("1"), Source: "user"}, {Key: "theme.name", Value: "mono", Source: "default"}}
+	port.Entries = []contracts.SettingEntry{{Key: "dist.x", Type: "bool", Default: false, Owner: "dist", Apply: "live", Doc: "x", Public: true}}
+	port.Validation = contracts.ValidationResult{OK: true, Problems: []protocol.Problem{{Severity: "warning", Code: "unknown_key", Layer: "user", Key: "nope.x", Message: "m"}}}
 	h := Settings{Port: port}
 
-	list := decode(t, h.Serve(context.Background(), cliCaller, req(t, "settings.list", `{}`), nil))
-	if list["theme.name"] != "mono" {
-		t.Fatalf("list = %v", list)
+	list := h.Serve(context.Background(), cliCaller, req(t, "settings.list", `{}`), nil)
+	if want := `{"entries":[{"key":"nope.x","value":1,"source":"user"},{"key":"theme.name","value":"mono","source":"default"}]}`; string(list.Result) != want {
+		t.Fatalf("list = %s, want %s", list.Result, want)
 	}
-	var entries []contracts.SettingEntry
 	reply := h.Serve(context.Background(), cliCaller, req(t, "settings.schema", `{"owner":"husk"}`), nil)
-	if reply.Error != nil || json.Unmarshal(reply.Result, &entries) != nil || len(entries) != 1 || entries[0].Key != "theme.name" {
-		t.Fatalf("schema = %s / %+v", reply.Result, reply.Error)
+	if want := `{"entries":[{"key":"dist.x","type":"bool","default":false,"doc":"x","owner":"dist","apply":"live","public":true}]}`; reply.Error != nil || string(reply.Result) != want {
+		t.Fatalf("schema = %s / %+v, want %s", reply.Result, reply.Error, want)
 	}
 	if calls := rec.Methods(); calls[len(calls)-1] != "Settings.Schema" || rec.Calls()[len(rec.Calls())-1].Args[0] != "husk" {
 		t.Fatalf("schema owner not passed: %v", rec.Calls())
 	}
-	validate := decode(t, h.Serve(context.Background(), cliCaller, req(t, "settings.validate", `{}`), nil))
-	if validate["applied"] != true {
-		t.Fatalf("validate = %v", validate)
+	validate := h.Serve(context.Background(), cliCaller, req(t, "settings.validate", `{}`), nil)
+	if want := `{"ok":true,"problems":[{"severity":"warning","code":"unknown_key","layer":"user","key":"nope.x","message":"m"}]}`; string(validate.Result) != want {
+		t.Fatalf("validate = %s, want %s", validate.Result, want)
 	}
 }
 
-func TestSettingsNilListEncodesAsEmptyObject(t *testing.T) {
+func TestSettingsNilListEncodesAsEmptyEntries(t *testing.T) {
 	port := fakes.NewSettings(nil)
 	port.Values = nil
 	h := Settings{Port: port}
 	reply := h.Serve(context.Background(), cliCaller, req(t, "settings.list", `{}`), nil)
-	if string(reply.Result) != "{}" {
-		t.Fatalf("nil list = %s, want {}", reply.Result)
+	if string(reply.Result) != `{"entries":[]}` {
+		t.Fatalf("nil list = %s, want {\"entries\":[]}", reply.Result)
 	}
 }
 

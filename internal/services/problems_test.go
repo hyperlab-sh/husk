@@ -56,7 +56,7 @@ func TestKeysListProblemIsTheSharedProblem(t *testing.T) {
 // Every problem a Service raises has a code.
 func TestServiceProblemsCarryCodes(t *testing.T) {
 	// settings: invalid value, unknown key.
-	s := settings.New(settings.Options{})
+	s := newSet(settings.Options{})
 	in := input(`{"theme":{"allow_low_contrast":"yes"},"nothing":{"here":1}}`)
 	_, rep, _ := s.Rebuild(context.Background(), in)
 	got := codes(rep.Problems)
@@ -67,7 +67,7 @@ func TestServiceProblemsCarryCodes(t *testing.T) {
 		t.Fatalf("no unknown_key: %+v", rep.Problems)
 	}
 	// settings: restart_required on a second load.
-	s = settings.New(settings.Options{})
+	s = newSet(settings.Options{})
 	in = catalog("new")
 	in.Declared[store.DeclaredPlugins]["new"]["settings_declared"] = []any{map[string]any{"key": "plugins.new.enabled", "type": "bool", "default": false, "apply": "restart"}}
 	apply(t, s, in)
@@ -146,7 +146,7 @@ func TestSecretDeclarationProblemsAreWarnings(t *testing.T) {
 // A bad color override is invalid_color, an error that blocks the palette.
 func TestThemeBadColorIsInvalidColor(t *testing.T) {
 	in := input(`{"theme":{"palette":{"ink":"red"}}}`)
-	st := settings.New(settings.Options{})
+	st := newSet(settings.Options{})
 	apply(t, st, in)
 	in.Settings = st.Snapshot()
 	_, rep, err := stheme.New().Rebuild(context.Background(), in)

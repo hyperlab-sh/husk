@@ -37,6 +37,10 @@ type Config struct {
 	Plugins []string
 	// PluginDirs are the --plugin-dir arguments, in order.
 	PluginDirs []string
+	// ProfileFlag is the --profile start flag, nil when it was not given. It
+	// is a selection input of the startup reload only; the profile slice is
+	// what later reloads read.
+	ProfileFlag *string
 	// Post posts a notice to the loop from any goroutine. It may block for
 	// backpressure while the loop is running; once the loop owner has begun
 	// shutdown (closed its post gate) it returns false without blocking, and

@@ -312,7 +312,7 @@ type Settings struct {
 	callLog
 	Value      any
 	Source     string
-	Values     map[string]any
+	Values     []contracts.SettingValue
 	Entries    []contracts.SettingEntry
 	Validation contracts.ValidationResult
 	Err        error
@@ -328,7 +328,7 @@ func (f *Settings) Get(_ context.Context, c contracts.Caller, key string) (any, 
 }
 
 // List implements contracts.SettingsPort.
-func (f *Settings) List(_ context.Context, c contracts.Caller) (map[string]any, error) {
+func (f *Settings) List(_ context.Context, c contracts.Caller) ([]contracts.SettingValue, error) {
 	f.RecordCaller("Settings.List", c)
 	return f.Values, f.Err
 }
@@ -396,6 +396,7 @@ func (f *Secrets) Reveal(_ context.Context, c contracts.Caller, name string) ([]
 type Profile struct {
 	callLog
 	Profiles []contracts.ProfileInfo
+	Used     contracts.ProfileUseResult
 	Err      error
 }
 
@@ -409,9 +410,9 @@ func (f *Profile) List(_ context.Context, c contracts.Caller) ([]contracts.Profi
 }
 
 // Use implements contracts.ProfilePort.
-func (f *Profile) Use(_ context.Context, c contracts.Caller, name string) error {
+func (f *Profile) Use(_ context.Context, c contracts.Caller, name string) (contracts.ProfileUseResult, error) {
 	f.RecordCaller("Profile.Use", c, name)
-	return f.Err
+	return f.Used, f.Err
 }
 
 // Theme fakes contracts.ThemePort.

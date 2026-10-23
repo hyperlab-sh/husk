@@ -23,7 +23,7 @@ import (
 func TestSettingsTypesBoundsSnapshotIsolationAndWarnings(t *testing.T) {
 	min, max := int64(1), int64(3)
 	warnings := 0
-	s := settings.New(settings.Options{Schema: []settings.Entry{{Key: "dist.n", Type: "int", Default: 2, Min: &min, Max: &max, Owner: "dist", Apply: "live"}, {Key: "dist.mode", Type: "enum", Default: "one", Enum: []string{"one", "two"}, Owner: "dist", Apply: "live"}, {Key: "dist.names", Type: "strings", Default: []string{"a"}, Owner: "dist", Apply: "live"}}, Warn: func(Problem) { warnings++ }})
+	s := newSet(settings.Options{Schema: []settings.Entry{{Key: "dist.n", Type: "int", Default: 2, Min: &min, Max: &max, Owner: "dist", Apply: "live"}, {Key: "dist.mode", Type: "enum", Default: "one", Enum: []string{"one", "two"}, Owner: "dist", Apply: "live"}, {Key: "dist.names", Type: "strings", Default: []string{"a"}, Owner: "dist", Apply: "live"}}, Warn: func(string) { warnings++ }})
 	apply(t, s, input(`{}`))
 	snap := s.Snapshot()
 	names := snap.Strings("dist.names")
@@ -49,7 +49,7 @@ func TestSettingsTypesBoundsSnapshotIsolationAndWarnings(t *testing.T) {
 		t.Fatal("old snapshot changed")
 	}
 	r, err := s.Validate(context.Background(), Caller{Kind: "cli"}, input(`{"dist":{"n":1}}`))
-	if err != nil || r.Applied || s.Snapshot().Int("dist.n") != 3 {
+	if err != nil || !r.OK || s.Snapshot().Int("dist.n") != 3 {
 		t.Fatal("dry validation applied")
 	}
 }
@@ -78,7 +78,7 @@ func TestThemeOverlayDerivationEveryFormatAndHiddenDistributionHatch(t *testing.
 			t.Fatal("missing pair", pair)
 		}
 	}
-	s := settings.New(settings.Options{})
+	s := newSet(settings.Options{})
 	in := input(`{"theme":{"palette":{"ink":"#123","accent":"index"}}}`)
 	apply(t, s, in)
 	in.Settings = s.Snapshot()
@@ -290,23 +290,29 @@ func TestRuntimeDefaultsListenerAndSettingsFreeze(t *testing.T) {
 		t.Fatal(err)
 	}
 	<-events
-	if err = runtime.Profile.Use(Caller{Kind: "cli"}, "work"); err != nil {
-		t.Fatal(err)
-	}
+	used := make(chan error, 1)
+	go func() {
+		_, _, err := runtime.Profile.Use(context.Background(), Caller{Kind: "cli"}, "work")
+		used <- err
+	}()
 	(<-posts)()
 	tree.Flush()
+	runtime.Coordinator.Tick()
+	if err = <-used; err != nil {
+		t.Fatal(err)
+	}
 	<-events
 	if runtime.Profile.Active() != "work" {
 		t.Fatal("listener did not reload")
 	}
 	before := runtime.Theme.Generation()
-	source.resolved = store.Resolved{Doc: doc(`{"unknown":true}`)}
+	source.resolved = store.Resolved{Doc: doc(`{"theme":{"name":5}}`)}
 	reports, err := runtime.Coordinator.Reload(context.Background(), ReasonCLI)
 	if err == nil || reports[1].Applied || reports[2].Applied || runtime.Theme.Generation() != before || !reports[3].Applied || !reports[4].Applied {
 		t.Fatal("partial failure semantics", reports, err)
 	}
-	newSettings := settings.New(settings.Options{})
-	_, _, err = newSettings.Rebuild(context.Background(), input(`{"unknown":true}`))
+	newSettings := newSet(settings.Options{})
+	_, _, err = newSettings.Rebuild(context.Background(), input(`{"theme":{"name":5}}`))
 	if err == nil || newSettings.Snapshot() == nil || newSettings.Snapshot().String("theme.name") == "" {
 		t.Fatal("first-load defaults missing")
 	}
@@ -364,8 +370,11 @@ func TestProfileProvenanceAndStartupFlagOverHydration(t *testing.T) {
 		t.Fatal(err)
 	}
 	apply(t, p, input(`{}`))
-	if p.Active() != "work" {
-		t.Fatal("flag lost to hydration")
+	if name, problems := p.Select(true, nil, []string{"app", "work"}); name != "work" || len(problems) != 0 {
+		t.Fatal("flag lost to hydration", name, problems)
+	}
+	if name, _ := p.Select(false, nil, []string{"app", "work"}); name != "app" {
+		t.Fatal("flag applied outside the startup flight", name)
 	}
 	list := p.List()
 	if list[0].Source != "distribution" || list[1].Source != "user" {
@@ -379,7 +388,7 @@ func (profileHydrator) Hydrate(state.Spec) (json.RawMessage, bool) {
 	return json.RawMessage(`{"active":"app"}`), true
 }
 func TestCandidatesDoNotPublishUntilApplyAndDiscardCancellation(t *testing.T) {
-	s := settings.New(settings.Options{})
+	s := newSet(settings.Options{})
 	ctx, cancel := context.WithCancel(context.Background())
 	candidate, report, err := s.Rebuild(ctx, input(`{}`))
 	if err != nil || report.Applied || s.Generation() != 0 {
@@ -462,7 +471,7 @@ func TestKeybindingProblemsKeepLayerFile(t *testing.T) {
 
 // Palette overrides are published in one hex casing whatever the user typed.
 func TestThemeOverridesNormalizeHexCasing(t *testing.T) {
-	s := settings.New(settings.Options{})
+	s := newSet(settings.Options{})
 	in := input(`{"theme":{"allow_low_contrast":true,"palette":{"accent":"#AaBbCc"}}}`)
 	in.Doc.Origins = map[string]store.Layer{"theme.allow_low_contrast": store.LayerUser, "theme.palette.accent": store.LayerUser}
 	apply(t, s, in)
