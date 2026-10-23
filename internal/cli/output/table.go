@@ -173,8 +173,8 @@ func quoted(s string) string {
 	return b.String()
 }
 
-// cell renders one value: strings bare unless they hold a control or bidi
-// control character (unsafeRune; then their quoted JSON form), numbers as written, everything
+// cell renders one value: strings bare unless they hold an unsafe rune
+// (unsafeRune; then their quoted JSON form), numbers as written, everything
 // else (booleans, null, nested objects and arrays) as compact JSON. Object
 // keys go through it too.
 func cell(v any) string {
