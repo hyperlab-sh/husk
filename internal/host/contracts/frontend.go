@@ -245,7 +245,10 @@ type KeyContext struct {
 	ModalOpen    bool
 	// ModalAction is the open modal's rail action id.
 	ModalAction string
-	Frozen      bool
+	// Capture is set while the focused occupant takes text input on
+	// FocusSurface (husk.surfaces.capture).
+	Capture bool
+	Frozen  bool
 }
 
 // KeyOutcome is the result of resolving one typed sequence.
