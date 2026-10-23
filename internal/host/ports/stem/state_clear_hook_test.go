@@ -90,10 +90,11 @@ type logLines struct {
 	lines []string
 }
 
-func (l *logLines) logf(format string, args ...any) {
+// logf records "level message".
+func (l *logLines) logf(level, format string, args ...any) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.lines = append(l.lines, fmt.Sprintf(format, args...))
+	l.lines = append(l.lines, level+" "+fmt.Sprintf(format, args...))
 }
 
 func (l *logLines) all() []string {
@@ -208,7 +209,7 @@ func TestClearLogsASubscriberThatDidNotAnswer(t *testing.T) {
 	}
 	r.cleared(t)
 	lines := r.log.all()
-	if len(lines) != 1 || !strings.Contains(lines[0], "slow") || !strings.Contains(lines[0], "timeout") {
+	if len(lines) != 1 || !strings.HasPrefix(lines[0], "info ") || !strings.Contains(lines[0], "slow") || !strings.Contains(lines[0], "timeout") {
 		t.Fatalf("log = %q, want one line naming the silent subscriber and its timeout", lines)
 	}
 }
@@ -257,8 +258,8 @@ func TestClearBusyFailsOpen(t *testing.T) {
 			}
 			r.cleared(t)
 			lines := r.log.all()
-			if len(lines) != 1 || !strings.Contains(lines[0], msg) {
-				t.Fatalf("log = %q, want one line holding the refusal", lines)
+			if len(lines) != 1 || !strings.HasPrefix(lines[0], "warn ") || !strings.Contains(lines[0], msg) {
+				t.Fatalf("log = %q, want one warn line holding the refusal", lines)
 			}
 		})
 	}
@@ -271,8 +272,8 @@ func TestClearHostBugRefusalsAreInternal(t *testing.T) {
 			wantPortCode(t, r.w.Clear(ctxBG, callerCLI, "atlas.state", false), protocol.CodeInternal)
 			r.untouched(t)
 			lines := r.log.all()
-			if len(lines) != 1 || !strings.Contains(lines[0], "the list is wrong") {
-				t.Fatalf("log = %q, want the refusal logged once", lines)
+			if len(lines) != 1 || !strings.HasPrefix(lines[0], "error ") || !strings.Contains(lines[0], "the list is wrong") {
+				t.Fatalf("log = %q, want the refusal logged once at error", lines)
 			}
 		})
 	}
@@ -280,6 +281,9 @@ func TestClearHostBugRefusalsAreInternal(t *testing.T) {
 		r := newClearRig(t, answer(hooks.Outcome{}, errors.New("boom")))
 		wantPortCode(t, r.w.Clear(ctxBG, callerCLI, "atlas.state", false), protocol.CodeInternal)
 		r.untouched(t)
+		if lines := r.log.all(); len(lines) != 1 || !strings.HasPrefix(lines[0], "error ") || !strings.Contains(lines[0], "boom") {
+			t.Fatalf("log = %q, want one error line", lines)
+		}
 	})
 }
 
@@ -323,6 +327,17 @@ func TestClearContextEndingMidHookIsCancelled(t *testing.T) {
 		return hooks.Outcome{}, &hooks.HookError{Code: protocol.CodeCancelled, Message: "ended", Cause: ctx.Err()}
 	})
 	wantPortCode(t, r.w.Clear(ctx, callerCLI, "atlas.state", false), protocol.CodeCancelled)
+	r.untouched(t)
+}
+
+func TestClearContextEndedByShutdownIsUnavailable(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(ctxBG)
+	r := newClearRig(t, func(ctx context.Context, _ string, _ map[string]any) (hooks.Outcome, error) {
+		cancel(contracts.ErrShutdown)
+		<-ctx.Done()
+		return hooks.Outcome{}, &hooks.HookError{Code: protocol.CodeCancelled, Message: "ended", Cause: ctx.Err()}
+	})
+	wantPortCode(t, r.w.Clear(ctx, callerCLI, "atlas.state", false), protocol.CodeUnavailable)
 	r.untouched(t)
 }
 
