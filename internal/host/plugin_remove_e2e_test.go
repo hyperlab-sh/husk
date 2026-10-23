@@ -85,9 +85,8 @@ func TestPluginRemoveAgainstRealHostAndProcess(t *testing.T) {
 		t.Fatalf("action list before: exit %d out %q err %q", code, out, stderr)
 	}
 
-	// One raw connection watches the facts: the events by name pattern, and
-	// the plugin's slice through state.watch (state.changed is a watcher
-	// notification from the State port, not a bus event).
+	// One connection checks both state.watch values and metadata-only
+	// state.changed events on the bus, alongside the lifecycle events.
 	w := dial(t, instance.SocketPath(h.dir, h.id))
 	for i, req := range []struct {
 		method string
@@ -95,6 +94,7 @@ func TestPluginRemoveAgainstRealHostAndProcess(t *testing.T) {
 	}{
 		{protocol.MethodEventWatch, map[string]any{"pattern": "pods.*"}},
 		{protocol.MethodEventWatch, map[string]any{"pattern": "services.*"}},
+		{protocol.MethodEventWatch, map[string]any{"pattern": "state.changed"}},
 		{protocol.MethodStateWatch, map[string]any{"slices": []string{"alpha.state", "alpha.occupants", "alpha.contributions", "husk.pods"}}},
 	} {
 		if rep := w.callParams(t, string(rune('a'+i)), req.method, req.params); rep.Error != nil {
@@ -131,7 +131,8 @@ func TestPluginRemoveAgainstRealHostAndProcess(t *testing.T) {
 	// services.reloaded. A husk.pods change that still lists the plugin before
 	// the removal (the exit's own write) is not part of it; one that lists it
 	// again afterwards is a re-add and fails the test.
-	var order []string
+	var order, busOrder []string
+	var removalRevision uint64
 	var podsUnlisted bool
 	_ = w.c.SetReadDeadline(time.Now().Add(failBound))
 	for len(order) == 0 || order[len(order)-1] != "services.reloaded" {
@@ -145,9 +146,10 @@ func TestPluginRemoveAgainstRealHostAndProcess(t *testing.T) {
 		}
 		if m.Method == protocol.MethodStateChanged {
 			var c struct {
-				Slice   string          `json:"slice"`
-				Removed bool            `json:"removed"`
-				Value   json.RawMessage `json:"value"`
+				Slice    string          `json:"slice"`
+				Revision uint64          `json:"revision"`
+				Removed  bool            `json:"removed"`
+				Value    json.RawMessage `json:"value"`
 			}
 			_ = json.Unmarshal(m.Params, &c)
 			switch {
@@ -162,6 +164,7 @@ func TestPluginRemoveAgainstRealHostAndProcess(t *testing.T) {
 					t.Fatalf("after %v: %v", order, err)
 				}
 				if record {
+					removalRevision = c.Revision
 					order = append(order, "slice:husk.pods")
 				}
 			case c.Removed:
@@ -176,20 +179,33 @@ func TestPluginRemoveAgainstRealHostAndProcess(t *testing.T) {
 		}
 		var p struct {
 			Name string `json:"name"`
+			Data struct {
+				Slice    string
+				Revision uint64
+				Removed  bool
+			}
 		}
 		_ = json.Unmarshal(m.Params, &p)
 		switch p.Name {
 		case "pods.plugin-exited", "pods.plugin-removed", "services.reloaded":
 			order = append(order, p.Name)
+			busOrder = append(busOrder, p.Name)
+		case "state.changed":
+			if (p.Data.Slice == "husk.pods" && p.Data.Revision == removalRevision) ||
+				(p.Data.Removed && (p.Data.Slice == "alpha.state" || p.Data.Slice == "alpha.occupants" || p.Data.Slice == "alpha.contributions")) {
+				busOrder = append(busOrder, "slice:"+p.Data.Slice)
+			}
 		}
 	}
-	if len(order) != 7 || order[0] != "pods.plugin-exited" || order[5] != "pods.plugin-removed" || order[6] != "services.reloaded" {
-		t.Fatalf("order = %v", order)
-	}
-	slices := append([]string(nil), order[1:5]...)
-	sort.Strings(slices)
-	if want := []string{"slice:alpha.contributions", "slice:alpha.occupants", "slice:alpha.state", "slice:husk.pods"}; !reflect.DeepEqual(slices, want) {
-		t.Fatalf("slice changes between exited and removed = %v, want %v", slices, want)
+	for source, facts := range map[string][]string{"state watch": order, "event bus": busOrder} {
+		if len(facts) != 7 || facts[0] != "pods.plugin-exited" || facts[5] != "pods.plugin-removed" || facts[6] != "services.reloaded" {
+			t.Fatalf("%s order = %v", source, facts)
+		}
+		slices := append([]string(nil), facts[1:5]...)
+		sort.Strings(slices)
+		if want := []string{"slice:alpha.contributions", "slice:alpha.occupants", "slice:alpha.state", "slice:husk.pods"}; !reflect.DeepEqual(slices, want) {
+			t.Fatalf("%s slice changes between exited and removed = %v, want %v", source, slices, want)
+		}
 	}
 }
 
