@@ -80,12 +80,20 @@ func TestPluginRemoveAgainstRealHostAndProcess(t *testing.T) {
 		t.Fatalf("action list before: exit %d out %q err %q", code, out, stderr)
 	}
 
-	// One raw connection watches the three families (state.changed travels on
-	// the bus like the pods.* and services.* facts).
+	// One raw connection watches the facts: the events by name pattern, and
+	// the plugin's slice through state.watch (state.changed is a watcher
+	// notification from the State port, not a bus event).
 	w := dial(t, instance.SocketPath(h.dir, h.id))
-	for i, pattern := range []string{"pods.*", "state.*", "services.*"} {
-		if rep := w.callParams(t, string(rune('a'+i)), protocol.MethodEventWatch, map[string]any{"pattern": pattern}); rep.Error != nil {
-			t.Fatalf("event.watch %s: %+v", pattern, rep.Error)
+	for i, req := range []struct {
+		method string
+		params map[string]any
+	}{
+		{protocol.MethodEventWatch, map[string]any{"pattern": "pods.*"}},
+		{protocol.MethodEventWatch, map[string]any{"pattern": "services.*"}},
+		{protocol.MethodStateWatch, map[string]any{"slices": []string{"alpha.state"}}},
+	} {
+		if rep := w.callParams(t, string(rune('a'+i)), req.method, req.params); rep.Error != nil {
+			t.Fatalf("%s: %+v", req.method, rep.Error)
 		}
 	}
 
@@ -121,18 +129,29 @@ func TestPluginRemoveAgainstRealHostAndProcess(t *testing.T) {
 			t.Fatalf("after %v: %v", order, err)
 		}
 		var m protocol.Message
-		if err := json.Unmarshal(line, &m); err != nil || m.Method != protocol.MethodEventDeliver {
+		if err := json.Unmarshal(line, &m); err != nil {
+			t.Fatalf("%s: %v", line, err)
+		}
+		if m.Method == protocol.MethodStateChanged {
+			var c struct {
+				Slice   string `json:"slice"`
+				Removed bool   `json:"removed"`
+			}
+			_ = json.Unmarshal(m.Params, &c)
+			if c.Slice == "alpha.state" && c.Removed {
+				order = append(order, "state.changed")
+			}
+			continue
+		}
+		if m.Method != protocol.MethodEventDeliver {
 			continue
 		}
 		var p struct {
-			Name string          `json:"name"`
-			Data json.RawMessage `json:"data"`
+			Name string `json:"name"`
 		}
 		_ = json.Unmarshal(m.Params, &p)
 		switch {
 		case p.Name == "pods.plugin-exited" || p.Name == "pods.plugin-removed" || p.Name == "services.reloaded":
-			order = append(order, p.Name)
-		case p.Name == "state.changed" && strings.Contains(string(p.Data), `"alpha.state"`):
 			order = append(order, p.Name)
 		}
 	}
