@@ -9,7 +9,7 @@ tags: [architecture-v2, frontend, services, pods]
 
 # Settings center
 
-**Landed:** the center shell, host actions, bottom-bar entry point, Theme tab, profile corner, host seams and catalog reader. General, Keys, Store and Installed are selectable but their content panes remain specified, not landed.
+**Landed:** the center shell, host actions, bottom-bar entry point, General, Keys and Theme tabs, profile corner, host seams and catalog reader. Store and Installed are selectable but their content panes remain specified, not landed.
 
 ## Level 0: What and why
 
@@ -107,6 +107,8 @@ Mouse: a click on a tab row activates it; a click in the content focuses it and 
 
 #### General
 
+**Landed:** schema-driven huh fields, ordered groups with collapsed plugin schemas, explicit sequential saves, per-field outcomes and dirty-preserving reloads. The center owns field traversal, so huh's submission and external-editor paths are disabled; cached field views are refreshed only on Update.
+
 Every settings key with a schema entry, as `settings.schema` lists them, edited in a huh form. The rows are **grouped by prefix**: the group of a key is the key minus its last segment (`husk`, `husk.plugins`, `theme`, `theme.palette`, `profile`, `dist`, `dist.<x>`, ...), groups sorted by name and keys sorted inside each; the group name is a heading and the field label is the last segment, with the entry's `Doc` line in `ink_muted` under it. Host keys (`husk.*`, `theme.*`, `profile.*`) come first, then the distribution's `dist.*` groups (same mechanics; the user may write them and `settings.set` accepts them, so leaving them out would hide keys the user owns), then one **collapsible group per plugin**, `plugins.<id>`, collapsed by default and showing only the keys that plugin's schema declares (a plugin whose schema was not registered has no group; its raw keys are `settings.list`'s business). `theme.name` is listed like any string key; the Theme tab is the comfortable way to change it, the field is the exact one.
 
 The huh field for each schema type:
@@ -132,6 +134,8 @@ The save continues past a failed key to the next dirty key: each write is indepe
 Not in v1, said so the implementer does not add it: a Save button (the key is enough and huh has no button field), per-field revert (close and reopen), a "reset to default" (there is no removal in `settings.set`; [Services](services.md) open question 3), batch writes (one reload per key is the cost of one-key semantics; the Services open question on batching is where that changes).
 
 #### Keys
+
+**Landed:** the full read-only listing, muted shadowed rows, palette-compatible query input, scrolling and bounded diagnostics.
 
 Read-only. One row per entry of `keys.list` (the full listing, as a `cli` caller sees it, through the seam `KeyListing()`), in the listing's order, with the columns `KEY` (a sequence space-joined, `ctrl+k ctrl+s`, as `husk keys` prints it), `SCOPE`, `ACTION`, `LAYER` (the owner: `husk`, `distribution`, `user`, `profile`, `instance`, `focus-local` with the plugin id) and `STATE` (`effective`, `shadowed by <source>`, `disabled`, `unavailable`, `unknown_action`; the handler's states, [Keybindings](keybindings.md) "`husk keys`"). Shadowed entries are **shown** (the center is where a user wonders why a key does nothing), in `ink_muted`. A **filter box** above the table (the palette's query line component, not a huh field, because it filters as the user types) keeps rows whose key spelling, action or plugin contains the text, case-insensitive. The listing's problems are shown under the table, `severity: code: message`, at most 20 with `and <n> more`.
 
@@ -244,7 +248,7 @@ Styling: a `huh.Theme` is built from the served `Palette` and its index map (`Pa
 
 ### Frontend seams
 
-**Landed:** the center's host seams, including `Themes` and `SetSetting`, are available through `contracts.Frontend`. The shell, Theme tab and profile corner are landed; the remaining tab content is specified, not landed.
+**Landed:** the center's host seams, including `Themes` and `SetSetting`, are available through `contracts.Frontend`. The shell, General, Keys and Theme tabs and profile corner are landed; Store and Installed content is specified, not landed.
 
 The center drives the host through `contracts.Frontend` ([Pods](pods.md), "Frontend seams") and nothing else. It uses `Snapshot`, `Palette`, `Themes`, `SetSetting` and the `PaletteANSI` seam that [Built-in themes](themes.md) adds. The seams below use a `host` caller with the authorization that caller has in [Services](services.md) and [Pods](pods.md), except `KeyListing`, which explicitly requests the full `cli` view:
 
@@ -332,12 +336,13 @@ Each named for the behaviour it pins, in `cmd/husk` on the recording fake fronte
 
 ## Level 2: Migration from today
 
-The shell, Theme tab and profile corner are landed, along with the host seams and catalog reader. The Theme tab is the only selector; no standalone selector was introduced. General, Keys, Store and Installed content remains to land. Implementation order:
+The shell, General, Keys and Theme tabs and profile corner are landed, along with the host seams and catalog reader. The Theme tab is the only selector; no standalone selector was introduced. Store and Installed content remains to land. Implementation order:
 
 1. **huh compatibility check — landed**, as "huh" says: huh v2 builds and renders with the existing pins. One commit, no workbench behaviour.
 2. **Seams — landed.** `contracts.Frontend` exposes `Themes`, `SetSetting`, `SettingsSchema`, `Setting`, `KeyListing`, `Profiles`, `UseProfile`, `RemovePlugin` and `ConfigDir` (`Catalog` landed with the reader, step 3). The root implements them over the existing Services ports and Pods; `KeyListing` calls the same Keybinding port as the handler with a `cli` caller. Writes run on tracked workers and reply only through the loop. `plugin.remove` admits a `host` caller in process ("Changes to other specs"). `husk.pods` entries and `plugin.list` carry `dir`.
 3. **The catalog reader — landed**, a small package beside Services (`internal/services/catalog`), with the rules of "The catalog document", importing `pkg/protocol`, Store's layer types and the shared Store-to-Problem conversion in `services/settings`, and nothing else; tested on fixtures. The host warms its cache on a worker after the startup flight and after each `services.reloaded` and posts the result to the loop. Construction drains the initial worker's post before handing ownership to the frontend; later reloads never wait for the cache. Late workers cannot replace a newer refresh. The cache uses the serving Profile snapshot's active name.
-4. **The center shell, Theme and profile corner — landed** in `cmd/husk`: the modal, five-tab list, focus and input isolation, profile Select, both host actions, `overlays.settings_center`, bottom-bar click and golden frames. The theme selector is implemented **as the Theme tab**, never as a standalone modal. General, Keys, Store and Installed currently have empty content panes; their implementations and goldens remain specified.
+4. **The center shell, Theme and profile corner — landed** in `cmd/husk`: the modal, five-tab list, focus and input isolation, profile Select, both host actions, `overlays.settings_center`, bottom-bar click and golden frames. The theme selector is implemented **as the Theme tab**, never as a standalone modal. Store and Installed currently have empty content panes; their implementations and goldens remain specified.
+5. **General and Keys — landed** in `cmd/husk`: the six schema field types, plugin-group collapse, single-flight key-ordered saves, persistent restart warnings, failure continuation and dirty-preserving snapshot refresh; the read-only Keys table with filtering and at most 20 problems. Three frame goldens cover General, its restart/error state and filtered Keys.
 
 The specs this one amends, each with the minimal consistent edit: [Services](services.md) ("The theme selector" becomes the Theme tab's contract; the toast rule names the center), [State](state.md) (`overlays.settings_center` replaces `overlays.theme_selector`; `husk.pods` gains `dir`), [Keybindings](keybindings.md) (`husk.settings.open` joins the host actions; the context filter row), [Store](store.md) (the `catalog` document in the document list and the directory tree), [Protocol](protocol.md) (`plugin.remove` admits the host; `plugin.list` gains `dir` in minor 2.3), [Pods](pods.md) (the same, and the seams), [Workbench chrome](chrome.md) (the theme pill's click runs `husk.settings.open` with `tab: theme`), [Bundles](bundles.md) (`themes` and `catalog` join the document names a bundle may ship).
 
@@ -365,6 +370,10 @@ The specs this one amends, each with the minimal consistent edit: [Services](ser
 13. **Unsaved edits are discarded on close with no prompt** (ruling), with the footer saying so while anything is dirty.
 14. **huh v2 with a bounded fallback.** The fallback names exactly four field kinds, all of which the frontend has or nearly has, so a failed compatibility check costs a bounded amount and changes no behaviour.
 15. **The bottom-bar click runs `husk.settings.open` with `tab: theme`**, not `husk.theme.select`: one action opens the center and the alias exists only for keymaps already written; [Workbench chrome](chrome.md) is amended accordingly.
+
+## Spec gaps resolved
+
+- A duration default that is not a whole millisecond is displayed as integer milliseconds, truncated toward zero, with `(ms)` after its label. Saves still send an integer number of milliseconds.
 
 ## Open questions
 
