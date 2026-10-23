@@ -17,6 +17,7 @@ type Loop interface {
 	// block the caller on the loop's work, and returns false when the
 	// loop no longer runs, in which case fn is not run. Ports that must
 	// observe the outcome wait off the loop: Calls and Hooks on their
-	// reply channels, State on the request context.
+	// reply channels, State's Set and Patch on the request context (Clear
+	// uses Do once the persisted copies have been deleted).
 	Post(fn func()) bool
 }
