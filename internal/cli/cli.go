@@ -101,6 +101,7 @@ func builtins() map[string]command {
 		"plugin":    pluginCommand(),
 		"hook":      hookCommand(),
 		"settings":  settingsCommand(),
+		"theme":     themeCommand(),
 	}
 }
 
