@@ -400,7 +400,8 @@ Value shapes:
 {"slice":"husk.surfaces","value":{
   "occupants":{"main-stage":{"surface":"main-stage","plugin":"example.editor"}},
   "contributions":{"example.editor.toolbar":[{"slot":"example.editor.toolbar","id":"example.git.branch","plugin":"example.git","label":"main"}]},
-  "capture":{"main-stage":true},
+  "capture":{"main-stage":"text"},
+  "terminals":{},
   "visible":["activity-rail","main-header","main-stage","side-panel","sidebar-footer","sidebar-list","sidebar-navigation"],
   "placement":{"rail_item":"","kind":""},
   "overlays":{"modal":{"plugin":"","rail_item":""},"palette":false,"slot_explorer":false,"settings_center":""}
@@ -448,10 +449,7 @@ live claimant in namespace order; a live occupant is never preempted by a
 claimant that goes live later. The host marks the engine on every
 `husk.pods` write (`Engine.LivenessChanged`), so the hand-over lands in the
 same tick, and the new occupant is told its size like any new occupant. The
-engine also keeps `capture`, a map from surface id to `true` for each surface
-whose occupant said it is taking text input: a `surface.update` from the
-occupant with `capture: true` sets the entry, `capture: false` removes it, and
-an absent field changes nothing ([Protocol](protocol.md) 2.1). The engine
+engine also keeps `capture`, a map from surface id to `"text"` or `"all"` for each capturing surface. A `surface.update` from the occupant with `capture: true` or `"text"` sets text capture, `"all"` sets full capture, `false` removes it, and an absent field changes nothing ([Protocol](protocol.md) 2.5). The engine
 removes the entry whenever the surface's occupant changes, releases or closes
 the surface, or its Pod leaves `live`, so a dead or departed plugin never
 leaves a surface capturing (D93). An unoccupied surface has no entry, and the
@@ -479,7 +477,7 @@ first live claim wins among the claims that arrive after the re-registration.
 
 #### Runtime and terminal surfaces
 
-**Level 1: specified, not landed** (protocol minor 2.2, [Protocol](protocol.md), "Runtime and terminal surfaces"). `husk.surfaces` gains three facts, all written by the Surfaces engine like the rest of its half:
+**Terminal metadata and capture modes land in protocol minor 2.5** ([Protocol](protocol.md), "Runtime and terminal surfaces"). Runtime surfaces remain Level 1, specified but not landed. The following facts are written by the Surfaces engine like the rest of its half:
 
 - `runtime`, a map from dynamic surface id (`<plugin_id>.<name>`) to `{"plugin", "placement", "title", "width", "height"}` for every surface a `surface.open` created and nothing has closed. Such a surface also appears in `occupants` (the opener is its occupant from the reply on) and in the frontend's `visible` while shown, and its rect in `husk.geometry.rects`, so a consumer that only knows the layout surfaces still sees it as occupied space. `capture`, `visible` and `rects` are keyed by the same dynamic id. The engine removes the entry on `surface.close`, on the host's close, and when the opener's Pod leaves `live`; a runtime surface is never handed to another claimant (there is no declaration to resolve).
 - `terminals`, a map from surface id to `{"title", "alt_screen", "mouse", "scrollback"}` for every attached surface: the title the application set (OSC 0/2), whether it is on the alternate screen, whether it enabled mouse reporting (so Input knows whether a wheel scrolls the application or the host's scrollback) and the scrollback line count. The engine updates it from the emulator's callbacks, coalesced per tick; the screen contents themselves are not State (see "What is not State"), exactly as `surface.update` lines are not.

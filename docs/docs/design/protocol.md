@@ -237,7 +237,9 @@ Minor 2.2 ([Pods](pods.md), "Adding a plugin"): `plugin.add` and the `pods.plugi
 
 Minor 2.3 ([Services](services.md), "Theme" and "Settings"; [Settings center](settings-center.md)): `theme.list` and `settings.set`, plus the `settings` reload reason in `services.reloaded`, plus the `dir` field of each `plugin.list` entry and `husk.pods` entry (additive; the plugin's directory as the converter resolved it, `""` for an implicit command line; [Pods](pods.md), "plugin.* wire shapes"). **Landed in 2.3:** both `theme.list` and `settings.set` are served after minor 2.2's `plugin.add` (rule 5 above); `dir` is landed as an additive field and does not move the version. `plugin.remove` admitting a `host` caller at its port is also landed; it is a port rule, not a wire change, and is not part of any minor. The socket adapter remains CLI-only. The two methods are described below under "Theme selection and the settings write (minor 2.3)" and landed together with their handlers: the constants, the schema entries and the rows of the method table were added in the change that serves them, so `pkg/protocol` never names a method the host answers `unknown_method` to.
 
-Minor 2.4 ([Built-in themes](themes.md), "Role values"; [Services](services.md), "Theme"): the optional `ansi` object beside `palette` in the `theme.get` result and the `theme.changed` params, mapping each palette role a theme set as an ANSI index to that index (`0`–`15`). No method is added and no existing field changes: `palette` values stay `#rrggbb`. **Landed:** `protocol.Version` is `2.4`; the host serves `ansi` and minor 2.3 is also landed (rule 5). The field's type is `protocol.ANSIRoles`, used by `ThemeChangedParams` and by the `theme.get` result; the generated schema constrains it on `theme.changed` (role-name keys, integers `0`–`15`), while the `theme.get` result stays an open object there because [Services](services.md) owns it. The shape is under "ANSI palette roles (minor 2.4)" below.
+Minor 2.4 ([Built-in themes](themes.md), "Role values"; [Services](services.md), "Theme"): the optional `ansi` object beside `palette` in the `theme.get` result and the `theme.changed` params, mapping each palette role a theme set as an ANSI index to that index (`0`–`15`). No method is added and no existing field changes: `palette` values stay `#rrggbb`. **Landed in 2.4:** the host serves `ansi` and minor 2.3 is also landed (rule 5). The field's type is `protocol.ANSIRoles`, used by `ThemeChangedParams` and by the `theme.get` result; the generated schema constrains it on `theme.changed` (role-name keys, integers `0`–`15`), while the `theme.get` result stays an open object there because [Services](services.md) owns it. The shape is under "ANSI palette roles (minor 2.4)" below.
+
+Minor 2.5 serves terminal attachment, output, detachment and encoded input on already claimed surfaces, with full-key capture and its release action. `protocol.Version` is `2.5`; all earlier minors remain served. Runtime surfaces and terminal links are deferred.
 
 Where the version is checked, since there is no handshake:
 
@@ -283,6 +285,9 @@ A requester that stops waiting ([Calls](calls.md) times a request out, or a sock
 | | `state.changed` | notification | Husk to a watching socket connection |
 | `surface` | `surface.update`, `surface.close` | notification | plugin to Husk (socket) |
 | | `surface.resized` | notification | Husk to plugin |
+| `terminal` | `terminal.attach` | request | plugin to Husk (socket) |
+| | `terminal.write`, `terminal.detach` | notification | plugin to Husk (socket) |
+| | `terminal.input` | notification | Husk to the attached plugin (stdin) |
 | `input` | `input.key`, `input.mouse`, `input.key_state` | notification | Husk to the plugin owning the target surface |
 | `theme` | `theme.changed` | notification | Husk to plugin |
 | | `theme.get`, `theme.list` | request | plugin or CLI to Husk |
@@ -323,9 +328,9 @@ Direction rule: stdin carries Husk's requests and notifications; stdout carries 
 
 Each entry names the surface and its inner content dimensions in cells, focus and visibility. In moved surface and input params, the host-surface identifier field is `surface`, never the legacy `slot`. Published extension points still use `slot_id`; they are not host surfaces.
 
-### Runtime and terminal surfaces (minor 2.2)
+### Runtime and terminal surfaces (minor 2.5)
 
-**Level 1: specified, not landed.** Nothing below exists in `pkg/protocol`; the current `2.4` serves `plugin.add`, `theme.list`, `settings.set` and ANSI palette roles, not these methods. The method table above, `pkg/protocol/methods.go` and the generated schema gain the rows, constants and payload types only in the change that serves them. The host-side contracts (ports, `MethodHomes`, the Surfaces engine) are named in [Pods](pods.md) and [State](state.md); this section owns only the wire.
+**Terminal surfaces land in 2.5.** The four served methods are `terminal.attach`, `terminal.write`, `terminal.detach` and `terminal.input`. Runtime surfaces (`surface.open`) and `terminal.link` remain Level 1, specified but not landed; they gain constants and schema only with their implementations. Terminal attachment to an already claimed layout surface does not depend on runtime surfaces. The host-side contracts (ports, `MethodHomes`, the Surfaces engine) are named in [Pods](pods.md) and [State](state.md); this section owns only the wire.
 
 Two capabilities a manifest cannot express motivate the minor: a plugin that decides at run time that it needs a modal or the whole canvas (a dialog, a viewer), and a plugin whose content is a terminal, a byte stream from a process, rather than lines of text. Both are generic: no plugin kind is named here.
 
@@ -347,13 +352,17 @@ Two capabilities a manifest cannot express motivate the minor: a plugin that dec
 
 **`terminal.write`** carries bytes from the plugin to the emulator: `surface` and `data`, base64, at most 64 KiB decoded per notification. The host decodes, feeds the emulator and redraws on its own schedule (writes are coalesced per frame; a plugin never waits for a paint). A write to a surface the caller does not occupy or has not attached is logged and dropped, like a refused `surface.update`.
 
+**Resize.** The host resizes the emulator grid in the same geometry pass as `surface.resized`. The plugin applies the new inner dimensions to its PTY with `TIOCSWINSZ`, which delivers `SIGWINCH` to the foreground process group; the program is expected to redraw and the host renders that subsequent output. The pinned `x/vt v0.1.0` resize truncates cells outside a shrunken grid and does not rewrap already-printed lines. Soft-wrap and history reflow are deferred, not part of the resize contract of this minor.
+
 **`terminal.detach`** returns the surface to line rendering with an empty frame; the emulator and its scrollback are discarded. `surface.close` on an attached surface detaches implicitly.
 
-**`terminal.input`** carries bytes from the emulator to the plugin: `surface` and `data`, base64. The host's emulator encodes every key, mouse event and paste it receives for the application's current modes (cursor-key mode, bracketed paste, mouse reporting, keyboard protocol flags) and the host sends the encoded bytes here; the plugin writes them to its process verbatim. Key and mouse events on an attached surface are never delivered as `input.key` or `input.mouse` (`input.key_state` is not sent to an attached surface either); which keys reach the emulator at all is the keybinding policy's `all` capture mode ([Keybindings](keybindings.md), "Capture modes").
+**`terminal.input`** carries bytes from the emulator to the plugin: `surface` and `data`, base64. The host's emulator encodes every key, mouse event and paste it receives for the application's current modes (cursor-key mode, bracketed paste, mouse reporting). This minor encodes legacy keyboard sequences only; kitty/CSI-u and modifyOtherKeys encoding are deferred. Focus in/out is encoded when the program enables focus reporting. OSC 0/2 titles replace a non-empty manifest frame label while set; clearing the title or detaching restores that label. The host sends the encoded bytes here; the plugin writes them to its process verbatim. Key and mouse events on an attached surface are never delivered as `input.key` or `input.mouse` (`input.key_state` is not sent to an attached surface either); which keys reach the emulator at all is the keybinding policy's `all` capture mode ([Keybindings](keybindings.md), "Capture modes").
 
 **`terminal.link`** reports a modified click (the host's link modifier, `ctrl` by default) on a URL in an attached surface: `surface`, `url` (an OSC 8 hyperlink target, or a `[a-z][a-z0-9+.-]*://` run detected in the screen text), `row`, `col`. It is informational: the host opens nothing itself.
 
 **`capture`** on `surface.update` (and on `terminal.attach`) accepts, from this minor, `true`, `false`, `"text"` or `"all"`: `true` means `"text"` and `false` means none, so 2.1 plugins are unchanged. `"all"` says the occupant takes every key except the host's release key ([Keybindings](keybindings.md)). The host records the mode in `husk.surfaces.capture` ([State](state.md)).
+
+Emulator replies and encoded input use the occupant's existing bounded Pod queue. A full queue drops and logs rather than blocking the host loop or waiting for a paint.
 
 Limits owned here: `terminal.write` 64 KiB decoded per notification; runtime surfaces 8 per plugin; `surface.open` `name` 32 bytes; `title` 80 runes; scrollback 20,000 lines.
 
@@ -487,5 +496,6 @@ A receiver that knows `ansi` draws each listed role as the terminal's basic colo
 3. Aggregating `hook.call` into one reply (decision 11) delays the caller to the slowest subscriber, up to the hook's timeout. Settled in [Hooks](hooks.md): accepted; a publisher bounds the wait with `timeout_ms`, and streaming can come back as a minor addition if a plugin needs it.
 4. Resolved (no shim): should Husk keep a major-1 compatibility shim for the external plugin crate that exists today? Recommended: no; update it in step with the change and rely on the one-line major-1 rejection to tell stale builds what happened.
 5. Resolved: `pkg/huskipc` was deleted; the only known importers were in this repository.
-6. **Minor 2.2 (runtime and terminal surfaces) is specified before any of it is built.** The constants, homes and payload types land with the first served method so that `pkg/protocol` never names a method the host answers `unknown_method` to. Recommended: land `surface.open` first (it needs no emulator), then the `terminal.*` family together.
+6. **Terminal surfaces ship in minor 2.5 independently of runtime surfaces.** Constants, homes and payload types land only for served methods; `surface.open` and `terminal.link` remain deferred.
 7. **Should `terminal.input` be framed per event** (one notification per key, with the key name beside the bytes) rather than as an opaque byte stream? The stream is what a PTY wants and keeps the host's encoder authoritative; per-event framing would let a plugin see key names it cannot otherwise learn. Recommended: the stream; a plugin that wants key names keeps a line surface and `input.key`.
+8. **Reflow of already-printed screen lines and history remains open.** The pinned `x/vt v0.1.0` uses a truncating grid resize and has no soft-wrap/history reflow. A future change may add reflow with explicit wrap metadata; this minor relies on the program redrawing after the PTY's `SIGWINCH` and introduces no replacement emulator or dependency.
