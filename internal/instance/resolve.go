@@ -274,7 +274,7 @@ func discover(opts ResolveOptions) (Resolved, error) {
 	}
 	var live, skipped, unresponsive []Status
 	for _, st := range statuses {
-		if st.NotSocket != "" {
+		if st.Skipped() {
 			skipped = append(skipped, st) // warned about, never a candidate
 			continue
 		}

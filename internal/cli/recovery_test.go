@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"io/fs"
 	"net"
 	"os"
 	"strings"
@@ -160,4 +161,29 @@ func TestNonSocketEntryIsSkippedWithAWarningNamingThePath(t *testing.T) {
 			t.Fatalf("stderr = %q, want %q", h.errb.String(), want)
 		}
 	})
+}
+
+// A removal failure while recovering a stale entry (EACCES here) is warned
+// about naming the path, in both `instances` and discovery; the entry stays.
+func TestRemovalFailureIsWarnedAboutNamingThePath(t *testing.T) {
+	for _, args := range [][]string{{"instances", "--format", "json"}, {"ping", "--format", "table"}} {
+		t.Run(args[0], func(t *testing.T) {
+			dir := shortDir(t)
+			sock := instance.SocketPath(dir, "stuck")
+			register(t, dir, "stuck", sock, protocol.Version)
+			deadSocket(t, sock)
+			h := newHarness(t, dir, nil)
+			h.env.Deps = &instance.Deps{Remove: func(path string) error {
+				if path == sock {
+					return &fs.PathError{Op: "remove", Path: path, Err: syscall.EACCES}
+				}
+				return os.Remove(path)
+			}}
+			h.run(args...)
+			want := "cannot remove " + sock + ": permission denied; instance \"stuck\" skipped"
+			if !strings.Contains(h.errb.String(), strings.ReplaceAll(want, `"`, map[bool]string{true: `\"`, false: `"`}[args[0] == "instances"])) {
+				t.Fatalf("stderr = %q, want %q", h.errb.String(), want)
+			}
+		})
+	}
 }
