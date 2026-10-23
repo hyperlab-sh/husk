@@ -584,9 +584,14 @@ func (m *WorkbenchModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if s := m.settings; s != nil {
-			if s.profileForm == nil && s.focus == settingsContentFocus {
+			if s.profileForm == nil && (s.plugins == nil || s.plugins.confirm == nil) && s.focus == settingsContentFocus {
 				if s.tab == "general" {
 					return m, m.settingsGeneralKey(msg)
+				}
+				if s.tab == "store" && s.plugins != nil && s.plugins.filter == nil {
+					s.plugins.query += cleanQueryPaste(msg.Content)
+					s.plugins.cursor, s.plugins.top, s.plugins.selectedID = 0, 0, ""
+					s.plugins.dirty = true
 				}
 				if s.tab == "keys" {
 					s.keyQuery += cleanQueryPaste(msg.Content)

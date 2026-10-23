@@ -2,6 +2,7 @@ package main
 
 import (
 	"image"
+	"slices"
 	"strings"
 
 	"charm.land/huh/v2"
@@ -129,6 +130,20 @@ func (m *WorkbenchModel) drawSettings(c *canvas) uv.Rectangle {
 	if s.tab == "keys" {
 		c.blitLines(content.Min.X, content.Min.Y, content.Dx(), content.Dy(), m.settingsKeysLines())
 	}
+	if (s.tab == "store" || s.tab == "installed") && s.plugins != nil {
+		p := s.plugins
+		lines := p.lines[min(p.top, len(p.lines)):]
+		if p.confirm != nil {
+			confirm := strings.Split(p.confirmView, "\n")
+			keep := min(len(lines), max(1, content.Dy()-len(confirm)-1))
+			lines = append(slices.Clone(lines[:keep]), "")
+			lines = append(lines, confirm...)
+		}
+		if p.filter != nil {
+			lines = strings.Split(p.filterView, "\n")
+		}
+		c.blitLines(content.Min.X, content.Min.Y, content.Dx(), content.Dy(), lines)
+	}
 	if s.tab == "theme" {
 		height := max(1, content.Dy()-4)
 		top := settingsListTop(s.top, s.cursor, len(s.themes), height)
@@ -168,6 +183,12 @@ func (m *WorkbenchModel) drawSettings(c *canvas) uv.Rectangle {
 	case settingsContentFocus:
 		if s.tab == "theme" {
 			footer += base.Bold(true).Render("enter") + muted.Render(" select · ")
+		}
+		if s.tab == "installed" {
+			footer += base.Bold(true).Render("enter/x") + muted.Render(" remove · ")
+		}
+		if s.tab == "store" {
+			footer += base.Bold(true).Render("enter") + muted.Render(" surface · type to filter · ")
 		}
 		if s.tab == "general" {
 			footer += base.Bold(true).Render("ctrl+s") + muted.Render(" save · ")
