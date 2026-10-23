@@ -535,7 +535,9 @@ func (m *WorkbenchModel) settingsMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) 
 				if mouse.Button == tea.MouseWheelUp {
 					return m.settingsKey(tea.KeyPressMsg{Code: tea.KeyUp})
 				}
-				return m.settingsKey(tea.KeyPressMsg{Code: tea.KeyDown})
+				if mouse.Button == tea.MouseWheelDown {
+					return m.settingsKey(tea.KeyPressMsg{Code: tea.KeyDown})
+				}
 			}
 			return m, nil
 		}
@@ -597,6 +599,19 @@ func (m *WorkbenchModel) settingsMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) 
 				s.keyTop++
 			}
 			m.clampSettingsKeysTop()
+			return m, nil
+		}
+		if s.focus == settingsContentFocus && s.tab == "store" && s.plugins != nil {
+			switch mouse.Button {
+			case tea.MouseWheelUp:
+				s.plugins.top--
+			case tea.MouseWheelDown:
+				s.plugins.top++
+			default:
+				return m, nil
+			}
+			// The cached Store body clamps its offset after the event.
+			s.plugins.dirty = true
 			return m, nil
 		}
 		if mouse.Button == tea.MouseWheelUp {
