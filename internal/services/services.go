@@ -76,6 +76,7 @@ type flight struct {
 	started  bool // protected by Coordinator.mu; the worker was launched
 	dry      bool // a dry run: holds the coordinator's turn, never coalesces
 	granted  chan struct{}
+	work     sync.WaitGroup // the gather and Rebuild goroutines the flight started
 	reports  []Report
 	err      error
 }
@@ -312,6 +313,12 @@ func (co *Coordinator) execute(f *flight) {
 	f.err = err
 	co.last = c.Clone(reports)
 	close(f.done)
+	co.mu.Unlock()
+	// The turn ends only when what the flight started has returned: a flight
+	// that gave up (deadline, Close) must not overlap the next one on Store
+	// or on a Service's Rebuild. Waiters were already answered above.
+	f.work.Wait()
+	co.mu.Lock()
 	co.advanceLocked()
 	co.mu.Unlock()
 }
@@ -400,7 +407,8 @@ func (co *Coordinator) reload(parent context.Context, reason Reason, f *flight) 
 	}
 	defer publish()
 	inputs := make(chan inputResult, 1)
-	go func() { inputs <- co.loadInput(f) }()
+	f.work.Add(1)
+	go func() { defer f.work.Done(); inputs <- co.loadInput(f) }()
 	var input inputResult
 	select {
 	case input = <-inputs:
@@ -446,7 +454,12 @@ func (co *Coordinator) reload(parent context.Context, reason Reason, f *flight) 
 			in.Settings = co.opts.Settings()
 		}
 		result := make(chan prepared, 1)
-		go func() { candidate, report, err := service.Rebuild(ctx, in); result <- prepared{candidate, report, err} }()
+		f.work.Add(1)
+		go func() {
+			defer f.work.Done()
+			candidate, report, err := service.Rebuild(ctx, in)
+			result <- prepared{candidate, report, err}
+		}()
 		var p prepared
 		select {
 		case p = <-result:

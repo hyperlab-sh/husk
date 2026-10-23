@@ -550,3 +550,51 @@ func TestConfigNoticeSurvivesAFailureInTheSameSettle(t *testing.T) {
 		t.Fatalf("joined toast = %+v", tt)
 	}
 }
+
+// The config line and plugin failures join one toast whichever settle brings
+// which: a notice then a launch failure, and a failure then a notice.
+func TestConfigNoticeAndFailuresJoinAcrossSettles(t *testing.T) {
+	boot := func() (*WorkbenchModel, *fakeFE) {
+		m := goldenModel()
+		fe := withFE(m)
+		fe.pods, fe.occ, fe.podErr = map[string]string{}, map[protocol.SurfaceID]string{}, map[string]string{}
+		m.settle()
+		return m, fe
+	}
+	const cfg = "2 configuration problems; run husk config reload"
+	t.Run("notice then a launch failure", func(t *testing.T) {
+		m, fe := boot()
+		fe.Notices = []contracts.ConfigNotice{{Reason: "startup", Errors: 2}}
+		m.settle()
+		if tt := m.activeToast; tt == nil || tt.Message != cfg {
+			t.Fatalf("first toast = %+v", tt)
+		}
+		fe.pods["bad"], fe.podErr["bad"] = "failed", "start: no such file"
+		fe.publish()
+		m.settle()
+		tt := m.activeToast
+		if tt == nil || tt.Title != "Plugin failed" || !strings.Contains(tt.Message, "bad: start: no such file") || !strings.Contains(tt.Message, cfg) {
+			t.Fatalf("toast = %+v, want both lines", tt)
+		}
+	})
+	t.Run("failure then a notice", func(t *testing.T) {
+		m, fe := boot()
+		fe.pods["bad"], fe.podErr["bad"] = "failed", "start: no such file"
+		fe.publish()
+		m.settle()
+		fe.Notices = []contracts.ConfigNotice{{Reason: "plugin", Errors: 2}}
+		m.settle()
+		tt := m.activeToast
+		if tt == nil || tt.Title != "Plugin failed" || !strings.Contains(tt.Message, "bad: start: no such file") || !strings.Contains(tt.Message, cfg) {
+			t.Fatalf("toast = %+v, want both lines", tt)
+		}
+		// The next failure keeps the earlier lines.
+		fe.pods["worse"], fe.podErr["worse"] = "failed", "boom"
+		fe.publish()
+		m.settle()
+		tt = m.activeToast
+		if tt == nil || tt.Title != "2 plugins failed" || !strings.Contains(tt.Message, "bad: start") || !strings.Contains(tt.Message, "worse: boom") || !strings.Contains(tt.Message, cfg) {
+			t.Fatalf("toast = %+v, want both failures and the config line", tt)
+		}
+	})
+}

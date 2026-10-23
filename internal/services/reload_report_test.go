@@ -577,3 +577,56 @@ func TestDryRunsTakeTheCoordinatorsTurn(t *testing.T) {
 		}
 	})
 }
+
+// An imported cli_only_event problem names its manifest member as the Key and
+// leaves Source.Order unset; a binding problem keeps its index as the Order.
+func TestImportedSubscriptionProblemNamesItsMember(t *testing.T) {
+	kb := keybinding.New()
+	in := catalog("files")
+	in.Declared[store.DeclaredKeymap] = map[string]store.Doc{"files": doc(`{"version":1,"bind":[],"problems":[{"index":1,"code":"cli_only_event","key":"events.subscribe[1]","message":"event secrets.* is delivered to cli watchers only; subscription dropped"},{"index":3,"code":"foreign_action","message":"conversion rejected action"}]}`)}
+	apply(t, kb, in)
+	got := map[string]keybinding.Problem{}
+	for _, p := range kb.Listing().Problems {
+		got[p.Code] = p
+	}
+	sub, ok := got["cli_only_event"]
+	if !ok || sub.Key != "events.subscribe[1]" || sub.Source == nil || sub.Source.Order != 0 || sub.Layer != "plugin:files" {
+		t.Fatalf("cli_only_event = %+v source %+v", sub, sub.Source)
+	}
+	if b := got["foreign_action"]; b.Source == nil || b.Source.Order != 3 || b.Key != "" {
+		t.Fatalf("foreign_action = %+v source %+v", b, b.Source)
+	}
+}
+
+// A flight that gave up on a gather still blocked in Store keeps the turn
+// until the gather returns, so the next Reload does not Invalidate and
+// Resolve on top of it.
+func TestTimedOutFlightKeepsTheTurnUntilItsGatherReturns(t *testing.T) {
+	gate := make(chan struct{})
+	st := &fakeStore{block: gate}
+	set := fakeServices()
+	clk := clock()
+	co, _ := NewCoordinator(Options{Store: st, Services: set, Clock: clk})
+	defer co.Close()
+	first := make(chan error, 1)
+	go func() { _, err := co.Reload(context.Background(), ReasonCLI); first <- err }()
+	<-clk.created
+	clk.advance(2 * time.Second)
+	var coded *c.Error
+	if err := <-first; !errors.As(err, &coded) || coded.Reason != "reload_deadline" {
+		t.Fatalf("first reload err = %v", err)
+	}
+	second := make(chan error, 1)
+	go func() { _, err := co.Reload(context.Background(), ReasonPlugin); second <- err }()
+	waitQueued(co, 1)
+	if got := st.trace(); len(got) != 1 {
+		t.Fatalf("store trace while the abandoned gather reads = %v, want its single invalidate", got)
+	}
+	close(gate)
+	if err := <-second; err != nil {
+		t.Fatalf("second reload: %v", err)
+	}
+	if got := st.trace(); len(got) != 2 {
+		t.Fatalf("store trace = %v, want two invalidates", got)
+	}
+}

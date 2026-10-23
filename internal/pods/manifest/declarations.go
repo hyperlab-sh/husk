@@ -182,6 +182,9 @@ type BindingProblem struct {
 	Index   int    `json:"index"`
 	Code    string `json:"code"`
 	Message string `json:"message"`
+	// Key names the offending manifest member when Index is not a binding
+	// position, e.g. "events.subscribe[1]".
+	Key string `json:"key,omitempty"`
 }
 
 // Suggestion is an ignored legacy shortcut, never a routing declaration.
