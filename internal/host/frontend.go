@@ -354,6 +354,13 @@ func (r *Root) Refusals() []contracts.PluginRefusal {
 	return slices.Clone(r.refusals)
 }
 
+// ConfigNotices implements contracts.Frontend.
+func (r *Root) ConfigNotices() []contracts.ConfigNotice {
+	r.noticesMu.Lock()
+	defer r.noticesMu.Unlock()
+	return slices.Clone(r.notices)
+}
+
 // ActiveToast implements contracts.Frontend.
 func (r *Root) ActiveToast() (contracts.Toast, bool) {
 	t, ok := r.engine.ActiveToast()

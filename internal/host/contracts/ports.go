@@ -262,6 +262,7 @@ type ReloadReport struct {
 	Service  string             `json:"service"`
 	Gen      uint64             `json:"gen"`
 	Applied  bool               `json:"applied"`
+	Changed  bool               `json:"changed"`
 	Problems []protocol.Problem `json:"problems,omitempty"`
 }
 

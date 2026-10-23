@@ -127,10 +127,14 @@ type fakeStoreReader struct {
 	layers   []store.LayerDoc
 	declared map[store.DocName]map[string]store.Doc
 	profiles []string
+	err      error // Resolve fails with it when set
 }
 
 func (s *fakeStoreReader) Invalidate() {}
 func (s *fakeStoreReader) Resolve(store.DocName, string) (store.Resolved, error) {
+	if s.err != nil {
+		return store.Resolved{}, s.err
+	}
 	return s.resolved, nil
 }
 func (s *fakeStoreReader) Layers(store.DocName, string) ([]store.LayerDoc, error) {

@@ -18,7 +18,8 @@ import (
 
 func TestThemeGetOpenToPluginsCheckUserOnly(t *testing.T) {
 	svc := theme.New()
-	port := Theme{Svc: svc, Inputs: staticInputs{}}
+	settingsSvc := newSet(settings.Options{})
+	port := Theme{Svc: svc, Inputs: staticInputs{}, Settings: settingsSvc}
 
 	for _, c := range []host.Caller{userCaller, filesCaller, stemHost} {
 		pal, err := port.Get(context.Background(), c)
@@ -33,9 +34,8 @@ func TestThemeGetOpenToPluginsCheckUserOnly(t *testing.T) {
 	}
 	// A dry check with good input applies nothing and reports no problems;
 	// theme reads overrides from the Settings snapshot the coordinator wires.
-	settingsSvc := newSet(settings.Options{})
 	applyTo(t, settingsSvc, services.ReloadInput{Doc: store.Resolved{Doc: doc(t, `{}`), Origins: map[string]store.Layer{}}})
-	in := services.ReloadInput{Doc: store.Resolved{Doc: doc(t, `{}`), Origins: map[string]store.Layer{}}, Settings: settingsSvc.Snapshot()}
+	in := services.ReloadInput{Doc: store.Resolved{Doc: doc(t, `{}`), Origins: map[string]store.Layer{}}}
 	port.Inputs = staticInputs{in: in}
 	port.Settings = settingsSvc
 	res, err := port.Check(context.Background(), userCaller)

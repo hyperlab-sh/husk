@@ -8,6 +8,7 @@ import (
 	"maps"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -73,6 +74,10 @@ func (p publisher) Publish(name string, data any) {
 	var key string
 	if name == pods.PluginExitedEvent || name == pods.PluginRemovedEvent {
 		key, _ = obj["plugin_id"].(string)
+	}
+	if name == servicesReloadedEvent {
+		// Each reload is its own event: the theme.changed push reads every one.
+		key = strconv.FormatUint(p.r.reloadSeq.Add(1), 10)
 	}
 	publish := func() {
 		if name == pods.PluginExitedEvent {

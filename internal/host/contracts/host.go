@@ -21,7 +21,7 @@ type Limiter interface {
 	Allow(key string) bool
 }
 
-// RateLimitPerSecond is the per-plugin cap for settings.get and secrets.get.
+// RateLimitPerSecond is the per-plugin cap shared by every plugin-callable Services method.
 const RateLimitPerSecond = 20
 
 // Config is everything the composition root needs. host-root implements Host
