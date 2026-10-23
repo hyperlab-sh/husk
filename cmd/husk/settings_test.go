@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -82,7 +83,7 @@ func TestSettingsOpeningMemoryAndArguments(t *testing.T) {
 	m.closeSettings()
 	for _, value := range []any{"plugins", "", "unknown", 42, nil} {
 		_, err := m.openSettings(map[string]any{"tab": value})
-		if contracts.CodeOf(err) != "invalid_params" || m.settings != nil || !strings.Contains(err.Error(), "tab") {
+		if contracts.CodeOf(err) != "invalid_params" || m.settings != nil || !strings.Contains(err.Error(), "tab") || !strings.Contains(err.Error(), fmt.Sprint(value)) {
 			t.Fatalf("value %v: %v", value, err)
 		}
 	}
@@ -203,6 +204,18 @@ func TestSettingsFocusCycleAndInputIsolation(t *testing.T) {
 	if keys.calls != 0 || len(fe.Keys) != 0 || len(fe.Invoked) != 0 || len(fe.SettingWrites) != 0 || len(fe.PluginRemovals) != 0 {
 		t.Fatal("modal leaked input")
 	}
+	m.settings.focus = settingsProfileFocus
+	settingsPress(m, "enter")
+	settingsPress(m, "tab")
+	if m.settings.profileForm != nil || m.settings.focus != settingsTabsFocus {
+		t.Fatal("Select trapped the focus cycle")
+	}
+	m.settings.focus = settingsProfileFocus
+	settingsPress(m, "enter")
+	settingsPress(m, "ctrl+c")
+	if m.settings != nil || m.closed {
+		t.Fatal("ctrl+c did not close the whole center without quitting")
+	}
 }
 
 func TestSettingsThemeListCurrentCursorMovementAndReload(t *testing.T) {
@@ -302,7 +315,7 @@ func TestSettingsProfileCornerSelectionAndFailure(t *testing.T) {
 	}
 	m.settings.focus = settingsProfileFocus
 	settingsPress(m, "enter")
-	if m.settings.profileForm == nil || !strings.Contains(m.settings.profileView, "work") {
+	if m.settings.profileForm == nil || m.settings.profileChoice != "work" || !strings.Contains(m.settings.profileView, "work") {
 		t.Fatal("Select not open")
 	}
 	settingsPress(m, "esc")
@@ -316,7 +329,7 @@ func TestSettingsProfileCornerSelectionAndFailure(t *testing.T) {
 		t.Fatal("none selection")
 	}
 	fe.replyProfile(0, contracts.ProfileUseResult{}, contracts.NewError(protocol.CodeNotFound, "profile vanished", map[string]any{"reason": "unknown_profile"}))
-	if m.settings.active != "work" || m.settings.profileError != "unknown_profile: profile vanished" {
+	if m.settings.active != "work" || m.settings.profileError != "unknown_profile: profile vanished" || !strings.Contains(ansi.Strip(m.View().Content), "unknown_profile: profile vanished") {
 		t.Fatal("profile failure")
 	}
 	settingsPress(m, "enter")
