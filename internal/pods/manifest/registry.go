@@ -143,7 +143,12 @@ func (r *Loader) LoadDir(dir string) ([]Result, error) {
 	}
 	var out []Result
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		isDir := entry.IsDir()
+		if entry.Type()&os.ModeSymlink != 0 {
+			st, err := os.Stat(filepath.Join(abs, entry.Name()))
+			isDir = err == nil && st.IsDir()
+		}
+		if !isDir {
 			continue
 		}
 		s, w, e, ok := r.detect(filepath.Join(abs, entry.Name()))
