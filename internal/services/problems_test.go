@@ -74,7 +74,9 @@ func TestServiceProblemsCarryCodes(t *testing.T) {
 	}
 	// profile: unknown_profile.
 	p, _ := profile.New(profile.Options{Store: &fakeStore{}, State: state.New(state.Options{}), Post: func(f func()) bool { f(); return true }})
-	in = input(`{"profile":{"default":"ghost"}}`)
+	ghost := "ghost"
+	in = input(`{}`)
+	in.Profile = &ghost
 	if _, rep, _ := p.Rebuild(context.Background(), in); codes(rep.Problems)["unknown_profile"].Severity != "warning" {
 		t.Fatalf("no unknown_profile: %+v", rep.Problems)
 	}
