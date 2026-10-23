@@ -561,6 +561,18 @@ func TestHookListReturnsDeclaredHooksWithLiveness(t *testing.T) {
 	}
 }
 
+func TestHookListCancelledWhilePostIsPending(t *testing.T) {
+	r := newHookRig(t, hookSubs{"a.h": nil}, live{})
+	// post queues fn without running it, so only ctx can end the wait.
+	port := stemports.NewHooks(r.runner, func(fn func()) bool { return true })
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := port.HookList(ctx, contracts.Caller{Kind: contracts.CallerCLI})
+	if code := hookCodeOf(t, err); code != "cancelled" {
+		t.Fatalf("want cancelled, got %s (%v)", code, err)
+	}
+}
+
 func TestHookListWhenTheLoopIsDown(t *testing.T) {
 	r := newHookRig(t, hookSubs{"a.h": nil}, live{})
 	port := stemports.NewHooks(r.runner, func(fn func()) bool { return false })
