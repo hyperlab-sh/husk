@@ -192,6 +192,9 @@ func TestStartupFatal(t *testing.T) {
 	problem := func(code string) services.Report {
 		return services.Report{Service: "theme", Problems: []services.Problem{{Severity: "error", Code: code}}}
 	}
+	invalid := func(service, key string) services.Report {
+		return services.Report{Service: service, Problems: []services.Problem{{Severity: "error", Code: "invalid_value", Key: key}}}
+	}
 	incomplete := errors.New("service reload incomplete")
 	for _, tc := range []struct {
 		name    string
@@ -203,7 +206,11 @@ func TestStartupFatal(t *testing.T) {
 		{"timeout after settings applied", []services.Report{{Service: "settings", Applied: true}, problem("timed_out")}, incomplete, true},
 		{"cancelled", []services.Report{problem("cancelled")}, incomplete, true},
 		{"no reports with error", nil, incomplete, true},
-		{"validation only", []services.Report{problem("invalid_value")}, incomplete, false},
+		{"invalid plugin dirs", []services.Report{invalid("settings", "husk.plugins.dirs")}, incomplete, true},
+		{"invalid plugin paths", []services.Report{invalid("settings", "husk.plugins.paths")}, incomplete, true},
+		{"invalid theme name stays nonfatal", []services.Report{invalid("settings", "theme.name")}, incomplete, false},
+		{"keyless settings validation", []services.Report{invalid("settings", "")}, incomplete, false},
+		{"other service plugin key stays nonfatal", []services.Report{invalid("theme", "husk.plugins.dirs")}, incomplete, false},
 		{"nil error", nil, nil, false},
 		{"applied with nil error", []services.Report{{Service: "settings", Applied: true}}, nil, false},
 	} {
@@ -229,6 +236,8 @@ func TestStartupError(t *testing.T) {
 		{"nil cause", []services.Report{{Problems: []services.Problem{{Code: "timed_out", Message: "deadline exceeded"}}}}, nil, "startup reload failed: timed_out: deadline exceeded"},
 		{"repeated store problem", []services.Report{storeReport, storeReport}, storeErr, "store_error: " + storeMessage},
 		{"separate diagnostic", []services.Report{{Problems: []services.Problem{{Code: "cancelled", Message: "shutdown", Source: &protocol.Source{Layer: "user", File: "config.json"}}}}}, incomplete, "service reload incomplete: cancelled: shutdown (layer user, file config.json)"},
+		{"explicit key independent of prose", []services.Report{{Service: "settings", Problems: []services.Problem{{Code: "invalid_value", Key: "husk.plugins.dirs", Message: "want strings", Source: &protocol.Source{Layer: "user", File: "config.json"}}}}}, incomplete, "service reload incomplete: invalid_value: want strings (key husk.plugins.dirs) (layer user, file config.json)"},
+		{"shared cause retains key", []services.Report{{Service: "settings", Problems: []services.Problem{{Code: "invalid_value", Key: "husk.plugins.paths", Message: incomplete.Error()}}}}, incomplete, "service reload incomplete: invalid_value: service reload incomplete (key husk.plugins.paths)"},
 		{"no reports", nil, incomplete, "service reload incomplete"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -247,9 +256,12 @@ func TestStartupFlightFailures(t *testing.T) {
 	for _, tc := range []struct {
 		name, config string
 		fatal        bool
+		key          string
 	}{
-		{"malformed user config", `{"theme":`, true},
-		{"invalid setting", `{"theme":{"name":true}}`, false},
+		{"malformed user config", `{"theme":`, true, ""},
+		{"invalid plugin dirs", `{"husk":{"plugins":{"dirs":"./plugins"}}}`, true, "husk.plugins.dirs"},
+		{"invalid plugin paths", `{"husk":{"plugins":{"paths":"./plugin"}}}`, true, "husk.plugins.paths"},
+		{"invalid theme name stays nonfatal", `{"theme":{"name":true}}`, false, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var failed *Root
@@ -266,13 +278,19 @@ func TestStartupFlightFailures(t *testing.T) {
 				}
 			}), func(o *options) { o.afterFail = func(r *Root) { failed = r } })
 			if tc.fatal {
-				for _, text := range []string{"host: startup:", "store_error", "config.json", "layer user"} {
+				want := []string{"host: startup:", "config.json", "layer user"}
+				if tc.key != "" {
+					want = append(want, "invalid_value", "(key "+tc.key+")")
+				} else {
+					want = append(want, "store_error")
+				}
+				for _, text := range want {
 					if err == nil || !strings.Contains(err.Error(), text) {
 						t.Fatalf("error=%v missing %q", err, text)
 					}
 				}
 				if strings.Count(err.Error(), "config.json") != 1 {
-					t.Fatalf("duplicated Store diagnostic: %v", err)
+					t.Fatalf("duplicated startup source: %v", err)
 				}
 				if failed == nil || !storeStopped(failed) || len(h.leftovers()) != 0 {
 					t.Fatal("fatal flight leaked resources")

@@ -341,7 +341,8 @@ func (r *Root) buildServices() error {
 }
 
 // startup performs the one launch-time load, before any manifests are declared.
-// Service validation failures retain defaults; flight failures are fatal.
+// Flight failures and invalid plugin launch settings are fatal; other service
+// validation failures retain defaults.
 func (r *Root) startup() error {
 	reports, err := r.rt.Coordinator.Reload(r.ctx, services.ReasonStartup)
 	r.startupReports = reports
@@ -363,8 +364,9 @@ func (r *Root) startup() error {
 	return nil
 }
 
-// startupFatal distinguishes flight failures from nonfatal service validation.
-// A flight may fail after earlier services have already applied their snapshots.
+// startupFatal rejects failed flights and invalid plugin launch settings.
+// Other service validation remains nonfatal; a flight may fail after earlier
+// services have already applied their snapshots.
 func startupFatal(reports []services.Report, err error) bool {
 	if len(reports) == 0 && err != nil {
 		return true
@@ -374,6 +376,10 @@ func startupFatal(reports []services.Report, err error) bool {
 			switch p.Code {
 			case "store_error", "timed_out", "cancelled":
 				return true
+			case "invalid_value":
+				if report.Service == "settings" && (p.Key == "husk.plugins.paths" || p.Key == "husk.plugins.dirs") {
+					return true
+				}
 			}
 		}
 	}
@@ -390,11 +396,14 @@ func startupError(reports []services.Report, err error) error {
 	for _, report := range reports {
 		for _, p := range report.Problems {
 			text := fmt.Sprintf("%s: %s", p.Code, p.Message)
+			if p.Key != "" {
+				text += fmt.Sprintf(" (key %s)", p.Key)
+			}
 			if p.Source != nil {
 				text += fmt.Sprintf(" (layer %s, file %s)", p.Source.Layer, p.Source.File)
 			}
-			// Do not discard provenance that exists only on the problem.
-			if p.Message != err.Error() || p.Source != nil {
+			// Do not discard keys or provenance that exist only on the problem.
+			if p.Message != err.Error() || p.Key != "" || p.Source != nil {
 				sameMessage = false
 			}
 			if !seen[text] {
