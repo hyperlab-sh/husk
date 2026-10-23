@@ -155,9 +155,7 @@ A plugin directory contains a `husk-plugin.json` manifest:
 - `surfaces` lists the surfaces the plugin may occupy, each with an optional frame. `published_slots`, `hooks`, `events`, `actions`, `rail_items` and focus-local `keybindings` are declared here too, never on the wire; Husk registers them before the plugin starts. See [Architecture](docs/docs/architecture.md#declaring-in-the-manifest).
 - The host starts the plugin with `HUSK_SOCKET_PATH` and `HUSK_PLUGIN_TOKEN`; the plugin sends its requests and notifications on the socket with the token in each message.
 - `--plugin <path>` accepts an executable, a plugin directory, or a `husk-plugin.json` path, and may be repeated. `--plugin-dir <dir>` loads every immediate subdirectory of `<dir>` that contains a `husk-plugin.json`, and may also be repeated.
-
-- `--plugin` / `--plugin-dir` replace the configured `husk.plugins.paths` / `husk.plugins.dirs` arrays. Use repeatable `--add-plugin <path>` / `--add-plugin-dir <dir>` to append to the effective distribution/user/profile arrays, excluding the named-instance file. Additions are deduplicated by cleaned absolute path, retaining the first occurrence. Combining a replace flag with its own add flag is a usage error (exit 2); mixing across arrays is allowed.
-
+- `--plugin` / `--plugin-dir` replace the configured `husk.plugins.paths` / `husk.plugins.dirs` arrays. Use repeatable `--add-plugin <path>` / `--add-plugin-dir <dir>` to append to the effective configured arrays, including the named-instance file (which replaces lower-layer arrays as usual). Additions are deduplicated by cleaned absolute path, retaining the first occurrence. Combining a replace flag with its own add flag is a usage error (exit 2); mixing across arrays is allowed.
 - `--bundle <dir>` loads a directory with `husk-bundle.json`, optional configuration defaults and a `plugins/` directory. The equivalent `husk.bundle` setting is read from user and named-instance config; the flag wins, and `--bundle ""` disables it. Explicit plugins win over bundle copies with the same id. See [Bundles](docs/docs/design/bundles.md).
 
 ## Keys

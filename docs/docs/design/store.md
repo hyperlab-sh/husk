@@ -333,15 +333,19 @@ settings keys under the host's `husk.*` namespace in document `config`
 Store does not know these paths mean anything; `cmd/husk` owns the flag table
 and Services own the schema. `--add-plugin` / `--add-plugin-dir` are not flag
 documents: Store never sees them. Settings computes the instance value of
-`husk.plugins.paths` / `husk.plugins.dirs` from the layers below instance plus
-the additions, ignoring the whole instance layer for that key
+`husk.plugins.paths` / `husk.plugins.dirs` from the effective layers including
+the named-instance file, then appends the additions. Only flag-generated
+documents for that key are excluded
 ([Services](services.md), "Additive plugin launch flags").
 
 Distribution layer: two parts merged in order with the same rules, the
 embedding application's `Options.Distribution` files, then the bundle's
 `Options.Bundle` files ([Bundles](bundles.md)). Both are layer `distribution`
 in `Origins`, `Problems` and `LayerDoc`; a `LayerDoc.File` for a document both
-parts supply is `""`, as for the flag-folded instance layer. `Profiles` and
+parts supply is `""`, as for the flag-folded instance layer. A flag-folded
+instance `LayerDoc.InstanceFile` retains the saved file's config-relative path
+for diagnostics on keys not overridden by flags (including additive plugin
+keys); it is empty when no named-instance document was loaded. `Profiles` and
 `ProfileSources` list profile directories from both parts as `distribution`.
 Either part may be nil. With an active profile the order is embedded base,
 embedded profile, bundle base, bundle profile, so the bundle wins over every
@@ -784,8 +788,9 @@ startup snapshot. Configured arrays survive when their flag is absent.
   set only when given. The composition root reads them from the startup
   flight's Settings snapshot. `--add-plugin` / `--add-plugin-dir` are not
   `Options.InstanceDocs`: Store never sees them. Settings computes those
-  instance arrays from the layers below instance plus the additions, ignoring
-  the whole instance layer for each affected key ([Services](services.md),
+  instance arrays from the effective config, including the named-instance
+  file, plus the additions; only flag-generated documents for each affected
+  key are excluded ([Services](services.md),
   "Additive plugin launch flags"). `--dump-frame`, `--demo-frame`, `--demo`,
   `--rail` and `--hold-alt` stay process flags, not config. New flags:
   `--instance <name>`, `--bundle <dir>` (folded into `husk.bundle`; the
