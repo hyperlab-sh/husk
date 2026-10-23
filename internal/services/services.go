@@ -293,6 +293,9 @@ func (co *Coordinator) reload(parent context.Context, reason Reason, f *flight) 
 			failed = true
 			p.report.Applied = false
 			p.report.Gen = service.Generation()
+			if p.err != nil && len(p.report.Problems) == 0 {
+				p.report.Problems = []Problem{rebuildProblem(p.err)}
+			}
 		}
 		p.report.Service = name
 		reports = append(reports, p.report)
@@ -307,6 +310,26 @@ func (co *Coordinator) reload(parent context.Context, reason Reason, f *flight) 
 		return reports, errors.New("service reload incomplete")
 	}
 	return reports, nil
+}
+
+// rebuildProblem names a failed Rebuild that raised no problem of its own, so
+// every failing report carries a coded problem: the context end for a
+// cancelled or timed-out preparation, otherwise the Service's own failure code.
+func rebuildProblem(err error) Problem {
+	code := "internal"
+	var coded *c.Error
+	switch {
+	case errors.Is(err, context.Canceled):
+		code = "cancelled"
+	case errors.Is(err, context.DeadlineExceeded):
+		code = "timed_out"
+	case errors.As(err, &coded):
+		code = coded.Reason
+		if code == "" {
+			code = coded.Code
+		}
+	}
+	return Problem{Severity: "error", Code: code, Message: err.Error()}
 }
 
 func (co *Coordinator) loadInput() inputResult {

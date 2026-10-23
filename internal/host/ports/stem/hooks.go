@@ -8,7 +8,6 @@ import (
 	"fmt"
 
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
-	"github.com/hyperlab-sh/husk/internal/stem/dispatcher"
 	"github.com/hyperlab-sh/husk/internal/stem/hooks"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
@@ -41,23 +40,9 @@ func NewHooks(runner *hooks.Runner, post Post) *Hooks {
 // over 1 MiB (compact JSON, measured on the raw bytes) is invalid_params and
 // nothing is posted.
 func (p *Hooks) HookCall(ctx context.Context, c contracts.Caller, hook string, data json.RawMessage) (contracts.HookOutcome, error) {
-	d, ok := c, validCaller(c)
-	if !ok {
+	if !validCaller(c) {
 		return contracts.HookOutcome{}, coded(protocol.CodeDenied, "unknown caller")
 	}
-	// Only the kinds validCaller admits and the hook runner knows pass.
-	var caller hooks.Caller
-	switch d.Kind {
-	case dispatcher.CallerCLI:
-		caller.Kind = hooks.CallerCLI
-	case dispatcher.CallerHost:
-		caller.Kind = hooks.CallerHost
-	case dispatcher.CallerPlugin:
-		caller.Kind = hooks.CallerPlugin
-	default:
-		return contracts.HookOutcome{}, coded(protocol.CodeDenied, "unknown caller")
-	}
-	caller.PluginID = d.PluginID
 	if n := compactLen(data); n > hooks.MaxPayload {
 		return contracts.HookOutcome{}, coded(protocol.CodeInvalidParams,
 			fmt.Sprintf("hook data is %d bytes, over the %d byte limit", n, hooks.MaxPayload))
@@ -69,7 +54,7 @@ func (p *Hooks) HookCall(ctx context.Context, c contracts.Caller, hook string, d
 	done := make(chan hooks.Outcome, 1)
 	failed := make(chan error, 1)
 	if !p.post(func() {
-		if err := p.runner.Call(caller, hook, payload, func(o hooks.Outcome) {
+		if err := p.runner.Call(c, hook, payload, func(o hooks.Outcome) {
 			// Non-blocking: when the caller left before the aggregate
 			// arrived, no one receives it and it is dropped here.
 			select {

@@ -559,3 +559,49 @@ func TestCoordinatorStoreFailureDoesNotPrepareAnyService(t *testing.T) {
 		}
 	}
 }
+
+// rebuildErrService returns a Rebuild error that raised no problem of its own.
+type rebuildErrService struct {
+	fakeService
+	err error
+}
+
+func (s *rebuildErrService) Rebuild(ctx context.Context, in ReloadInput) (Candidate, Report, error) {
+	return nil, Report{Service: s.name}, s.err
+}
+
+// A Rebuild that fails without a problem still yields a coded error problem:
+// the Service's own failure code, or cancelled/timed_out for a context end.
+func TestCoordinatorCodesARebuildErrorWithoutProblems(t *testing.T) {
+	for name, tc := range map[string]struct {
+		err  error
+		code string
+	}{
+		"service code": {c.Failure("unavailable", "settings_missing"), "settings_missing"},
+		"code only":    {&c.Error{Code: "unavailable", Message: "x"}, "unavailable"},
+		"cancelled":    {fmt.Errorf("service preparation cancelled: %w", context.Canceled), "cancelled"},
+		"deadline":     {fmt.Errorf("service preparation cancelled: %w", context.DeadlineExceeded), "timed_out"},
+		"plain":        {errors.New("boom"), "internal"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			services := fakeServices()
+			services["keybinding"] = &rebuildErrService{fakeService{name: "keybinding"}, tc.err}
+			co, _ := NewCoordinator(Options{Store: &fakeStore{}, Services: services, Clock: clock()})
+			defer co.Close()
+			reports, err := co.Reload(context.Background(), ReasonCLI)
+			if err == nil {
+				t.Fatal("reload reported success")
+			}
+			for _, r := range reports {
+				if r.Service != "keybinding" {
+					continue
+				}
+				if r.Applied || len(r.Problems) != 1 || r.Problems[0].Code != tc.code || r.Problems[0].Severity != "error" {
+					t.Fatalf("keybinding report = %+v, want one error %q", r, tc.code)
+				}
+				return
+			}
+			t.Fatal("no keybinding report")
+		})
+	}
+}

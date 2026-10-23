@@ -203,10 +203,12 @@ func (r Reloader) Reload(ctx context.Context) (bool, []protocol.Problem) {
 	return reloadProblems(r.Coordinator.Reload(ctx, services.ReasonPlugin))
 }
 
-// reloadProblems translates the Coordinator's reports into host problems. The
-// Coordinator returns its reports together with the aggregate "incomplete"
-// error, so a failing service is named here (its own problems, or a note that
-// it was not applied) rather than hidden behind the aggregate.
+// reloadProblems translates the Coordinator's reports into host problems. A
+// failing service is named by its own coded problems (the Coordinator makes
+// sure every failed report carries one), so the aggregate "incomplete" error
+// adds nothing when reports exist. Only a context that ended before the
+// flight produced any report is reported on its own: cancelled for
+// context.Canceled, timed_out for context.DeadlineExceeded.
 func reloadProblems(reports []services.Report, err error) (bool, []protocol.Problem) {
 	applied := err == nil
 	var problems []protocol.Problem
@@ -217,34 +219,20 @@ func reloadProblems(reports []services.Report, err error) (bool, []protocol.Prob
 		for _, p := range report.Problems {
 			problems = append(problems, withService(p, report.Service))
 		}
-		if !report.Applied && len(report.Problems) == 0 {
-			problems = append(problems, protocol.Problem{Severity: "error", Code: "candidate_superseded", Layer: "services", Message: report.Service + ": not applied"})
-		}
 	}
-	if err != nil {
-		problems = append(problems, protocol.Problem{Severity: "error", Code: aggregateCode(reports, err), Layer: "services", Message: err.Error()})
+	if err != nil && len(reports) == 0 {
+		code := ""
+		switch {
+		case errors.Is(err, context.Canceled):
+			code = "cancelled"
+		case errors.Is(err, context.DeadlineExceeded):
+			code = "timed_out"
+		}
+		if code != "" {
+			problems = append(problems, protocol.Problem{Severity: "error", Code: code, Layer: "services", Message: err.Error()})
+		}
 	}
 	return applied, problems
-}
-
-// aggregateCode names the coordinator's aggregate failure with a code the
-// reports already use: cancelled or timed_out for a context end, otherwise
-// the first error code a report carries, otherwise candidate_superseded.
-func aggregateCode(reports []services.Report, err error) string {
-	switch {
-	case errors.Is(err, context.Canceled):
-		return "cancelled"
-	case errors.Is(err, context.DeadlineExceeded):
-		return "timed_out"
-	}
-	for _, r := range reports {
-		for _, p := range r.Problems {
-			if p.Severity == "error" && p.Code != "" {
-				return p.Code
-			}
-		}
-	}
-	return "candidate_superseded"
 }
 
 // withService prefixes a problem's message with the service that reported it.
