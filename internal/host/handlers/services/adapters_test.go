@@ -77,7 +77,7 @@ func TestKeysServe(t *testing.T) {
 	port := fakes.NewKeybinding(rec)
 	port.Listing = contracts.KeyListing{Entries: []contracts.KeyEntry{{
 		Keys: []string{"ctrl+t"}, Action: "files.tree", Plugin: "files",
-		Source: contracts.KeySource{Layer: "user", Order: 3}, State: "effective",
+		Source: protocol.Source{Layer: "user", Order: 3}, State: "effective",
 	}}}
 	h := Keys{Port: port}
 

@@ -71,7 +71,7 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 		if in.Settings.Source(key) != "default" {
 			hex := in.Settings.String(key)
 			if _, err := palette.RelativeLuminance(hex); err != nil {
-				c.Issue(&r.Problems, "error", in.Settings.Source(key), key, "role "+role+": want #RRGGBB")
+				c.Issue(&r.Problems, "error", "invalid_value", in.Settings.Source(key), key, "role "+role+": want #RRGGBB")
 			}
 			overrides[role] = strings.ToLower(hex)
 		}
@@ -82,7 +82,7 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 	}
 	p, err := palette.Overlay(palette.Default(), overrides)
 	if err != nil {
-		c.Issue(&r.Problems, "error", "user", "theme.palette", err.Error())
+		c.Issue(&r.Problems, "error", "invalid_value", "user", "theme.palette", err.Error())
 		return nil, r, c.Invalid(r.Problems)
 	}
 	allow := in.Settings.Bool("theme.allow_low_contrast")
@@ -96,7 +96,7 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 		}
 	}
 	if distributionOptOut {
-		c.Issue(&r.Problems, "error", "distribution", "theme.allow_low_contrast", "distribution cannot opt out of contrast")
+		c.Issue(&r.Problems, "error", "distribution_opt_out", "distribution", "theme.allow_low_contrast", "distribution cannot opt out of contrast")
 		allow = false
 	}
 	for _, v := range palette.CheckContrast(p) {
@@ -104,7 +104,7 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 		if allow && (source == "user" || source == "profile" || source == "instance") {
 			severity = "warning"
 		}
-		c.Issue(&r.Problems, severity, in.Settings.Source("theme.palette."+v.Foreground), "theme.palette."+v.Foreground, fmt.Sprintf("%s on %s is %.2f:1, need %.1f:1", v.Foreground, v.Background, v.Ratio, v.Minimum))
+		c.Issue(&r.Problems, severity, "low_contrast", in.Settings.Source("theme.palette."+v.Foreground), "theme.palette."+v.Foreground, fmt.Sprintf("%s on %s is %.2f:1, need %.1f:1", v.Foreground, v.Background, v.Ratio, v.Minimum))
 	}
 	if err = c.Invalid(r.Problems); err != nil {
 		return nil, r, err

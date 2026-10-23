@@ -240,12 +240,12 @@ func (co *Coordinator) reload(parent context.Context, reason Reason, f *flight) 
 		timeout = true
 	}
 	if timeout || input.err != nil {
-		message := "Store resolution failed"
+		message, code := "Store resolution failed", "store_unavailable"
 		if timeout {
-			message = "timed out"
+			message, code = "timed out", "timed_out"
 		}
 		for _, name := range order() {
-			reports = append(reports, Report{Service: name, Gen: co.opts.Services[name].Generation(), Problems: []Problem{{Severity: "error", Message: message}}})
+			reports = append(reports, Report{Service: name, Gen: co.opts.Services[name].Generation(), Problems: []Problem{{Severity: "error", Code: code, Message: message}}})
 		}
 		return reports, errors.New(message)
 	}
@@ -255,12 +255,12 @@ func (co *Coordinator) reload(parent context.Context, reason Reason, f *flight) 
 		service := co.opts.Services[name]
 		if timeout || expired() {
 			timeout = true
-			reports = append(reports, Report{Service: name, Gen: service.Generation(), Problems: []Problem{{Severity: "error", Message: "timed out"}}})
+			reports = append(reports, Report{Service: name, Gen: service.Generation(), Problems: []Problem{{Severity: "error", Code: "timed_out", Message: "timed out"}}})
 			failed = true
 			continue
 		}
 		if name == "theme" && settingsFailed {
-			reports = append(reports, Report{Service: name, Gen: service.Generation(), Problems: []Problem{{Severity: "error", Message: "Settings failed; palette unchanged"}}})
+			reports = append(reports, Report{Service: name, Gen: service.Generation(), Problems: []Problem{{Severity: "error", Code: "settings_unchanged", Message: "Settings failed; palette unchanged"}}})
 			continue
 		}
 		in := input.in
@@ -283,7 +283,7 @@ func (co *Coordinator) reload(parent context.Context, reason Reason, f *flight) 
 		}
 		if timeout || expired() {
 			timeout = true
-			reports = append(reports, Report{Service: name, Gen: service.Generation(), Problems: []Problem{{Severity: "error", Message: "timed out"}}})
+			reports = append(reports, Report{Service: name, Gen: service.Generation(), Problems: []Problem{{Severity: "error", Code: "timed_out", Message: "timed out"}}})
 			failed = true
 			continue
 		}

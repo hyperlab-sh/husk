@@ -67,49 +67,27 @@ const (
 // ReasonInFlight is the data.reason of a busy refusal from the in-flight cap.
 const ReasonInFlight = "hook_in_flight"
 
-// CallerKind says who started the hook call.
-type CallerKind uint8
+// Caller says who started the hook call; it is the one shared identity type.
+// The subscribers never see it.
+type Caller = protocol.Caller
 
+// CallerKind is the kind of a Caller.
+type CallerKind = protocol.CallerKind
+
+// The caller kinds.
 const (
-	// CallerInput is the user pressing a key or choosing a palette entry.
-	CallerInput CallerKind = iota + 1
-	// CallerPlugin is an authenticated plugin.
-	CallerPlugin
-	// CallerCLI is a shell outside any plugin: the user typing.
-	CallerCLI
-	// CallerHost is a host module acting on its own.
-	CallerHost
+	CallerInput  = protocol.CallerInput
+	CallerPlugin = protocol.CallerPlugin
+	CallerCLI    = protocol.CallerCLI
+	CallerHost   = protocol.CallerHost
 )
-
-// String returns the wire spelling of the kind.
-func (k CallerKind) String() string {
-	switch k {
-	case CallerInput:
-		return "input"
-	case CallerPlugin:
-		return "plugin"
-	case CallerCLI:
-		return "cli"
-	case CallerHost:
-		return "host"
-	}
-	return "unknown"
-}
-
-// Caller says who started the hook call. It is set by the module that accepts
-// the request, never read from params; the subscribers never see it.
-type Caller struct {
-	Kind CallerKind
-	// PluginID is set only when Kind is CallerPlugin.
-	PluginID string
-}
 
 // label names the caller for log lines.
 func callerLabel(c Caller) string {
 	if c.Kind == CallerPlugin {
 		return "plugin " + c.PluginID
 	}
-	return c.Kind.String() + " caller"
+	return string(c.Kind) + " caller"
 }
 
 // Kind is what a hook's subscribers may answer; the owner declares it.

@@ -545,14 +545,14 @@ func (f *Catalog) Undeclare(id string) { f.Record("Catalog.Undeclare", id) }
 type Reloader struct {
 	callLog
 	Applied  bool
-	Problems []contracts.Problem
+	Problems []protocol.Problem
 }
 
 // NewReloader returns a Reloader logging to rec.
 func NewReloader(rec *Recorder) *Reloader { return &Reloader{callLog: callLog{r: orNew(rec)}} }
 
 // Reload implements contracts.Reloader.
-func (f *Reloader) Reload(context.Context) (bool, []contracts.Problem) {
+func (f *Reloader) Reload(context.Context) (bool, []protocol.Problem) {
 	f.Record("Reloader.Reload")
 	return f.Applied, f.Problems
 }

@@ -30,17 +30,7 @@ func (p Config) Reload(ctx context.Context, hc host.Caller) ([]host.ReloadReport
 			Gen:     uint64(r.Gen),
 			Applied: r.Applied,
 		}
-		if len(r.Problems) > 0 {
-			rep.Problems = make([]host.Problem, len(r.Problems))
-			for i, pr := range r.Problems {
-				rep.Problems[i] = host.Problem{
-					Severity: pr.Severity,
-					Layer:    pr.Layer,
-					Key:      pr.Key,
-					Message:  pr.Message,
-				}
-			}
-		}
+		rep.Problems = append(rep.Problems, r.Problems...)
 		out = append(out, rep)
 	}
 	return out, nil

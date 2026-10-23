@@ -20,13 +20,11 @@ import (
 // Generation increases after each successfully applied candidate.
 type Generation uint64
 
-// Problem is one validation issue; messages must never contain secret values.
-type Problem struct {
-	Severity string `json:"severity"`
-	Layer    string `json:"layer"`
-	Key      string `json:"key,omitempty"`
-	Message  string `json:"message"`
-}
+// Problem is the one diagnostic type, shared with every layer.
+type Problem = protocol.Problem
+
+// Source locates a declaration.
+type Source = protocol.Source
 
 // Report describes the snapshot actually serving after a reload step.
 type Report struct {
@@ -90,7 +88,7 @@ func (p *Prepared) Apply() Report {
 		}
 		p.report.Gen = p.generation()
 		if !p.report.Applied {
-			p.report.Problems = append(p.report.Problems, Problem{Severity: "error", Message: "candidate cancelled or superseded"})
+			p.report.Problems = append(p.report.Problems, Problem{Severity: "error", Code: "candidate_superseded", Message: "candidate cancelled or superseded"})
 		}
 	})
 	r := p.report
@@ -239,8 +237,8 @@ func Invalid(ps []Problem) error {
 }
 
 // Issue appends a value-free diagnostic for a document key.
-func Issue(ps *[]Problem, severity, layer, key, message string) {
-	*ps = append(*ps, Problem{severity, layer, key, message})
+func Issue(ps *[]Problem, severity, code, layer, key, message string) {
+	*ps = append(*ps, Problem{Severity: severity, Code: code, Layer: layer, Key: key, Message: message})
 }
 
 // Catalog is the normalized per-plugin document published by Pod conversion.
@@ -290,7 +288,7 @@ func Catalogs(in ReloadInput) (map[string]Catalog, []Problem) {
 	for id, doc := range in.Declared[store.DeclaredPlugins] {
 		var c Catalog
 		if err := Decode(doc, &c); err != nil || c.ID != id {
-			Issue(&ps, "error", "plugin:"+id, "", "invalid plugin catalog")
+			Issue(&ps, "error", "invalid_plugin_catalog", "plugin:"+id, "", "invalid plugin catalog")
 			continue
 		}
 		out[id] = c

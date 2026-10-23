@@ -8,6 +8,7 @@ import (
 	"github.com/hyperlab-sh/husk/internal/keyspelling"
 	c "github.com/hyperlab-sh/husk/internal/services/contracts"
 	"github.com/hyperlab-sh/husk/internal/substrate/store"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -15,7 +16,7 @@ import (
 )
 
 // Layer is one fixed keymap precedence tier.
-type Layer string
+type Layer = string
 
 const (
 	// LayerHusk is the weakest built-in default.
@@ -30,14 +31,8 @@ const (
 	LayerProfile Layer = "profile"
 )
 
-// Source locates one original declaration.
-type Source struct {
-	Layer  Layer  `json:"layer"`
-	File   string `json:"file,omitempty"`
-	Line   int    `json:"line,omitempty"`
-	Plugin string `json:"plugin,omitempty"`
-	Order  int    `json:"order"`
-}
+// Source locates one original declaration; it is the shared protocol type.
+type Source = protocol.Source
 
 // Binding is an immutable parsed declaration; returned copies are detached.
 type Binding struct {
@@ -85,14 +80,8 @@ type Hint struct {
 	Text   string   `json:"hint"`
 }
 
-// Problem retains machine-readable loader/conversion codes.
-type Problem struct {
-	Code    string `json:"code"`
-	Layer   string `json:"layer"`
-	Key     string `json:"key,omitempty"`
-	Message string `json:"message"`
-	Source  Source `json:"source"`
-}
+// Problem is the one shared diagnostic type, serialized as is by keys.list.
+type Problem = protocol.Problem
 
 // Entry includes a binding's static precedence state.
 type Entry struct {
@@ -346,7 +335,7 @@ func (s *Service) ListFor(caller c.Caller) Listing {
 	out.Entries = entries
 	var ps []Problem
 	for _, p := range out.Problems {
-		if p.Source.Plugin == caller.PluginID {
+		if p.Source != nil && p.Source.Plugin == caller.PluginID {
 			ps = append(ps, p)
 		}
 	}
@@ -484,12 +473,13 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 	r := c.Report{Service: "keybinding", Gen: old.gen}
 	next := &snapshot{gen: old.gen + 1, index: map[string][]Binding{}, documents: map[string]store.Doc{}, actionOwners: map[string]string{}}
 	issue := func(code string, src Source, key string) {
-		layer := string(src.Layer)
+		layer := src.Layer
 		if src.Plugin != "" {
 			layer = "plugin:" + src.Plugin
 		}
-		next.listing.Problems = append(next.listing.Problems, Problem{code, layer, key, code, src})
-		c.Issue(&r.Problems, "warning", layer, key, code)
+		source := src
+		next.listing.Problems = append(next.listing.Problems, Problem{Severity: "warning", Code: code, Layer: layer, Key: key, Message: code, Source: &source})
+		c.Issue(&r.Problems, "warning", code, layer, key, code)
 	}
 	catalog, catalogProblems := c.Catalogs(in)
 	r.Problems = append(r.Problems, catalogProblems...)

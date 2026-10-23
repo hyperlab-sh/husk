@@ -159,7 +159,7 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 	}
 	if !found || !requestedFound {
 		next.active = ""
-		c.Issue(&r.Problems, "warning", "user", "profile.default", "unknown or deleted active profile; using no profile")
+		c.Issue(&r.Problems, "warning", "unknown_profile", "user", "profile.default", "unknown or deleted active profile; using no profile")
 	}
 	if ctx.Err() != nil {
 		return c.ContextError(ctx, r)

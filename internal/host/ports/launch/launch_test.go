@@ -206,7 +206,7 @@ func TestFailedReloadStillOpensGate(t *testing.T) {
 	rec := fakes.NewRecorder()
 	reload := fakes.NewReloader(rec)
 	reload.Applied = false
-	reload.Problems = []contracts.Problem{{Severity: "error", Layer: "theme", Message: "contrast below floor"}}
+	reload.Problems = []protocol.Problem{{Severity: "error", Layer: "theme", Message: "contrast below floor"}}
 	starter := fakes.NewWrapper(rec)
 
 	loop, h := newRecordedLoop(t, t.Context(), fakes.NewPods(rec), launch.Preparer{Reload: reload}, starter, nil)
