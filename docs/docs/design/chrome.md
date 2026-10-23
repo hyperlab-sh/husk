@@ -5,9 +5,12 @@ description: "What the frontend draws around plugin content: every surface laid 
 
 # Workbench chrome: empty surfaces, rail, bars
 
-Status: specified, not landed. Scope: `cmd/husk` layout and rendering (the
-frontend). No wire, manifest or plugin-visible change; `husk.surfaces.visible`
-and `husk.geometry.rects` change content, not shape.
+Status: landed for layout, empty surfaces, rail geometry and bar composition.
+Colour discipline and the built-in theme migration remain specified, not landed;
+until they land the frontend keeps its existing colour roles and `CharmTone`
+default name. Scope: `cmd/husk` layout and rendering (the frontend). No wire,
+manifest or plugin-visible change; `husk.surfaces.visible` and
+`husk.geometry.rects` change content, not shape.
 
 ## Level 0: What and why
 
@@ -279,9 +282,11 @@ The cells between the last hint and the theme name are blank bar background.
 The label and the theme name are always drawn. The theme name is clipped to 24
 cells with a `…` tail, so the two together never exceed 54 cells and always fit
 the 84-cell minimum. When the three parts do not fit the width, hint groups are
-dropped from the end of the hint list (quit first) until they do; a group is
-dropped whole, never clipped. The `ipc: N` counter is removed and
-`totalIPCEvents` leaves the model.
+dropped from the end of the hint list (quit first) until they do, leaving at
+least one blank cell before the pill. A group is one footer hint entry (the
+dock keys together count as one); it is dropped whole, never clipped. The
+traffic counter is removed from the bar and the model; the frame-dump driver
+fingerprints published content and Pod status to detect quiescence.
 
 **The theme name** is the served palette's `name` (`protocol.Palette.Name`, the
 value `theme.changed` carries). Theme copies the `theme.name` setting into it,
@@ -492,16 +497,17 @@ All in `package main` under `cmd/husk`. `pkg/` is untouched.
 | `renderActivityRailBox` (`render.go`): 3-cell pill with `▄▄▄`/`▀▀▀` caps | 5x3 whole-cell tile; `railButtons` stride 4 |
 | `renderTopWorkbenchBar`: brand, `defaultLayoutLabel`, plugin count, theme pill, rail hint, transient pills | Brand `◈ HUSK` and transient pills only |
 | `defaultLayoutLabel` | Becomes `layoutLabel` with the table above; called by the bottom bar |
-| `renderBottomKeybindBar`: hints and `ipc: N` | Layout label, hints with group dropping, theme pill; a hit rect for the pill recorded for `input.go` |
+| `renderBottomKeybindBar`: hints and `ipc: N` | Layout label, hints with group dropping, theme pill; one pure `themePillRect(width, height, name)` shared by rendering and `input.go` |
 | `footerHints` (`commands.go`): docks group from bound keys | Docks group filtered by placement and fit |
 | `drawSurface`: content or blank canvas | Content, or the humanised name when the slot is a region slot and `surfaceOwner(slot) == ""` (never for `full-canvas` or `workspace-stage`; `drawModal` is unchanged) |
 | `dropVanishedSides`, `leaveUndrawnSides` | Unchanged; a side column now vanishes only by its dock or the fit rule, never because a plugin left |
-| `totalIPCEvents` | Removed |
-| Every role use listed under "Colour discipline" | Moved to the role in the table's last column; `drawToast` keeps the level colour for glyph and title only |
+| Frontend traffic counter | Removed; frame-dump settling fingerprints published content and Pod status |
+| Every role use listed under "Colour discipline" | Specified, not landed: moves to the role in the table's last column; `drawToast` keeps the level colour for glyph and title only |
 | `mode_label_test.go` | Rewritten for the table above and the inverted layout rule; other `cmd/husk` tests that assume zero plugins lay out no side rects, or read the top-bar label (`focus_fallback_test.go`, `surface_owner_test.go`), are updated the same way |
 
-A click on the theme pill is routed in `input.go` before surface hit-testing,
-as the rail and the dividers are. The action it runs is `husk.settings.open`
+A left press on the theme pill is routed in `input.go` before modal, divider,
+rail and surface hit-testing, including modal-only consumption. Its rect is
+computed by the same pure function rendering uses; `View` records no hit state. The action it runs is `husk.settings.open`
 with `tab: theme` ([Settings center](settings-center.md)); until that lands
 the handler is a no-op that still consumes the click.
 
