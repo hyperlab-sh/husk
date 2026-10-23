@@ -15,6 +15,7 @@ import (
 	"github.com/hyperlab-sh/husk/internal/instance"
 	"github.com/hyperlab-sh/husk/internal/pods/manifest"
 	"github.com/hyperlab-sh/husk/internal/pods/wrapper"
+	"github.com/hyperlab-sh/husk/internal/substrate/store"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
@@ -388,5 +389,37 @@ func TestHookSubscriberExitMidCallIsCancelledAtOnce(t *testing.T) {
 	}
 	if o.Allowed == nil || !*o.Allowed {
 		t.Fatalf("a departed gate subscriber must count as allow: %+v", o)
+	}
+}
+
+// TestHookReloadReordersTheNextCall changes a subscriber's priority in the
+// declared documents, reloads the catalog the way the loop does, and checks
+// that the next hook.call asks the subscribers in the new order.
+func TestHookReloadReordersTheNextCall(t *testing.T) {
+	f := newFakes()
+	responders{
+		"alpha": func(legParams) any { return map[string]any{} },
+		"zeta":  func(legParams) any { return map[string]any{} },
+	}.install(f)
+	h := hookHost(t, f, []string{
+		hookPlugin(t, "notes", []any{pubHook("notes.gate", "gate")}, nil),
+		hookPlugin(t, "alpha", nil, []any{subHook("notes.gate", 10)}),
+		hookPlugin(t, "zeta", nil, []any{subHook("notes.gate", 5)}),
+	}, 3)
+	fire := map[string]any{"hook": "notes.gate"}
+	o := decodeOutcome(t, rpc(t, h, "tok-notes", protocol.MethodHookCall, fire))
+	if !slices.Equal(o.plugins(), []string{"zeta", "alpha"}) {
+		t.Fatalf("before reload: %v", o.plugins())
+	}
+
+	h.loop(func() {
+		docs := h.root.catalog.declared()
+		docs["alpha"] = hookDoc(nil, hookReg{"notes.gate", 1})
+		h.root.catalog.declared = func() map[string]store.Doc { return docs }
+		h.root.refreshCatalog()
+	})
+	o = decodeOutcome(t, rpc(t, h, "tok-notes", protocol.MethodHookCall, fire))
+	if !slices.Equal(o.plugins(), []string{"alpha", "zeta"}) {
+		t.Fatalf("after reload: %v", o.plugins())
 	}
 }
