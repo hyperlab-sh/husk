@@ -540,6 +540,21 @@ func TestOversizedRequestIsRefusedBeforeConnecting(t *testing.T) {
 	}
 }
 
+func TestParamsThatFitButWithTheEnvelopeDoNotAreRefusedBeforeConnecting(t *testing.T) {
+	dir := shortDir(t)
+	srv := serve(t, dir, "a", pingOK("a", nil))
+	h := newHarness(t, dir, nil)
+	// Exactly the limit for the params alone: the request line is longer.
+	pad := protocol.MaxLineBytes - len(`{"a":""}`)
+	h.env.Stdin = strings.NewReader(`{"a":"` + strings.Repeat("x", pad) + `"}`)
+	if got := h.run("rpc", "x.y", "-", "--socket", srv.Socket, "--format", "table"); got != output.ExitUsage {
+		t.Fatalf("exit = %d, want %d; stderr %.200q", got, output.ExitUsage, h.errb.String())
+	}
+	if h.errb.String() != "husk: request exceeds the 4 MiB line limit\n" || srv.connections() != 0 {
+		t.Fatalf("stderr %.200q, %d connections", h.errb.String(), srv.connections())
+	}
+}
+
 func TestRequestJustUnderTheLimitIsSent(t *testing.T) {
 	dir := shortDir(t)
 	srv := serve(t, dir, "a", pingOK("a", func(c *srvConn, req protocol.Message) { c.reply(req, map[string]any{}) }))
