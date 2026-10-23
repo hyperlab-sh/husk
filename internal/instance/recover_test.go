@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -224,6 +225,45 @@ func TestSurveyReportsRemovalFailuresAndContinues(t *testing.T) {
 	}
 	if exists(EntryPath(dir, "b-dead")) || exists(SocketPath(dir, "b-dead")) {
 		t.Fatal("the survey must go on and recover the entry beside it")
+	}
+}
+
+// A failure removing <id>.json is carried out on the status too, naming the
+// entry path; the entry file stays. When both removals fail both are kept.
+func TestSurveyReportsEntryRemovalFailures(t *testing.T) {
+	dir := shortRunDir(t)
+	entryFor(t, dir, "stuck", 111)
+	deadSocket(t, dir, "stuck")
+	entry, sock := EntryPath(dir, "stuck"), SocketPath(dir, "stuck")
+	failing := func(paths ...string) *Deps {
+		return &Deps{Remove: func(path string) error {
+			for _, p := range paths {
+				if path == p {
+					return &fs.PathError{Op: "remove", Path: path, Err: syscall.EACCES}
+				}
+			}
+			return os.Remove(path)
+		}}
+	}
+	statuses, err := Survey(dir, failing(entry))
+	if err != nil || len(statuses) != 1 {
+		t.Fatalf("statuses = %+v, err = %v", statuses, err)
+	}
+	var pe *fs.PathError
+	if !errors.As(statuses[0].RecoverErr, &pe) || pe.Path != entry || !errors.Is(statuses[0].RecoverErr, syscall.EACCES) {
+		t.Fatalf("RecoverErr = %v, want the EACCES path error on %s", statuses[0].RecoverErr, entry)
+	}
+	if !exists(entry) {
+		t.Fatal("the entry file must still exist")
+	}
+
+	deadSocket(t, dir, "stuck") // the first survey unlinked it
+	statuses, err = Survey(dir, failing(entry, sock))
+	if err != nil || len(statuses) != 1 {
+		t.Fatalf("statuses = %+v, err = %v", statuses, err)
+	}
+	if got := statuses[0].RecoverErr.Error(); !strings.Contains(got, entry) || !strings.Contains(got, sock) {
+		t.Fatalf("RecoverErr = %q, want both paths named", got)
 	}
 }
 

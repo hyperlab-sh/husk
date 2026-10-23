@@ -337,9 +337,7 @@ func TestResolveDiscoveryOnlyStale(t *testing.T) {
 		return []Entry{namedEntry(dir, "notes", 5120)}
 	})
 	net.live = map[string]bool{}
-	if err := os.Remove(SocketPath(dir, "notes")); err != nil { // a crash left no socket
-		t.Fatal(err)
-	}
+	replaceWithDeadSocket(t, dir, "notes")
 	_, err := Resolve(ResolveOptions{Dir: dir, Deps: net.deps()})
 	var e *Error
 	if !errors.As(err, &e) || e.Kind != KindNoInstance {
@@ -348,6 +346,9 @@ func TestResolveDiscoveryOnlyStale(t *testing.T) {
 	if _, serr := os.Lstat(EntryPath(dir, "notes")); serr == nil {
 		t.Error("stale entry should have been removed by discovery")
 	}
+	if _, serr := os.Lstat(SocketPath(dir, "notes")); serr == nil {
+		t.Error("the refused socket should have been unlinked")
+	}
 }
 
 func TestResolveDiscoveryOneLiveAmongStale(t *testing.T) {
@@ -355,9 +356,7 @@ func TestResolveDiscoveryOneLiveAmongStale(t *testing.T) {
 		return []Entry{namedEntry(dir, "notes", 5120), pidEntry(dir, "4242", 4242)}
 	})
 	delete(net.live, SocketPath(dir, "4242"))
-	if err := os.Remove(SocketPath(dir, "4242")); err != nil { // a crash left no socket
-		t.Fatal(err)
-	}
+	replaceWithDeadSocket(t, dir, "4242")
 	got, err := Resolve(ResolveOptions{Dir: dir, Deps: net.deps()})
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
@@ -370,6 +369,9 @@ func TestResolveDiscoveryOneLiveAmongStale(t *testing.T) {
 	}
 	if _, serr := os.Lstat(EntryPath(dir, "4242")); serr == nil {
 		t.Error("stale entry should have been removed")
+	}
+	if _, serr := os.Lstat(SocketPath(dir, "4242")); serr == nil {
+		t.Error("the refused socket should have been unlinked")
 	}
 }
 
@@ -506,4 +508,14 @@ func TestSourceString(t *testing.T) {
 			t.Fatalf("Source(%d).String() = %q, want %q", int(s), got, want)
 		}
 	}
+}
+
+// replaceWithDeadSocket swaps the fixture's placeholder file for a real
+// socket nobody listens on: what a crash leaves behind.
+func replaceWithDeadSocket(t *testing.T, dir, id string) {
+	t.Helper()
+	if err := os.Remove(SocketPath(dir, id)); err != nil {
+		t.Fatal(err)
+	}
+	deadSocket(t, dir, id)
 }

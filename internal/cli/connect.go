@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"strings"
 
 	"github.com/hyperlab-sh/husk/internal/cli/output"
 	"github.com/hyperlab-sh/husk/internal/instance"
@@ -166,9 +167,15 @@ func skipWarning(dir string, st instance.Status) string {
 	if st.NotSocket != "" {
 		return fmt.Sprintf("%s is not a socket; instance %q skipped", st.NotSocket, st.Entry.ID)
 	}
-	var pe *fs.PathError
-	if errors.As(st.RecoverErr, &pe) {
-		return fmt.Sprintf("cannot remove %s: %v; instance %q skipped", pe.Path, pe.Err, st.Entry.ID)
+	if st.RecoverErr != nil {
+		var causes []string
+		for _, e := range joinedErrors(st.RecoverErr) {
+			var pe *fs.PathError
+			if errors.As(e, &pe) {
+				causes = append(causes, fmt.Sprintf("%s: %v", pe.Path, pe.Err))
+			}
+		}
+		return fmt.Sprintf("cannot remove %s; instance %q skipped", strings.Join(causes, "; "), st.Entry.ID)
 	}
 	if st.Locked {
 		return fmt.Sprintf("runtime dir %s is locked; instance %q left as is", dir, st.Entry.ID)
@@ -202,4 +209,12 @@ func (inv *Invocation) recoverTarget(cause error, res instance.Resolved) error {
 		msg += " (stale entry removed)"
 	}
 	return output.NoInstance(cause, "%s", msg)
+}
+
+// joinedErrors flattens an errors.Join result into its members.
+func joinedErrors(err error) []error {
+	if j, ok := err.(interface{ Unwrap() []error }); ok {
+		return j.Unwrap()
+	}
+	return []error{err}
 }
