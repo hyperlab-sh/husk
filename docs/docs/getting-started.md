@@ -61,6 +61,7 @@ A plugin directory contains a `husk-plugin.json`:
 - `--plugin "<cmd> <args>"` (a path that does not exist) is split like a shell would: spaces separate arguments, single and double quotes group, a backslash escapes; an unterminated quote or trailing backslash is an error. To run an executable whose path contains spaces, point `--plugin` at the file or use a manifest.
 - `--instance <name>` names the instance (`[a-z0-9][a-z0-9-]*`, at most 32 bytes, not digits only; invalid is exit 2 before anything is created); without it the instance is called by its pid. A second start with a name a live instance holds fails with `instance "<name>" is already running`. Only named instances persist instance- and workspace-scoped state.
 - `--plugin <path>` accepts an executable, a plugin directory, or a `husk-plugin.json` path, and may be repeated. A bare executable has no manifest and declares nothing. `--plugin-dir <dir>` loads every immediate subdirectory of `<dir>` that contains a `husk-plugin.json`, and may also be repeated.
+- `--plugin` / `--plugin-dir` replace the configured `husk.plugins.paths` / `husk.plugins.dirs` arrays. Use repeatable `--add-plugin <path>` / `--add-plugin-dir <dir>` to append to the effective distribution/user/profile arrays, excluding the named-instance file. Additions are deduplicated by cleaned absolute path, retaining the first occurrence. Combining a replace flag with its own add flag is a usage error (exit 2); mixing across arrays is allowed.
 
 ## Reference plugin
 
