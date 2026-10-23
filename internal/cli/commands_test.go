@@ -676,7 +676,7 @@ func TestPingOutput(t *testing.T) {
 		if got := h.run("ping", "--socket", srv.Socket, "--format", "table"); got != 0 {
 			t.Fatalf("exit %d: %s", got, h.errb.String())
 		}
-		if want := "ID  PID   PROTO  HOST   UPTIME\na   4242  2.0    9.9.9  2s\n"; h.out.String() != want {
+		if want := "ID  PID   PROTO  HOST   UPTIME\na   4242  " + protocol.Version + "    9.9.9  2s\n"; h.out.String() != want {
 			t.Fatalf("table = %q, want %q", h.out.String(), want)
 		}
 	})
@@ -688,7 +688,7 @@ func TestPingOutput(t *testing.T) {
 		if got := h.run("ping", "--socket", quiet.Socket, "--format", "table"); got != 0 {
 			t.Fatalf("exit %d: %s", got, h.errb.String())
 		}
-		if want := "ID  PID  PROTO  HOST  UPTIME\nq   5    2.0          1m12s\n"; h.out.String() != want {
+		if want := "ID  PID  PROTO  HOST  UPTIME\nq   5    " + protocol.Version + "          1m12s\n"; h.out.String() != want {
 			t.Fatalf("table = %q, want %q", h.out.String(), want)
 		}
 	})
