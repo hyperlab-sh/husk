@@ -109,11 +109,14 @@ func (s *Service) ListFor(caller c.Caller) ([]ProfileInfo, error) {
 	return s.List(), nil
 }
 
-// Use implements profile.use. A name equal to the active profile replies at
-// once with the most recent flight's reports and writes nothing. Otherwise the
-// slice write is posted to the loop and, in the same callback, the requester
-// registers on the flight that write causes; the reply carries that flight's
-// reports. Correlation is the registration, never a comparison of names.
+// Use implements profile.use. The decision runs on the loop, in one callback,
+// and has three outcomes. A name the slice records and the snapshot has applied
+// replies at once with the most recent flight's reports. A name the slice
+// records but no flight has applied yet (an earlier call in the same tick wrote
+// it) joins the flight that applies it. An absent slice records the name and
+// either replies at once, when it equals the active profile and so causes no
+// reload, or registers on the flight the write causes. The reply carries that
+// flight's reports. Correlation is the registration, never a comparison of names.
 func (s *Service) Use(ctx context.Context, caller c.Caller, name string) (string, []c.Report, error) {
 	if err := c.RequireUser(caller); err != nil {
 		return "", nil, err
@@ -129,18 +132,31 @@ func (s *Service) Use(ctx context.Context, caller c.Caller, name string) (string
 	if s.reloader == nil {
 		return "", nil, c.Failure("unavailable", "no_reloader")
 	}
-	if name == snap.active {
-		return name, s.reloader.LastReports(), nil
-	}
 	type registered struct {
 		w   Waiter
 		err error
 	}
 	reg := make(chan registered, 1)
 	if s.opts.Post == nil || !s.opts.Post(func() {
+		if cur, present := s.stateActive(); present && cur == name {
+			if name == s.Active() {
+				reg <- registered{}
+				return
+			}
+			// Recorded but not yet applied (an earlier call in this tick wrote
+			// it): join the flight that applies it. AwaitProfile is idempotent.
+			reg <- registered{w: s.reloader.AwaitProfile(name)}
+			return
+		}
 		b, _ := json.Marshal(map[string]string{"active": name})
 		if _, err := s.handle.Set(b); err != nil {
 			reg <- registered{err: err}
+			return
+		}
+		// An absent slice confirming the current selection: the slice listener
+		// skips this write, so no flight follows and there is nothing to await.
+		if name == s.Active() {
+			reg <- registered{}
 			return
 		}
 		reg <- registered{w: s.reloader.AwaitProfile(name)}
@@ -151,6 +167,9 @@ func (s *Service) Use(ctx context.Context, caller c.Caller, name string) (string
 	case r := <-reg:
 		if r.err != nil {
 			return "", nil, c.Failure("unavailable", "state_write")
+		}
+		if r.w == nil {
+			return name, s.reloader.LastReports(), nil
 		}
 		reports, err := r.w.Wait(ctx)
 		if err != nil {
