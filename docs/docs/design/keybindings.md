@@ -263,7 +263,7 @@ The manifest field is `keybindings`, an optional array. Every entry is surface-s
 }
 ```
 
-Manifest conversion ([Pods](pods.md)) owns these checks and is the only place they run. It keeps the entries that pass and records one problem per entry it drops, in the declared document's `problems` array (`{index, code, message, key?}`, index being the manifest position). For a problem not about a binding position, `key` names the manifest member, for example `events.subscribe[1]` (the form `<field>[<i>]`):
+Manifest conversion ([Pods](pods.md)) owns these checks and is the only place they run. It keeps the entries that pass and records one problem per entry it drops, in the declared document's `problems` array (`{index, code, message, key?}`, `index` being the original zero-based position in the manifest list the problem is about: the `keybindings` entry, or the `events.subscribe` entry for `cli_only_event`). For a problem not about a binding position, `key` names the manifest member, for example `events.subscribe[1]` (the form `<field>[<i>]`):
 
 | Check | Drops the entry with |
 |---|---|
