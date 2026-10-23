@@ -271,17 +271,22 @@ func (m *WorkbenchModel) settingsPluginKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.openSettingsSurfaceFilter()
 		case "up", "ctrl+k":
 			p.cursor--
+			p.top = 0
 		case "down", "ctrl+j":
 			p.cursor++
+			p.top = 0
 		case "home":
 			p.cursor = 0
 			p.top = 0
 		case "end":
 			p.cursor = len(p.filtered) - 1
+			p.top = 0
 		case "pgup":
-			p.top = max(0, p.top-max(1, m.settingsContentRect().Dy()-2))
+			p.cursor -= max(1, m.settingsContentRect().Dy()/2)
+			p.top = 0
 		case "pgdown":
-			p.top += max(1, m.settingsContentRect().Dy()-2)
+			p.cursor += max(1, m.settingsContentRect().Dy()/2)
+			p.top = 0
 		case "backspace":
 			if len(p.query) > 0 {
 				_, n := utf8.DecodeLastRuneInString(p.query)
@@ -317,7 +322,9 @@ func (m *WorkbenchModel) confirmSettingsRemovalFor(id string) {
 	p := m.settings.plugins
 	p.confirmID, p.confirmed = id, false
 	p.confirm = huh.NewConfirm().Title("Remove " + plainText(id) + " from this instance?").Description("It is unloaded, not uninstalled: its files, settings and saved state stay, and the next start loads it again.").Value(&p.confirmed).Affirmative(" yes ").Negative(" no ")
-	p.confirm.WithKeyMap(huh.NewDefaultKeyMap())
+	keys := huh.NewDefaultKeyMap()
+	keys.Confirm.Toggle.SetKeys("left", "right", "h", "l", "up", "down")
+	p.confirm.WithKeyMap(keys)
 	p.confirm.WithTheme(settingsHuhTheme(m.palette))
 	p.confirm.WithWidth(m.settingsContentRect().Dx())
 	p.confirm.Focus()
@@ -357,6 +364,22 @@ func (m *WorkbenchModel) openSettingsSurfaceFilter() {
 	p.filter.Focus()
 	p.filterView = p.filter.View()
 	p.dirty = true
+}
+
+// Query matches are field-local, including each tag as an individual field.
+func settingsCatalogMatches(e contracts.CatalogEntry, query string) bool {
+	query = strings.ToLower(query)
+	for _, field := range []string{e.ID, e.Name, e.Description} {
+		if strings.Contains(strings.ToLower(field), query) {
+			return true
+		}
+	}
+	for _, tag := range e.Tags {
+		if strings.Contains(strings.ToLower(tag), query) {
+			return true
+		}
+	}
+	return false
 }
 
 func settingsPluginCommand(e contracts.CatalogEntry) []string {
@@ -474,7 +497,7 @@ func (m *WorkbenchModel) cacheSettingsPlugins() {
 			if p.surface != "" && !slices.Contains(e.Surfaces, protocol.SurfaceID(p.surface)) {
 				continue
 			}
-			if !strings.Contains(strings.ToLower(e.ID+" "+e.Name+" "+e.Description+" "+strings.Join(e.Tags, " ")), query) {
+			if !settingsCatalogMatches(e, query) {
 				continue
 			}
 			p.filtered = append(p.filtered, e)
