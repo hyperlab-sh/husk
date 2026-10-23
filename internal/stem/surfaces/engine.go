@@ -426,7 +426,7 @@ func (e *Engine) Flush() {
 	// moves, every surface still free goes to its first live claimant in
 	// declaration order. An occupant that is live stays: a later claimant
 	// never preempts it.
-	if liveDirty || len(e.yielded) > 0 {
+	if liveDirty {
 		for _, plugin := range plugins {
 			if d := next[plugin]; d != nil {
 				for _, surface := range sortedClaims(d.claims) {
@@ -525,8 +525,15 @@ func (e *Engine) resolvePlugin(plugin string, old, cur *pluginDecl, res *Surface
 		case "":
 			// First live claim wins; a claim from a Pod that is not live
 			// stands in its declaration and resolves when the Pod goes live.
-			if e.live.Live(plugin) && !e.yielded[claimKey{surface, plugin}] {
-				res.Occupants[surface] = Occupant{Surface: surface, Plugin: plugin}
+			if e.live.Live(plugin) {
+				if e.yielded[claimKey{surface, plugin}] {
+					// A full re-resolution observes this retained claim as
+					// fresh. Defer its award to the freed pass so ordinary
+					// claims, including later namespaces, get first choice.
+					e.freed[surface] = true
+				} else {
+					res.Occupants[surface] = Occupant{Surface: surface, Plugin: plugin}
+				}
 			}
 		case plugin:
 			// Still ours from a release the Pod has not re-declared; no-op.

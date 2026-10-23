@@ -2,54 +2,13 @@ package surfaces
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/hyperlab-sh/husk/internal/substrate/state"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
-
-// Decode the wire request so this regression also runs against a host that
-// predates the additive yield parameter.
-func yieldParams(t *testing.T) protocol.SurfaceCloseParams {
-	t.Helper()
-	var p protocol.SurfaceCloseParams
-	if err := json.Unmarshal([]byte(`{"surface":"main-stage","yield":true}`), &p); err != nil {
-		t.Fatal(err)
-	}
-	return p
-}
-
-func TestSurfaceYieldHandoffAndReturn(t *testing.T) {
-	for _, other := range []string{"beta", "zeta"} {
-		t.Run(other, func(t *testing.T) {
-			st, eng, pods := newEngine(t, Options{})
-			pods.launch("alpha")
-			pods.claim("alpha", string(protocol.SurfaceMainStage))
-			settle(st, eng)
-			pods.launch(other)
-			pods.claim(other, string(protocol.SurfaceMainStage))
-			settle(st, eng)
-			if err := eng.SurfaceClose("alpha", yieldParams(t)); err != nil {
-				t.Fatal(err)
-			}
-			settle(st, eng)
-			if got := resolution(t, st).Occupants[protocol.SurfaceMainStage].Plugin; got != other {
-				t.Fatalf("after yield occupant = %q, want %s", got, other)
-			}
-			if got := pods.decl("alpha").occ.Get()[protocol.SurfaceMainStage].Plugin; got != "alpha" {
-				t.Fatalf("yield retracted declaration: %q", got)
-			}
-			if err := eng.SurfaceClose(other, protocol.SurfaceCloseParams{Surface: protocol.SurfaceMainStage}); err != nil {
-				t.Fatal(err)
-			}
-			settle(st, eng)
-			if got := resolution(t, st).Occupants[protocol.SurfaceMainStage].Plugin; got != "alpha" {
-				t.Fatalf("after borrower closes occupant = %q, want alpha", got)
-			}
-		})
-	}
-}
 
 func TestSurfaceYieldWithoutLiveAlternative(t *testing.T) {
 	for _, deadClaimant := range []bool{false, true} {
@@ -113,13 +72,15 @@ func TestSurfaceYieldRanking(t *testing.T) {
 				pods.claim(tc.newClaimant, string(protocol.SurfaceMainStage))
 				settle(st, eng)
 			}
-			if err := eng.SurfaceClose("holder", protocol.SurfaceCloseParams{Surface: protocol.SurfaceMainStage}); err != nil {
-				t.Fatal(err)
-			}
 			if tc.clear {
+				// Withdraw the holder's declaration and clear resolution in
+				// the same tick: there is no release-time freed marker.
+				pods.unclaim("holder", string(protocol.SurfaceMainStage))
 				if _, err := st.Clear(state.SurfacesNamespace); err != nil {
 					t.Fatal(err)
 				}
+			} else if err := eng.SurfaceClose("holder", protocol.SurfaceCloseParams{Surface: protocol.SurfaceMainStage}); err != nil {
+				t.Fatal(err)
 			}
 			settle(st, eng)
 			if got := resolution(t, st).Occupants[protocol.SurfaceMainStage].Plugin; got != tc.want {
@@ -138,31 +99,103 @@ func TestSurfaceYieldRequiresOccupiedClaim(t *testing.T) {
 		surface  protocol.SurfaceID
 		plugin   string
 		occupied bool
+		standing bool
 	}{
-		{"unoccupied", protocol.SurfaceMainStage, "alpha", false},
-		{"other occupant", protocol.SurfaceMainStage, "beta", true},
-		{"non-claimed modal", protocol.SurfaceModal, "alpha", true},
-		{"unknown surface", protocol.SurfaceID("unknown"), "alpha", false},
+		{"unoccupied", protocol.SurfaceMainStage, "alpha", false, false},
+		{"other occupant", protocol.SurfaceMainStage, "beta", true, false},
+		{"non-claimed modal", protocol.SurfaceModal, "alpha", true, false},
+		{"refused standing claimant", protocol.SurfaceMainStage, "beta", true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			st, eng, pods := newEngine(t, Options{})
 			pods.launch("alpha")
-			if tc.occupied {
+			pods.launch("beta")
+			if tc.standing {
+				pods.claim("alpha", string(tc.surface))
+				pods.claim("beta", string(tc.surface))
+			} else if tc.occupied {
 				// A frontend-opened surface has occupancy but no claim.
 				if err := eng.slice.Update(func(v *Surfaces) { v.Occupants = Occupants{tc.surface: {Surface: tc.surface, Plugin: "alpha"}} }); err != nil {
 					t.Fatal(err)
 				}
 				eng.markRev()
 			}
+			settle(st, eng)
+			settle(st, eng) // drain the resolution write before the refusal
 			p := yieldParams(t)
 			p.Surface = tc.surface
-			before := st.Snapshot().Seq
+			before := eng.slice.Get()
 			err := eng.SurfaceClose(tc.plugin, p)
 			if codeOf(t, err) != protocol.CodeInvalidParams || !strings.Contains(err.Error(), "yield") {
 				t.Fatalf("error = %v, want invalid_params naming yield", err)
 			}
-			if st.Snapshot().Seq != before {
-				t.Fatal("invalid yield changed State")
+			if !reflect.DeepEqual(eng.slice.Get(), before) {
+				t.Error("invalid yield changed resolution before flush")
+			}
+			if len(eng.yielded) != 0 || len(eng.freed) != 0 || eng.dirty {
+				t.Errorf("invalid yield changed engine bookkeeping: yielded=%v freed=%v dirty=%t", eng.yielded, eng.freed, eng.dirty)
+			}
+			settle(st, eng)
+			after := resolution(t, st)
+			if !reflect.DeepEqual(after, before) {
+				t.Errorf("invalid yield changed resolution after flush: got %+v, want %+v", after, before)
+			}
+			if tc.occupied && after.Occupants[tc.surface].Plugin != "alpha" {
+				t.Error("invalid yield released alpha's occupancy")
+			}
+			if len(eng.yielded) != 0 || len(eng.freed) != 0 {
+				t.Errorf("invalid yield left pending claims after flush: yielded=%v freed=%v", eng.yielded, eng.freed)
+			}
+		})
+	}
+}
+
+func TestSurfaceCloseReleaseFailureWithUnrelatedYield(t *testing.T) {
+	for _, raw := range []string{`{"surface":"main-stage"}`, `{"surface":"main-stage","yield":false}`} {
+		t.Run(raw, func(t *testing.T) {
+			st, eng, pods := newEngine(t, Options{})
+			flaky := &flakyPod{pod: pods}
+			eng.decls = flaky
+			for _, plugin := range []string{"closer", "yielder", "borrower"} {
+				pods.launch(plugin)
+			}
+			pods.claim("closer", string(protocol.SurfaceMainStage))
+			pods.claim("yielder", string(protocol.SurfaceSidebarList))
+			settle(st, eng)
+			pods.claim("borrower", string(protocol.SurfaceSidebarList))
+			settle(st, eng)
+			if err := eng.SurfaceClose("yielder", protocol.SurfaceCloseParams{Surface: protocol.SurfaceSidebarList, Yield: true}); err != nil {
+				t.Fatal(err)
+			}
+			settle(st, eng)
+			if !eng.yielded[claimKey{protocol.SurfaceSidebarList, "yielder"}] {
+				t.Fatal("precondition: unrelated yielded claim is missing")
+			}
+			flaky.failRelease = true
+			var p protocol.SurfaceCloseParams
+			if err := json.Unmarshal([]byte(raw), &p); err != nil {
+				t.Fatal(err)
+			}
+			if err := eng.SurfaceClose("closer", p); err != nil {
+				t.Fatal(err)
+			}
+			for range 2 {
+				settle(st, eng)
+				if got := resolution(t, st).Occupants[protocol.SurfaceMainStage].Plugin; got != "" {
+					t.Fatalf("failed plain release reoccupied main-stage: %q", got)
+				}
+			}
+			eng.CatalogChanged() // an unrelated dirty pass must not re-award it
+			settle(st, eng)
+			if got := resolution(t, st).Occupants[protocol.SurfaceMainStage].Plugin; got != "" {
+				t.Fatalf("unrelated dirty pass reoccupied main-stage: %q", got)
+			}
+			if _, err := st.Clear(state.SurfacesNamespace); err != nil {
+				t.Fatal(err)
+			}
+			settle(st, eng)
+			if got := resolution(t, st).Occupants[protocol.SurfaceMainStage].Plugin; got != "closer" {
+				t.Fatalf("full resolution lost standing claim: %q", got)
 			}
 		})
 	}

@@ -327,7 +327,7 @@ func (r *Root) occupiedSizes(pluginID string) []protocol.SurfaceSize {
 // markSizesDirty is the State flush listener: a write to the frontend's
 // husk.geometry or husk.focus, or to husk.surfaces (visibility), may change
 // what an occupant is told about its surfaces.
-func (r *Root) markSizesDirty(changes []state.Change, _ *state.Snapshot) {
+func (r *Root) markSizesDirty(changes []state.Change, snap *state.Snapshot) {
 	for i := range changes {
 		switch changes[i].Namespace {
 		case state.GeometryNamespace, state.FocusNamespace:
@@ -337,7 +337,7 @@ func (r *Root) markSizesDirty(changes []state.Change, _ *state.Snapshot) {
 			// Observe the release before the engine resolves standing claims.
 			// A yielder with no alternative can regain the same surface in
 			// this tick; it must hear surface.resized even at unchanged size.
-			if res, ok := decodeSurfaces(r.st.Snapshot()); ok {
+			if res, ok := decodeSurfaces(snap); ok {
 				for id := range r.lastSizes {
 					if res.Occupants[id].Plugin == "" {
 						delete(r.lastSizes, id)
