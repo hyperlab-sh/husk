@@ -95,6 +95,30 @@ var goldenFrames = map[string]func(t *testing.T) string{
 		return runGolden(t, m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	},
 	"TestGoldenFrameFullSlots": func(t *testing.T) string { return runGolden(t, fullSlotsModel()) },
+	"TestGoldenFrameSettingsGeneral": func(t *testing.T) string {
+		m, _ := generalFixture(t,
+			contracts.SettingEntry{Key: "husk.bundle", Type: "string", Default: "", Owner: "husk", Apply: "restart", Doc: "Bundle directory loaded once at start."},
+			contracts.SettingEntry{Key: "husk.plugins.paths", Type: "strings", Default: []string{}, Owner: "husk", Apply: "restart", Doc: "Plugin arguments loaded once at start."},
+			contracts.SettingEntry{Key: "profile.default", Type: "string", Default: "", Owner: "husk"},
+			contracts.SettingEntry{Key: "theme.name", Type: "string", Default: "charm", Owner: "husk"})
+		return runGolden(t, m)
+	},
+	"TestGoldenFrameSettingsGeneralErrors": func(t *testing.T) string {
+		m, fe := generalFixture(t,
+			contracts.SettingEntry{Key: "husk.bundle", Type: "string", Default: "", Owner: "husk", Apply: "restart"},
+			contracts.SettingEntry{Key: "theme.name", Type: "string", Default: "charm", Owner: "husk"})
+		editGeneral(m, "husk.bundle", "example")
+		editGeneral(m, "theme.name", "evening")
+		m.saveSettingsGeneral()
+		fe.replySetting(0, contracts.SettingSetResult{Value: "example", Reports: []contracts.ReloadReport{{Service: "settings", Problems: []protocol.Problem{{Key: "husk.bundle", Severity: "warning", Code: "restart_required"}}}}}, nil)
+		fe.replySetting(1, contracts.SettingSetResult{}, contracts.NewError(protocol.CodeUnavailable, "cannot write configuration", map[string]any{"reason": "store_error"}))
+		return runGolden(t, m)
+	},
+	"TestGoldenFrameSettingsKeysFilter": func(t *testing.T) string {
+		m, _ := keysFixture(t)
+		m.settings.keyQuery = "p.open"
+		return runGolden(t, m)
+	},
 	"TestGoldenFrameSettingsTheme": func(t *testing.T) string {
 		m, _ := settingsFixture(t, "theme")
 		return runGolden(t, m)
@@ -125,6 +149,24 @@ func fullSlotsModel() *WorkbenchModel {
 		protocol.SurfaceSidePanel:         {"SIDEPANEL"},
 	})
 	return m
+}
+
+func TestGoldenFrameSettingsGeneral(t *testing.T) {
+	frame := goldenFrames[t.Name()](t)
+	requireFrameGeometry(t, frame)
+	golden.RequireEqual(t, frame)
+}
+
+func TestGoldenFrameSettingsGeneralErrors(t *testing.T) {
+	frame := goldenFrames[t.Name()](t)
+	requireFrameGeometry(t, frame)
+	golden.RequireEqual(t, frame)
+}
+
+func TestGoldenFrameSettingsKeysFilter(t *testing.T) {
+	frame := goldenFrames[t.Name()](t)
+	requireFrameGeometry(t, frame)
+	golden.RequireEqual(t, frame)
 }
 
 func TestGoldenFrameSettingsTheme(t *testing.T) {

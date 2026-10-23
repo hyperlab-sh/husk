@@ -122,6 +122,13 @@ func (m *WorkbenchModel) drawSettings(c *canvas) uv.Rectangle {
 		c.blitBlock(r.Min.X+13, y, border.Render("│"))
 	}
 	content := m.settingsContentRect()
+	if s.tab == "general" && s.general != nil {
+		g := s.general
+		c.blitLines(content.Min.X, content.Min.Y, content.Dx(), content.Dy(), g.lines[g.top:])
+	}
+	if s.tab == "keys" {
+		c.blitLines(content.Min.X, content.Min.Y, content.Dx(), content.Dy(), m.settingsKeysLines())
+	}
 	if s.tab == "theme" {
 		height := max(1, content.Dy()-4)
 		top := settingsListTop(s.top, s.cursor, len(s.themes), height)
@@ -162,10 +169,16 @@ func (m *WorkbenchModel) drawSettings(c *canvas) uv.Rectangle {
 		if s.tab == "theme" {
 			footer += base.Bold(true).Render("enter") + muted.Render(" select · ")
 		}
+		if s.tab == "general" {
+			footer += base.Bold(true).Render("ctrl+s") + muted.Render(" save · ")
+		}
 	case settingsProfileFocus:
 		footer += base.Bold(true).Render("enter") + muted.Render(" profiles · ")
 	}
 	footer += base.Bold(true).Render("esc") + muted.Render(" close")
+	if s.tab == "keys" {
+		footer = muted.Render("edit keymap.json to change a key · ") + base.Bold(true).Render("esc") + muted.Render(" close")
+	}
 	if s.dirty() {
 		footer += muted.Render(" (discards edits)")
 	}

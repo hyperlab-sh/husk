@@ -29,6 +29,9 @@ type fakeFE struct {
 	Invoked   []invoked
 	Registers []string
 	// Writer calls retain their callbacks until a test explicitly delivers a reply.
+	SchemaRows     []contracts.SettingEntry
+	SettingValues  map[string]contracts.SettingValue
+	KeyRows        contracts.KeyListing
 	ThemeRows      []contracts.ThemeEntry
 	ProfileRows    []contracts.ProfileInfo
 	SettingWrites  []settingWrite
@@ -170,11 +173,21 @@ func (f *fakeFE) Snapshot() *state.Snapshot                { return f.Snap }
 func (f *fakeFE) StartupReports() []contracts.ReloadReport { return nil }
 func (f *fakeFE) Catalog() contracts.CatalogResult         { return contracts.CatalogResult{} }
 func (f *fakeFE) Themes() []contracts.ThemeEntry           { return slices.Clone(f.ThemeRows) }
-func (f *fakeFE) SettingsSchema() []contracts.SettingEntry { return nil }
-func (f *fakeFE) Setting(string) (any, string, error)      { return nil, "", nil }
-func (f *fakeFE) KeyListing() contracts.KeyListing         { return contracts.KeyListing{} }
-func (f *fakeFE) Profiles() []contracts.ProfileInfo        { return slices.Clone(f.ProfileRows) }
-func (f *fakeFE) ConfigDir() string                        { return "" }
+func (f *fakeFE) SettingsSchema() []contracts.SettingEntry { return slices.Clone(f.SchemaRows) }
+func (f *fakeFE) Setting(key string) (any, string, error) {
+	if value, ok := f.SettingValues[key]; ok {
+		return value.Value, value.Source, nil
+	}
+	for _, entry := range f.SchemaRows {
+		if entry.Key == key {
+			return entry.Default, "default", nil
+		}
+	}
+	return nil, "", contracts.NewError(protocol.CodeNotFound, "unknown setting", nil)
+}
+func (f *fakeFE) KeyListing() contracts.KeyListing  { return f.KeyRows }
+func (f *fakeFE) Profiles() []contracts.ProfileInfo { return slices.Clone(f.ProfileRows) }
+func (f *fakeFE) ConfigDir() string                 { return "" }
 
 type settingWrite struct {
 	Key   string
