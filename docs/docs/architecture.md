@@ -65,13 +65,15 @@ Husk has nine fixed slots, modeled on `bb`, plus three placement surfaces (below
 
 Husk assigns no application meaning to a surface; the occupying plugin decides what it shows.
 
+Every surface the layout has a place for is laid out whether or not a plugin occupies it: the sidebar bands and the side panel are drawn whenever their dock is on (and, for the panel, it fits), and an unoccupied surface shows its humanised surface name (`sidebar-list` is "Sidebar list") centred on the slot background, so the layout is visible with no plugins at all. The footer's dock keys are shown only when they change the frame. See [Workbench chrome](design/chrome.md).
+
 When the side panel is shown, the host leaves one blank column between it and the main header and stage (the centre column is one cell narrower, and `surface.resized` reports that narrower size), so clipped centre text never touches the panel. The gutter is inert: it belongs to no slot, so clicks and wheel events on it reach no surface. The side-panel resize divider is whichever adjacent edge is drawn as a border: the centre column's right border, the panel's left border, or both.
 
 Three placement surfaces sit on top of these: `modal-surface` (floating overlay), `full-canvas` (everything right of the rail) and `workspace-stage` (the canvas minus the sidebar).
 
 ## Surfaces and frames
 
-A slot's region on screen is a **surface**, and it is a blank canvas: without a declaration from the occupying plugin, Husk renders its content with no border, title or decoration of any kind. A **frame** is the chrome a plugin asks Husk to draw around its surface:
+A slot's region on screen is a **surface**, and it is a blank canvas: without a declaration from the occupying plugin, Husk renders its content with no border, title or decoration of any kind. A surface with no occupant shows only its humanised name ([Workbench chrome](design/chrome.md)); the moment a plugin occupies it the name goes and the plugin's content, or a blank canvas until it draws, takes the surface. A **frame** is the chrome a plugin asks Husk to draw around its surface:
 
 | Element | Effect | Geometry |
 | :--- | :--- | :--- |
@@ -93,7 +95,7 @@ Plugin lines may carry ANSI SGR styling. Husk composes each frame on a grid of c
 
 **Modal owner and hit-testing.** The open modal has exactly one source of truth in the host (`modalOwner()`: owning plugin plus the rail item that opened it); every surface, the modal surface included, is owned by its registry occupant, so write authorisation and published-content cleanup follow the manifest claim and never the plugin whose rail item opened the modal. Mouse hit-testing walks the laid-out surfaces in an explicit z-order (full-canvas above workspace-stage above the regular regions above the activity rail, ties broken by slot ID), so overlapping rects always resolve to the same surface.
 
-**Minimum size.** The layout needs at least 84x24 cells. On a smaller terminal Husk renders a "terminal too small (need 84x24, have WxH)" screen that fills the real terminal exactly (message shortened or truncated on narrow terminals, never wider than the terminal). While too small, mouse and key input are ignored (only quit works and nothing is forwarded to plugins), the last valid layout is kept and no `surface.resized` is sent; growing the terminal back restores the workbench.
+**Minimum size.** The layout needs at least 84x24 cells. At or above it, the only surface that gives way to a narrow terminal is the side panel, which is not drawn while the centre column beside the sidebar would be under 72 cells (117 cells wide with the default sidebar width); it leaves no stub, and the layout label and footer reflect its absence ([Workbench chrome](design/chrome.md)). On a smaller terminal Husk renders a "terminal too small (need 84x24, have WxH)" screen that fills the real terminal exactly (message shortened or truncated on narrow terminals, never wider than the terminal). While too small, mouse and key input are ignored (only quit works and nothing is forwarded to plugins), the last valid layout is kept and no `surface.resized` is sent; growing the terminal back restores the workbench.
 
 ## Protocol
 
@@ -178,7 +180,7 @@ Keys use one spelling (`"f4"`, `"ctrl+g"`, `"alt+2"`, `"n"`, `" "`) and match ex
 
 A palette command whose ID equals a rail item's ID activates that rail item, so a plugin can list its rail items as actions. The activity rail lists rail items in registration order.
 
-All chrome is derived from what plugins declared. With no plugins connected the rail holds only Home, the slot explorer and the palette; the palette lists only the host's `husk.*` workbench actions plus the actions of live plugins; the top bar lists only declared rail items. The footer always shows the host keys and adds the hinted focus-local bindings of the plugin owning the focused surface (at most four, first declaration wins per key). Bindings without a hint are not advertised.
+All chrome is derived from what plugins declared. With no plugins connected the rail holds only Home, the slot explorer and the palette; the palette lists only the host's `husk.*` workbench actions plus the actions of live plugins. The top bar carries the brand and transient status pills and no plugin information. The footer shows the layout label at the left and the theme name at the right, and between them the host keys plus the hinted focus-local bindings of the plugin owning the focused surface (at most four, first declaration wins per key). Bindings without a hint are not advertised. See [Workbench chrome](design/chrome.md).
 
 ## Published slots, hooks and events
 

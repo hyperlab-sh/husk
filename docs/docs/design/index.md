@@ -14,6 +14,9 @@ Background and trade-offs behind decisions in the host.
 - [Command palette input and Bubbles textinput](palette-textinput.md): whether
   the palette query line should adopt the Bubbles `textinput`. Assessed, not
   adopted.
+- [Workbench chrome](chrome.md): every surface laid out whether occupied or
+  not, with its name when empty; the rail tiles; what the top and bottom bars
+  show, including the layout label and the theme name. Specified, not landed.
 
 ## Architecture v2 (planned)
 
