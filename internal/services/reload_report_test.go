@@ -515,6 +515,13 @@ func TestDryRunsTakeTheCoordinatorsTurn(t *testing.T) {
 		if err := <-done; !errors.As(err, &coded) || coded.Reason != "input_deadline" {
 			t.Fatalf("err = %v", err)
 		}
+		// The abandoned gather still holds the turn.
+		co.mu.Lock()
+		held := co.active != nil && co.active.dry
+		co.mu.Unlock()
+		if !held {
+			t.Fatal("the turn was released while the gather was still reading")
+		}
 		reloaded := make(chan error, 1)
 		go func() { _, err := co.Reload(context.Background(), ReasonCLI); reloaded <- err }()
 		waitQueued(co, 1)
