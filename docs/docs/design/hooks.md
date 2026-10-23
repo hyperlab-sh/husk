@@ -728,7 +728,7 @@ exits 1 with the `denied` reply: JSON mode prints the error object with
 `data.vetoes`, table mode adds one `plugin_id: reason` line per veto to the
 message on stderr. Ids, owners, kinds and veto reasons are printed under the
 table rules in [Instances](instances.md): a string holding a control
-character is shown in its JSON form.
+or bidi control character is shown in its JSON form.
 
 There is no `husk hook call`: the CLI is not at any owner's point, and a
 diagnostic that fires a hook from outside would make every subscriber act on
