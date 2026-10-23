@@ -402,6 +402,9 @@ func TestTransformCloseMidChainEndsItWithAShutdownEntry(t *testing.T) {
 	if len(col.out.Results) != 2 || !isShutdown(col.out.Results[1].Err) || col.out.Results[1].Plugin != "p2" {
 		t.Fatalf("results %#v", col.out.Results)
 	}
+	if m := col.out.Results[1].Err.Message; m != "husk is shutting down" {
+		t.Fatalf("Calls.Close message %q", m)
+	}
 	if !reflect.DeepEqual(col.out.Data, map[string]any{"v": json.Number("2")}) {
 		t.Fatalf("outcome data %#v, want the data after stage 1", col.out.Data)
 	}
@@ -432,6 +435,9 @@ func TestTransformClosedTableBeforeAStageEndsTheChain(t *testing.T) {
 			e := col.out.Results[1]
 			if e.Plugin != "p2" || !isShutdown(e.Err) {
 				t.Fatalf("entry %#v, want cancelled/shutdown", e)
+			}
+			if e.Err.Message != "husk is shutting down" {
+				t.Fatalf("message %q differs from the Calls.Close path", e.Err.Message)
 			}
 			if !reflect.DeepEqual(col.out.Data, map[string]any{"v": json.Number("2")}) || len(g.r.inFlight) != 0 {
 				t.Fatalf("outcome %#v inFlight %v", col.out.Data, g.r.inFlight)
