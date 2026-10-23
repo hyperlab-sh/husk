@@ -497,7 +497,7 @@ func TestHookCallRefusalCodesCrossTheBoundary(t *testing.T) {
 			code   string
 		}{
 			{"foreign plugin", contracts.Caller{Kind: contracts.CallerPlugin, PluginID: "other"}, "a.h", "denied"},
-			{"host hook unknown", contracts.Caller{Kind: contracts.CallerStem}, "husk.nope", "not_found"},
+			{"host hook unknown", contracts.Caller{Kind: contracts.CallerHost}, "husk.nope", "not_found"},
 			{"malformed id", ownerOf("a.h"), "a..h", "invalid_params"},
 		} {
 			_, err := r.port.HookCall(ctx, tc.caller, tc.hook, nil)
