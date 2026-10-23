@@ -51,6 +51,8 @@ const (
 	MethodThemeChanged = "theme.changed"
 	// MethodThemeGet reads the palette; see design/services.md.
 	MethodThemeGet = "theme.get"
+	// MethodThemeList lists the serving themes; see design/services.md.
+	MethodThemeList = "theme.list"
 	// MethodThemeCheck checks contrast; see design/services.md.
 	MethodThemeCheck = "theme.check"
 	// MethodSlotContribute fills an extension point; see design/message-kinds.md.
@@ -105,7 +107,7 @@ func Methods() []string {
 		MethodEventEmit, MethodEventDeliver, MethodEventWatch, MethodHookCall, MethodHookList,
 		MethodStateGet, MethodStateSet, MethodStatePatch, MethodStateSnapshot, MethodStateWatch, MethodStateClear, MethodStateChanged,
 		MethodSurfaceUpdate, MethodSurfaceClose, MethodSurfaceResized, MethodInputKey, MethodInputMouse, MethodInputKeyState,
-		MethodThemeChanged, MethodThemeGet, MethodThemeCheck, MethodSlotContribute, MethodSlotContributions, MethodToastShow,
+		MethodThemeChanged, MethodThemeGet, MethodThemeList, MethodThemeCheck, MethodSlotContribute, MethodSlotContributions, MethodToastShow,
 		MethodSettingsGet, MethodSettingsList, MethodSettingsSchema, MethodSettingsValidate,
 		MethodSecretsGet, MethodSecretsNames, MethodSecretsSet, MethodSecretsGrant, MethodSecretsRevoke, MethodSecretsReveal,
 		MethodKeysList, MethodProfileList, MethodProfileUse, MethodPluginList, MethodPluginLog, MethodPluginRemove, MethodPluginAdd, MethodConfigReload}

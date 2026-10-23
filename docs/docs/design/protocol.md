@@ -285,7 +285,7 @@ A requester that stops waiting ([Calls](calls.md) times a request out, or a sock
 | | `surface.resized` | notification | Husk to plugin |
 | `input` | `input.key`, `input.mouse`, `input.key_state` | notification | Husk to the plugin owning the target surface |
 | `theme` | `theme.changed` | notification | Husk to plugin |
-| | `theme.get` | request | plugin or CLI to Husk |
+| | `theme.get`, `theme.list` | request | plugin or CLI to Husk |
 | | `theme.check` | request | CLI to Husk |
 | `slot` | `slot.contribute` | request | plugin to Husk |
 | | `slot.contributions` | notification | Husk to the publisher |

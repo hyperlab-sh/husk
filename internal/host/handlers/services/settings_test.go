@@ -473,9 +473,10 @@ func TestOneBudgetCoversEveryPluginReadMethod(t *testing.T) {
 		"secrets.get":   `{"name":"token"}`,
 		"secrets.names": `{}`,
 		"theme.get":     `{}`,
+		"theme.list":    `{}`,
 		"keys.list":     `{}`,
 	}
-	methods := []string{"settings.get", "secrets.get", "secrets.names", "theme.get", "keys.list"}
+	methods := []string{"settings.get", "secrets.get", "secrets.names", "theme.get", "theme.list", "keys.list"}
 	for _, spent := range methods {
 		for _, next := range methods {
 			t.Run(spent+" then "+next, func(t *testing.T) {
@@ -493,6 +494,9 @@ func TestOneBudgetCoversEveryPluginReadMethod(t *testing.T) {
 						return Secrets{Port: fakes.NewSecrets(rec), Limiter: lim}.Serve(context.Background(), pluginCaller("files"), m, nil)
 					},
 					"theme.get": func(m protocol.Message) protocol.Message {
+						return Theme{Port: fakes.NewTheme(rec), Limiter: lim}.Serve(context.Background(), pluginCaller("files"), m, nil)
+					},
+					"theme.list": func(m protocol.Message) protocol.Message {
 						return Theme{Port: fakes.NewTheme(rec), Limiter: lim}.Serve(context.Background(), pluginCaller("files"), m, nil)
 					},
 					"keys.list": func(m protocol.Message) protocol.Message {
@@ -514,7 +518,7 @@ func TestOneBudgetCoversEveryPluginReadMethod(t *testing.T) {
 				}
 				// The CLI is never limited, and the window resets whole.
 				cliServe := Theme{Port: fakes.NewTheme(rec), Limiter: lim}
-				if r := cliServe.Serve(context.Background(), cliCaller, req(t, "theme.get", `{}`), nil); r.Error != nil {
+				if r := cliServe.Serve(context.Background(), cliCaller, req(t, "theme.list", `{}`), nil); r.Error != nil {
 					t.Fatalf("CLI limited: %+v", r.Error)
 				}
 				clock.Advance(time.Second)

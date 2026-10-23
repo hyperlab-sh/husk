@@ -55,6 +55,7 @@ func payloads() map[string]payload {
 		protocol.MethodStateClear:        {obj, obj},
 		protocol.MethodStateChanged:      {obj, nil},
 		protocol.MethodThemeGet:          {obj, obj},
+		protocol.MethodThemeList:         {obj, obj},
 		protocol.MethodThemeCheck:        {obj, obj},
 		protocol.MethodSettingsGet:       {obj, obj},
 		protocol.MethodSettingsList:      {obj, obj},

@@ -43,6 +43,7 @@ var servicesParams = map[string]string{
 	"profile.list":      `{}`,
 	"profile.use":       `{"name":"work"}`,
 	"theme.get":         `{}`,
+	"theme.list":        `{}`,
 	"theme.check":       `{}`,
 	"keys.list":         `{}`,
 	"config.reload":     `{}`,

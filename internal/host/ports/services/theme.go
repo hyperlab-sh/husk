@@ -31,6 +31,12 @@ func (p Theme) Get(ctx context.Context, hc host.Caller) (protocol.Palette, error
 	return palette, coded(err)
 }
 
+// List implements contracts.ThemePort without reading Store.
+func (p Theme) List(ctx context.Context, hc host.Caller) ([]host.ThemeEntry, error) {
+	rows, err := p.Svc.List(hc)
+	return rows, coded(err)
+}
+
 // Check implements contracts.ThemePort (user-only: dry input is user-scoped).
 // It dry-builds Settings first to get the snapshot Theme would see; a Settings
 // that would not publish is ok:false with its problems, and Theme is not
