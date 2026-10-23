@@ -34,7 +34,8 @@ func NewHooks(runner *hooks.Runner, post Post) *Hooks {
 }
 
 // HookCall serves hook.call: one result per live subscriber once all are
-// accounted for, in completion order (empty when none).
+// accounted for, in priority order (empty when none). The result shape is
+// the pre-outcome one; the outcome's kind-specific fields are not mapped yet.
 func (p *Hooks) HookCall(ctx context.Context, c contracts.Caller, hook string, data json.RawMessage) ([]contracts.HookResult, error) {
 	d, ok := callerOf(c)
 	if !ok {
@@ -59,14 +60,14 @@ func (p *Hooks) HookCall(ctx context.Context, c contracts.Caller, hook string, d
 	if err != nil {
 		return nil, err
 	}
-	done := make(chan []hooks.HookResult, 1)
+	done := make(chan hooks.Outcome, 1)
 	failed := make(chan error, 1)
 	if !p.post(func() {
-		if err := p.runner.Call(caller, hook, payload, func(rs []hooks.HookResult) {
+		if err := p.runner.Call(caller, hook, payload, func(o hooks.Outcome) {
 			// Non-blocking: when the caller left before the aggregate
 			// arrived, no one receives it and it is dropped here.
 			select {
-			case done <- rs:
+			case done <- o:
 			default:
 			}
 		}); err != nil {
@@ -76,9 +77,9 @@ func (p *Hooks) HookCall(ctx context.Context, c contracts.Caller, hook string, d
 		return nil, coded(protocol.CodeUnavailable, "host is shutting down")
 	}
 	select {
-	case rs := <-done:
-		out := make([]contracts.HookResult, len(rs))
-		for i, r := range rs {
+	case o := <-done:
+		out := make([]contracts.HookResult, len(o.Results))
+		for i, r := range o.Results {
 			out[i] = hookResultOf(r)
 		}
 		return out, nil
@@ -99,7 +100,7 @@ func hookResultOf(r hooks.HookResult) contracts.HookResult {
 		}
 	}
 	if r.Err != nil {
-		out.Err = contracts.NewError(protocol.Code(r.Err.Code), r.Err.Message, r.Err.Data)
+		out.Err = contracts.NewError(r.Err.Code, r.Err.Message, r.Err.Data)
 	}
 	return out
 }
@@ -109,7 +110,7 @@ func hookResultOf(r hooks.HookResult) contracts.HookResult {
 func hookErrorOf(err error) error {
 	var he *hooks.HookError
 	if errors.As(err, &he) {
-		return contracts.NewError(protocol.Code(he.Code), he.Message, he.Data)
+		return contracts.NewError(he.Code, he.Message, he.Data)
 	}
 	return contracts.NewError(protocol.CodeInternal, err.Error(), nil)
 }

@@ -333,7 +333,7 @@ func (r *Root) buildStem() error {
 	if err != nil {
 		return fmt.Errorf("dispatcher: %w", err)
 	}
-	r.runner, err = hooks.New(hooks.Options{Subscriptions: r.catalog, Liveness: live, Calls: r.table, Logger: r.logf})
+	r.runner, err = hooks.New(hooks.Options{Catalog: r.catalog, Liveness: live, Calls: r.table, Logger: r.logf})
 	if err != nil {
 		return fmt.Errorf("hook runner: %w", err)
 	}
