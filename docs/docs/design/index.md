@@ -55,7 +55,8 @@ Everything that knows a foreign plugin format lives outside the host, behind
 the generic seams the core specs define (executable converters, runtime and
 terminal surfaces, capture modes).
 
-- [Herdr adapter](herdr-adapter.md): running unmodified Herdr plugins over a
-  real Herdr server through a converter and shim shipped in this repository
-  outside core; which server mode is used, how panes and popups become
-  terminal surfaces, and what the core must provide.
+- [Terminal multiplexer adapter](herdr-adapter.md): running an external
+  terminal multiplexer's unmodified plugins over its real server through a
+  converter and shim shipped in this repository outside core; which server
+  mode is used, how its panes and popups become terminal surfaces, and what
+  the core must provide.
