@@ -108,33 +108,70 @@ func compileDef(t *testing.T, fragment string) *jsonschema.Schema {
 	return s
 }
 
-// requireFullyPopulated fails on any exported field, slice or map element left
-// at its zero value, so every optional property is exercised by a marshaled value.
-func requireFullyPopulated(t *testing.T, path string, v reflect.Value) {
-	t.Helper()
+// unpopulated lists every exported field, slice or map element reachable from
+// v that is left at its zero value, following pointers and interfaces, so every
+// optional property is exercised by a marshaled value.
+func unpopulated(path string, v reflect.Value) []string {
 	switch v.Kind() {
 	case reflect.Struct:
+		var out []string
 		for i := 0; i < v.NumField(); i++ {
 			if f := v.Type().Field(i); f.IsExported() {
-				requireFullyPopulated(t, path+"."+f.Name, v.Field(i))
+				out = append(out, unpopulated(path+"."+f.Name, v.Field(i))...)
 			}
 		}
+		return out
+	case reflect.Pointer, reflect.Interface:
+		if v.IsNil() {
+			return []string{path + " is nil"}
+		}
+		return unpopulated(path, v.Elem())
 	case reflect.Slice, reflect.Map:
 		if v.Len() == 0 {
-			t.Errorf("%s is empty", path)
+			return []string{path + " is empty"}
 		}
+		var out []string
 		if v.Kind() == reflect.Slice {
 			for i := 0; i < v.Len(); i++ {
-				requireFullyPopulated(t, path+"[]", v.Index(i))
+				out = append(out, unpopulated(path+"[]", v.Index(i))...)
 			}
-			break
+			return out
 		}
 		for _, k := range v.MapKeys() {
-			requireFullyPopulated(t, path+"{}", v.MapIndex(k))
+			out = append(out, unpopulated(path+"{}", v.MapIndex(k))...)
 		}
-	default:
-		if v.IsZero() {
-			t.Errorf("%s is zero; populate it so the schema property is exercised", path)
+		return out
+	}
+	if v.IsZero() {
+		return []string{path + " is zero"}
+	}
+	return nil
+}
+
+func requireFullyPopulated(t *testing.T, path string, v reflect.Value) {
+	t.Helper()
+	for _, problem := range unpopulated(path, v) {
+		t.Errorf("%s; populate it so the schema property is exercised", problem)
+	}
+}
+
+func TestUnpopulatedFollowsPointersAndInterfaces(t *testing.T) {
+	type inner struct{ A, B string }
+	type outer struct {
+		P *inner
+		I any
+	}
+	if got := unpopulated("x", reflect.ValueOf(outer{P: &inner{A: "a", B: "b"}, I: &inner{A: "a", B: "b"}})); len(got) != 0 {
+		t.Fatalf("fully populated reported %v", got)
+	}
+	for name, v := range map[string]outer{
+		"nil pointer":       {I: &inner{A: "a", B: "b"}},
+		"nil interface":     {P: &inner{A: "a", B: "b"}},
+		"half pointer":      {P: &inner{A: "a"}, I: &inner{A: "a", B: "b"}},
+		"half in interface": {P: &inner{A: "a", B: "b"}, I: &inner{B: "b"}},
+	} {
+		if len(unpopulated("x", reflect.ValueOf(v))) == 0 {
+			t.Errorf("%s was accepted", name)
 		}
 	}
 }
@@ -213,14 +250,6 @@ func TestMarshaledMessagesValidateAgainstCommittedSchema(t *testing.T) {
 			if form(name) != "request" {
 				return
 			}
-			withToken := protocol.Message{ID: &id, Method: name, Params: params, Token: "tok"}
-			if err := root.Validate(wire(t, withToken)); err != nil {
-				t.Errorf("request with token: %v", err)
-			}
-			failure := protocol.Message{ID: &id, Error: &protocol.Error{Code: protocol.CodeNotFound, Message: "x", Data: json.RawMessage(`{"k":1}`)}}
-			if err := root.Validate(wire(t, failure)); err != nil {
-				t.Errorf("error reply: %v", err)
-			}
 			result, err := json.Marshal(row.result)
 			if err != nil {
 				t.Fatal(err)
@@ -234,6 +263,23 @@ func TestMarshaledMessagesValidateAgainstCommittedSchema(t *testing.T) {
 		})
 	}
 	t.Logf("envelope-only placeholder methods: %v", placeholders)
+}
+
+// TestEnvelopeVariantsValidate covers the envelope forms that do not depend on
+// the method: a request carrying a token and an error reply with data.
+func TestEnvelopeVariantsValidate(t *testing.T) {
+	root := compileDef(t, "")
+	id := protocol.NewStringID("1")
+	for name, msg := range map[string]protocol.Message{
+		"request with token": {ID: &id, Method: protocol.MethodSessionPing, Params: json.RawMessage(`{}`), Token: "tok"},
+		"error reply":        {ID: &id, Error: &protocol.Error{Code: protocol.CodeNotFound, Message: "x", Data: json.RawMessage(`{"k":1}`)}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := root.Validate(wire(t, msg)); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
 }
 
 // TestSchemaRejectsMalformedMarshaledPayloads keeps the validation test honest:
