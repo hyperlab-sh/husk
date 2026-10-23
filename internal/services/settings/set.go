@@ -11,16 +11,21 @@ import (
 
 // StoreWriter is the sole configuration write seam; it runs off the loop.
 type StoreWriter interface {
+	// Patch atomically merges a single-key user-layer configuration patch.
 	Patch(store.DocName, store.Layer, string, store.Doc) error
 }
 
 // Waiter is a registration on the flight that observes a completed write.
 type Waiter interface {
+	// Wait awaits the captured flight off the loop without cancelling it.
 	Wait(context.Context) ([]c.Report, error)
 }
 
 // Reloader registers writes on the loop using the coordinator's coalescing rule.
-type Reloader interface{ AwaitSettings() Waiter }
+type Reloader interface {
+	// AwaitSettings registers a write after persistence; loop-only.
+	AwaitSettings() Waiter
+}
 
 // Bind connects the coordinator once, before Set can be called.
 func (s *Service) Bind(r Reloader) { s.reloader = r }
