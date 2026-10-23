@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/hyperlab-sh/husk/pkg/protocol"
@@ -254,5 +255,17 @@ func TestEnvelopeSchema(t *testing.T) {
 				t.Fatalf("valid=%v want %v", got, tc.valid)
 			}
 		})
+	}
+}
+
+func TestHookMethodsAreOwnedByTheHooksSpec(t *testing.T) {
+	defs := document(t)["$defs"].(map[string]any)
+	for _, name := range []string{protocol.MethodHookCall, protocol.MethodHookList} {
+		for _, kind := range []string{"params", "result"} {
+			desc := defs[name+"."+kind].(map[string]any)["description"].(string)
+			if !strings.Contains(desc, "design/hooks.md") {
+				t.Errorf("%s.%s description %q does not name design/hooks.md", name, kind, desc)
+			}
+		}
 	}
 }

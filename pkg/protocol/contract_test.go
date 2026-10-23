@@ -119,7 +119,7 @@ func TestVersionMatrix(t *testing.T) {
 		major, minor      int
 		parse, compatible bool
 	}{
-		{"2.0", 2, 0, true, true}, {"2", 2, 0, true, true}, {"2.99", 2, 99, true, true},
+		{"2.0", 2, 0, true, true}, {"2.1", 2, 1, true, true}, {"2", 2, 0, true, true}, {"2.99", 2, 99, true, true},
 		{"02.001", 2, 1, true, true}, {"1.2", 1, 2, true, false}, {"3", 3, 0, true, false},
 		{"0.0", 0, 0, true, false}, {"", 0, 0, false, false}, {"2.", 0, 0, false, false},
 		{".0", 0, 0, false, false}, {"2.0.1", 0, 0, false, false}, {"-2.0", 0, 0, false, false},
@@ -143,7 +143,7 @@ func TestVersionMatrix(t *testing.T) {
 			}
 		})
 	}
-	if Version != "2.0" || Major != 2 {
+	if Version != "2.1" || Major != 2 {
 		t.Fatal("unexpected version")
 	}
 }

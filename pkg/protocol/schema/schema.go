@@ -52,7 +52,9 @@ func owner(method string) string {
 	switch ns {
 	case "state":
 		return "design/state.md"
-	case "action", "event", "hook", "slot":
+	case "hook":
+		return "design/hooks.md"
+	case "action", "event", "slot":
 		return "design/message-kinds.md"
 	case "settings", "theme", "profile", "secrets", "config":
 		return "design/services.md"

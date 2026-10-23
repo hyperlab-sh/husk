@@ -16,8 +16,11 @@ const (
 	MethodEventDeliver = "event.deliver"
 	// MethodEventWatch watches events; see design/message-kinds.md.
 	MethodEventWatch = "event.watch"
-	// MethodHookCall calls hook subscribers; see design/message-kinds.md.
+	// MethodHookCall calls hook subscribers; see design/hooks.md.
 	MethodHookCall = "hook.call"
+	// MethodHookList lists declared hooks and their subscribers (minor 2.1);
+	// see design/hooks.md.
+	MethodHookList = "hook.list"
 	// MethodStateGet reads a slice; see design/state.md.
 	MethodStateGet = "state.get"
 	// MethodStateSet replaces a slice; see design/state.md.
@@ -93,7 +96,7 @@ const (
 // Methods returns all defined method names in specification order.
 func Methods() []string {
 	return []string{MethodSessionPing, MethodProtocolError, MethodActionInvoke, MethodActionList,
-		MethodEventEmit, MethodEventDeliver, MethodEventWatch, MethodHookCall,
+		MethodEventEmit, MethodEventDeliver, MethodEventWatch, MethodHookCall, MethodHookList,
 		MethodStateGet, MethodStateSet, MethodStatePatch, MethodStateSnapshot, MethodStateWatch, MethodStateClear, MethodStateChanged,
 		MethodSurfaceUpdate, MethodSurfaceClose, MethodSurfaceResized, MethodInputKey, MethodInputMouse, MethodInputKeyState,
 		MethodThemeChanged, MethodThemeGet, MethodThemeCheck, MethodSlotContribute, MethodSlotContributions, MethodToastShow,

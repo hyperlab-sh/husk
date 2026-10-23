@@ -754,11 +754,18 @@
       "description": "Result owned by design/message-kinds.md; no additional field constraints specified here."
     },
     "hook.call.params": {
-      "description": "Payload owned by design/message-kinds.md; no additional field constraints specified here.",
+      "description": "Payload owned by design/hooks.md; no additional field constraints specified here.",
       "type": "object"
     },
     "hook.call.result": {
-      "description": "Result owned by design/message-kinds.md; no additional field constraints specified here."
+      "description": "Result owned by design/hooks.md; no additional field constraints specified here."
+    },
+    "hook.list.params": {
+      "description": "Payload owned by design/hooks.md; no additional field constraints specified here.",
+      "type": "object"
+    },
+    "hook.list.result": {
+      "description": "Result owned by design/hooks.md; no additional field constraints specified here."
     },
     "input.key.params": {
       "$ref": "#/$defs/SurfaceKeyParams"
@@ -1004,7 +1011,7 @@
   "$id": "https://github.com/hyperlab-sh/husk/blob/main/docs/docs/wire-schema-v2.json",
   "$ref": "#/$defs/Message",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "One UTF-8 JSON object per line, at most 4194304 bytes. Protocol 2.0. Generated from pkg/protocol; do not edit. x-methods indexes payload schemas; unknown fields are accepted.",
+  "description": "One UTF-8 JSON object per line, at most 4194304 bytes. Protocol 2.1. Generated from pkg/protocol; do not edit. x-methods indexes payload schemas; unknown fields are accepted.",
   "title": "Husk wire protocol v2",
   "x-methods": {
     "action.invoke": {
@@ -1068,6 +1075,15 @@
       },
       "result": {
         "$ref": "#/$defs/hook.call.result"
+      }
+    },
+    "hook.list": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/hook.list.params"
+      },
+      "result": {
+        "$ref": "#/$defs/hook.list.result"
       }
     },
     "input.key": {
