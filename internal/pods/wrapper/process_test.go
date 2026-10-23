@@ -307,6 +307,42 @@ func TestLaunchEnvironmentProcessGroupAndOpeningOrder(t *testing.T) {
 	}
 }
 
+// TestLaunchEnvironmentCarriesInstanceIdentityAndBinary pins the values, not
+// just the names: the plugin sees this instance's id, the absolute path of the
+// husk binary it was configured with and its socket, and an inherited value
+// from another instance is replaced (pods.md, Environment).
+func TestLaunchEnvironmentCarriesInstanceIdentityAndBinary(t *testing.T) {
+	bin, err := filepath.Abs(os.Args[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := newFixture(t, "env", func(o *Options) {
+		o.InstanceID = "notes-42"
+		o.BinPath = bin
+		o.BaseEnv = append(o.BaseEnv, "HUSK_INSTANCE=other", "HUSK_BIN_PATH=/elsewhere/husk", "HUSK_SOCKET_PATH=/elsewhere.sock")
+	})
+	f.start(t)
+	var v struct {
+		Env map[string]string `json:"env"`
+	}
+	if err := json.Unmarshal(awaitReply(t, f, "9000").Result, &v); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{
+		"HUSK_INSTANCE":    "notes-42",
+		"HUSK_BIN_PATH":    bin,
+		"HUSK_SOCKET_PATH": f.w.opts.SocketPath,
+		"HUSK_PLUGIN_ID":   "fake",
+	} {
+		if v.Env[name] != want {
+			t.Errorf("%s = %q, want %q", name, v.Env[name], want)
+		}
+	}
+	if !filepath.IsAbs(v.Env["HUSK_BIN_PATH"]) {
+		t.Errorf("HUSK_BIN_PATH %q is not absolute", v.Env["HUSK_BIN_PATH"])
+	}
+}
+
 func TestMalformedReplySalvagedAndNonReplyRejected(t *testing.T) {
 	f := newFixture(t, "malformed", nil)
 	f.start(t)
