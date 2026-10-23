@@ -97,7 +97,7 @@ func (h *Host) AddPod(spec manifest.Spec) (*Pod, error) {
 	// this Host must never be replaced (its credential would outlive the pod
 	// record), even if a registry lost track of the id.
 	if _, ok := h.pods[spec.ID]; ok {
-		return nil, errors.New("duplicate plugin id")
+		return nil, contracts.NewError(protocol.CodeConflict, "duplicate plugin id", nil)
 	}
 	if h.opts.Registry != nil {
 		if err := h.opts.Registry.Reserve(h.ctx, spec.ID); err != nil {
@@ -114,8 +114,14 @@ func (h *Host) AddPod(spec manifest.Spec) (*Pod, error) {
 // returned worker may block, but only Handle(PreparedMsg) starts wrappers on the
 // loop. Repeated calls while a gate is in flight do not duplicate preparation.
 func (h *Host) Prepare(batch ...string) tea.Cmd {
+	_, cmd := h.prepare(batch...)
+	return cmd
+}
+
+// prepare returns the gate opened by this batch, or zero and nil for no work.
+func (h *Host) prepare(batch ...string) (uint64, tea.Cmd) {
 	if h.closing {
-		return nil
+		return 0, nil
 	}
 	var ids []string
 	for _, id := range batch {
@@ -125,7 +131,7 @@ func (h *Host) Prepare(batch ...string) tea.Cmd {
 		}
 	}
 	if len(ids) == 0 {
-		return nil
+		return 0, nil
 	}
 	slices.Sort(ids)
 	var specs []manifest.Spec
@@ -136,7 +142,7 @@ func (h *Host) Prepare(batch ...string) tea.Cmd {
 	h.nextGate++
 	gate := h.nextGate
 	h.gates[gate] = ids
-	return func() tea.Msg { return PreparedMsg{Gate: gate, Preparation: h.loop.Prepare(h.ctx, gate, specs)} }
+	return gate, func() tea.Msg { return PreparedMsg{Gate: gate, Preparation: h.loop.Prepare(h.ctx, gate, specs)} }
 }
 
 // Start is launch step 6's built-in WrapperStarter implementation, over the
@@ -173,11 +179,22 @@ func (h *Host) Start(id string, opening []protocol.Message) error {
 		h.revoke(id)
 		return err
 	}
-	p.info = process.Info()
-	if p.info.Status == wrapper.Live {
-		h.loop.Liveness(LivenessMsg{Info: p.Info()})
+	info := process.Info()
+	if info.Status != wrapper.Live {
+		p.info.LogPath = info.LogPath
+		h.revoke(id)
+		return openingFailure(info)
 	}
+	p.info = info
+	h.loop.Liveness(LivenessMsg{Info: p.Info()})
 	return nil
+}
+
+func openingFailure(info wrapper.Info) error {
+	if info.LastError != "" {
+		return errors.New(info.LastError)
+	}
+	return errors.New("plugin failed during opening")
 }
 
 // Handle applies lifecycle messages on the loop. ClosedMsg and calls.ReplyMsg
