@@ -60,19 +60,19 @@ func TestReviewEmptyCallerDeniedOnEveryUserOnlyMethod(t *testing.T) {
 	}
 }
 
-func TestReviewKeyListingExactCatalogOwnershipAndNativeRejections(t *testing.T) {
+func TestReviewKeyListingExactCatalogOwnership(t *testing.T) {
 	kb := keybinding.New()
 	in := catalog("a")
 	in.Declared[store.DeclaredPlugins]["a.b"] = catalog("a.b").Declared[store.DeclaredPlugins]["a.b"]
-	in.Declared[store.DeclaredKeymap] = map[string]store.Doc{"a": doc(`{"version":1,"bind":[{"key":"x","focus":"stage","action":"a.run"},{"key":"y","focus":"foreign","action":"a.run"},{"key":"z","focus":"stage","action":"a.b.run"}]}`), "a.b": doc(`{"version":1,"bind":[{"key":"b","focus":"stage","action":"a.b.run"}]}`)}
+	in.Declared[store.DeclaredKeymap] = map[string]store.Doc{"a": doc(`{"version":1,"bind":[{"key":"x","focus":"stage","action":"a.run"}]}`), "a.b": doc(`{"version":1,"bind":[{"key":"b","focus":"stage","action":"a.b.run"}]}`)}
 	in.Layers = []store.LayerDoc{{Layer: store.LayerUser, Doc: doc(`{"version":1,"bind":[{"key":"1","action":"a.run"},{"key":"2","action":"a.b.run"}]}`)}}
 	apply(t, kb, in)
-	codes := map[string]bool{}
+	// Ownership and scope were enforced by manifest conversion; the service
+	// trusts the declared document and sets the plugin from its key.
 	for _, problem := range kb.Listing().Problems {
-		codes[problem.Code] = true
-	}
-	if !codes["foreign_surface"] || !codes["foreign_action"] {
-		t.Fatal("service did not reject native declarations", codes)
+		if problem.Code == "foreign_surface" || problem.Code == "foreign_action" || problem.Code == "global_not_allowed" {
+			t.Fatal("service re-checked conversion's rules", problem)
+		}
 	}
 	for _, id := range []string{"a", "a.b"} {
 		view := kb.ListFor(Caller{Kind: "plugin", PluginID: id})
@@ -149,7 +149,7 @@ func TestReviewDisabledChordFallsThroughAndUserDisableWins(t *testing.T) {
 	kb := keybinding.New()
 	in := catalog("a")
 	in.Declared[store.DeclaredKeymap] = map[string]store.Doc{"a": doc(`{"version":1,"bind":[{"key":"r","focus":"stage","action":"a.run"}]}`)}
-	in.Layers = []store.LayerDoc{{Layer: store.LayerUser, Doc: doc(`{"version":1,"bind":[{"keys":["a","b"],"disable":true},{"key":"r","disable":true}]}`)}}
+	in.Layers = []store.LayerDoc{{Layer: store.LayerUser, Doc: doc(`{"version":1,"bind":[{"keys":["a","b"],"disable":true},{"key":"r","focus":"stage","disable":true}]}`)}}
 	apply(t, kb, in)
 	for _, keys := range [][]string{{"a"}, {"a", "b"}} {
 		if kb.Resolve(keybinding.KeyContext{}, keys).Outcome != keybinding.NoMatch {

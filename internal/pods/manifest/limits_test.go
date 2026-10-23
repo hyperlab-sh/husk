@@ -3,6 +3,7 @@ package manifest
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -54,5 +55,27 @@ func TestSettingLocalKeysCannotOverlapDottedPluginNamespaces(t *testing.T) {
 				t.Fatal(s.SettingsDeclared)
 			}
 		})
+	}
+}
+
+// focus_bindings is no longer an alias of keybindings: its entries bind
+// nothing and the manifest says so.
+func TestFocusBindingsSpellingIsNotAnAlias(t *testing.T) {
+	raw := `{"manifest_version":2,"protocol":2,"id":"p","name":"P","version":"1","command":["plugin"],
+ "surfaces":[{"id":"sidebar-list"}],"actions":[{"id":"p.new"}],
+ "focus_bindings":[{"key":"n","action":"p.new","focus":"sidebar-list"}]}`
+	s, w, err := convertBytes(t, raw, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.FocusBindings) != 0 || len(s.BindingProblems) != 0 {
+		t.Fatalf("focus_bindings still read: %+v %+v", s.FocusBindings, s.BindingProblems)
+	}
+	if len(w) != 1 || w[0].Code != "ignored_field" || w[0].Field != "focus_bindings" {
+		t.Fatalf("warnings = %+v, want one ignored_field for focus_bindings", w)
+	}
+	raw = strings.Replace(raw, "focus_bindings", "keybindings", 1)
+	if s, _, err = convertBytes(t, raw, true); err != nil || len(s.FocusBindings) != 1 {
+		t.Fatalf("keybindings not read: %+v %v", s, err)
 	}
 }

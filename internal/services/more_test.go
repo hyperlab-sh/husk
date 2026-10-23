@@ -129,7 +129,7 @@ func TestKeybindingAllInvalidRowsAndSequences(t *testing.T) {
 		t.Fatal("builtin was not dropped")
 	}
 }
-func TestKeybindingCapsAndExactDisable(t *testing.T) {
+func TestKeybindingCapsAndScopedDisable(t *testing.T) {
 	kb := keybinding.New()
 	in := catalog("files")
 	entries := []any{}
@@ -144,8 +144,10 @@ func TestKeybindingCapsAndExactDisable(t *testing.T) {
 			tooMany++
 		}
 	}
-	if tooMany != 2 {
-		t.Fatal("focus cap", tooMany)
+	// The 128-entry manifest cap belongs to conversion; the service only
+	// applies the per-document limit.
+	if tooMany != 0 {
+		t.Fatal("service re-applied the manifest cap", tooMany)
 	}
 	in = input(`{}`)
 	for layerIndex, layer := range []store.Layer{store.LayerDistribution, store.LayerUser, store.LayerProfile} {
@@ -415,8 +417,10 @@ func TestKeybindingResolvedCapKeepsStrongestLayers(t *testing.T) {
 			kept[entry.Source.Layer]++
 		}
 	}
-	if kept[keybinding.LayerProfile] != 2048 || kept[keybinding.LayerUser] != 2048 || kept[keybinding.LayerDistribution] != 0 || kept[keybinding.LayerHusk] != 0 {
-		t.Errorf("kept per layer = %v, want both stronger layers whole, nothing weaker", kept)
+	// The cap order is scope first, so the built-in surface-scoped modal-close
+	// entry outranks every global one; among the globals the weakest go first.
+	if kept[keybinding.LayerProfile] != 2048 || kept[keybinding.LayerUser] != 2047 || kept[keybinding.LayerDistribution] != 0 || kept[keybinding.LayerHusk] != 1 {
+		t.Errorf("kept per layer = %v, want profile whole, the surface-scoped built-in entry, then the strongest globals", kept)
 	}
 	dropped := 0
 	for _, p := range kb.Listing().Problems {

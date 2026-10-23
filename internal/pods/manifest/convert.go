@@ -188,8 +188,11 @@ func convert(src Source, modern bool) (*Spec, []Warning, error) {
 			Plugin  json.RawMessage `json:"plugin"`
 			Disable json.RawMessage `json:"disable"`
 		}
-		if err := alias(fields, "focus_bindings", "keybindings", &bindings); err != nil {
+		if err := decodeField(fields, "keybindings", &bindings); err != nil {
 			return nil, nil, err
+		}
+		if fields["focus_bindings"] != nil {
+			warnings = append(warnings, Warning{Code: "ignored_field", Field: "focus_bindings", Message: "focus_bindings is not a manifest field; declare surface-scoped keys as keybindings"})
 		}
 		actions := make(map[string]bool)
 		for _, a := range s.Actions {
