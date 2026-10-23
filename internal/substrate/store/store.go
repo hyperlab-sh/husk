@@ -116,26 +116,13 @@ func Open(opts Options) (*Store, error) {
 	if opts.Clock == nil {
 		opts.Clock = realClock{}
 	}
-	if opts.Env.LookupEnv == nil {
-		opts.Env.LookupEnv = os.LookupEnv
-	}
-	if opts.Env.HomeDir == nil {
-		opts.Env.HomeDir = os.UserHomeDir
-	}
+	opts.Env = defaultEnv(opts.Env)
 	var err error
 	base := func(key, fallback string) (string, error) {
-		p, _ := opts.Env.LookupEnv(key)
-		if p == "" {
-			home, err := opts.Env.HomeDir()
-			if err != nil {
-				return "", err
-			}
-			p = filepath.Join(home, fallback)
+		p, err := resolveBase(opts.Env, key, fallback)
+		if err != nil {
+			return "", err
 		}
-		if !filepath.IsAbs(p) {
-			return "", fmt.Errorf("store: %s must be absolute", key)
-		}
-		p = filepath.Join(p, "husk")
 		return p, privateDir(p)
 	}
 	var paths Paths

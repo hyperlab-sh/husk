@@ -145,8 +145,10 @@ type Keyring interface {
 type Options struct {
 	// Instance identifies this process.
 	Instance InstanceRef
-	// Distribution is the one read-only distribution layer; nil means none.
+	// Distribution is the embedded first part of the read-only distribution layer.
 	Distribution fs.FS
+	// Bundle is its second part, merged above embedded defaults; nil means none.
+	Bundle fs.FS
 	// InstanceDocs contains flag-derived instance-layer documents.
 	InstanceDocs map[DocName]Doc
 	// Env supplies XDG lookups and home directory resolution.

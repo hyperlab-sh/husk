@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -231,32 +232,39 @@ func (s *Store) loadLayers(name DocName, profile string) (layerLoad, error) {
 		}
 		out.layers = append(out.layers, LayerDoc{Layer: layer, File: layerFile, Doc: d, MemberOrder: memberOrder(b)})
 	}
-	if s.opts.Distribution != nil {
-		b, err := fs.ReadFile(s.opts.Distribution, string(name)+".json")
-		appendDoc(LayerDistribution, string(name)+".json", string(name)+".json", b, err)
-		// Distribution profiles are defaults inside the same single layer.
+	// Each part folds its base and profile before the next part: embedded
+	// base, embedded profile, bundle base, bundle profile. Both remain one
+	// distribution layer, including array replacement and null deletion.
+	for _, part := range []fs.FS{s.opts.Distribution, s.opts.Bundle} {
+		if part == nil {
+			continue
+		}
+		start := len(out.layers)
+		files := []string{string(name) + ".json"}
 		if profile != "" {
-			b, err = fs.ReadFile(s.opts.Distribution, "profiles/"+profile+"/"+string(name)+".json")
-			if !errors.Is(err, fs.ErrNotExist) {
-				var previous Doc = Doc{}
-				var order map[string][]string
-				file := "profiles/" + profile + "/" + string(name) + ".json"
-				if len(out.layers) > 0 {
-					file = out.layers[0].File
-					previous = out.layers[0].Doc
-					order = out.layers[0].MemberOrder
-					out.layers = out.layers[:0]
-				}
-				appendDoc(LayerDistribution, "profiles/"+profile+"/"+string(name)+".json", file, b, err)
-				if len(out.layers) > 0 {
-					var ps []Problem
-					mergeDoc(previous, out.layers[0].Doc, LayerDistribution, map[string]Layer{}, &ps, "")
-					out.layers[0].Doc = previous
-					out.layers[0].MemberOrder = overlayOrder(order, out.layers[0].MemberOrder)
-				} else if len(previous) > 0 {
-					out.layers = append(out.layers, LayerDoc{Layer: LayerDistribution, File: file, Doc: previous, MemberOrder: order})
-				}
+			files = append(files, "profiles/"+profile+"/"+string(name)+".json")
+		}
+		for _, file := range files {
+			b, err := fs.ReadFile(part, file)
+			appendDoc(LayerDistribution, file, file, b, err)
+		}
+		if len(out.layers) == start {
+			continue
+		}
+		if start == 0 {
+			folded := out.layers[0]
+			for _, l := range out.layers[1:] {
+				mergeDoc(folded.Doc, l.Doc, LayerDistribution, map[string]Layer{}, &out.problems, "")
+				folded.MemberOrder = overlayOrder(folded.MemberOrder, l.MemberOrder)
 			}
+			out.layers = []LayerDoc{folded}
+		} else {
+			for _, l := range out.layers[start:] {
+				mergeDoc(out.layers[0].Doc, l.Doc, LayerDistribution, map[string]Layer{}, &out.problems, "")
+				out.layers[0].MemberOrder = overlayOrder(out.layers[0].MemberOrder, l.MemberOrder)
+			}
+			out.layers = out.layers[:1]
+			out.layers[0].File = ""
 		}
 	}
 	read := func(layer Layer, parts []string) {
@@ -339,7 +347,10 @@ func (s *Store) Resolve(name DocName, profile string) (Resolved, error) {
 		return Resolved{}, err
 	}
 	r := Resolved{Doc: Doc{}, Origins: map[string]Layer{}, Problems: append([]Problem(nil), load.problems...)}
-	if len(load.problems) > 0 {
+	// Merge clashes are warnings, not failed reads. A distribution override
+	// must still become last-good and must not freeze later valid reloads.
+	badLoad := slices.ContainsFunc(load.problems, func(p Problem) bool { return p.Code != "type_clash" })
+	if badLoad {
 		if old, ok := s.lastGood[k]; ok {
 			r = copyResolved(old)
 			r.Problems = append(r.Problems, load.problems...)
@@ -351,7 +362,7 @@ func (s *Store) Resolve(name DocName, profile string) (Resolved, error) {
 		mergeDoc(r.Doc, l.Doc, l.Layer, r.Origins, &r.Problems, "")
 	}
 	s.resolved[k] = r
-	if len(load.problems) == 0 {
+	if !badLoad {
 		s.lastGood[k] = copyResolved(r)
 	}
 	return copyResolved(r), nil
@@ -369,8 +380,11 @@ func (s *Store) Invalidate() {
 // configuration. A user directory of the same name overrides distribution.
 func (s *Store) ProfileSources() map[string]Layer {
 	set := map[string]Layer{}
-	if s.opts.Distribution != nil {
-		entries, _ := fs.ReadDir(s.opts.Distribution, "profiles")
+	for _, part := range []fs.FS{s.opts.Distribution, s.opts.Bundle} {
+		if part == nil {
+			continue
+		}
+		entries, _ := fs.ReadDir(part, "profiles")
 		for _, e := range entries {
 			if e.IsDir() && validProfile(e.Name()) {
 				set[e.Name()] = LayerDistribution
