@@ -690,7 +690,20 @@ way, so shutdown wins):
 | `cancelled` (the request context ended first) | answers `cancelled`; deletes nothing; the legs drain |
 | `denied`, `not_found` or `invalid_params` | a host bug (the hook list or the data the handler built is wrong): logs at error, answers `internal`, deletes nothing |
 
-An outcome with no live subscriber is allowed and proceeds. A slice that is not registered has no owner, so the hook is not fired and the clear answers `not_found`; a subscriber skipped for timeout, error or exit is logged by the handler. A request context that ends because the host is closing answers `unavailable`, like the shutdown row; any other ended context answers `cancelled`.
+An outcome with no live subscriber is allowed and proceeds. A slice that is
+not registered has no owner to name, so the hook is not fired and the clear
+answers `not_found`; a subscriber skipped for timeout, error or exit is
+logged by the handler. The table covers the hook wait only: there, a request
+context that ended because the host is closing answers `unavailable`, like
+the shutdown row, and any other ended context answers `cancelled`. Once the
+gate has allowed (or `force` skipped it, so no row applied), the clear is a
+Store delete followed by a reset posted to the loop, and that phase answers
+like every other `state.*` write: a failed delete is `internal`; a loop that
+no longer runs is `unavailable`; a context ended because the host is closing
+is `cancelled` with reason `shutdown` ([Protocol](protocol.md)); a context
+ended by the caller is `cancelled` with no reason. By then the persisted
+copies are gone and the posted reset may still run, so only a refusal from
+the hook wait promises that the slice is intact.
 
 Rationale: `state.changed` already tells an owner that its slice was reset,
 after the fact; the only thing a hook adds is a chance to act before, which
