@@ -122,7 +122,7 @@ func (s *Store) Close(ctx context.Context) error
 
 ```go
 type Doc = map[string]any // decoded JSON object; values are Doc, []any, string, float64, bool, nil
-type DocName string       // "config", "keymap", "themes"; [a-z0-9_-] segments joined by "/"
+type DocName string       // "config", "keymap", "themes", "catalog"; [a-z0-9_-] segments joined by "/"
 
 type Layer string
 const (
@@ -149,8 +149,10 @@ func (s *Store) Resolve(name DocName, profile string) (Resolved, error)
 // because rank, scope and tombstones are not a document merge
 // ([Keybindings](keybindings.md)); the Theme service reads the "themes"
 // document the same way, because a named theme is replaced whole by a higher
-// layer and keeps its source layer ([Services](services.md), "Named themes").
-// Store knows neither document's meaning; both are files named <doc>.json in
+// layer and keeps its source layer ([Services](services.md), "Named themes");
+// the frontend's catalog seam reads the "catalog" document the same way
+// ([Settings center](settings-center.md), "The catalog document"). Store
+// knows none of these documents' meaning; all are files named <doc>.json in
 // the directory tree below.
 func (s *Store) Layers(name DocName, profile string) ([]LayerDoc, error)
 
@@ -552,7 +554,7 @@ to the XDG defaults below. Windows is out of scope (Unix sockets).
 
 ```text
 $XDG_CONFIG_HOME/husk/                  ~/.config/husk          0700
-  <doc>.json                            user layer, e.g. config.json, keymap.json, themes.json
+  <doc>.json                            user layer, e.g. config.json, keymap.json, themes.json, catalog.json
   profiles/<profile>/<doc>.json         profile layer
   instances/<name>/<doc>.json           instance layer file part, named instances
 

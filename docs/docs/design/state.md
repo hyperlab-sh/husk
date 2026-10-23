@@ -385,7 +385,7 @@ Error codes come from the [Protocol](protocol.md) registry:
 | `husk.focus` | the frontend | instance | no | | Focused surface, its fallback, terminal focus. |
 | `husk.layout` | the frontend | instance | yes | keep-latest | Dock preferences the user set: shown flags and sizes. |
 | `husk.geometry` | the frontend | instance | no | | Terminal size, too-small flag, computed surface rects. |
-| `husk.pods` | Pods | instance | no | | Per plugin: status, pid, start time, last error, log path. |
+| `husk.pods` | Pods | instance | no | | Per plugin: status, pid, start time, last error, log path, and (Level 1, not landed, protocol minor 2.3) `dir`, the plugin's directory as the converter resolved it, `""` for an implicit command line ([Settings center](settings-center.md), "Changes to other specs"). |
 | `husk.profile` | Services: Profile | instance | yes | keep-latest | The chosen profile; `{"active":""}` is an explicit no profile; absent until a choice is made ([Services](services.md), Profile). |
 | `husk.grants` | Services: Secrets | user | yes | manual | Secret grants: `(plugin, name, digest, at)`; never a value ([Services](services.md)). |
 | `husk.store` | Store | instance | no | | Store's own health: last 50 diagnostics, quarantined files, keyring fallback flag ([Store](store.md)). |
@@ -413,7 +413,7 @@ Value shapes:
 {"slice":"husk.layout","value":{"sidebar":{"shown":true,"width":32,"nav_height":3,"footer_height":2},"side_panel":{"shown":false,"width":40},"main_header_height":3}}
 {"slice":"husk.geometry","value":{"terminal":{"width":160,"height":48},"too_small":false,
   "rects":{"main-stage":{"x":34,"y":4,"width":125,"height":43,"inner":{"x":35,"y":5,"width":123,"height":41}}}}}
-{"slice":"husk.pods","value":{"plugins":{"example.files":{"status":"live","pid":4242,"started_at":"2026-10-22T06:01:02Z","last_error":null,"log":"/home/u/.local/state/husk/logs/4242/example.files.log"}}}}
+{"slice":"husk.pods","value":{"plugins":{"example.files":{"status":"live","pid":4242,"started_at":"2026-10-22T06:01:02Z","last_error":null,"log":"/home/u/.local/state/husk/logs/4242/example.files.log","dir":"/home/u/plugins/files"}}}}
 {"slice":"husk.profile","value":{"active":"default"}}
 ```
 
@@ -487,7 +487,7 @@ first live claim wins among the claims that arrive after the re-registration.
 
 `overlays.modal` gains `surface`: the id of the modal's surface, `modal-surface` for a rail item and the dynamic id for a runtime modal, so the frontend's `FocusSurface` while a modal is open is whichever of the two it is. The example value above becomes `"overlays":{"modal":{"plugin":"","rail_item":"","surface":""},...}` and `"runtime":{}`, `"terminals":{}` are always present, `{}` when empty, like `capture`.
 
-`overlays` gains `theme_selector` (bool, Level 1, not landed, with the theme selector of [Services](services.md), "The theme selector"): true while the frontend's theme selector modal is open. It is written by the frontend through `UpdateSurfaceView` like `palette` and `slot_explorer`, read by Input (the selector consumes every key while open, [Keybindings](keybindings.md) context filters) and by `husk state get husk.surfaces`, and is false whenever the selector is closed by any path. The example becomes `"overlays":{"modal":{...},"palette":false,"slot_explorer":false,"theme_selector":false}`.
+`overlays` gains `settings_center` (string, Level 1, not landed, with the Settings center of [Settings center](settings-center.md), whose Theme tab is the theme selector of [Services](services.md), "The theme selector"): the id of the active tab (`general`, `keys`, `theme`, `store`, `installed`) while the frontend's Settings center modal is open, `""` while it is closed. It is written by the frontend through `UpdateSurfaceView` like `palette` and `slot_explorer`, rewritten on every tab switch, read by Input (the center consumes every key while open, [Keybindings](keybindings.md) context filters) and by `husk state get husk.surfaces`, and is `""` whenever the center is closed by any path. There is no separate `theme_selector` flag: the selector is a tab. The example becomes `"overlays":{"modal":{...},"palette":false,"slot_explorer":false,"settings_center":""}`.
 
 #### Frontend-owned slices
 
