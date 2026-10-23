@@ -10,6 +10,7 @@ import (
 
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
 	"github.com/hyperlab-sh/husk/internal/pods"
+	"github.com/hyperlab-sh/husk/internal/pods/manifest"
 	"github.com/hyperlab-sh/husk/internal/pods/wrapper"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 	palette "github.com/hyperlab-sh/husk/pkg/theme"
@@ -175,34 +176,56 @@ func TestFrontendRemovePlugin(t *testing.T) {
 }
 
 func TestFrontendPluginDirSurvivesLifecycle(t *testing.T) {
-	h, _, _ := bootFrontend(t, nil)
-	infos, err := h.root.pods.List(t.Context(), contracts.Caller{Kind: protocol.CallerCLI})
-	if err != nil || len(infos) != 1 || infos[0].Dir == "" {
-		t.Fatalf("%+v %v", infos, err)
-	}
-	dir := infos[0].Dir
-	for _, status := range []wrapper.Liveness{wrapper.Live, wrapper.Exited} {
-		h.loop(func() {
-			if status == wrapper.Exited {
-				h.root.Update(pods.ExitMsg{Info: wrapper.Info{PluginID: "alpha", Status: status}})
-			}
-		})
+	dir := alphaPlugin(t)
+	var h *harness
+	checkEntry := func(status wrapper.Liveness) {
+		t.Helper()
 		raw := h.root.Snapshot().Slices["husk.pods"].Value
 		var doc struct {
-			Plugins map[string]struct {
-				Dir    string
-				Status string
-			}
+			Plugins map[string]struct{ Dir, Status string }
 		}
 		if err := json.Unmarshal(raw, &doc); err != nil {
-			t.Fatal(err)
+			t.Error(err)
+			return
 		}
 		if doc.Plugins["alpha"].Dir != dir || doc.Plugins["alpha"].Status != string(status) {
-			t.Fatalf("%s", raw)
+			t.Errorf("entry = %s, want directory %q and status %q", raw, dir, status)
 		}
 	}
+	f := newFakes()
+	hook, ready := readyHook("")
+	var sawStarting bool
+	var err error
+	h, err = boot(t, func(c *contracts.Config) {
+		pluginSettings(c)["paths"] = []string{dir}
+	}, withHook(hook), WithFactory(func(spec manifest.Spec, opts wrapper.Options) (wrapper.Process, error) {
+		// Factory is reached after starting flushed but before Start reports live.
+		checkEntry(wrapper.Starting)
+		sawStarting = true
+		return f.factory(spec, opts)
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runHost(t, ready, h)
+	<-f.started
+	h.loop(func() {
+		if !sawStarting {
+			t.Error("starting entry was not observed")
+		}
+		// This live write came from the actual launch gate and Wrapper.Start.
+		checkEntry(wrapper.Live)
+	})
+	infos, err := h.root.pods.List(t.Context(), contracts.Caller{Kind: protocol.CallerCLI})
+	if err != nil || len(infos) != 1 || infos[0].Dir != dir {
+		t.Fatalf("%+v %v; want %q", infos, err, dir)
+	}
+	h.loop(func() {
+		h.root.Update(pods.ExitMsg{Info: wrapper.Info{PluginID: "alpha", Status: wrapper.Exited}})
+		checkEntry(wrapper.Exited)
+	})
 	infos, err = h.root.pods.List(t.Context(), contracts.Caller{Kind: protocol.CallerCLI})
 	if err != nil || len(infos) != 1 || infos[0].Dir != dir {
-		t.Fatalf("%+v %v", infos, err)
+		t.Fatalf("%+v %v; want %q", infos, err, dir)
 	}
 }
