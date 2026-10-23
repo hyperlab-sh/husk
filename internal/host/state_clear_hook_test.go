@@ -212,6 +212,23 @@ func TestStateClearVetoAndForceOverTheSocket(t *testing.T) {
 	}
 }
 
+func TestStateClearAllowedOverTheSocket(t *testing.T) {
+	f := newFakes()
+	responders{"notes": func(legParams) any { return map[string]any{} }}.install(f)
+	h := clearHost(t, f, frozenClock{time.Unix(1000, 0)}, nil, clearPlugin(t, "notes", "husk.before-state-clear"))
+	setSlice(t, h, "tok-notes", "notes.state", map[string]any{"n": 1})
+
+	if m := rpc(t, h, "", protocol.MethodStateClear, map[string]any{"namespace": "notes.state"}); m.Error != nil {
+		t.Fatalf("clear: %+v", m.Error)
+	}
+	if got := sliceValue(t, h, "notes.state"); got != `{}` {
+		t.Fatalf("slice = %s after an allowed clear", got)
+	}
+	if n := f.proc("notes").hookCalls(); n != 1 {
+		t.Fatalf("plugin was asked %d times, want 1", n)
+	}
+}
+
 func TestStateClearSilentSubscribersCostOneLegTimeout(t *testing.T) {
 	f := newFakes()
 	sent := make(chan string, 4)
@@ -333,6 +350,22 @@ func TestHookFirerReturns(t *testing.T) {
 		var he *hooks.HookError
 		if !errors.As(refusal, &he) || he.Code != protocol.CodeBusy {
 			t.Fatalf("refusal = %v, want busy before 64 calls", refusal)
+		}
+	})
+	t.Run("an already cancelled context asks nobody", func(t *testing.T) {
+		counted := newFakes()
+		counted.onSend = func(*fakeProc, protocol.Message) {}
+		hs := clearHost(t, counted, frozenClock{time.Unix(1000, 0)}, nil, clearPlugin(t, "quiet", "husk.before-state-clear"))
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		_, err := hookFirer{hs.root}.Fire(ctx, "husk.before-state-clear", data)
+		var he *hooks.HookError
+		if !errors.As(err, &he) || he.Code != protocol.CodeCancelled || !errors.Is(err, context.Canceled) {
+			t.Fatalf("err = %v, want cancelled", err)
+		}
+		hs.loop(func() {}) // anything posted has run by now
+		if n := counted.proc("quiet").hookCalls(); n != 0 {
+			t.Fatalf("%d hook.call sent for a request that was already cancelled", n)
 		}
 	})
 	t.Run("cancelled wraps the context error when it ends first", func(t *testing.T) {

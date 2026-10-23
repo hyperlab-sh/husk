@@ -174,7 +174,7 @@ func TestCatalogNamespaceRule(t *testing.T) {
 	})
 }
 
-func TestCatalogDuplicateRuleRefusesEveryDeclarer(t *testing.T) {
+func TestCatalogDuplicateDeclarationIsRefused(t *testing.T) {
 	d := newDocsView().set("p", hookDoc([]hookDecl{gateDecl("p.x"), gateDecl("p.x"), gateDecl("p.y")}))
 	if _, ok := d.Lookup("p.x"); ok {
 		t.Fatal("contested hook still fireable")

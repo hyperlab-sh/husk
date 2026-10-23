@@ -2,6 +2,7 @@ package host
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"sort"
 	"strings"
@@ -74,7 +75,9 @@ func (r *Root) buildServer() error {
 			Handles: pods.NewPodSlices(r.pods),
 			Cleaner: storeCleaner{r},
 			Hooks:   hookFirer{r},
-			Logf:    r.logf,
+			Logf: func(level, format string, args ...any) {
+				r.log(pods.LogMsg{Level: level, Message: fmt.Sprintf(format, args...)})
+			},
 		}),
 	})
 	co := r.rt.Coordinator

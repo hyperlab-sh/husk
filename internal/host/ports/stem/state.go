@@ -57,7 +57,7 @@ type StatePortOptions struct {
 	Handles SliceHandles
 	Cleaner SliceCleaner
 	Hooks   HookFirer
-	Logf    func(format string, args ...any)
+	Logf    func(level, format string, args ...any)
 }
 
 // State serves contracts.StatePort over the real substrate State: reads and
@@ -71,7 +71,7 @@ type State struct {
 	handles SliceHandles
 	cleaner SliceCleaner
 	hooks   HookFirer
-	logf    func(format string, args ...any)
+	logf    func(level, format string, args ...any)
 
 	mu       sync.Mutex
 	watchers map[*stateWatch]struct{}
@@ -255,22 +255,22 @@ func (w *State) beforeClear(ctx context.Context, namespace string) error {
 	if err != nil {
 		var he *hooks.HookError
 		if !errors.As(err, &he) {
-			w.log("state.clear: firing %s failed: %v", BeforeStateClearHook, err)
+			w.log("error", "state.clear: firing %s failed: %v", BeforeStateClearHook, err)
 			return coded(protocol.CodeInternal, "firing "+BeforeStateClearHook+" failed")
 		}
 		switch he.Code {
 		case protocol.CodeBusy:
-			w.log("state.clear: %s skipped, clearing %s anyway: %s", BeforeStateClearHook, namespace, he.Message)
+			w.log("warn", "state.clear: %s skipped, clearing %s anyway: %s", BeforeStateClearHook, namespace, he.Message)
 			return nil
 		case protocol.CodeUnavailable:
 			return coded(protocol.CodeUnavailable, "the host is shutting down")
 		case protocol.CodeCancelled:
 			if errors.Is(context.Cause(ctx), contracts.ErrShutdown) {
-				return ctxError(ctx)
+				return coded(protocol.CodeUnavailable, "the host is shutting down")
 			}
 			return coded(protocol.CodeCancelled, "request ended before the hook answered; nothing was cleared")
 		default:
-			w.log("state.clear: BUG: %s refused with %s: %s", BeforeStateClearHook, he.Code, he.Message)
+			w.log("error", "state.clear: BUG: %s refused with %s: %s", BeforeStateClearHook, he.Code, he.Message)
 			return coded(protocol.CodeInternal, "firing "+BeforeStateClearHook+" failed")
 		}
 	}
@@ -281,7 +281,7 @@ func (w *State) beforeClear(ctx context.Context, namespace string) error {
 	}
 	for _, r := range out.Results {
 		if r.Err != nil {
-			w.log("state.clear: %s: subscriber %s counted as allow: %s", BeforeStateClearHook, r.Plugin, r.Err.Error())
+			w.log("info", "state.clear: %s: subscriber %s counted as allow: %s", BeforeStateClearHook, r.Plugin, r.Err.Error())
 		}
 	}
 	if !out.Allowed {
@@ -296,9 +296,9 @@ func (w *State) beforeClear(ctx context.Context, namespace string) error {
 }
 
 // log reports through the injected logger; nil discards.
-func (w *State) log(format string, args ...any) {
+func (w *State) log(level, format string, args ...any) {
 	if w.logf != nil {
-		w.logf(format, args...)
+		w.logf(level, format, args...)
 	}
 }
 

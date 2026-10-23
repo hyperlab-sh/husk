@@ -690,7 +690,7 @@ way, so shutdown wins):
 | `cancelled` (the request context ended first) | answers `cancelled`; deletes nothing; the legs drain |
 | `denied`, `not_found` or `invalid_params` | a host bug (the hook list or the data the handler built is wrong): logs at error, answers `internal`, deletes nothing |
 
-An outcome with no live subscriber is allowed and proceeds.
+An outcome with no live subscriber is allowed and proceeds. A slice that is not registered has no owner, so the hook is not fired and the clear answers `not_found`; a subscriber skipped for timeout, error or exit is logged by the handler. A request context that ends because the host is closing answers `unavailable`, like the shutdown row; any other ended context answers `cancelled`.
 
 Rationale: `state.changed` already tells an owner that its slice was reset,
 after the fact; the only thing a hook adds is a chance to act before, which
