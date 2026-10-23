@@ -292,12 +292,14 @@ func (m *memoryCrypto) Keys() ([]string, error) {
 }
 
 type fakeStore struct {
-	profiles []string
-	resolved store.Resolved
-	err      error
-	block    <-chan struct{}
-	mu       sync.Mutex
-	log      []string // "invalidate" per capture, plus whatever note records
+	profiles  []string
+	resolved  store.Resolved
+	err       error
+	block     <-chan struct{}
+	blockOnce <-chan struct{} // only the first Resolve is held; later gathers pass
+	onCall    func(string)    // optional Store-call probe, configured before use
+	mu        sync.Mutex
+	log       []string // "invalidate" per capture, plus whatever note records
 }
 
 func (s *fakeStore) note(what string) { s.mu.Lock(); s.log = append(s.log, what); s.mu.Unlock() }
@@ -306,16 +308,38 @@ func (s *fakeStore) trace() []string {
 	defer s.mu.Unlock()
 	return append([]string(nil), s.log...)
 }
-func (s *fakeStore) Invalidate() { s.note("invalidate") }
+func (s *fakeStore) call(name string) {
+	if s.onCall != nil {
+		s.onCall(name)
+	}
+}
+func (s *fakeStore) Invalidate() { s.note("invalidate"); s.call("invalidate") }
 func (s *fakeStore) Resolve(store.DocName, string) (store.Resolved, error) {
+	s.mu.Lock()
+	once := s.blockOnce
+	s.blockOnce = nil
+	s.mu.Unlock()
+	if once != nil {
+		<-once
+	}
+	s.call("resolve")
 	if s.block != nil {
 		<-s.block
 	}
 	return s.resolved, s.err
 }
-func (s *fakeStore) Layers(store.DocName, string) ([]store.LayerDoc, error) { return nil, nil }
-func (s *fakeStore) Declared(store.DocName) map[string]store.Doc            { return nil }
-func (s *fakeStore) Profiles() []string                                     { return append([]string(nil), s.profiles...) }
+func (s *fakeStore) Layers(name store.DocName, profile string) ([]store.LayerDoc, error) {
+	s.call("layers:" + string(name) + ":" + profile)
+	return nil, nil
+}
+func (s *fakeStore) Declared(name store.DocName) map[string]store.Doc {
+	s.call("declared:" + string(name))
+	return nil
+}
+func (s *fakeStore) Profiles() []string {
+	s.call("profiles")
+	return append([]string(nil), s.profiles...)
+}
 
 type fakeService struct {
 	name  string

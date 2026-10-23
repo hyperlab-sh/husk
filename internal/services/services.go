@@ -77,7 +77,6 @@ type flight struct {
 	started  bool // protected by Coordinator.mu; the worker was launched
 	dry      bool // a dry run: holds the coordinator's turn, never coalesces
 	granted  chan struct{}
-	work     sync.WaitGroup // the gather and Rebuild goroutines the flight started
 	reports  []Report
 	err      error
 }
@@ -322,12 +321,8 @@ func (co *Coordinator) execute(f *flight) {
 	f.err = err
 	co.last = c.Clone(reports)
 	close(f.done)
-	co.mu.Unlock()
-	// The turn ends only when what the flight started has returned: a flight
-	// that gave up (deadline, Close) must not overlap the next one on Store
-	// or on a Service's Rebuild. Waiters were already answered above.
-	f.work.Wait()
-	co.mu.Lock()
+	// reload cancelled the flight context before returning. Late gathers and
+	// pure Rebuilds are abandoned; neither may hold up the next turn.
 	co.advanceLocked()
 	co.mu.Unlock()
 }
@@ -453,8 +448,7 @@ func (co *Coordinator) reload(parent context.Context, reason Reason, f *flight) 
 	}
 	defer publish()
 	inputs := make(chan inputResult, 1)
-	f.work.Add(1)
-	go func() { defer f.work.Done(); inputs <- co.loadInput(f) }()
+	go func() { inputs <- co.loadInput(ctx, f) }()
 	var input inputResult
 	select {
 	case input = <-inputs:
@@ -502,9 +496,7 @@ func (co *Coordinator) reload(parent context.Context, reason Reason, f *flight) 
 			in.Settings = co.opts.Settings()
 		}
 		result := make(chan prepared, 1)
-		f.work.Add(1)
 		go func() {
-			defer f.work.Done()
 			candidate, report, err := service.Rebuild(ctx, in)
 			result <- prepared{candidate, report, err}
 		}()
@@ -583,19 +575,33 @@ func rebuildProblem(err error) Problem {
 // loadInput is step 2. Capture is the Store.Invalidate call: it is the first
 // thing a flight does, a request arriving before it joins the flight, and one
 // arriving after it goes to the queued follow-up. f is nil for a dry run.
-func (co *Coordinator) loadInput(f *flight) inputResult {
+func (co *Coordinator) loadInput(ctx context.Context, f *flight) inputResult {
+	if err := ctx.Err(); err != nil {
+		return inputResult{err: err}
+	}
 	co.opts.Store.Invalidate()
+	if err := ctx.Err(); err != nil {
+		return inputResult{err: err}
+	}
 	if f != nil {
 		co.mu.Lock()
-		f.captured = true
+		if ctx.Err() == nil && co.active == f {
+			f.captured = true
+		}
 		co.mu.Unlock()
 	}
 	selected := ""
 	var selectionProblems []Problem
 	var profileWrite bool
 	profileNames := co.opts.Store.Profiles()
+	if err := ctx.Err(); err != nil {
+		return inputResult{err: err}
+	}
 	if co.opts.Profile != nil {
 		layers, err := co.opts.Store.Layers("config", "")
+		if ended := ctx.Err(); ended != nil {
+			return inputResult{err: ended}
+		}
 		if err != nil {
 			return inputResult{err: err}
 		}
@@ -603,10 +609,18 @@ func (co *Coordinator) loadInput(f *flight) inputResult {
 	}
 	if f != nil {
 		co.mu.Lock()
-		co.selected, co.haveSelected = selected, true
+		if ctx.Err() == nil && co.active == f {
+			co.selected, co.haveSelected = selected, true
+		}
 		co.mu.Unlock()
 	}
+	if err := ctx.Err(); err != nil {
+		return inputResult{err: err}
+	}
 	resolved, err := co.opts.Store.Resolve("config", selected)
+	if ended := ctx.Err(); ended != nil {
+		return inputResult{err: ended}
+	}
 	if err != nil {
 		return inputResult{err: err}
 	}
@@ -614,14 +628,27 @@ func (co *Coordinator) loadInput(f *flight) inputResult {
 		return inputResult{err: err}
 	}
 	layers, err := co.opts.Store.Layers("keymap", selected)
+	if ended := ctx.Err(); ended != nil {
+		return inputResult{err: ended}
+	}
 	if err != nil {
 		return inputResult{err: err}
 	}
 	configLayers, err := co.opts.Store.Layers("config", selected)
+	if ended := ctx.Err(); ended != nil {
+		return inputResult{err: ended}
+	}
 	if err != nil {
 		return inputResult{err: err}
 	}
-	return inputResult{in: ReloadInput{Doc: resolved, Layers: layers, ConfigLayers: configLayers, Declared: map[store.DocName]map[string]store.Doc{store.DeclaredPlugins: co.opts.Store.Declared(store.DeclaredPlugins), store.DeclaredKeymap: co.opts.Store.Declared(store.DeclaredKeymap)}, Profile: &selected, ProfileNames: profileNames, ProfileProblems: selectionProblems, ProfileWrite: profileWrite}}
+	declared := map[store.DocName]map[string]store.Doc{}
+	for _, name := range []store.DocName{store.DeclaredPlugins, store.DeclaredKeymap} {
+		declared[name] = co.opts.Store.Declared(name)
+		if err := ctx.Err(); err != nil {
+			return inputResult{err: err}
+		}
+	}
+	return inputResult{in: ReloadInput{Doc: resolved, Layers: layers, ConfigLayers: configLayers, Declared: declared, Profile: &selected, ProfileNames: profileNames, ProfileProblems: selectionProblems, ProfileWrite: profileWrite}}
 }
 
 // Inputs collects fresh user-authorized disk input for a dry run
@@ -629,9 +656,10 @@ func (co *Coordinator) loadInput(f *flight) inputResult {
 // for a running flight to end, a flight requested meanwhile waits for it, and
 // it never coalesces. Step 2 (capture included) runs under the same 2 s
 // deadline as a flight, counted from when the turn is granted. The turn ends
-// when the gather returns, even if the caller already gave up on it; the
-// caller's Rebuild publishes nothing, so it needs no exclusion. It never applies a candidate or publishes
-// services.reloaded.
+// when the gather returns, the deadline passes, the caller gives up or the
+// coordinator closes. An unfinished gather is abandoned. The caller's Rebuild
+// runs after the turn and publishes nothing, so it needs no exclusion. Inputs
+// never applies a candidate or publishes services.reloaded.
 func (co *Coordinator) Inputs(ctx context.Context, caller Caller) (ReloadInput, error) {
 	if err := c.RequireUser(caller); err != nil {
 		return ReloadInput{}, err
@@ -662,12 +690,16 @@ func (co *Coordinator) Inputs(ctx context.Context, caller Caller) (ReloadInput, 
 	}
 	timer := co.opts.Clock.NewTimer(2 * time.Second)
 	defer timer.Stop()
+	gatherCtx, cancel := context.WithCancel(co.ctx)
+	gatherCtx = c.WithDeadline(gatherCtx, co.opts.Clock, co.opts.Clock.Now().Add(2*time.Second))
+	defer func() { cancel(); co.release(f) }()
 	result := make(chan inputResult, 1)
-	// The gather owns the turn: on a timeout or cancellation the caller
-	// returns at once, but the next flight must not capture (Invalidate) and
-	// resolve while this gather is still reading, so the turn ends only when
-	// loadInput comes back.
-	go func() { result <- co.loadInput(nil); co.release(f) }()
+	go func() {
+		loaded := co.loadInput(gatherCtx, nil)
+		cancel()
+		result <- loaded
+		co.release(f) // a late release is a no-op after another turn started
+	}()
 	select {
 	case loaded := <-result:
 		if loaded.err != nil {

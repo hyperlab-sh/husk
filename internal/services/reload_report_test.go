@@ -500,49 +500,8 @@ func TestDryRunsTakeTheCoordinatorsTurn(t *testing.T) {
 		}
 		close(gate)
 	})
-	t.Run("a timed-out gather keeps the turn until it returns", func(t *testing.T) {
-		gate := make(chan struct{})
-		st := &fakeStore{block: gate}
-		set := fakeServices()
-		clk := clock()
-		co, _ := NewCoordinator(Options{Store: st, Services: set, Clock: clk})
-		defer co.Close()
-		done := make(chan error, 1)
-		go func() { _, err := co.Inputs(context.Background(), user); done <- err }()
-		<-clk.created
-		clk.advance(2 * time.Second)
-		var coded *c.Error
-		if err := <-done; !errors.As(err, &coded) || coded.Reason != "input_deadline" {
-			t.Fatalf("err = %v", err)
-		}
-		// The abandoned gather still holds the turn.
-		co.mu.Lock()
-		held := co.active != nil && co.active.dry
-		co.mu.Unlock()
-		if !held {
-			t.Fatal("the turn was released while the gather was still reading")
-		}
-		reloaded := make(chan error, 1)
-		go func() { _, err := co.Reload(context.Background(), ReasonCLI); reloaded <- err }()
-		waitQueued(co, 1)
-		if got := st.trace(); len(got) != 1 {
-			t.Fatalf("store trace while the gather is still reading = %v, want its single invalidate", got)
-		}
-		for n, s := range set {
-			if s.(*fakeService).calls.Load() != 0 {
-				t.Fatalf("%s rebuilt before the gather returned", n)
-			}
-		}
-		close(gate)
-		if err := <-reloaded; err != nil {
-			t.Fatalf("reload after the gather: %v", err)
-		}
-		if got := st.trace(); len(got) != 2 {
-			t.Fatalf("store trace = %v, want two invalidates", got)
-		}
-		if set["settings"].(*fakeService).calls.Load() != 1 {
-			t.Fatal("the flight did not run")
-		}
+	t.Run("a timed-out gather releases the turn before it returns", func(t *testing.T) {
+		testAbandonedGatherReleasesTurn(t, true)
 	})
 	t.Run("store failure is unavailable", func(t *testing.T) {
 		co, _ := NewCoordinator(Options{Store: &fakeStore{err: errors.New("x")}, Services: fakeServices(), Clock: clock()})
@@ -598,45 +557,7 @@ func TestImportedSubscriptionProblemNamesItsMember(t *testing.T) {
 	}
 }
 
-// A flight that gave up on a gather still blocked in Store keeps the turn
-// until the gather returns, so the next Reload does not Invalidate and
-// Resolve on top of it.
-func TestTimedOutFlightKeepsTheTurnUntilItsGatherReturns(t *testing.T) {
-	gate := make(chan struct{})
-	st := &fakeStore{block: gate}
-	set := fakeServices()
-	clk := clock()
-	co, _ := NewCoordinator(Options{Store: st, Services: set, Clock: clk})
-	defer co.Close()
-	first := make(chan error, 1)
-	go func() { _, err := co.Reload(context.Background(), ReasonCLI); first <- err }()
-	<-clk.created
-	clk.advance(2 * time.Second)
-	var coded *c.Error
-	if err := <-first; !errors.As(err, &coded) || coded.Reason != "reload_deadline" {
-		t.Fatalf("first reload err = %v", err)
-	}
-	second := make(chan error, 1)
-	go func() { _, err := co.Reload(context.Background(), ReasonPlugin); second <- err }()
-	// Parked behind the abandoned gather, or (the bug) already capturing.
-	for len(st.trace()) < 2 {
-		co.mu.Lock()
-		queued := len(co.queue)
-		co.mu.Unlock()
-		if queued >= 1 {
-			break
-		}
-		runtime.Gosched()
-	}
-	if got := st.trace(); len(got) != 1 {
-		close(gate)
-		t.Fatalf("store trace while the abandoned gather reads = %v, want its single invalidate", got)
-	}
-	close(gate)
-	if err := <-second; err != nil {
-		t.Fatalf("second reload: %v", err)
-	}
-	if got := st.trace(); len(got) != 2 {
-		t.Fatalf("store trace = %v, want two invalidates", got)
-	}
+// A timed-out gather cannot hold the next flight behind blocked Store I/O.
+func TestTimedOutFlightReleasesTheTurnBeforeItsGatherReturns(t *testing.T) {
+	testAbandonedGatherReleasesTurn(t, false)
 }
