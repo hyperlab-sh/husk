@@ -278,6 +278,9 @@ Where the code differs from the plan above:
 
 ## Popup shadow
 
+Status: implemented, including the basic/indexed-colour skip after default
+colour resolution.
+
 Popups (the modal and the command palette) are opaque, so on their own they
 read flat. After each is drawn, `View` calls `canvas.castShadow` with its rect
 (`blitBlock`'s result for the palette, the slot rect for the modal). Toasts
