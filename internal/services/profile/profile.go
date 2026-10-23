@@ -32,6 +32,8 @@ type Waiter interface {
 
 // Reloader is the coordinator seam profile.use needs.
 type Reloader interface {
+	// Settled reports whether no flight is pending and the last selection is name.
+	Settled(name string) bool
 	// AwaitProfile runs on the loop right after the slice write: it registers
 	// a waiter on the flight that write causes, without blocking.
 	AwaitProfile(name string) Waiter
@@ -109,14 +111,13 @@ func (s *Service) ListFor(caller c.Caller) ([]ProfileInfo, error) {
 	return s.List(), nil
 }
 
-// Use implements profile.use. The decision runs on the loop, in one callback,
-// and has three outcomes. A name the slice records and the snapshot has applied
-// replies at once with the most recent flight's reports. A name the slice
-// records but no flight has applied yet (an earlier call in the same tick wrote
-// it) joins the flight that applies it. An absent slice records the name and
-// either replies at once, when it equals the active profile and so causes no
-// reload, or registers on the flight the write causes. The reply carries that
-// flight's reports. Correlation is the registration, never a comparison of names.
+// Use implements profile.use. One posted loop callback always records the
+// choice in State (an identical write changes nothing), then replies at once
+// with LastReports only when the coordinator is settled on the name and it is
+// the active profile. Otherwise it registers on the flight that applies the
+// write, joining an uncaptured flight or its queued follow-up after capture.
+// The reply carries that flight's reports. Correlation is the registration,
+// never a comparison of names or generations.
 func (s *Service) Use(ctx context.Context, caller c.Caller, name string) (string, []c.Report, error) {
 	if err := c.RequireUser(caller); err != nil {
 		return "", nil, err
@@ -138,24 +139,12 @@ func (s *Service) Use(ctx context.Context, caller c.Caller, name string) (string
 	}
 	reg := make(chan registered, 1)
 	if s.opts.Post == nil || !s.opts.Post(func() {
-		if cur, present := s.stateActive(); present && cur == name {
-			if name == s.Active() {
-				reg <- registered{}
-				return
-			}
-			// Recorded but not yet applied (an earlier call in this tick wrote
-			// it): join the flight that applies it. AwaitProfile is idempotent.
-			reg <- registered{w: s.reloader.AwaitProfile(name)}
-			return
-		}
 		b, _ := json.Marshal(map[string]string{"active": name})
 		if _, err := s.handle.Set(b); err != nil {
 			reg <- registered{err: err}
 			return
 		}
-		// An absent slice confirming the current selection: the slice listener
-		// skips this write, so no flight follows and there is nothing to await.
-		if name == s.Active() {
+		if s.reloader.Settled(name) && s.Active() == name {
 			reg <- registered{}
 			return
 		}

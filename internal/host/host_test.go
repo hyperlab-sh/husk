@@ -761,6 +761,114 @@ func TestLaunchGoesLiveWithOpening(t *testing.T) {
 	})
 }
 
+type startupNotifier func(protocol.Message) error
+
+func (n startupNotifier) Notify(m protocol.Message) error { return n(m) }
+
+// The first bus delivery is observed on the loop, after the startup write-back
+// has flushed but before the launch gate can make a Pod live.
+func TestStartupProfileFlagBeforePluginLaunch(t *testing.T) {
+	testStartupProfileFlag(t, true)
+}
+
+func TestStartupWithoutPluginsReloadsOnce(t *testing.T) {
+	testStartupProfileFlag(t, false)
+}
+
+func testStartupProfileFlag(t *testing.T, plugin bool) {
+	t.Helper()
+	f := newFakes()
+	hook, ready := readyHook("")
+	flag := "work"
+	h, err := boot(t, func(c *contracts.Config) {
+		c.ProfileFlag = &flag
+		c.Clock = frozenClock{time.Unix(1000, 0)}
+		if err := os.MkdirAll(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "husk", "profiles", "work"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if plugin {
+			c.Plugins = []string{writePlugin(t, "alpha", false)}
+		}
+	}, withHook(hook), WithFactory(f.factory))
+	if err != nil {
+		t.Fatal(err)
+	}
+	type observed struct {
+		reason string
+		slice  string
+		active string
+		pod    bool
+	}
+	events := make(chan observed, 8)
+	var reasons []string // loop-only; read through h.loop after launch completes
+	h.loop(func() {
+		_, err := h.root.bus.Subscribe(startupNotifier(func(m protocol.Message) error {
+			var ev struct {
+				Data struct {
+					Reason string `json:"reason"`
+				} `json:"data"`
+			}
+			if err := json.Unmarshal(m.Params, &ev); err != nil {
+				return err
+			}
+			reasons = append(reasons, ev.Data.Reason)
+			_, pod := h.root.pods.Pod("alpha")
+			events <- observed{ev.Data.Reason, string(h.root.st.Snapshot().Slices[state.ProfileNamespace].Value), h.root.rt.Profile.Active(), pod}
+			return nil
+		}), "services.reloaded")
+		if err != nil {
+			t.Error(err)
+		}
+	})
+	if plugin {
+		runHost(t, ready, h)
+	} else {
+		// Run uses this same launch path. Calling it synchronously fences its
+		// completion, so counting one event cannot race a second startup flight.
+		if err := h.root.launchPlugins(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		h.loop(func() {})
+		if len(events) == 0 {
+			t.Fatal("launch completed without a startup services.reloaded event")
+		}
+	}
+	first := <-events
+	if first.reason != "startup" || first.slice != `{"active":"work"}` || first.active != "work" || first.pod {
+		t.Fatalf("first services.reloaded = %+v, want startup with work recorded before any Pod", first)
+	}
+	want := []string{"startup"}
+	if plugin {
+		second := <-events
+		if second.reason != "plugin" {
+			t.Fatalf("second services.reloaded = %+v, want launch gate's plugin flight", second)
+		}
+		if id := <-f.started; id != "alpha" {
+			t.Fatal(id)
+		}
+		want = append(want, "plugin")
+	}
+	h.loop(func() {
+		if !slices.Equal(reasons, want) || !h.root.rt.Coordinator.Settled("work") {
+			t.Errorf("reload reasons=%q settled=%v, want exactly %q", reasons, h.root.rt.Coordinator.Settled("work"), want)
+		}
+	})
+	id := protocol.NewStringID("profiles")
+	reply := h.root.mux.Serve(t.Context(), contracts.Caller{Kind: contracts.CallerCLI}, protocol.Message{ID: &id, Method: protocol.MethodProfileList}, nil)
+	if reply.Error != nil {
+		t.Fatalf("profile.list: %+v", reply.Error)
+	}
+	var list struct {
+		Profiles []contracts.ProfileInfo `json:"profiles"`
+	}
+	if err := json.Unmarshal(reply.Result, &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Profiles) != 1 || list.Profiles[0].Name != "work" || !list.Profiles[0].Active {
+		t.Fatalf("profile.list = %s, want work active", reply.Result)
+	}
+}
+
 func TestPublishedSlotCatalogChangeCallsCatalogChanged(t *testing.T) {
 	hook, ready := readyHook("")
 	f := newFakes()

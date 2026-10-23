@@ -231,9 +231,13 @@ type useResult struct {
 }
 
 func (r *rig) use(name string) <-chan useResult {
+	return r.useContext(context.Background(), name)
+}
+
+func (r *rig) useContext(ctx context.Context, name string) <-chan useResult {
 	out := make(chan useResult, 1)
 	go func() {
-		active, reports, err := r.rt.Profile.Use(context.Background(), Caller{Kind: "cli"}, name)
+		active, reports, err := r.rt.Profile.Use(ctx, Caller{Kind: "cli"}, name)
 		out <- useResult{active, reports, err}
 	}()
 	return out
@@ -276,7 +280,8 @@ func TestProfileUseConfirmsDefaultWithoutReload(t *testing.T) {
 	}
 }
 
-// A slice that already records the name needs no write: the reply is immediate.
+// A settled choice still calls Set, but an identical write changes no State:
+// the reply is immediate and the slice revision stays unchanged.
 func TestProfileUseSameRecordedNameWritesNothing(t *testing.T) {
 	r, st := defaultRig(t, state.Options{Hydrator: profileHydratorOf("work")}, "")
 	if _, err := r.rt.Coordinator.Reload(context.Background(), ReasonStartup); err != nil {
@@ -304,8 +309,8 @@ func TestProfileUseSameRecordedNameWritesNothing(t *testing.T) {
 	}
 }
 
-// A slice that records a choice no flight has applied yet (an earlier call in
-// the tick wrote it) is joined, not rewritten: both callers share one flight.
+// A choice no flight has applied yet (an earlier call in the tick wrote it)
+// is recorded with an identical Set: both callers share one flight.
 func TestProfileUseRecordedButPendingJoinsTheFlight(t *testing.T) {
 	r, st := defaultRig(t, state.Options{}, "work")
 	if _, err := r.rt.Coordinator.Reload(context.Background(), ReasonStartup); err != nil {
@@ -363,6 +368,119 @@ func TestProfileUseNoneWhileAbsentRecordsExplicitNone(t *testing.T) {
 	r.settle()
 	if last := st.Resolved(); last[len(last)-1] != "" || r.rt.Profile.Active() != "" {
 		t.Fatalf("Resolve calls = %q active=%q", last, r.rt.Profile.Active())
+	}
+}
+
+// An applied name is not settled while a captured flight is switching away.
+func TestProfileUseDuringSwitchWaitsForFollowUp(t *testing.T) {
+	testProfileUseWaitsForFollowUp(t, true)
+}
+
+// Even an unchanged choice must wait when a captured CLI flight is pending.
+func TestProfileUseActiveNameWhileQueuedWaits(t *testing.T) {
+	testProfileUseWaitsForFollowUp(t, false)
+}
+
+// Use first evaluates Done while awaiting its loop registration, then again
+// in Waiter.Wait. Observing the second call or the reply lets the test tell a
+// registered wait from an early reply without relying on goroutine scheduling.
+type profileUseContext struct {
+	context.Context
+	calls   int
+	waiting chan struct{}
+}
+
+func (c *profileUseContext) Done() <-chan struct{} {
+	c.calls++
+	if c.calls == 2 {
+		close(c.waiting)
+	}
+	return c.Context.Done()
+}
+
+func testProfileUseWaitsForFollowUp(t *testing.T, switching bool) {
+	t.Helper()
+	st := &recStore{fakeStore: fakeStore{profiles: []string{"work", "home"}, resolved: store.Resolved{Doc: doc(`{}`)}}}
+	r := newRigWith(t, st, nil, state.Options{Hydrator: profileHydratorOf("work")})
+	co := r.rt.Coordinator
+	if _, err := co.Reload(t.Context(), ReasonStartup); err != nil {
+		t.Fatal(err)
+	}
+	r.settle()
+	before := len(st.Resolved())
+	entered, release := make(chan struct{}, 2), make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	st.set(func() { st.onResolve = func() { entered <- struct{}{}; <-release } })
+
+	var firstReply <-chan useResult
+	if switching {
+		firstReply = r.use("home")
+		(<-r.posts)()
+		r.tree.Flush()
+		co.Tick()
+	} else {
+		co.request(ReasonCLI, false)
+	}
+	<-entered // F1 has captured and selected, but cannot apply yet.
+	co.mu.Lock()
+	first, selected := co.active, co.selected
+	co.mu.Unlock()
+	if r.rt.Profile.Active() != "work" || switching && selected != "home" {
+		t.Fatalf("active=%q selected=%q", r.rt.Profile.Active(), selected)
+	}
+
+	ctx := &profileUseContext{Context: t.Context(), waiting: make(chan struct{})}
+	reply := r.useContext(ctx, "work")
+	(<-r.posts)()
+	r.tree.Flush()
+	co.Tick()
+	select {
+	case <-ctx.waiting:
+	case got := <-reply:
+		t.Fatalf("profile.use replied instead of waiting for the follow-up: %+v", got)
+	}
+	co.mu.Lock()
+	follow := co.queued
+	co.mu.Unlock()
+	// This is a synchronous registration check, not a scheduler-dependent
+	// assertion that the request goroutine has happened to send its reply.
+	if follow == nil || follow == first {
+		t.Fatal("profile.use did not register on the queued follow-up")
+	}
+	assertWaiting := func() {
+		t.Helper()
+		select {
+		case got := <-reply:
+			t.Fatalf("profile.use replied before its follow-up completed: %+v", got)
+		default:
+		}
+	}
+	assertWaiting()
+	release <- struct{}{}
+	<-first.done
+	<-entered // F2 is in Resolve; F1 is applied but cannot satisfy this call.
+	assertWaiting()
+	if firstReply != nil {
+		if got := <-firstReply; got.err != nil || got.active != "home" {
+			t.Fatalf("first profile.use = %+v", got)
+		}
+	}
+	release <- struct{}{}
+	got := <-reply
+	<-follow.done
+	if got.err != nil || got.active != "work" || len(got.reports) != 5 {
+		t.Fatalf("follow-up profile.use = %+v", got)
+	}
+	if got.reports[0].Gen != first.reports[0].Gen+1 || !reflect.DeepEqual(got.reports, follow.reports) {
+		t.Fatalf("reply reports=%+v, F1=%+v F2=%+v", got.reports, first.reports, follow.reports)
+	}
+	r.settle()
+	want := []string{"work", "work"}
+	if switching {
+		want[0] = "home"
+	}
+	if calls := st.Resolved()[before:]; !reflect.DeepEqual(calls, want) || !r.idle() {
+		t.Fatalf("Resolve calls=%q idle=%v, want %q with no extra listener flight", calls, r.idle(), want)
 	}
 }
 

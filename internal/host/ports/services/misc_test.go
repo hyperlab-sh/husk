@@ -115,6 +115,7 @@ func TestProfileUseFlightErrorKeepsItsCode(t *testing.T) {
 
 type errReloader struct{ err error }
 
+func (f errReloader) Settled(string) bool                { return false }
 func (f errReloader) AwaitProfile(string) profile.Waiter { return f }
 func (f errReloader) LastReports() []c.Report            { return nil }
 func (f errReloader) Wait(context.Context) ([]c.Report, error) {
@@ -124,6 +125,7 @@ func (f errReloader) Wait(context.Context) ([]c.Report, error) {
 // fakeReloader answers every profile.use registration with canned reports.
 type fakeReloader struct{ reports []c.Report }
 
+func (f fakeReloader) Settled(string) bool                { return false }
 func (f fakeReloader) AwaitProfile(string) profile.Waiter { return f }
 func (f fakeReloader) LastReports() []c.Report            { return f.reports }
 func (f fakeReloader) Wait(context.Context) ([]c.Report, error) {
