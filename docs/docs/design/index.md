@@ -60,6 +60,10 @@ Level 2 migration from today's code. Read [Protocol](protocol.md) and
   on the `app-overlay` surface; the overlay layer's drawing rules and the
   keys a plugin may read are specified in the compositor, State and
   Keybinding specs.
+- [Settings center](settings-center.md): the one host-owned settings modal,
+  tabs on the left (General, Keys, Theme, Plugins with Store and Installed)
+  and the current profile top-right; forms built with huh over the existing
+  methods; the `catalog` document the Store tab reads.
 
 ## Adapters (planned)
 

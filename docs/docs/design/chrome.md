@@ -34,7 +34,8 @@ This spec fixes four things:
 3. **The top bar is the brand and the transient status pills**, nothing else.
 4. **The bottom bar shows the layout label at the left and the theme name at
    the right**, around the key hints. The theme name is clickable; it runs
-   `husk.theme.select`, which opens the theme selector once that lands.
+   `husk.settings.open` with `tab: theme`, which opens the Settings center on
+   its Theme tab, the theme selector, once that lands.
 
 Husk has no normal/insert modes and this spec introduces none. Where this
 spec's requirements say "mode", they mean the layout label defined under "The
@@ -280,8 +281,10 @@ empty case then cannot arise; the `theme` fallback stays as a guard. The
 frontend reads the name from `Frontend.Palette()`, never from Settings.
 
 **Clicking the theme name** (a left click on any cell of the pill) opens the
-theme selector: it runs the host action `husk.theme.select` ([Services](services.md),
-"The theme selector"; not landed). Until that lands the click is consumed
+Settings center on its Theme tab, the theme selector: it runs the host action
+`husk.settings.open` with the argument `tab: theme` ([Settings center](settings-center.md),
+"Opening and closing"; [Services](services.md), "The theme selector"; not
+landed). Until that lands the click is consumed
 (it reaches no surface and starts no drag) and does nothing; hover does not
 change the pill. No other cell of the bottom bar is a click target.
 
@@ -322,7 +325,7 @@ input modes under this name.
 | Occupant leaves `live` | Engine vacates; the surface shows its name from that tick |
 | Occupant claimed, no content yet | Blank canvas (slot background), not the name |
 | Palette name empty | Theme slot shows `theme` |
-| Theme name clicked before the selector exists | Click consumed, nothing happens |
+| Theme name clicked before the Settings center exists | Click consumed, nothing happens |
 | Theme name longer than 24 cells | Clipped with `…`; the label and the hints are unaffected |
 | Bottom bar too narrow for every hint group | Groups dropped from the end until the rest fits; the label and the theme name stay |
 | Rail shorter than the tiles need | Tiles that do not fit are not drawn, as today |
@@ -377,9 +380,9 @@ All in `package main` under `cmd/husk`. `pkg/` is untouched.
 | `mode_label_test.go` | Rewritten for the table above and the inverted layout rule; other `cmd/husk` tests that assume zero plugins lay out no side rects, or read the top-bar label (`focus_fallback_test.go`, `surface_owner_test.go`), are updated the same way |
 
 A click on the theme pill is routed in `input.go` before surface hit-testing,
-as the rail and the dividers are. The action it runs is `husk.theme.select`
-([Services](services.md), "The theme selector"); until that lands the handler
-is a no-op that still consumes the click.
+as the rail and the dividers are. The action it runs is `husk.settings.open`
+with `tab: theme` ([Settings center](settings-center.md)); until that lands
+the handler is a no-op that still consumes the click.
 
 [Architecture](../architecture.md) ("Slots", "Surfaces and frames", "Minimum
 size", "Input routing"), [Services](services.md) ("Settings", `theme.name`),
@@ -442,5 +445,7 @@ size", "Input routing"), [Services](services.md) ("Settings", `theme.name`),
 1. `thread-row-status`: does it get a rect (a narrow column to the right of
    `sidebar-list`, inside the sidebar width), or is it retired from the
    surface list? Either is a later spec; this one leaves it undrawn.
-2. Resolved: the theme pill runs `husk.theme.select` ([Services](services.md),
-   "The theme selector").
+2. Resolved: the theme pill runs `husk.settings.open` with `tab: theme`, which
+   opens the Settings center on its Theme tab, the theme selector
+   ([Settings center](settings-center.md); [Services](services.md), "The theme
+   selector").
