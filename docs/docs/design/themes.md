@@ -5,10 +5,10 @@ description: "The nine themes Husk ships as a built-in layer, the rules that map
 
 # Built-in themes
 
-Status: the nine-theme built-in layer, `charm` default and ANSI index
-resolution are landed. The minor 2.4 `ansi` wire field and frontend index
-drawing, index-aware popup shadows and terminal-background handling remain
-specified, not landed. Scope: `pkg/theme` (the built-in `themes`
+Status: the nine-theme built-in layer, `charm` default, ANSI index
+resolution and frontend index drawing are landed, including the `PaletteANSI`
+seam, index-aware popup shadows and terminal-background handling. Only the
+minor 2.4 `ansi` wire field remains specified, not landed. Scope: `pkg/theme` (the built-in `themes`
 layer, its tests), the Theme Service ([Services](services.md), "Named
 themes": the layer and the default), and the name the frontend shows
 ([Workbench chrome](chrome.md), "The bottom bar"). The rules for which role
@@ -762,7 +762,7 @@ chrome spec's test, renamed); the goldens are regenerated once for the new
 values (the chrome spec's "Tests and goldens" owns the mechanics). Under
 `base16` the frontend draws each index role as `ansi.BasicColor(n)`; the
 View's `BackgroundColor` is nil when the canvas is an index and set to the
-canvas otherwise (no OSC 11 for an index canvas). In `internal/compose`: the
+canvas otherwise (no OSC 11 for an index canvas). In `cmd/husk/compose.go`: the
 shadow leaves a cell with a basic or indexed colour unchanged and still
 blends a hex neighbour in the same shadow band.
 
@@ -786,7 +786,7 @@ blends a hex neighbour in the same shadow band.
 | `internal/host/frontend.go`: `Root.Palette()` returns `Theme.Wire()` | Plus `Root.PaletteANSI()` returning `Theme.WireANSI()` |
 | Theme handler (`internal/host/handlers/services/theme.go`): `themeGetResult{Palette}` | Gains `ANSI map[string]int` with `json:"ansi,omitempty"`, the handler fills palette and `ansi` from one `WireANSI()` call; the `theme.changed` pushes (`internal/host/loop.go` at launch, `internal/host/reload_watch.go` on change) take both from one `WireANSI()` call the same way |
 | `cmd/husk` draws every role from its hex | Reads `PaletteANSI()` wherever it needs the map (`Palette()` stays for callers that need only the palette); `refresh` (`cmd/husk/model.go`), which today redraws only when `pal != m.palette`, compares the palette and the map: index roles drawn as `ansi.BasicColor(n)`; `castShadow` skips cells with basic or indexed colours; the View's `BackgroundColor` (OSC 11) is set only when `canvas` is not in the map |
-| `internal/compose` `castShadow` blends every cell's colours | Leaves a cell with an ANSI basic or indexed colour unblended ([Cell-buffer compositor](cell-buffer-compositor.md), "Popup shadow") |
+| `cmd/husk/compose.go` `castShadow` blended every cell's colours | Leaves a cell with an ANSI basic or indexed colour unblended ([Cell-buffer compositor](cell-buffer-compositor.md), "Popup shadow") |
 | `cmd/husk` goldens show `✦ CharmTone` and today's colours | Regenerated once with the chrome spec's colour changes |
 | `AGENTS.md`, `README.md`: "one palette, CharmTone, do not add other themes" | Rewritten by the landing commit to name `charm` and the built-in layer; this spec does not edit them because they describe the code as it is |
 
