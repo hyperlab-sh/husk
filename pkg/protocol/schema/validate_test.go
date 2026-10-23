@@ -45,6 +45,7 @@ func payloads() map[string]payload {
 		protocol.MethodEventDeliver:      {obj, nil},
 		protocol.MethodEventWatch:        {obj, obj},
 		protocol.MethodHookCall:          {obj, obj},
+		protocol.MethodHookList:          {obj, obj},
 		protocol.MethodStateGet:          {obj, obj},
 		protocol.MethodStateSet:          {obj, obj},
 		protocol.MethodStatePatch:        {obj, obj},
