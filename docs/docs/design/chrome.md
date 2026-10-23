@@ -361,7 +361,9 @@ included: the rule, not the palette, is what keeps it so.
    title in the toast's level colour; the secret prompt's `⚠` glyph; a
    **status badge**, which includes a one-word status cell in a table or
    form (`live`, `installed`, `restart required`, `taken`, as the Settings
-   center draws them). Never as decoration, never as a border (a toast's
+   center draws them). A status glyph may lead a line of ink text: a problem
+   or warning line in a modal is `ink` after a `✕` in `danger` or a `⚠` in
+   `warning`, never a line of coloured text. Never as decoration, never as a border (a toast's
    border is `border`, its background `surface_elevated`), never on keys,
    hints, titles, callouts or dev overlays. Today's chrome breaks this in
    sixteen elements (the audit below).
@@ -413,15 +415,15 @@ After the migration the frame (rail, bars, surfaces, palette, prompts)
 draws `accent` in three places: the active rail icon, the palette prompt and
 the dragged divider. The Settings center adds its own rule-2 uses (the Theme
 tab's current-theme marker, the focused tab label, the focused form field).
-Status roles appear only inside `drawToast`, as the secret prompt's `⚠`
-glyph, and in the Settings center's status-badge helper; `accent_secondary`
-and `accent_soft` appear nowhere. `TestChromeColourDiscipline` pins it: a
+Status roles appear only inside `drawToast` and in one shared status
+helper that draws a status glyph or a one-word status badge in its level
+colour, used by the secret prompt (its `⚠`) and the Settings center (its
+problem and warning lines and its status cells); `accent_secondary` and
+`accent_soft` appear nowhere. `TestChromeColourDiscipline` pins it: a
 source-level test over `cmd/husk/*.go` (excluding tests) that counts
 `m.palette.<Role>` references per role and fails when `AccentSecondary` or
 `AccentSoft` appears, or when `Success`, `Warning`, `Danger` or `Info`
-appears outside `drawToast`, the secret prompt's glyph line and the Settings
-center's one status-badge helper (the function that colours a one-word
-status cell); and a rendering test that the empty workbench's frame contains
+appears outside `drawToast` and the shared status helper; and a rendering test that the empty workbench's frame contains
 the accent colour's escape sequence only on the active rail tile. Every golden changes with these moves and is
 regenerated once with the layout change ("Tests and goldens").
 
@@ -584,6 +586,13 @@ size", "Input routing"), [Services](services.md) ("Settings", `theme.name`),
 20. **The audit covers all of `cmd/husk`**, not one file: the secret prompt in
     `secretprompt.go` broke the same rules (`warning` title and border,
     `accent` id and keys) and is migrated with the rest.
+21. **A problem line is ink behind a status glyph.** The Settings center's
+    `<code>: <message>` lines and its warning lines are `ink` text after a
+    `✕` in `danger` or a `⚠` in `warning`, the secret prompt's pattern. A
+    line of red or yellow text is the loudness rule 4 removes; the glyph
+    carries the level in one cell. One shared status helper draws every
+    such glyph and every status badge, so the source-level test allows
+    status roles in `drawToast` and that helper only.
 
 ## Open questions
 
@@ -599,11 +608,6 @@ size", "Input routing"), [Services](services.md) ("Settings", `theme.name`),
    19), but after the plugin-count badge goes the frame itself has none.
    Whether a later spec adds one (a plugin-crashed count in `danger`, say) and
    where it sits is open.
-4. Problem lines in host modals. The Settings center and the Theme tab show
-   a failed write as a line `<code>: <message>` and say they draw problems in
-   `danger` and warnings in `warning`. Such a line is neither a glyph, a badge
-   nor a toast, so rule 4 does not yet cover it: either the line becomes
-   `ink` behind a status glyph in the level colour (the secret prompt's
-   pattern), or rule 4 names modal problem lines as a fourth place. It must
-   be decided before the Settings center lands; `TestChromeColourDiscipline`'s
-   allowance follows the decision.
+4. Resolved: problem lines in host modals (the Settings center's
+   `<code>: <message>` and warning lines) are `ink` text after a status glyph
+   in the level colour (rule 4, decision 21).
