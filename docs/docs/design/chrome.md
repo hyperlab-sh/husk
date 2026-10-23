@@ -17,14 +17,14 @@ manifest or plugin-visible change; `husk.surfaces.visible` and
 Husk is a blank-canvas TUI framework. The frontend's job is to show the canvas,
 not to hide it: a developer who starts `husk` with no plugins must see the
 layout they will be filling, and a developer whose plugin has not claimed a
-surface yet must see where that surface is. Today the frontend does the
-opposite in several places. It lays a side column out only when a plugin
-occupies it, so an empty workbench is one wide stage and the dock keys in the
-footer toggle columns that are not there. Its top bar carries a brand, a layout
-label, a plugin count, a theme pill and a rail-key reminder, most of which
-duplicate the rail and the footer. Its bottom bar shows an IPC counter nobody
-reads. And its rail buttons are tall pills whose caps depend on half-block
-glyphs.
+surface yet must see where that surface is. Before this spec the frontend did
+the opposite in several places. It laid a side column out only when a plugin
+occupied it, so an empty workbench was one wide stage and the dock keys in the
+footer toggled columns that were not there. Its top bar carried a brand, a
+layout label, a plugin count, a theme pill and a rail-key reminder, most of
+which duplicated the rail and the footer. Its bottom bar showed an IPC counter
+nobody read. And its rail buttons were tall pills whose caps depended on
+half-block glyphs.
 
 This spec fixes five things:
 
@@ -506,8 +506,10 @@ All in `package main` under `cmd/husk`. `pkg/` is untouched.
 | `mode_label_test.go` | Rewritten for the table above and the inverted layout rule; other `cmd/husk` tests that assume zero plugins lay out no side rects, or read the top-bar label (`focus_fallback_test.go`, `surface_owner_test.go`), are updated the same way |
 
 A left press on the theme pill is routed in `input.go` before modal, divider,
-rail and surface hit-testing, including modal-only consumption. Its rect is
-computed by the same pure function rendering uses; `View` records no hit state. The action it runs is `husk.settings.open`
+rail and surface hit-testing, including modal-only consumption (the open
+palette and the secret prompt still take every click first). Its rect is
+computed by the same pure function rendering uses; `View` records no hit
+state. The action it runs is `husk.settings.open`
 with `tab: theme` ([Settings center](settings-center.md)); until that lands
 the handler is a no-op that still consumes the click.
 
