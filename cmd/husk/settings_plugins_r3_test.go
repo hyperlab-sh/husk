@@ -77,7 +77,10 @@ func TestSettingsStoreScrolledFirstRowDoesNotOpenFilter(t *testing.T) {
 	fe.CatalogRows.Entries[1].Description = strings.Repeat("long detail text ", 200)
 	fe.CatalogRev++
 	m.settle()
-	settingsPress(m, "pgdown")
+	// Seed a body offset to exercise hit geometry independently of list keys.
+	m.settings.plugins.top = 3
+	m.settings.plugins.dirty = true
+	m.settle()
 	if m.settings.plugins.top == 0 {
 		t.Fatal("fixture did not scroll past filter")
 	}
