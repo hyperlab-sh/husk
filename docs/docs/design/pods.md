@@ -124,6 +124,8 @@ Framing: one JSON object per line, at most 4 MiB (`MaxLineBytes`, unchanged), re
 {"id":8,"error":{"code":"not_found","message":"no action \"nope\""}}
 ```
 
+The first line of a connection that is a major-1 `hello` is answered and the connection closed as Versioning in [Protocol](protocol.md) says, without counting as `invalid_message`; the per-request token rule is unchanged.
+
 Method families and their handlers (registered by `internal/host.New`; names and forms are [Protocol](protocol.md)'s):
 
 | Prefix | Handler owner | Notes |
@@ -579,6 +581,7 @@ Frontend seams. A frontend (the TUI in `cmd/husk`, later any embedding applicati
 | `pkg/huskipc/read.go` | **Done (v2-cutover-retire):** moved to `pkg/protocol/read.go`. `protocol.ReadLoop` is reused for plugin stdout and socket connections. |
 | `cmd/husk/render.go` (`drawChrome`) | Starting point for Decoration; moves when its shape is decided. |
 | `cmd/husk/lifecycle_test.go`, `cmd/husk/socket_security_test.go`, `cmd/husk/send_queue_test.go` | Move with their code; hand-off and ancestry cases are deleted; token, base-dir ownership and stdin-failure kill cases are added. |
+| `hello` on the socket (v1 plugins) | A major-1 `hello` as the first line of a connection is answered with the major-1 `protocol_error` line and the connection is closed; the Server asks Pods (`Config.Legacy`) to fail the live pod named by `hello.plugin_id` with `version_mismatch`. No peer-PID lookup. |
 | `plugins/reference`, `plugins/reference-actions` | Rewritten to read stdin and call the CLI; their manifests gain `"manifest_version": 2`. |
 
 Removed behaviour, stated for the changelog: the socket transport for plugins (plugins no longer connect to receive messages, only to send), the `hello`/`welcome` exchange, the launcher hand-off grace, and pid-ancestry binding.
