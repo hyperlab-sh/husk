@@ -987,8 +987,9 @@ func TestInvokeActionKindAndFocus(t *testing.T) {
 		{"plugin", protocol.CallerPlugin, nil, string(protocol.CodeDenied), ""},
 		{"zero kind", "", nil, string(protocol.CodeDenied), ""},
 	}
+	var handled int // handler runs; touched on the loop only
 	h.loop(func() {
-		if err := fe.RegisterHostAction("husk.test.ping", func(map[string]any) (map[string]any, error) { return nil, nil }); err != nil {
+		if err := fe.RegisterHostAction("husk.test.ping", func(map[string]any) (map[string]any, error) { handled++; return nil, nil }); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -997,9 +998,15 @@ func TestInvokeActionKindAndFocus(t *testing.T) {
 			mu.Lock()
 			logs = nil
 			mu.Unlock()
-			var replies int
+			var replies, pending int
 			var gotErr error
 			h.loop(func() {
+				handled, pending = 0, h.root.disp.Pending()
+				defer func() {
+					if h.root.disp.Pending() != pending {
+						t.Errorf("pending calls %d -> %d", pending, h.root.disp.Pending())
+					}
+				}()
 				fe.InvokeAction("husk.test.ping", nil, tc.kind, tc.focus, func(_ map[string]any, declined bool, err error) {
 					replies++
 					gotErr = err
@@ -1014,6 +1021,15 @@ func TestInvokeActionKindAndFocus(t *testing.T) {
 			if got := codeOf(gotErr); got != tc.wantCode {
 				t.Fatalf("code = %q (%v), want %q", got, gotErr, tc.wantCode)
 			}
+			wantHandled := 0
+			if tc.wantCode == "" {
+				wantHandled = 1
+			}
+			h.loop(func() {
+				if handled != wantHandled {
+					t.Errorf("handler ran %d times, want %d: a rejected call must not reach the Dispatcher", handled, wantHandled)
+				}
+			})
 			mu.Lock()
 			logged := slices.DeleteFunc(slices.Clone(logs), func(l string) bool { return !strings.Contains(l, "InvokeAction") })
 			mu.Unlock()

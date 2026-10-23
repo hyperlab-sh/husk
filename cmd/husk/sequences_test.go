@@ -250,6 +250,55 @@ func TestSequenceTable(t *testing.T) {
 			wantTimers: 1,
 		},
 		{
+			name: "a click inside the focused surface keeps the sequence",
+			run: func(t *testing.T, m *WorkbenchModel, _ *fakeFE, _ *timerRecorder) {
+				press(m, "a")
+				r := m.slotRects[protocol.SurfaceMainStage]
+				m.Update(tea.MouseClickMsg{X: r.InnerX + 1, Y: r.InnerY + 1, Button: tea.MouseLeft})
+			},
+			pending:    []string{"a"},
+			wantTimers: 1,
+		},
+		{
+			name: "the focused side column is hidden",
+			run: func(t *testing.T, m *WorkbenchModel, _ *fakeFE, _ *timerRecorder) {
+				m.setFocus(protocol.SurfaceSidebarList)
+				press(m, "a")
+				m.run("husk.sidebar.toggle", nil)
+				if m.focusedSlot != protocol.SurfaceMainStage || m.focusFallback != protocol.SurfaceSidebarList {
+					t.Fatalf("setup: focus %q fallback %q", m.focusedSlot, m.focusFallback)
+				}
+			},
+			wantInvoked: []string{"husk.sidebar.toggle"},
+			wantTimers:  1,
+		},
+		{
+			name: "the column focus fell back from returns",
+			run: func(t *testing.T, m *WorkbenchModel, _ *fakeFE, _ *timerRecorder) {
+				m.setFocus(protocol.SurfaceSidebarList)
+				m.run("husk.sidebar.toggle", nil)
+				press(m, "a")
+				m.run("husk.sidebar.toggle", nil)
+				if m.focusedSlot != protocol.SurfaceSidebarList {
+					t.Fatalf("setup: focus not restored: %q", m.focusedSlot)
+				}
+			},
+			wantInvoked: []string{"husk.sidebar.toggle", "husk.sidebar.toggle"},
+			wantTimers:  1,
+		},
+		{
+			name: "occupant handover keeps focus but not the sequence",
+			run: func(t *testing.T, m *WorkbenchModel, _ *fakeFE, _ *timerRecorder) {
+				hostPlugin(m, "q", protocol.SurfaceMainStage) // p holds it; q is a later claimant
+				press(m, "a")
+				hostLeave(m, "p")
+				if m.surfaceOwner(protocol.SurfaceMainStage) != "q" {
+					t.Fatalf("setup: owner %q", m.surfaceOwner(protocol.SurfaceMainStage))
+				}
+			},
+			wantTimers: 1,
+		},
+		{
 			name: "paste discards, then travels as one bracket-wrapped key",
 			run: func(t *testing.T, m *WorkbenchModel, _ *fakeFE, _ *timerRecorder) {
 				press(m, "a")
@@ -356,6 +405,58 @@ func TestHomeDeclinesGenerically(t *testing.T) {
 	press(m, "esc")
 	if len(fe.Keys) != 0 || m.stageMode != "plugin" {
 		t.Fatalf("esc with a stage mode up: keys=%v stage=%q, want it consumed and home shown", sentKeys(fe), m.stageMode)
+	}
+}
+
+// esc from a full-canvas rail item is consumed by husk.home through the
+// activeRailID half of homeApplies, not delivered to the occupant.
+func TestHomeAppliesFromAnActiveRailItem(t *testing.T) {
+	m, fe, _ := seqModel(t)
+	m.keys = fe
+	ri := contracts.RailItem{Plugin: "p", ID: "p.canvas", Placement: contracts.PlacementFullCanvas}
+	fe.Rails = append(fe.Rails, ri)
+	hostPlugin(m, "p", protocol.SurfaceFullCanvas)
+	m.activateRailItem(ri)
+	if m.activeRailID != ri.ID {
+		t.Fatalf("setup: activeRailID %q", m.activeRailID)
+	}
+	fe.Keys, fe.Invoked = nil, nil
+	press(m, "esc")
+	if len(fe.Keys) != 0 || m.activeRailID != "" {
+		t.Fatalf("keys=%v activeRailID=%q, want esc consumed and the rail item closed", sentKeys(fe), m.activeRailID)
+	}
+}
+
+// A plugin rail click and a close-button click act on the model directly:
+// neither dispatches an action.
+func TestRailAndCloseClicksDoNotDispatch(t *testing.T) {
+	m, fe, _ := seqModel(t)
+	wire := protocol.FrameSpec{Border: true, Close: true}
+	ri := contracts.RailItem{Plugin: "p.stage", ID: "p.stage.open", Placement: contracts.PlacementStage, Frame: &wire}
+	fe.Rails = append(fe.Rails, ri)
+	hostPlugin(m, "p.stage", protocol.SurfaceWorkspaceStage)
+	rr := m.slotRects[protocol.SurfaceActivityRail]
+	clicked := false
+	for _, b := range m.railButtons() {
+		if b.kind == "plugin" && b.item.ID == ri.ID {
+			m.Update(tea.MouseClickMsg{X: rr.X, Y: rr.Y + b.startY, Button: tea.MouseLeft})
+			clicked = true
+		}
+	}
+	if !clicked || m.activeRailID != ri.ID {
+		t.Fatalf("setup: rail click did not open the item (clicked=%v active=%q)", clicked, m.activeRailID)
+	}
+	if len(fe.Invoked) != 0 {
+		t.Fatalf("rail click dispatched %v", invokedActions(fe))
+	}
+
+	sr := m.slotRects[protocol.SurfaceWorkspaceStage]
+	m.Update(tea.MouseClickMsg{X: sr.X + sr.Width - 2, Y: sr.Y, Button: tea.MouseLeft})
+	if m.activeRailID != "" {
+		t.Fatalf("close click left %q active", m.activeRailID)
+	}
+	if len(fe.Invoked) != 0 {
+		t.Fatalf("close click dispatched %v", invokedActions(fe))
 	}
 }
 

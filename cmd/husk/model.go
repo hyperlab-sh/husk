@@ -1010,8 +1010,10 @@ func (m *WorkbenchModel) flushState() bool {
 	return wrote
 }
 
-// run starts an action the host itself initiates (a palette choice, a rail
-// click, a close button): kind host, no focus snapshot.
+// run starts an action the host itself initiates (a palette choice, the
+// hotspots rail button): kind host, no focus snapshot. A plugin rail click
+// (activateRailItem) and a close-button click act on the model directly and
+// never dispatch an action.
 func (m *WorkbenchModel) run(action string, args map[string]any) {
 	m.invoke(action, args, protocol.CallerHost, nil)
 }
@@ -1198,7 +1200,9 @@ func (m *WorkbenchModel) focusNext() {
 // any remembered fallback slot, so a column that returns later does not take
 // the focus back.
 func (m *WorkbenchModel) setFocus(slot protocol.SurfaceID) {
-	m.clearPending()
+	if slot != m.focusedSlot {
+		m.clearPending()
+	}
 	m.focusedSlot = slot
 	m.focusFallback = ""
 }
