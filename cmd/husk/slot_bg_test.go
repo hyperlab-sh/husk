@@ -113,6 +113,46 @@ func TestViewPaintsSlotBackgroundUnderPluginContent(t *testing.T) {
 	}
 }
 
+// An unset served token must not install a non-nil noColor background: slot
+// cells stay default until View applies Canvas, and explicit backgrounds survive.
+func TestViewUnsetSlotBackgroundKeepsDefaultCells(t *testing.T) {
+	m := goldenModel()
+	p := protocol.Palette(theme.Default())
+	p.Slot = ""
+	withFE(m).PaletteFn = func() (protocol.Palette, map[string]int) { return p, nil }
+	m.refresh()
+	goldenPlugin(m, "p.one", map[protocol.SurfaceID][]string{
+		protocol.SurfaceMainStage: {"\x1b[41mred\x1b[m plain"},
+	})
+	rect := m.slotRects[protocol.SurfaceMainStage]
+	if rect.InnerW < 12 || rect.InnerH < 2 {
+		t.Fatalf("main stage inner rect too small: %+v", rect)
+	}
+	c := newCanvas(m.width, m.height)
+	defer c.release()
+	m.drawSurface(c, protocol.SurfaceMainStage, "", "")
+	for y := rect.InnerY; y < rect.InnerY+rect.InnerH; y++ {
+		for x := rect.InnerX; x < rect.InnerX+rect.InnerW; x++ {
+			bg := c.buf.CellAt(x, y).Style.Bg
+			if y == rect.InnerY && x < rect.InnerX+3 {
+				if !sameColor(bg, lipgloss.Color("1")) {
+					t.Fatalf("plugin background at %d,%d changed: %v", x, y, bg)
+				}
+			} else if bg != nil {
+				t.Fatalf("default slot cell %d,%d painted with %T(%v), want nil", x, y, bg, bg)
+			}
+		}
+	}
+
+	// The full frame's final canvas pass must still reach plain and blank cells.
+	rows := frameCells(m.View().Content)
+	for _, xy := range [][2]int{{rect.InnerX + 4, rect.InnerY}, {rect.InnerX, rect.InnerY + 1}} {
+		if bg := rows[xy[1]][xy[0]].Style.Bg; !sameColor(bg, m.palette.Canvas) {
+			t.Errorf("default slot cell %v bg = %v, want canvas %v", xy, bg, m.palette.Canvas)
+		}
+	}
+}
+
 // A bordered frame keeps its ring styling: only the content area is painted.
 func TestViewSlotBackgroundSkipsBorderRing(t *testing.T) {
 	m := goldenModel()
