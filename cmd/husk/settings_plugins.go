@@ -37,6 +37,8 @@ type settingsPluginRenderKey struct {
 
 type settingsPlugins struct {
 	inputs             map[string]uint64
+	snapshot           *state.Snapshot
+	snapshotSeq        uint64
 	catalogRead        bool
 	catalogRevision    uint64
 	servicesRevision   uint64
@@ -98,7 +100,7 @@ func (m *WorkbenchModel) refreshSettingsPlugins() {
 		p.widgetKey = widgetKey
 		if p.confirm != nil {
 			yes := p.confirmed
-			m.confirmSettingsRemoval()
+			m.confirmSettingsRemovalFor(p.confirmID)
 			p.confirmed = yes
 			p.confirmView = p.confirm.View()
 		}
@@ -108,11 +110,23 @@ func (m *WorkbenchModel) refreshSettingsPlugins() {
 			p.surfaceBefore = before
 		}
 	}
-	inputs := map[string]uint64{}
+	inputs := p.inputs
 	var entries map[string]state.Entry
+	var snapshot *state.Snapshot
 	if m.fe != nil {
-		if snap := m.fe.Snapshot(); snap != nil {
-			entries = snap.Slices
+		snapshot = m.fe.Snapshot()
+	}
+	var seq uint64
+	if snapshot != nil {
+		seq = snapshot.Seq
+	}
+	// Immutable snapshots need no namespace scan or revision-map allocation
+	// until their publication changes. The sequence also supports loop fakes.
+	if snapshot != p.snapshot || seq != p.snapshotSeq {
+		p.snapshot, p.snapshotSeq = snapshot, seq
+		inputs = map[string]uint64{}
+		if snapshot != nil {
+			entries = snapshot.Slices
 			for ns, entry := range entries {
 				if ns == "husk.pods" || ns == "husk.surfaces" || strings.HasSuffix(ns, ".occupants") {
 					inputs[ns] = entry.Revision
@@ -153,6 +167,9 @@ func (m *WorkbenchModel) refreshSettingsPlugins() {
 			p.rows = append(p.rows, row)
 		}
 		slices.SortFunc(p.rows, func(a, b settingsPluginRow) int { return strings.Compare(a.ID, b.ID) })
+		if p.confirm != nil && !slices.ContainsFunc(p.rows, func(row settingsPluginRow) bool { return row.ID == p.confirmID }) {
+			p.confirm = nil
+		}
 		for id := range p.removing {
 			if !slices.ContainsFunc(p.rows, func(r settingsPluginRow) bool { return r.ID == id }) {
 				delete(p.removing, id)
@@ -292,7 +309,12 @@ func (m *WorkbenchModel) confirmSettingsRemoval() {
 	if p.cursor >= len(p.rows) || m.fe == nil {
 		return
 	}
-	id := p.rows[p.cursor].ID
+	m.confirmSettingsRemovalFor(p.rows[p.cursor].ID)
+}
+
+// Rebuilds retain the original target, independently of the table cursor.
+func (m *WorkbenchModel) confirmSettingsRemovalFor(id string) {
+	p := m.settings.plugins
 	p.confirmID, p.confirmed = id, false
 	p.confirm = huh.NewConfirm().Title("Remove " + plainText(id) + " from this instance?").Description("It is unloaded, not uninstalled: its files, settings and saved state stay, and the next start loads it again.").Value(&p.confirmed).Affirmative(" yes ").Negative(" no ")
 	p.confirm.WithKeyMap(huh.NewDefaultKeyMap())
@@ -549,7 +571,7 @@ func (m *WorkbenchModel) settingsPluginsMouse(point image.Point) {
 	p := m.settings.plugins
 	r := m.settingsContentRect()
 	at := p.top + point.Y - r.Min.Y
-	if m.settings.tab == "store" && point.Y == r.Min.Y {
+	if m.settings.tab == "store" && at == 0 {
 		m.openSettingsSurfaceFilter()
 		return
 	}
@@ -590,21 +612,26 @@ func (m *WorkbenchModel) settingsPluginConfirmLayout() ([]string, image.Rectangl
 	y := content.Min.Y + keep + 1
 	return lines, image.Rect(content.Min.X, y, content.Max.X, min(content.Max.Y, y+len(lines)))
 }
-func (m *WorkbenchModel) settingsPluginDialogMouse(point image.Point) {
+
+// settingsPluginDialogMouse reports whether the dialog consumed the click.
+// An outside dismissal lets the same click reach its visible target.
+func (m *WorkbenchModel) settingsPluginDialogMouse(point image.Point) bool {
 	p := m.settings.plugins
 	if p.confirm == nil {
+		r := m.settingsContentRect()
+		r.Max.Y = min(r.Max.Y, r.Min.Y+len(strings.Split(p.filterView, "\n")))
 		m.settings.dismissPluginDialogs()
-		return
+		return point.In(r)
 	}
 	lines, r := m.settingsPluginConfirmLayout()
 	if !point.In(r) {
 		m.settings.dismissPluginDialogs()
-		return
+		return false
 	}
 	// huh renders the buttons on its final line. Description words such as
 	// "not" must never count as a click on the negative button.
 	if point.Y-r.Min.Y != len(lines)-1 {
-		return
+		return true
 	}
 	line := ansi.Strip(lines[len(lines)-1])
 	for _, button := range []struct {
@@ -616,10 +643,11 @@ func (m *WorkbenchModel) settingsPluginDialogMouse(point image.Point) {
 			if point.X >= x && point.X < x+len(button.text) {
 				p.confirmed = button.yes
 				m.settingsPluginKey(tea.KeyPressMsg{Code: tea.KeyEnter})
-				return
+				return true
 			}
 		}
 	}
+	return true
 }
 
 const settingsCatalogExample = `{"version": 1, "entries": {

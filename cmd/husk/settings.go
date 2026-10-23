@@ -527,15 +527,18 @@ func (m *WorkbenchModel) settingsMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) 
 	}
 	if s.plugins != nil && (s.plugins.confirm != nil || s.plugins.filter != nil) {
 		if left {
-			m.settingsPluginDialogMouse(point)
-		}
-		if _, wheel := event.(tea.MouseWheelMsg); wheel {
-			if mouse.Button == tea.MouseWheelUp {
-				return m.settingsKey(tea.KeyPressMsg{Code: tea.KeyUp})
+			if m.settingsPluginDialogMouse(point) {
+				return m, nil
 			}
-			return m.settingsKey(tea.KeyPressMsg{Code: tea.KeyDown})
+		} else {
+			if _, wheel := event.(tea.MouseWheelMsg); wheel {
+				if mouse.Button == tea.MouseWheelUp {
+					return m.settingsKey(tea.KeyPressMsg{Code: tea.KeyUp})
+				}
+				return m.settingsKey(tea.KeyPressMsg{Code: tea.KeyDown})
+			}
+			return m, nil
 		}
-		return m, nil
 	}
 	if left && point.In(m.settingsCornerRect()) {
 		s.focus = settingsProfileFocus
