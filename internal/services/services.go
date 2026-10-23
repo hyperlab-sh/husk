@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	c "github.com/hyperlab-sh/husk/internal/services/contracts"
 	"github.com/hyperlab-sh/husk/internal/services/keybinding"
 	"github.com/hyperlab-sh/husk/internal/services/profile"
@@ -350,26 +351,63 @@ type prepared struct {
 	err       error
 }
 
-// storeFailure is a flight-level Store failure: the message names the
-// config-relative file when Store reported one, never a value.
-type storeFailure struct{ message string }
+// storeFailure is a flight-level Store failure: the message names the code and
+// where the failure is (config-relative file, layer, line and column, when
+// Store reported them), never a value or Store's own text, which may quote one.
+type storeFailure struct {
+	message string
+	source  *c.Source
+}
 
 func (e *storeFailure) Error() string { return e.message }
 
 func storeProblemFailure(problems []store.Problem) error {
 	for _, problem := range problems {
-		if problem.Code != "type_clash" {
-			if problem.File != "" {
-				where := problem.File
-				if problem.Layer != "" {
-					where += " (layer " + string(problem.Layer) + ")"
-				}
-				return &storeFailure{problem.Code + ": configuration file " + where + " could not be loaded"}
+		if problem.Code == "type_clash" {
+			continue
+		}
+		if problem.File == "" {
+			return &storeFailure{message: problem.Code + ": configuration could not be loaded"}
+		}
+		where := problem.File
+		if problem.Layer != "" {
+			where += " (layer " + string(problem.Layer) + ")"
+		}
+		if problem.Line > 0 {
+			where += fmt.Sprintf(" line %d", problem.Line)
+			if problem.Column > 0 {
+				where += fmt.Sprintf(", column %d", problem.Column)
 			}
-			return &storeFailure{problem.Code + ": configuration could not be loaded"}
+		}
+		return &storeFailure{
+			message: problem.Code + ": configuration file " + where + " could not be loaded",
+			source:  &c.Source{Layer: string(problem.Layer), File: problem.File, Line: problem.Line},
 		}
 	}
 	return nil
+}
+
+// storeErrorFailure codes an error Store returned instead of a problem. Its
+// text is never shown: it may quote a path or a value.
+func storeErrorFailure(err error) *storeFailure {
+	var failure *storeFailure
+	if errors.As(err, &failure) {
+		return failure
+	}
+	reason := "store_failed"
+	switch {
+	case errors.Is(err, store.ErrInvalidPath):
+		reason = "invalid_path"
+	case errors.Is(err, store.ErrNotFound):
+		reason = "not_found"
+	case errors.Is(err, store.ErrClosed):
+		reason = "closed"
+	case errors.Is(err, store.ErrUnavailable):
+		reason = "unavailable"
+	case errors.Is(err, fs.ErrPermission):
+		reason = "permission_denied"
+	}
+	return &storeFailure{message: reason + ": configuration could not be loaded"}
 }
 
 func (co *Coordinator) reload(parent context.Context, reason Reason, f *flight) ([]Report, error) {
@@ -424,13 +462,15 @@ func (co *Coordinator) reload(parent context.Context, reason Reason, f *flight) 
 		return reports, stoppedError(why)
 	}
 	if input.err != nil {
-		message := "configuration could not be loaded"
-		var failure *storeFailure
-		if errors.As(input.err, &failure) {
-			message = failure.message
-		}
+		failure := storeErrorFailure(input.err)
+		message := failure.message
 		for _, name := range order() {
-			reports = append(reports, Report{Service: name, Gen: co.opts.Services[name].Generation(), Problems: []Problem{{Severity: "error", Code: "store_error", Message: message}}})
+			var source *c.Source
+			if failure.source != nil {
+				copied := *failure.source
+				source = &copied
+			}
+			reports = append(reports, Report{Service: name, Gen: co.opts.Services[name].Generation(), Problems: []Problem{{Severity: "error", Code: "store_error", Message: message, Source: source}}})
 		}
 		return reports, &c.Error{Code: "unavailable", Reason: "store_error", Message: message}
 	}

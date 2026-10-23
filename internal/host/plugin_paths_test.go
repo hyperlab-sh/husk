@@ -227,6 +227,9 @@ func TestStartupError(t *testing.T) {
 	storeErr := errors.New(storeMessage)
 	incomplete := errors.New("service reload incomplete")
 	storeReport := services.Report{Problems: []services.Problem{{Code: "store_error", Message: storeMessage}}}
+	locatedMessage := "invalid_document: configuration file config.json (layer user) line 1, column 10 could not be loaded"
+	locatedErr := errors.New(locatedMessage)
+	located := services.Report{Problems: []services.Problem{{Code: "store_error", Message: locatedMessage, Source: &protocol.Source{Layer: "user", File: "config.json", Line: 1}}}}
 	for _, tc := range []struct {
 		name    string
 		reports []services.Report
@@ -238,6 +241,7 @@ func TestStartupError(t *testing.T) {
 		{"separate diagnostic", []services.Report{{Problems: []services.Problem{{Code: "cancelled", Message: "shutdown", Source: &protocol.Source{Layer: "user", File: "config.json"}}}}}, incomplete, "service reload incomplete: cancelled: shutdown (layer user, file config.json)"},
 		{"explicit key independent of prose", []services.Report{{Service: "settings", Problems: []services.Problem{{Code: "invalid_value", Key: "husk.plugins.dirs", Message: "want strings", Source: &protocol.Source{Layer: "user", File: "config.json"}}}}}, incomplete, "service reload incomplete: invalid_value: want strings (key husk.plugins.dirs) (layer user, file config.json)"},
 		{"shared cause retains key", []services.Report{{Service: "settings", Problems: []services.Problem{{Code: "invalid_value", Key: "husk.plugins.paths", Message: incomplete.Error()}}}}, incomplete, "service reload incomplete: invalid_value: service reload incomplete (key husk.plugins.paths)"},
+		{"source already in message", []services.Report{located, located}, locatedErr, "store_error: " + locatedMessage},
 		{"no reports", nil, incomplete, "service reload incomplete"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -282,7 +286,7 @@ func TestStartupFlightFailures(t *testing.T) {
 				if tc.key != "" {
 					want = append(want, "invalid_value", "(key "+tc.key+")")
 				} else {
-					want = append(want, "store_error")
+					want = append(want, "store_error", "line 1, column ")
 				}
 				for _, text := range want {
 					if err == nil || !strings.Contains(err.Error(), text) {
