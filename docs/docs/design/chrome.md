@@ -23,7 +23,7 @@ duplicate the rail and the footer. Its bottom bar shows an IPC counter nobody
 reads. And its rail buttons are tall pills whose caps depend on half-block
 glyphs.
 
-This spec fixes four things:
+This spec fixes five things:
 
 1. **Every surface the layout has a place for is laid out, occupied or not.**
    An unoccupied region slot other than the rail, which always draws its host
