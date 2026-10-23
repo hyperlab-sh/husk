@@ -232,12 +232,14 @@ behaviour; a v1 subscriber's `{"data": ...}` reply is an allow.
 
 Catalog rules, enforced where the catalog is built from the declared
 documents (not at single-manifest conversion, because they compare plugins).
-They run in this order on every catalog rebuild (each reload), over the
-plugins loaded at that moment. A plugin is loaded when it has declared
-documents in Store ([Pods](pods.md) keeps them across process exit), whatever
-its liveness: a `failed` plugin still owns its namespace. `husk plugin remove`
-unloads it: its documents leave Store, the next rebuild drops its hooks and
-subscriptions, and a namespace it held is free again.
+They run in this order on every catalog rebuild, which happens whenever
+`Store.DeclaredRevision` advances, so at each `Declare` (a launch) and
+`Undeclare` (a removal), over the plugins loaded at that moment. A plugin is
+loaded when it has declared documents in Store ([Pods](pods.md) keeps them
+across process exit), whatever its liveness: a `failed` plugin still owns its
+namespace. `husk plugin remove` unloads it: its documents leave Store, the
+catalog refresh that follows undeclaration drops its hooks and subscriptions,
+and its namespace is no longer owned.
 
 1. **Namespace.** A loaded plugin owns its whole namespace: every hook id
    that starts with its id followed by a dot. A hook id belongs to the loaded
@@ -753,7 +755,7 @@ socket client. Rejected: palette entries that fire hooks, and a
 | Oversized `params.data` (over 1 MiB raw) | `HookPort`, before decoding | Nothing sent | `invalid_params` |
 | A `HookDef` with a zero `Timeout` | Catalog adapter | Logged once; hook left out of the catalog | `denied` (plugin) or `not_found` (host) |
 | Hook not declared, fired by the host | Runner | Nothing sent | `not_found` |
-| Hook id inside another loaded plugin's namespace (declared by that plugin or not) | Catalog build, each reload | The intruding declaration is refused with a problem on its plugin | nothing |
+| Hook id inside another loaded plugin's namespace (declared by that plugin or not) | Catalog build, each `DeclaredRevision` change | The intruding declaration is refused with a problem on its plugin | nothing |
 | Hook id still declared by two plugins after the namespace rule | Catalog build | Every declarer refused, problem on each | nothing |
 | A 17th concurrent call of this hook | Runner | Nothing sent, logged | `busy`, `data.reason` `hook_in_flight` |
 | Pending cap reached at preflight | Calls via `CanSend` | Nothing sent | `busy` |
@@ -937,11 +939,12 @@ or priority. It is the starting point; the changes below extend it.
 19. **`husk plugin remove` fires no hook.** The host owns the operation and
     could fire a `husk.before-plugin-remove` gate under decision 1; it does
     not, because the stop already gives the plugin EOF, SIGTERM and the 2 s
-    grace it gets at shutdown, the operation destroys no data, the usual
-    target is a dead plugin that cannot answer, and a veto would put a plugin
-    between the user and their own instance. The after-the-fact notice is the
-    `pods.plugin-removed` event ([Pods](pods.md)). Adding the hook later is a
-    protocol minor.
+    grace it gets at shutdown, the operation destroys no data (unlike the
+    clear that `husk.before-state-clear` guards, as this spec specifies it),
+    the usual target is a dead plugin that cannot answer, and a veto would put
+    a plugin between the user and their own instance. The after-the-fact
+    notice is the `pods.plugin-removed` event ([Pods](pods.md)). Adding the
+    hook later is a protocol minor.
 
 ## Open questions
 
