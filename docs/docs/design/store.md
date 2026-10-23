@@ -172,6 +172,9 @@ func (s *Store) ProfileSources() map[string]Layer
 
 // Invalidate drops every cached layer and resolution. `husk config reload`
 // and a plugin added at runtime call it through Services.
+// Resolve, Layers and Invalidate are safe for concurrent use: each holds one
+// lock across its read and its cache write, so a read that overlaps an
+// Invalidate never leaves a cached document older than that Invalidate.
 func (s *Store) Invalidate()
 
 // Patch applies a merge patch (same rules as layer merge, null deletes) to
