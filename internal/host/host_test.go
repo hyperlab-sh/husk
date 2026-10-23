@@ -335,8 +335,22 @@ func dial(t *testing.T, path string) wireConn {
 
 func (w wireConn) call(t *testing.T, id, method string) protocol.Message {
 	t.Helper()
+	return w.callParams(t, id, method, nil)
+}
+
+// callParams is call with a params object.
+func (w wireConn) callParams(t *testing.T, id, method string, params any) protocol.Message {
+	t.Helper()
 	mid := protocol.NewStringID(id)
-	raw, err := json.Marshal(protocol.Message{ID: &mid, Method: method})
+	msg := protocol.Message{ID: &mid, Method: method}
+	if params != nil {
+		p, err := json.Marshal(params)
+		if err != nil {
+			t.Fatal(err)
+		}
+		msg.Params = p
+	}
+	raw, err := json.Marshal(msg)
 	if err != nil {
 		t.Fatal(err)
 	}
