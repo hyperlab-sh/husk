@@ -358,8 +358,17 @@ func (c *catalogView) buildHooks(ids []string, parsed map[string]catalogDoc) (ma
 		decl   hookDecl
 	}
 	claims := map[string][]claim{}
+	hostDefs := hostHookDefs()
 	for _, id := range ids {
 		for _, h := range parsed[id].HooksDeclared {
+			if _, host := hostDefs[h.ID]; host {
+				problem(id, "hook %q belongs to the host", h.ID)
+				continue
+			}
+			if !hooks.Kind(h.Kind).Valid() {
+				problem(id, "hook %q has kind %q, which is not transform, collect or gate", h.ID, h.Kind)
+				continue
+			}
 			if owner := nsOwner(h.ID); owner != id {
 				if owner == "" {
 					problem(id, "hook %q is outside its namespace", h.ID)
@@ -371,14 +380,19 @@ func (c *catalogView) buildHooks(ids []string, parsed map[string]catalogDoc) (ma
 			claims[h.ID] = append(claims[h.ID], claim{id, h})
 		}
 	}
-	// Rule 2, duplicate: still contested ids are refused for every declarer.
+	// Rule 2, duplicate: rule 1 leaves at most one claimant plugin per id, so
+	// a still contested id is one plugin declaring it twice; it is refused.
 	defs := hostHookDefs()
 	zero := map[string]bool{}
-	for hook, list := range claims {
+	claimed := make([]string, 0, len(claims))
+	for hook := range claims {
+		claimed = append(claimed, hook)
+	}
+	sort.Strings(claimed)
+	for _, hook := range claimed {
+		list := claims[hook]
 		if len(list) > 1 {
-			for _, cl := range list {
-				problem(cl.plugin, "hook %q is declared by more than one plugin", hook)
-			}
+			problem(list[0].plugin, "hook %q is declared more than once", hook)
 			continue
 		}
 		cl := list[0]
@@ -402,8 +416,13 @@ func (c *catalogView) buildHooks(ids []string, parsed map[string]catalogDoc) (ma
 
 // reportProblems logs each problem that was not in the previous rebuild.
 func (c *catalogView) reportProblems(now map[string][]string) {
-	for plugin, list := range now {
-		for _, p := range list {
+	plugins := make([]string, 0, len(now))
+	for plugin := range now {
+		plugins = append(plugins, plugin)
+	}
+	sort.Strings(plugins)
+	for _, plugin := range plugins {
+		for _, p := range now[plugin] {
 			if !slices.Contains(c.problems[plugin], p) {
 				c.logf("hooks: plugin %s: %s", plugin, p)
 			}

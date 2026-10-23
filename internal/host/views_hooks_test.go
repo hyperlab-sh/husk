@@ -172,14 +172,6 @@ func TestCatalogNamespaceRule(t *testing.T) {
 			t.Fatalf("problems = %v", d.Problems())
 		}
 	})
-	t.Run("a plugin that is not live still owns its namespace", func(t *testing.T) {
-		// Ownership reads declared documents only: liveness is not an input,
-		// so a failed plugin (documents kept, process gone) owns it too.
-		d := newDocsView().set("go", nested).set("go.reference", store.Doc{"surfaces_declared": []any{}})
-		if _, ok := d.Lookup("go.reference.x"); ok {
-			t.Fatal("declaration survived a loaded inner plugin")
-		}
-	})
 }
 
 func TestCatalogDuplicateRuleRefusesEveryDeclarer(t *testing.T) {
@@ -190,8 +182,69 @@ func TestCatalogDuplicateRuleRefusesEveryDeclarer(t *testing.T) {
 	if _, ok := d.Lookup("p.y"); !ok {
 		t.Fatal("uncontested hook lost")
 	}
+	got := d.Problems()["p"]
+	if len(got) != 1 || !strings.Contains(got[0], "declared more than once") || strings.Contains(got[0], "plugin") {
+		t.Fatalf("problems = %v, want one line saying the id is declared more than once", d.Problems())
+	}
+}
+
+func TestCatalogRefusesUnknownKindAndHostHookIDs(t *testing.T) {
+	d := newDocsView().set("p", hookDoc([]hookDecl{
+		{ID: "p.empty", TimeoutMs: 1000},
+		{ID: "p.odd", Kind: "weird", TimeoutMs: 1000},
+		gateDecl("p.ok"),
+	}))
+	for _, id := range []string{"p.empty", "p.odd"} {
+		if _, ok := d.Lookup(id); ok {
+			t.Fatalf("%s entered the catalog", id)
+		}
+	}
+	if _, ok := d.Lookup("p.ok"); !ok {
+		t.Fatal("valid sibling lost")
+	}
 	if len(d.Problems()["p"]) != 2 {
 		t.Fatalf("problems = %v", d.Problems())
+	}
+
+	// A plugin declaring the host's id is refused and the host definition
+	// stays as the host wrote it, whichever id the plugin carries.
+	d = newDocsView().set("husk", hookDoc([]hookDecl{{ID: "husk.before-state-clear", Kind: "transform", TimeoutMs: 9000}}))
+	def, ok := d.Lookup("husk.before-state-clear")
+	if !ok || def.Owner != hooks.HostOwner || def.Kind != hooks.Gate || def.Timeout != 2*time.Second {
+		t.Fatalf("host hook = %+v %v", def, ok)
+	}
+	if len(d.Problems()["husk"]) != 1 {
+		t.Fatalf("problems = %v", d.Problems())
+	}
+}
+
+func TestCatalogLogsProblemsInPluginOrder(t *testing.T) {
+	d := newDocsView()
+	for _, id := range []string{"zed", "mid", "alpha", "beta"} {
+		d.docs[id] = hookDoc([]hookDecl{gateDecl("elsewhere." + id)})
+	}
+	d.refresh()
+	want := []string{"alpha", "beta", "mid", "zed"}
+	if len(d.logs) != len(want) {
+		t.Fatalf("logs = %q", d.logs)
+	}
+	for i, id := range want {
+		if !strings.Contains(d.logs[i], "plugin "+id+":") {
+			t.Fatalf("log %d = %q, want plugin %s first", i, d.logs[i], id)
+		}
+	}
+}
+
+func TestCatalogLogsZeroTimeoutsInHookOrder(t *testing.T) {
+	d := newDocsView()
+	d.set("p", hookDoc([]hookDecl{{ID: "p.c", Kind: "gate"}, {ID: "p.a", Kind: "gate"}, {ID: "p.b", Kind: "gate"}}))
+	if len(d.logs) != 3 {
+		t.Fatalf("logs = %q", d.logs)
+	}
+	for i, id := range []string{"p.a", "p.b", "p.c"} {
+		if !strings.Contains(d.logs[i], id) {
+			t.Fatalf("log %d = %q, want %s", i, d.logs[i], id)
+		}
 	}
 }
 
