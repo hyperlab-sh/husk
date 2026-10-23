@@ -424,7 +424,7 @@ resolution.
 The declarations live in the Pod-owned slices: `<plugin_id>.occupants` and
 `<plugin_id>.contributions` hold one plugin's own claims and entries, their
 Pod is the owner, and their value types are the frozen
-`internal/host/contracts` shapes. Every write is owner-checked — an occupant
+`pkg/host/contracts` shapes. Every write is owner-checked — an occupant
 names its own plugin and a defined host layout surface; a contribution's id
 and `on_click` are the owning plugin's own `<plugin_id>.<name>` with a
 non-empty dot-free name — so nothing outside the plugin's authority commits.
@@ -700,7 +700,7 @@ With one:
   `surfaceGutter` stay as Surfaces constants. `leftSideShown` and
   `rightSideShown` become reads of `husk.layout` and `husk.surfaces`.
 - `pkg/huskipc`: deleted in the retirement. `WorkspaceContextPayload` is gone with it, and the `state.*` request and reply shapes live in `pkg/protocol`.
-- `pkg/manifest` (deleted; now `internal/pods/manifest`): `Plugin` gains an optional `State` block (`scope`,
+- `pkg/manifest` (deleted; now `pkg/pods/manifest`): `Plugin` gains an optional `State` block (`scope`,
   `persistent`, `retention`, `max_bytes`). `Slots` stays: which surfaces a
   plugin claims is declared config; which surface it actually occupies is
   resolved in `husk.surfaces`.

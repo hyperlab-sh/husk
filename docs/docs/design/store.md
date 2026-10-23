@@ -740,7 +740,7 @@ secrets. Explicit `GC` and `ResetSecrets` still do what they say.
 ### Startup and shutdown order
 
 1. `cmd/husk` parses flags into `InstanceDocs`; the composition root
-   (`internal/host.New`) calls `ReadBootstrap`, loads the bundle it names if
+   (`pkg/host` (`New`)) calls `ReadBootstrap`, loads the bundle it names if
    any (a bad bundle stops the start here, [Bundles](bundles.md)), and calls
    `store.Open` with them and the bundle's config as `Options.Bundle`.
 2. State is created with Store as `Hydrator`; `Store.Attach` registers the
@@ -800,7 +800,7 @@ startup snapshot. Configured arrays survive when their flag is absent.
   so no separate `--distribution <dir>` flag is added), `--profile <name>`
   ([Services](services.md)). `main` opens Store before the listener and closes
   it after `model.cleanup`.
-- `pkg/manifest`: deleted in the retirement; `internal/pods/manifest` reads
+- `pkg/manifest`: deleted in the retirement; `pkg/pods/manifest` reads
   `husk-plugin.json` read-only, and the catalog it yields reaches Store through
   `Declare`, called by Pods.
 - `pkg/huskipc`: became `pkg/protocol` ([Protocol](protocol.md)) and was deleted; its

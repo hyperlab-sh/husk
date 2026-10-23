@@ -5,6 +5,30 @@ description: "Slots, plugins and the wire protocol."
 
 # Architecture
 
+## Package layout and embedding
+
+Everything under `pkg/` is public Go API, versioned with the module
+`github.com/hyperlab-sh/husk`. Go-internal directories are reserved for test
+helpers: `pkg/pods/internal/testclock` is not API.
+
+| Path | Purpose |
+| :--- | :--- |
+| `pkg/host` and `pkg/host/contracts` | Host composition root and the ports and frontend seam embedders use |
+| `pkg/substrate` | State and Store |
+| `pkg/stem` | Calls, Dispatcher, hooks, events, surfaces and terminals |
+| `pkg/services` | Profile, settings, theme, keybindings, secrets and their coordinator |
+| `pkg/pods` | Plugin lifecycle, manifests, server and process wrappers |
+| `pkg/cli`, `pkg/instance`, `pkg/bundle`, `pkg/keyspelling` | CLI, discovery, bundle loading and shared key spelling |
+| `pkg/frame`, `pkg/protocol`, `pkg/ptyhost`, `pkg/theme` | Frame geometry, wire types, plugin-side PTYs and palette helpers |
+| `cmd/` and `plugins/` | Executables and out-of-process plugin examples |
+
+An embedding frontend drives `Host.Frontend()` through
+`pkg/host/contracts` (`Frontend`). Its existing `Snapshot` and `OwnSlices` methods
+return `*state.Snapshot` and `*state.Handle` values from the now-public
+`pkg/substrate/state`, so embedders can use the seam directly. The package move
+changes import paths, not the frontend API or wire protocol. See
+[Frontend seams](design/pods.md#level-2-migration-from-today).
+
 ## Process model
 
 The Go host uses Bubble Tea v2 (`charm.land/bubbletea/v2`) for its event loop and Lip Gloss v2 (`charm.land/lipgloss/v2`) for styling. Views declare alternate-screen and mouse tracking settings; typed key and mouse events are translated to the wire's key and mouse notifications.
@@ -307,7 +331,7 @@ Declarations are manifest-only. A plugin's `husk-plugin.json` carries its
 `protocol` major, `command`, `surfaces` (each with an optional `frame`), `actions`, `keybindings`,
 `rail_items`, `published_slots`, `hooks` and `events`, plus optional State
 slice, settings and secrets declarations. [Pods](design/pods.md) specifies the
-schema and `internal/pods/manifest` converts it into the plain declaration
+schema and `pkg/pods/manifest` converts it into the plain declaration
 catalog the rest of the host reads:
 
 ```json

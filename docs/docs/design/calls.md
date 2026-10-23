@@ -298,7 +298,7 @@ Today the only waiting path is plugin-to-plugin hook calls brokered by the host,
 - `cmd/husk/transport.go`: `post` and the 256-slot inbound channel stay; the stdio reader gains reply classification.
 - `pkg/huskipc/queue.go` (moved to `pkg/protocol/queue.go` when `pkg/huskipc` was deleted): unchanged. Its non-blocking `Send`, 1024-line capacity and 5 s write timeout are what `Outbox` relies on; `ErrSendQueueFull` and `ErrWriterClosed` surface as `ErrUnavailable`.
 - `pkg/huskipc/published.go` (deleted): `HookCallPayload.RequestID` and `HookResultPayload.Error` were replaced by the `id` / `result` / `error` envelope of [Protocol](protocol.md).
-- `pkg/manifest` (deleted; now `internal/pods/manifest`): no change from Calls. A per-action timeout field, if added, belongs to the Dispatcher's spec and arrives here as `Options.Timeout`.
+- `pkg/manifest` (deleted; now `pkg/pods/manifest`): no change from Calls. A per-action timeout field, if added, belongs to the Dispatcher's spec and arrives here as `Options.Timeout`.
 - `docs/docs/architecture.md`, Hooks section: the caps and disconnect wording change with the implementation.
 
 ## Decisions made here
