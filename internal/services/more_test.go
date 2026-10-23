@@ -136,7 +136,7 @@ func TestKeybindingCapsAndExactDisable(t *testing.T) {
 	for i := 0; i < 130; i++ {
 		entries = append(entries, map[string]any{"key": string(rune(0x4e00 + i)), "focus": "stage", "action": "files.run"})
 	}
-	in.Declared[store.DeclaredFocusKeymap] = map[string]store.Doc{"files": {"version": 1, "bind": entries}}
+	in.Declared[store.DeclaredKeymap] = map[string]store.Doc{"files": {"version": 1, "bind": entries}}
 	apply(t, kb, in)
 	tooMany := 0
 	for _, p := range kb.Listing().Problems {

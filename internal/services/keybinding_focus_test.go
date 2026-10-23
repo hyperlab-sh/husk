@@ -13,7 +13,7 @@ func focusKeys(t *testing.T, aDoc, bDoc string) *keybinding.Service {
 	kb := keybinding.New()
 	in := catalog("a")
 	in.Declared[store.DeclaredPlugins]["b"] = catalog("b").Declared[store.DeclaredPlugins]["b"]
-	in.Declared[store.DeclaredFocusKeymap] = map[string]store.Doc{"a": doc(aDoc), "b": doc(bDoc)}
+	in.Declared[store.DeclaredKeymap] = map[string]store.Doc{"a": doc(aDoc), "b": doc(bDoc)}
 	apply(t, kb, in)
 	return kb
 }

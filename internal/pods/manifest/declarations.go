@@ -152,8 +152,8 @@ type Suggestion struct {
 	Action string `json:"action"`
 }
 
-// FocusKeymap is the normalized declared focus-keymap document.
-type FocusKeymap struct {
+// Keymap is the normalized declared keymap document.
+type Keymap struct {
 	Version     int              `json:"version"`
 	Bind        []FocusBinding   `json:"bind"`
 	Problems    []BindingProblem `json:"problems,omitempty"`
@@ -177,11 +177,11 @@ func (s Spec) CatalogJSON() ([]byte, error) {
 	return json.Marshal(doc)
 }
 
-// FocusKeymapJSON returns version 1, an always-present bind array and diagnostics.
-func (s Spec) FocusKeymapJSON() ([]byte, error) {
+// KeymapJSON returns version 1, an always-present bind array and diagnostics.
+func (s Spec) KeymapJSON() ([]byte, error) {
 	bind := s.FocusBindings
 	if bind == nil {
 		bind = []FocusBinding{}
 	}
-	return json.Marshal(FocusKeymap{Version: 1, Bind: bind, Problems: s.BindingProblems, Suggestions: s.Suggestions})
+	return json.Marshal(Keymap{Version: 1, Bind: bind, Problems: s.BindingProblems, Suggestions: s.Suggestions})
 }

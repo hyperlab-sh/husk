@@ -566,7 +566,6 @@ The five Services and the coordinator exist. Items below are where the code on `
 - `profile.default` is honoured from the user layer only in the code, as specified, but a value in another layer is silently ignored instead of reported.
 - The `husk settings|theme|profile|secrets|config` subcommands do not exist yet; the Server handlers do.
 - The host built-in keys `husk.layout.rail` and `husk.input.hold_alt` are registered but the frontend still reads the equivalent start flags; `husk.plugins.paths` and `husk.plugins.dirs` are registered and read by nothing.
-- The declared focus-local document is still named `focus-keymap` in the code (`store.DeclaredFocusKeymap`); the spec name is `keymap`.
 - The Keybinding Service ranks layer before scope; [Keybindings](keybindings.md) ranks scope first.
 
 ## Decisions made here

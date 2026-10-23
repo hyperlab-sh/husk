@@ -55,11 +55,11 @@ type PodRegistry interface {
 }
 
 // CatalogDeclarer is launch step 3's Store half. The JSON comes from the
-// manifest Spec's CatalogJSON and FocusKeymapJSON. It may run off the loop.
+// manifest Spec's CatalogJSON and KeymapJSON. It may run off the loop.
 type CatalogDeclarer interface {
-	// Declare stores the plugin's catalog document and focus-keymap document
+	// Declare stores the plugin's catalog document and keymap document
 	// as its declared documents, replacing earlier ones.
-	Declare(pluginID string, catalog, focusKeymap json.RawMessage) error
+	Declare(pluginID string, catalog, keymap json.RawMessage) error
 	// Undeclare removes both documents (Pod teardown only).
 	Undeclare(pluginID string)
 }
