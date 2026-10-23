@@ -403,11 +403,14 @@ func startupError(reports []services.Report, err error) error {
 			if p.Key != "" {
 				text += fmt.Sprintf(" (key %s)", p.Key)
 			}
-			if p.Source != nil {
+			// A message that already names its file (store_error does) carries
+			// its provenance; repeating it would name the file twice.
+			provenance := p.Source != nil && !strings.Contains(p.Message, "file "+p.Source.File)
+			if provenance {
 				text += fmt.Sprintf(" (layer %s, file %s)", p.Source.Layer, p.Source.File)
 			}
 			// Do not discard keys or provenance that exist only on the problem.
-			if p.Message != err.Error() || p.Key != "" || p.Source != nil {
+			if p.Message != err.Error() || p.Key != "" || provenance {
 				sameMessage = false
 			}
 			if !seen[text] {

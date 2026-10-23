@@ -445,7 +445,9 @@ func TestCoordinatorStoreFailureDoesNotPrepareAnyService(t *testing.T) {
 		err     error
 	}{
 		{name: "resolve error", err: errors.New("bad source")},
-		{name: "user parse problem", problem: store.Problem{Code: "parse_error", Layer: store.LayerUser, File: "config.json", Message: "invalid JSON"}},
+		{name: "invalid path error", err: fmt.Errorf("resolve /secret/dir: %w", store.ErrInvalidPath)},
+		{name: "user parse problem", problem: store.Problem{Code: "invalid_document", Layer: store.LayerUser, File: "config.json", Line: 3, Column: 14, Message: `hujson: line 3, column 14: invalid character '"hunter2"'`}},
+		{name: "line without column", problem: store.Problem{Code: "invalid_document", Layer: store.LayerUser, File: "config.json", Line: 7, Message: "invalid JSON"}},
 		{name: "profile read problem", problem: store.Problem{Code: "unreadable", Layer: store.LayerProfile, File: "profiles/work/config.json", Message: "permission denied"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -467,22 +469,54 @@ func TestCoordinatorStoreFailureDoesNotPrepareAnyService(t *testing.T) {
 				if len(rep.Problems) != 1 || rep.Problems[0].Code != "store_error" || rep.Problems[0].Severity != "error" {
 					t.Fatalf("%s report = %+v", rep.Service, rep.Problems)
 				}
-				// The message names the code, layer and config-relative file
-				// but never Store's own text, which may quote a value.
-				want := []string{"configuration could not be loaded"}
-				absent := "bad source"
-				if tc.problem.Code != "" {
-					want = []string{tc.problem.Code, "layer " + string(tc.problem.Layer), tc.problem.File}
-					absent = tc.problem.Message
+				problem := rep.Problems[0]
+				// The message says where the failure is (code, file, layer,
+				// line, column) but never Store's own text, which may quote a
+				// value; an error without a problem gets a coded reason.
+				var want, absent []string
+				var wantSource *c.Source
+				switch {
+				case tc.problem.Code != "":
+					want = []string{tc.problem.Code + ": configuration file " + tc.problem.File, "(layer " + string(tc.problem.Layer) + ")"}
+					if tc.problem.Line > 0 {
+						want = append(want, fmt.Sprintf("line %d", tc.problem.Line))
+					} else {
+						absent = append(absent, "line ")
+					}
+					if tc.problem.Column > 0 {
+						want = append(want, fmt.Sprintf("line %d, column %d", tc.problem.Line, tc.problem.Column))
+					} else {
+						absent = append(absent, "column")
+					}
+					absent = append(absent, tc.problem.Message, "hunter2")
+					wantSource = &c.Source{Layer: string(tc.problem.Layer), File: tc.problem.File, Line: tc.problem.Line}
+				case errors.Is(tc.err, store.ErrInvalidPath):
+					want = []string{"invalid_path: configuration could not be loaded"}
+					absent = []string{"/secret/dir", "store: invalid path"}
+				default:
+					want = []string{"store_failed: configuration could not be loaded"}
+					absent = []string{"bad source"}
 				}
 				for _, text := range want {
-					if !strings.Contains(rep.Problems[0].Message, text) {
-						t.Fatalf("%s message=%q missing %q", rep.Service, rep.Problems[0].Message, text)
+					if !strings.Contains(problem.Message, text) {
+						t.Fatalf("%s message=%q missing %q", rep.Service, problem.Message, text)
 					}
 				}
-				if strings.Contains(rep.Problems[0].Message, absent) {
-					t.Fatalf("%s message=%q leaks %q", rep.Service, rep.Problems[0].Message, absent)
+				for _, text := range absent {
+					if strings.Contains(problem.Message, text) {
+						t.Fatalf("%s message=%q has %q", rep.Service, problem.Message, text)
+					}
 				}
+				if (problem.Source == nil) != (wantSource == nil) || (wantSource != nil && *problem.Source != *wantSource) {
+					t.Fatalf("%s source=%+v want %+v", rep.Service, problem.Source, wantSource)
+				}
+			}
+			if r[0].Problems[0].Source != nil && r[0].Problems[0].Source == r[1].Problems[0].Source {
+				t.Fatal("reports share one Source")
+			}
+			var coded *c.Error
+			if !errors.As(err, &coded) || coded.Code != "unavailable" || coded.Reason != "store_error" || coded.Message != r[0].Problems[0].Message {
+				t.Fatalf("flight error = %v", err)
 			}
 			for _, s := range services {
 				if s.(*fakeService).calls.Load() != 0 {
