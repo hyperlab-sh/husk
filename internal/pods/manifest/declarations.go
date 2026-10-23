@@ -189,7 +189,10 @@ type Suggestion struct {
 	Action string `json:"action"`
 }
 
-// Keymap is the normalized declared keymap document.
+// Keymap is the normalized declared keymap document: the focus-local bindings a
+// plugin's manifest declares (D64). It is not the layered user keymap, which
+// internal/services/keybinding resolves from the Store's keymap layer files
+// (D90); the two share a name and nothing else.
 type Keymap struct {
 	Version     int              `json:"version"`
 	Bind        []FocusBinding   `json:"bind"`

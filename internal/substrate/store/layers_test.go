@@ -173,9 +173,20 @@ func TestParseDocLimitsAndDeclaredIsolation(t *testing.T) {
 	if len(s.Declared("keymap")) != 1 {
 		t.Fatal("declared keymap document is not stored under the name keymap")
 	}
-	r, _ := s.Resolve("keymap", "")
-	if len(r.Doc) != 0 {
-		t.Fatal("declared documents leaked into layers")
+	writeConfig(t, s, []string{"keymap.json"}, `{"layer":"user"}`)
+	r, err := s.Resolve("keymap", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(r.Doc, Doc{"layer": "user"}) {
+		t.Fatal("declared documents leaked into layers:", r.Doc)
+	}
+	layers, err := s.Layers("keymap", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(layers) != 1 || layers[0].Layer != LayerUser || !reflect.DeepEqual(layers[0].Doc, Doc{"layer": "user"}) {
+		t.Fatal("declared documents leaked into layers:", layers)
 	}
 	s.Undeclare("example.notes")
 	if len(s.Declared(DeclaredKeymap)) != 0 || len(s.Declared(DeclaredPlugins)) != 0 {
