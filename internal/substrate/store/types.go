@@ -88,6 +88,9 @@ type LayerDoc struct {
 	// File is config-relative and slash-separated; distribution files are relative
 	// to their root. It is empty for a layer with no single file (flag-folded instance).
 	File string
+	// InstanceFile retains the named-instance source when flags are folded in.
+	// It identifies only values not overridden by flag documents.
+	InstanceFile string
 	// Doc is an independent unmerged object.
 	Doc Doc
 	// MemberOrder records object keys in file order, keyed by JSON pointer.

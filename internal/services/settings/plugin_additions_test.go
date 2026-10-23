@@ -21,7 +21,7 @@ func TestPluginAdditionsLowerLayersAndRestart(t *testing.T) {
 		{"distribution", []store.LayerDoc{{Layer: store.LayerDistribution, Doc: plugins([]string{"a"})}}, []string{"a", "added"}},
 		{"user replaces distribution", []store.LayerDoc{{Layer: store.LayerDistribution, Doc: plugins([]string{"a"})}, {Layer: store.LayerUser, Doc: plugins([]string{"b"})}}, []string{"b", "added"}},
 		{"selected profile wins", []store.LayerDoc{{Layer: store.LayerUser, Doc: plugins([]string{"a"})}, {Layer: store.LayerProfile, Doc: plugins([]string{"b"})}}, []string{"b", "added"}},
-		{"instance excluded", []store.LayerDoc{{Layer: store.LayerUser, Doc: plugins([]string{"a"})}, {Layer: store.LayerInstance, Doc: plugins([]string{"b"})}}, []string{"a", "added"}},
+		{"named instance wins", []store.LayerDoc{{Layer: store.LayerUser, Doc: plugins([]string{"a"})}, {Layer: store.LayerInstance, File: "instances/example/config.json", Doc: plugins([]string{"b"})}}, []string{"b", "added"}},
 		{"null deletes", []store.LayerDoc{{Layer: store.LayerUser, Doc: plugins([]string{"a"})}, {Layer: store.LayerProfile, Doc: plugins(nil)}}, []string{"added"}},
 		{"ancestor replaced", []store.LayerDoc{{Layer: store.LayerUser, Doc: plugins([]string{"a"})}, {Layer: store.LayerProfile, Doc: store.Doc{"husk": "replaced"}}}, []string{"added"}},
 		{"unrelated sibling", []store.LayerDoc{{Layer: store.LayerUser, Doc: plugins([]string{"a"})}, {Layer: store.LayerProfile, Doc: store.Doc{"husk": store.Doc{"other": true}}}}, []string{"a", "added"}},
