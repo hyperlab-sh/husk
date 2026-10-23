@@ -143,6 +143,8 @@ type Process interface {
 	Info() Info
 	Token() string
 	MarkShutdown()
+	// FailVersionMismatch fails the plugin as a major-1 speaker and stops it.
+	FailVersionMismatch()
 	CloseStdin()
 	Terminate() error
 	Kill() error

@@ -64,6 +64,7 @@ func (p *fakeProcess) Info() wrapper.Info {
 }
 func (p *fakeProcess) Send(protocol.Message) error { return nil }
 func (p *fakeProcess) MarkShutdown()               {}
+func (p *fakeProcess) FailVersionMismatch()        {}
 func (p *fakeProcess) CloseStdin()                 { p.once.Do(func() { close(p.done) }) }
 func (p *fakeProcess) Terminate() error            { p.CloseStdin(); return nil }
 func (p *fakeProcess) Kill() error                 { p.CloseStdin(); return nil }

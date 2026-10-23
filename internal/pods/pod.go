@@ -28,6 +28,15 @@ func (p *Pod) Info() wrapper.Info {
 	return v
 }
 
+// ProcessDone is closed when the Pod's process has exited; nil before it was
+// started. Loop-only, like the Pod.
+func (p *Pod) ProcessDone() <-chan struct{} {
+	if p.process == nil {
+		return nil
+	}
+	return p.process.Done()
+}
+
 // Notify implements the Message kinds Sink for this plugin alone.
 func (p *Pod) Notify(method string, params any) error {
 	var raw json.RawMessage

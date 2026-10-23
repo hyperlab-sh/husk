@@ -281,6 +281,9 @@ func (h *Host) Handle(msg tea.Msg) bool {
 	case TeardownMsg:
 		h.teardown(m.PluginID, m.Unreaped)
 		return true
+	case LegacyHelloMsg:
+		h.failLegacy(m.PluginID)
+		return true
 	case RemoveDoneMsg:
 		h.finishRemoval(m)
 		return true
