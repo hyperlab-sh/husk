@@ -26,10 +26,10 @@ func TestTerminalPayloadValidation(t *testing.T) {
 		valid bool
 	}{
 		{"default", TerminalAttachParams{Surface: SurfaceMainStage}, true},
-		{"text", TerminalAttachParams{Surface: SurfaceMainStage, Capture: CaptureText}, true},
-		{"all", TerminalAttachParams{Surface: SurfaceMainStage, Capture: CaptureAll}, true},
+		{"text", TerminalAttachParams{Surface: SurfaceMainStage, Capture: CaptureValueText.Ptr()}, true},
+		{"all", TerminalAttachParams{Surface: SurfaceMainStage, Capture: CaptureValueAll.Ptr()}, true},
 		{"invalid-surface", TerminalAttachParams{Surface: "missing"}, false},
-		{"invalid-capture", TerminalAttachParams{Surface: SurfaceMainStage, Capture: "unknown"}, false},
+		{"invalid-capture", TerminalAttachParams{Surface: SurfaceMainStage, Capture: CaptureValue("unknown").Ptr()}, false},
 		{"negative-history", TerminalAttachParams{Surface: SurfaceMainStage, Scrollback: &negative}, false},
 		{"history-limit", TerminalAttachParams{Surface: SurfaceMainStage, Scrollback: &limit}, true},
 		{"history-over-limit", TerminalAttachParams{Surface: SurfaceMainStage, Scrollback: &over}, false},

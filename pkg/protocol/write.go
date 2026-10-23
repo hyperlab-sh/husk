@@ -20,7 +20,16 @@ func NewWriter(w io.Writer) *Writer { return &Writer{w: w} }
 
 // Send validates and writes or queues m. It never silently drops a message.
 // Queued Send never waits for the peer, but encoding still runs on the caller.
-func (w *Writer) Send(m Message) error {
+func (w *Writer) Send(m Message) error { return w.send(m, false) }
+
+// TrySend offers a message without failing a full queue. A synchronous writer
+// refuses the offer rather than blocking. Transport errors still fail the queue.
+func (w *Writer) TrySend(m Message) error { return w.send(m, true) }
+
+func (w *Writer) send(m Message, try bool) error {
+	if try && w.q == nil {
+		return ErrSendQueueFull
+	}
 	if err := m.Validate(); err != nil {
 		return err
 	}
@@ -34,7 +43,7 @@ func (w *Writer) Send(m Message) error {
 		return ErrLineTooLong
 	}
 	if w.q != nil {
-		return w.q.enqueue(b.Bytes())
+		return w.q.offer(b.Bytes(), !try)
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()

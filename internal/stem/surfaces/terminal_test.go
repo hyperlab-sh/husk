@@ -3,6 +3,7 @@ package surfaces
 import (
 	"encoding/base64"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
+	"go.uber.org/goleak"
 	"strings"
 	"testing"
 )
@@ -84,14 +85,22 @@ func TestTerminalLifecycleAndLimits(t *testing.T) {
 	}
 	for _, end := range []string{"close", "exit", "shutdown"} {
 		t.Run(end, func(t *testing.T) {
+			defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+			input := make(chan []byte, 2)
 			if end != "close" {
 				pods.claim("p", string(id))
 				dead["p"] = false
 				e.LivenessChanged()
 				settle(st, e)
 			}
-			if _, err := e.TerminalAttach("p", attach, size, nil); err != nil {
+			if _, err := e.TerminalAttach("p", attach, size, func(b []byte) { input <- b }); err != nil {
 				t.Fatal(err)
+			}
+			if err := e.TerminalWrite("p", protocol.TerminalWriteParams{Surface: id, Data: base64.StdEncoding.EncodeToString([]byte("\x1b[6n"))}); err != nil {
+				t.Fatal(err)
+			}
+			if string(<-input) != "\x1b[1;1R" {
+				t.Fatal("live drain query lost")
 			}
 			switch end {
 			case "close":

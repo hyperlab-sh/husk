@@ -245,6 +245,17 @@ func (w *Wrapper) Send(m protocol.Message) error {
 	return q.Send(m)
 }
 
+// TrySend offers terminal input without failing the Pod on queue overflow.
+func (w *Wrapper) TrySend(m protocol.Message) error {
+	w.mu.Lock()
+	q, live, finished := w.queue, w.live, w.finished
+	w.mu.Unlock()
+	if finished || q == nil || !live {
+		return ErrNotLive
+	}
+	return q.TrySend(m)
+}
+
 // MarkShutdown makes any subsequent exit normal and refuses new sends.
 func (w *Wrapper) MarkShutdown() {
 	w.mu.Lock()

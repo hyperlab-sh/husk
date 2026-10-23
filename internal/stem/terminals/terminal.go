@@ -5,6 +5,8 @@ package terminals
 
 import (
 	"io"
+	"unicode"
+	"unicode/utf8"
 
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
@@ -46,8 +48,13 @@ func New(width, height, scrollback int, send func([]byte)) *Terminal {
 	e.SetScrollbackSize(scrollback)
 	t := &Terminal{em: e, pipe: e.InputPipe().(*io.PipeWriter), done: make(chan struct{}), modes: map[ansi.Mode]bool{}}
 	e.SetCallbacks(vt.Callbacks{
-		Title:       func(s string) { t.title = s },
-		EnableMode:  func(m ansi.Mode) { t.modes[m] = true },
+		Title: func(s string) { t.title = s },
+		EnableMode: func(m ansi.Mode) {
+			t.modes[m] = true
+			if m == ansi.ModeFocusEvent && t.focused {
+				e.Focus()
+			}
+		},
 		DisableMode: func(m ansi.Mode) { delete(t.modes, m) },
 	})
 	go func() {
@@ -131,7 +138,13 @@ func (t *Terminal) Key(k uv.KeyPressEvent) {
 	// and repeat metadata must not turn ctrl+c into a printable c.
 	k.IsRepeat = false
 	if k.Mod.Contains(uv.ModCtrl) {
-		k.Text = ""
+		r, n := utf8.DecodeRuneInString(k.Text)
+		layout := n == len(k.Text) && n > 0 && unicode.IsPrint(r) && !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z')
+		if k.Mod.Contains(uv.ModAlt) && layout {
+			k.Mod &^= uv.ModCtrl | uv.ModAlt
+		} else {
+			k.Text = ""
+		}
 	}
 	t.em.SendKey(k)
 }
@@ -169,6 +182,11 @@ func (t *Terminal) Mouse(event uv.MouseEvent) {
 	}
 	if _, ok := event.(uv.MouseReleaseEvent); ok && mode == ansi.ModeMouseX10 {
 		return
+	}
+	if release, ok := event.(uv.MouseReleaseEvent); ok && !t.modes[ansi.ModeMouseExtSgr] {
+		// Legacy release uses button code 3, not the released button's code.
+		release.Button = uv.MouseNone
+		event = release
 	}
 	t.em.SendMouse(event)
 }

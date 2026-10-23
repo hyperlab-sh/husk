@@ -9,7 +9,10 @@ import (
 )
 
 // Terminal adapts the plugin-only terminal byte stream methods.
-type Terminal struct{ Port contracts.TerminalPort }
+type Terminal struct {
+	Port contracts.TerminalPort
+	Logf func(string, ...any)
+}
 
 // Serve implements contracts.Handler.
 func (h Terminal) Serve(ctx context.Context, c contracts.Caller, req protocol.Message, _ contracts.Notifier) protocol.Message {
@@ -33,13 +36,13 @@ func (h Terminal) Serve(ctx context.Context, c contracts.Caller, req protocol.Me
 	case protocol.MethodTerminalWrite:
 		var p protocol.TerminalWriteParams
 		if bad := handlers.DecodeParams(req, &p); bad != nil {
-			return *bad
+			return h.invalidWrite(req, *bad)
 		}
 		if _, err := p.Decode(); err != nil {
-			return handlers.InvalidParams(req, "params", err.Error())
+			return h.invalidWrite(req, handlers.InvalidParams(req, "params", err.Error()))
 		}
 		if err := h.Port.TerminalWrite(ctx, c, p); err != nil {
-			return handlers.ErrorReply(req, err)
+			return h.invalidWrite(req, handlers.ErrorReply(req, err))
 		}
 		return handlers.Reply(req, nil)
 	case protocol.MethodTerminalDetach:
@@ -56,4 +59,14 @@ func (h Terminal) Serve(ctx context.Context, c contracts.Caller, req protocol.Me
 		return handlers.Reply(req, nil)
 	}
 	return handlers.UnknownMethod(req)
+}
+
+func (h Terminal) invalidWrite(req, reply protocol.Message) protocol.Message {
+	if req.ID != nil {
+		return reply
+	}
+	if h.Logf != nil {
+		h.Logf("terminals: dropped invalid write: %s", reply.Error.Code)
+	}
+	return handlers.Reply(req, nil)
 }

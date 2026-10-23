@@ -18,6 +18,8 @@ type TerminalPort struct {
 	Size    func(string, protocol.SurfaceID) protocol.TerminalAttachResult
 	Sender  func(string) func(protocol.Message) error
 	Content contracts.ContentSink
+	// Logf must be worker-safe: terminal drains never reenter the loop.
+	Logf func(string, ...any)
 }
 
 // TerminalAttach implements contracts.TerminalPort.
@@ -31,9 +33,9 @@ func (p TerminalPort) TerminalAttach(ctx context.Context, c contracts.Caller, pa
 		var err error
 		result, err = p.Engine.TerminalAttach(c.PluginID, params, p.Size(c.PluginID, params.Surface), func(b []byte) {
 			raw, _ := json.Marshal(protocol.TerminalInputParams{Surface: params.Surface, Data: base64.StdEncoding.EncodeToString(b)})
-			// Queue failure is handled by the existing Pod transport policy. The
-			// drain never retries, waits for the host loop or writes State.
-			_ = send(protocol.Message{Method: protocol.MethodTerminalInput, Params: raw})
+			if err := send(protocol.Message{Method: protocol.MethodTerminalInput, Params: raw}); err != nil && p.Logf != nil {
+				p.Logf("terminals: dropped input for %s: %v", params.Surface, err)
+			}
 		})
 		return err
 	})
@@ -54,10 +56,11 @@ func (p TerminalPort) TerminalDetach(ctx context.Context, c contracts.Caller, pa
 		return err
 	}
 	return p.run(ctx, func() error {
+		attached := p.Engine.Terminal(params.Surface) != nil
 		if err := p.Engine.TerminalDetach(c.PluginID, params); err != nil {
 			return err
 		}
-		if p.Content != nil {
+		if attached && p.Content != nil {
 			p.Content(c.PluginID, protocol.SurfaceUpdateParams{Surface: params.Surface, Lines: []string{}})
 		}
 		return nil

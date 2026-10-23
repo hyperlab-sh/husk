@@ -1,6 +1,8 @@
 # Terminal plugin
 
-A small plugin that hosts an arbitrary terminal program in `main-stage`.
+A small plugin that hosts an arbitrary terminal program in its manifest-occupied surface
+(`main-stage` by default). It waits for a usable `surface.resized` entry before
+attaching, so moving its manifest to another surface requires no code change.
 The plugin owns the process and PTY; Husk owns the terminal emulator and cell
 rendering. Linux and macOS are supported; Windows ConPTY is not implemented.
 
@@ -20,7 +22,11 @@ change the manifest command, preserving argv boundaries:
 
 The child receives `TERM=xterm-256color`, `COLORTERM=truecolor`,
 `TERM_PROGRAM=husk` and the inherited `HUSK_SOCKET_PATH`, but never the plugin's
-`HUSK_PLUGIN_TOKEN`. PTY output is sent in bounded base64 chunks. Resizes update
+`HUSK_PLUGIN_TOKEN`. PTY output is sent in bounded base64 chunks, with one acknowledged write request
+in flight. The PTY reader waits for ingestion before reading the next chunk, so
+large outputs are backpressured rather than overflowing host admission. Encoded
+input uses a separate bounded writer queue; a stalled child drops and logs excess
+input without blocking the plugin's control-message reader. Resizes update
 the PTY's winsize and signal the foreground program with `SIGWINCH` so it can
 redraw. Previously printed lines are not reflowed by the host emulator.
 
@@ -29,5 +35,7 @@ Ctrl+] and then one host shortcut to temporarily release capture; the release
 expires after 1500 ms. To send Ctrl+] itself, press it twice.
 
 Child exit detaches and closes the surface. Plugin shutdown hangs up the whole
-child process group. The reusable plugin-side pump lives in `pkg/ptyhost`;
+child process group, waits up to 500 ms, then kills and reaps a stubborn leader.
+On Linux, the leader also receives SIGKILL if the plugin dies unexpectedly;
+macOS has no equivalent parent-death facility. The reusable plugin-side pump lives in `pkg/ptyhost`;
 core host packages never allocate a PTY or launch the child program.

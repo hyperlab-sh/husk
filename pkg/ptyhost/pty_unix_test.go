@@ -80,6 +80,9 @@ func TestPTYOutputResizeInputAndEnvironment(t *testing.T) {
 }
 
 func TestPTYCloseHangsUpProcessGroup(t *testing.T) {
+	// The reexecuted race binary's default one-second os.Exit delay would
+	// exceed the shutdown grace even after its child has been reaped.
+	t.Setenv("GORACE", "atexit_sleep_ms=0")
 	c, err := Start([]string{os.Args[0], "-test.run=^TestPTYHelper$", "--", "parent"}, Options{Width: 80, Height: 24})
 	if err != nil {
 		t.Fatal(err)
@@ -132,6 +135,10 @@ func TestPTYHelper(t *testing.T) {
 			os.Exit(4)
 		}
 		os.Exit(0)
+	case "stubborn":
+		fmt.Println("STUBBORN")
+		for range hup {
+		}
 	case "child":
 		fmt.Printf("CHILD:%d\n", os.Getpid())
 		<-hup

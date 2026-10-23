@@ -1,13 +1,19 @@
 // Package ptyhost is the plugin-side PTY pump. The Husk host does not import it.
 package ptyhost
 
-import "strings"
+import (
+	"strings"
+	"time"
+)
 
 // Options describes the initial PTY geometry and inherited environment. Nil Env
 // uses the process environment. Credentials are always removed from the child.
 type Options struct {
 	Width, Height int
 	Env           []string
+	// StopGrace defaults to 500 ms. After is injectable for deterministic tests.
+	StopGrace time.Duration
+	After     func(time.Duration) <-chan time.Time
 }
 
 // Environment sets terminal capabilities without passing plugin credentials.

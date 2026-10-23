@@ -695,7 +695,18 @@
     "TerminalAttachParams": {
       "properties": {
         "capture": {
-          "type": "string"
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "enum": [
+                "text",
+                "all"
+              ],
+              "type": "string"
+            }
+          ]
         },
         "scrollback": {
           "type": "integer"

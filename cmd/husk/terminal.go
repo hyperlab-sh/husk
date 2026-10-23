@@ -104,7 +104,8 @@ func (m *WorkbenchModel) routeTerminalMouse(event tea.MouseMsg) bool {
 		if x < 0 || y < 0 || x >= r.InnerW || y >= r.InnerH {
 			return false
 		}
-		if !m.modalOwner().Open() && m.focusedSlot != hit.id {
+		_, wheel := event.(tea.MouseWheelMsg)
+		if !wheel && !m.modalOwner().Open() && m.focusedSlot != hit.id {
 			if _, ok := event.(tea.MouseClickMsg); ok {
 				m.setFocus(hit.id)
 			}

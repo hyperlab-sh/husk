@@ -35,9 +35,11 @@ func (e *Engine) TerminalAttach(plugin string, p protocol.TerminalAttachParams, 
 	}
 	term := terminals.New(size.Width, size.Height, history, send)
 	e.terminals[p.Surface] = attachment{plugin, term}
-	capture := p.Capture
-	if capture == protocol.CaptureNone {
-		capture = protocol.CaptureAll
+	term.Focus(e.terminalFocus[p.Surface])
+	e.terminalDirty = true
+	capture := protocol.CaptureAll
+	if p.Capture != nil {
+		capture = p.Capture.Mode()
 	}
 	e.absorbForeign()
 	if err := e.slice.Update(func(v *Surfaces) {
@@ -47,7 +49,11 @@ func (e *Engine) TerminalAttach(plugin string, p protocol.TerminalAttachParams, 
 		if v.Terminals == nil {
 			v.Terminals = map[protocol.SurfaceID]contracts.TerminalMetadata{}
 		}
-		v.Capture[p.Surface] = capture
+		if capture == protocol.CaptureNone {
+			delete(v.Capture, p.Surface)
+		} else {
+			v.Capture[p.Surface] = capture
+		}
 		v.Terminals[p.Surface] = contracts.TerminalMetadata{}
 	}); err != nil {
 		term.Close()
@@ -79,7 +85,11 @@ func (e *Engine) TerminalWrite(plugin string, p protocol.TerminalWriteParams) er
 		e.log.Printf("terminals: dropped write to unattached or foreign surface %s", p.Surface)
 		return nil
 	}
+	before := a.term.Metadata()
 	a.term.Write(b)
+	if a.term.Metadata() != before {
+		e.terminalDirty = true
+	}
 	return nil
 }
 
@@ -110,6 +120,13 @@ func (e *Engine) detachTerminal(surface protocol.SurfaceID) {
 }
 
 func (e *Engine) flushTerminals() {
+	if !e.terminalDirty {
+		return
+	}
+	e.terminalDirty = false
+	if len(e.terminals) == 0 {
+		return
+	}
 	current := map[protocol.SurfaceID]contracts.TerminalMetadata{}
 	for id, a := range e.terminals {
 		m := a.term.Metadata()

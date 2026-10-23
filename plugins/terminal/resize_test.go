@@ -91,6 +91,12 @@ func TestTerminalResizeSignalsAndRedraws(t *testing.T) {
 		}
 		output.Write(b)
 		term.Write(b)
+		if m.ID == nil {
+			t.Fatal("unacknowledged output")
+		}
+		if err := socket.Send(protocol.Message{ID: m.ID, Result: json.RawMessage(`{}`)}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	resize(80, 24)
 	attach := next()
