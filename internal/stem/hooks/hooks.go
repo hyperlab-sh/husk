@@ -568,6 +568,36 @@ func (r *Runner) release(hook string) {
 	}
 }
 
+// Listed is one hook.list entry: a declared hook with its subscribers.
+type Listed struct {
+	HookDef
+	// Subscribers is sorted as Catalog.Subscribers returns it.
+	Subscribers []ListedSubscriber
+}
+
+// ListedSubscriber is one registration with its plugin's liveness.
+type ListedSubscriber struct {
+	Plugin   string
+	Priority int
+	// Live is true when the plugin's status is live now.
+	Live bool
+}
+
+// List backs hook.list: every declared hook in the catalog's order, with its
+// subscribers and their liveness. Loop-confined, like Call.
+func (r *Runner) List() []Listed {
+	defs := r.opts.Catalog.List()
+	out := make([]Listed, len(defs))
+	for i, def := range defs {
+		subs := r.opts.Catalog.Subscribers(def.ID)
+		out[i] = Listed{HookDef: def, Subscribers: make([]ListedSubscriber, len(subs))}
+		for j, sub := range subs {
+			out[i].Subscribers[j] = ListedSubscriber{Plugin: sub.Plugin, Priority: sub.Priority, Live: r.opts.Liveness.Live(sub.Plugin)}
+		}
+	}
+	return out
+}
+
 // Pending reports how many hook legs are awaiting a reply.
 func (r *Runner) Pending() int { return len(r.legs) }
 

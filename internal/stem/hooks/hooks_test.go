@@ -988,3 +988,27 @@ func TestReplySizeLimitIsMeasuredOnCompactJSONForEveryKind(t *testing.T) {
 		t.Fatal("an oversized veto must count as allow")
 	}
 }
+
+func TestListCarriesSubscribersWithLiveness(t *testing.T) {
+	cat := (&fakeCatalog{}).declare("notes.resolve", "notes", Transform, "preview", "stats")
+	g := newRig(t, cat, fakeLiveness{"preview": true}, calls.TableOptions{})
+	got := g.r.List()
+	want := []Listed{{
+		HookDef: cat.defs["notes.resolve"],
+		Subscribers: []ListedSubscriber{
+			{Plugin: "preview", Priority: 10, Live: true},
+			{Plugin: "stats", Priority: 11, Live: false},
+		},
+	}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("List = %#v, want %#v", got, want)
+	}
+}
+
+func TestListHookWithoutSubscribersHasEmptyList(t *testing.T) {
+	cat := (&fakeCatalog{}).declare("notes.alone", "notes", Gate)
+	got := newRig(t, cat, fakeLiveness{}, calls.TableOptions{}).r.List()
+	if len(got) != 1 || got[0].Subscribers == nil || len(got[0].Subscribers) != 0 {
+		t.Fatalf("List = %#v", got)
+	}
+}
