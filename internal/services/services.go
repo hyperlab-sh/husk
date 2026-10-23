@@ -237,6 +237,14 @@ func (co *Coordinator) AwaitProfile(name string) profile.Waiter {
 	return co.waiter(co.request(ReasonProfile, true))
 }
 
+// Settled implements profile.Reloader. An applied name alone is insufficient:
+// a captured flight may be switching away, with another selection queued.
+func (co *Coordinator) Settled(name string) bool {
+	co.mu.Lock()
+	defer co.mu.Unlock()
+	return co.active == nil && co.queued == nil && co.haveSelected && co.selected == name
+}
+
 // LastReports implements profile.Reloader.
 func (co *Coordinator) LastReports() []Report {
 	co.mu.Lock()
