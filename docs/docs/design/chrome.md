@@ -361,7 +361,7 @@ included: the rule, not the palette, is what keeps it so.
    icon; the palette prompt glyph `❯` (the palette is the focused element
    while it is open); the divider under drag; the marker on the current theme
    in the Settings center's Theme tab; the Settings center's focused tab
-   label and its focused form field. The focused surface's border is
+   label, its focused form field and its focused profile corner. The focused surface's border is
    `border_focused`, a role of its own. No key, hint, brand, label, title or
    badge is accent-coloured for being one.
 3. **`accent_secondary` and `accent_soft` are for plugins.** The chrome never
@@ -425,7 +425,8 @@ complied.
 After the migration the frame (rail, bars, surfaces, palette, prompts)
 draws `accent` in three places: the active rail icon, the palette prompt and
 the dragged divider. The Settings center adds its own rule-2 uses (the Theme
-tab's current-theme marker, the focused tab label, the focused form field).
+tab's current-theme marker, the focused tab label, the focused form field and
+the focused profile corner).
 Status roles appear only inside `drawToast` and in the shared `statusMark`
 helper (`cmd/husk/status.go`), which draws a status glyph or a one-word status
 badge in its level colour, used by the secret prompt (its `⚠`) and the
@@ -455,7 +456,7 @@ regenerated for these moves ("Tests and goldens").
 | Occupant leaves `live` | Engine vacates; the surface shows its name from that tick |
 | Occupant claimed, no content yet | Blank canvas (slot background), not the name |
 | Palette name empty | Theme slot shows `theme` |
-| Theme name clicked before the Settings center exists | Click consumed, nothing happens |
+| Theme name clicked while another modal, the palette or the secret prompt is up | Click consumed; the action declines, nothing opens |
 | Theme name longer than 24 cells | Clipped with `…`; the label and the hints are unaffected |
 | Bottom bar too narrow for every hint group | Groups dropped from the end until the rest fits; the label and the theme name stay |
 | Rail shorter than the tiles need | Tiles that do not fit are not drawn, as today |
@@ -523,8 +524,8 @@ rail and surface hit-testing, including modal-only consumption (the open
 palette and the secret prompt still take every click first). Its rect is
 computed by the same pure function rendering uses; `View` records no hit
 state. The action it runs is `husk.settings.open`
-with `tab: theme` ([Settings center](settings-center.md)); until that lands
-the handler is a no-op that still consumes the click.
+with `tab: theme` ([Settings center](settings-center.md)); when the center is
+already open, the click switches it to Theme and focuses the content.
 
 [Architecture](../architecture.md) ("Slots", "Surfaces and frames", "Minimum
 size", "Input routing"), [Services](services.md) ("Settings", `theme.name`),

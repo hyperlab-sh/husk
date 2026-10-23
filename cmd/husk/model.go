@@ -941,9 +941,13 @@ func (m *WorkbenchModel) dropGoneSurfaces() {
 // bounded so a flapping host cannot spin the loop.
 func (m *WorkbenchModel) settle() {
 	defer m.toastFailures()
+	// Settings needs the final serving snapshot, not each stabilization pass.
+	defer m.refreshSettings()
+	if m.settings != nil && m.layoutFrozen() {
+		m.closeSettings() // clear the overlay before flushing frontend State
+	}
 	for range 4 {
 		changed := m.refresh()
-		m.refreshSettings()
 		wrote := m.flushState()
 		if wrote && m.host != nil {
 			m.host.Tick()
@@ -1181,7 +1185,13 @@ func (m *WorkbenchModel) hostActionTable() map[string]contracts.HostActionHandle
 		"husk.theme.select": func(map[string]any) (map[string]any, error) {
 			return m.openSettings(map[string]any{"tab": "theme"})
 		},
-		"husk.palette.open": do(m.openPalette),
+		"husk.palette.open": func(map[string]any) (map[string]any, error) {
+			if m.settings != nil {
+				return nil, contracts.ErrDeclined
+			}
+			m.openPalette()
+			return nil, nil
+		},
 		"husk.hotspots.toggle_stage": do(func() {
 			m.activeRailID = ""
 			m.activePlacement = ""

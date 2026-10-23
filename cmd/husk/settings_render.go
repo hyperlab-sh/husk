@@ -17,7 +17,10 @@ func settingsHuhTheme(p drawPalette) huh.Theme {
 		t := huh.ThemeBase(false)
 		base := lipgloss.NewStyle().Foreground(p.Ink).Background(p.SurfaceElevated)
 		muted := base.Foreground(p.InkMuted)
-		t.Form.Base, t.Group.Base = base, base
+		t.Form.Base = base
+		// A styled empty Group.Base makes huh's hidden footer non-empty,
+		// reserving a phantom row and shifting the Select viewport.
+		t.Group.Base = lipgloss.NewStyle()
 		t.Group.Title, t.Group.Description = base, muted
 		for _, f := range []*huh.FieldStyles{&t.Focused, &t.Blurred} {
 			f.Base = base
@@ -53,7 +56,8 @@ func (m *WorkbenchModel) settingsContentRect() image.Rectangle {
 }
 func (m *WorkbenchModel) settingsCornerRect() image.Rectangle {
 	r := m.settingsRect()
-	return image.Rect(r.Max.X-26, r.Min.Y, r.Max.X-2, r.Min.Y+1)
+	w := ansi.StringWidth(m.settingsCorner())
+	return image.Rect(r.Max.X-2-w, r.Min.Y, r.Max.X-2, r.Min.Y+1)
 }
 func (m *WorkbenchModel) settingsProfileRect() image.Rectangle {
 	r := m.settingsRect()
@@ -93,7 +97,7 @@ func (m *WorkbenchModel) drawSettings(c *canvas) uv.Rectangle {
 	if s.focus == settingsProfileFocus {
 		style = base.Foreground(m.palette.Accent)
 	}
-	c.blitBlock(corner.Min.X, corner.Min.Y, style.Render(m.settingsCorner()))
+	c.blitBlock(corner.Min.X-1, corner.Min.Y, style.Render(" "+m.settingsCorner()+" "))
 	labels := []string{"General", "Keys", "Theme", "Plugins", " Store", " Installed"}
 	tabs := []string{"general", "keys", "theme", "", "store", "installed"}
 	for row, label := range labels {
@@ -161,7 +165,10 @@ func (m *WorkbenchModel) drawSettings(c *canvas) uv.Rectangle {
 	case settingsProfileFocus:
 		footer += base.Bold(true).Render("enter") + muted.Render(" profiles · ")
 	}
-	footer += base.Bold(true).Render("esc") + muted.Render(" close (discards edits)")
+	footer += base.Bold(true).Render("esc") + muted.Render(" close")
+	if s.dirty() {
+		footer += muted.Render(" (discards edits)")
+	}
 	if s.profileForm != nil {
 		footer = muted.Render("applies now; persisting is husk profile use --save")
 	}

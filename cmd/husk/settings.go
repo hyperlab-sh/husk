@@ -38,6 +38,7 @@ type settingsCenter struct {
 	switching        bool
 	profileError     string
 	profileForm      *huh.Form
+	profileSelect    *huh.Select[string]
 	profileChoice    string
 	profileNames     []string
 	profileTop       int
@@ -45,6 +46,9 @@ type settingsCenter struct {
 	styled           protocol.Palette
 	indices          map[string]int
 }
+
+// dirty will include editable fields as their tabs land. U4 has none.
+func (s *settingsCenter) dirty() bool { return false }
 
 func (m *WorkbenchModel) settingsTab() string {
 	if m.settings == nil {
@@ -68,6 +72,9 @@ func (m *WorkbenchModel) openSettings(args map[string]any) (map[string]any, erro
 	if m.settings != nil {
 		if tab != "" {
 			m.settings.tab = tab
+			if tab == "theme" {
+				m.settings.focus = settingsContentFocus
+			}
 			m.lastSettingsTab = tab
 		}
 		return nil, nil
@@ -150,12 +157,17 @@ func (m *WorkbenchModel) refreshSettings() {
 		}
 	}
 	if s.profileForm != nil && (s.styled != protocol.Palette(m.served) || !maps.Equal(s.indices, m.ansi)) {
-		s.profileForm.WithTheme(settingsHuhTheme(m.palette))
-		s.styled, s.indices = protocol.Palette(m.served), maps.Clone(m.ansi)
+		// huh's Select.WithTheme only accepts its first theme. Rebuild the
+		// field with the same choice instead of leaving its old styles live.
+		m.buildSettingsProfiles(s.profileChoice)
 	}
 	if s.profileForm != nil {
 		r := m.settingsProfileRect()
+		s.profileSelect.Height(r.Dy()) // also grow again after a terminal resize
 		s.profileForm.WithWidth(r.Dx()).WithHeight(r.Dy())
+		// huh caches the group's viewport. Theme/size setters alone do not
+		// rebuild its content; a non-input update refreshes it without a write.
+		s.profileForm.Update(nil)
 		s.profileView = s.profileForm.View()
 		s.profileTop = settingsListTop(s.profileTop, max(0, slices.Index(s.profileNames, s.profileChoice)), len(s.profileNames), r.Dy()-1)
 	}
@@ -358,8 +370,8 @@ func (m *WorkbenchModel) buildSettingsProfiles(choice string) {
 		}
 	}
 	s.profileChoice = choice
-	field := huh.NewSelect[string]().Title("Profile").Options(options...).Value(&s.profileChoice)
-	s.profileForm = huh.NewForm(huh.NewGroup(field)).WithShowHelp(false).WithShowErrors(false).WithTheme(settingsHuhTheme(m.palette)).WithWidth(m.settingsProfileRect().Dx())
+	s.profileSelect = huh.NewSelect[string]().Title("Profile").Options(options...).Value(&s.profileChoice).Height(m.settingsProfileRect().Dy())
+	s.profileForm = huh.NewForm(huh.NewGroup(s.profileSelect)).WithShowHelp(false).WithShowErrors(false).WithTheme(settingsHuhTheme(m.palette)).WithWidth(m.settingsProfileRect().Dx())
 	s.styled, s.indices = protocol.Palette(m.served), maps.Clone(m.ansi)
 	m.cmds = append(m.cmds, s.profileForm.Init())
 }

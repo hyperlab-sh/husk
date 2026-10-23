@@ -3,10 +3,10 @@ package main
 import (
 	"errors"
 	"fmt"
-	"go/ast"
 	"go/parser"
 	"go/token"
 	"image"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -92,7 +92,7 @@ func TestSettingsOpeningMemoryAndArguments(t *testing.T) {
 func TestSettingsDeclinesWithoutChangingOverlays(t *testing.T) {
 	for _, state := range []string{"frozen", "modal", "palette", "secret"} {
 		t.Run(state, func(t *testing.T) {
-			m, _ := settingsFixture(t, "")
+			m, fe := settingsFixture(t, "")
 			switch state {
 			case "frozen":
 				m.width = 83
@@ -103,10 +103,17 @@ func TestSettingsDeclinesWithoutChangingOverlays(t *testing.T) {
 			case "secret":
 				m.secretPrompt = &secretPromptState{}
 			}
+			m.attachSlices()
+			m.settle()
+			before := len(fe.Views)
 			for _, action := range []string{"husk.settings.open", "husk.theme.select"} {
 				_, err := m.actions[action](nil)
+				m.settle()
 				if !errors.Is(err, contracts.ErrDeclined) || m.settings != nil {
 					t.Fatalf("%s: %v", action, err)
+				}
+				if len(fe.Views) != before || fe.Views[len(fe.Views)-1].Overlays.SettingsCenter != "" {
+					t.Fatalf("%s changed overlays: %+v", action, fe.Views)
 				}
 			}
 		})
@@ -114,7 +121,7 @@ func TestSettingsDeclinesWithoutChangingOverlays(t *testing.T) {
 }
 
 func TestSettingsThemeEntryPointsAndPillPrecedence(t *testing.T) {
-	for _, entry := range []string{"alias", "action", "pill", "palette"} {
+	for _, entry := range []string{"alias", "action", "action open", "pill", "pill closed", "palette"} {
 		t.Run(entry, func(t *testing.T) {
 			m, _ := settingsFixture(t, "")
 			switch entry {
@@ -122,8 +129,13 @@ func TestSettingsThemeEntryPointsAndPillPrecedence(t *testing.T) {
 				m.actions["husk.theme.select"](nil)
 			case "action":
 				m.actions["husk.settings.open"](map[string]any{"tab": "theme"})
-			case "pill":
+			case "action open":
 				m.openSettings(nil)
+				m.actions["husk.settings.open"](map[string]any{"tab": "theme"})
+			case "pill", "pill closed":
+				if entry == "pill" {
+					m.openSettings(nil)
+				}
 				r := themePillRect(m.width, m.height, m.palette.Name)
 				m.Update(tea.MouseClickMsg{X: r.Min.X, Y: r.Min.Y, Button: tea.MouseLeft})
 			case "palette":
@@ -131,8 +143,8 @@ func TestSettingsThemeEntryPointsAndPillPrecedence(t *testing.T) {
 				m.paletteQuery = "Select theme"
 				settingsPress(m, "enter")
 			}
-			if m.settingsTab() != "theme" || m.showPalette {
-				t.Fatal("entry point did not open Theme")
+			if m.settingsTab() != "theme" || m.showPalette || m.settings.focus != settingsContentFocus {
+				t.Fatal("entry point did not open Theme with content focus")
 			}
 		})
 	}
@@ -376,7 +388,15 @@ func TestSettingsMouseAndGeometry(t *testing.T) {
 			if m.settingsTab() != "keys" {
 				t.Fatal("tab click")
 			}
+			wantCorner := image.Rect(r.Max.X-2-ansi.StringWidth(m.settingsCorner()), r.Min.Y, r.Max.X-2, r.Min.Y+1)
 			corner := m.settingsCornerRect()
+			if corner != wantCorner {
+				t.Fatalf("corner hit rect %v, want drawn text %v", corner, wantCorner)
+			}
+			m.Update(tea.MouseClickMsg{X: wantCorner.Min.X - 2, Y: corner.Min.Y, Button: tea.MouseLeft})
+			if m.settings.profileForm != nil {
+				t.Fatal("bare border opened Select")
+			}
 			m.Update(tea.MouseClickMsg{X: corner.Min.X, Y: corner.Min.Y, Button: tea.MouseLeft})
 			if m.settings.profileForm == nil {
 				t.Fatal("corner click")
@@ -411,26 +431,44 @@ func TestSettingsViewIsPureAndUsesPalette(t *testing.T) {
 }
 
 func TestSettingsWidgetImportsStayInsideCenter(t *testing.T) {
-	files, err := os.ReadDir(".")
+	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, file := range files {
-		if file.IsDir() || filepath.Ext(file.Name()) != ".go" {
-			continue
-		}
-		parsed, err := parser.ParseFile(token.NewFileSet(), file.Name(), nil, parser.ImportsOnly)
+	root := filepath.Dir(filepath.Dir(cwd))
+	if _, err := os.Stat(filepath.Join(root, "go.mod")); err != nil {
+		t.Fatal(err)
+	}
+	err = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
-			t.Fatal(err)
+			return err
 		}
-		ast.Inspect(parsed, func(node ast.Node) bool {
-			if imp, ok := node.(*ast.ImportSpec); ok {
-				path, _ := strconv.Unquote(imp.Path.Value)
-				if (path == "charm.land/huh/v2" || strings.HasPrefix(path, "charm.land/bubbles/v2")) && !strings.HasPrefix(file.Name(), "settings") {
-					t.Errorf("widget import outside center: %s", file.Name())
-				}
+		if entry.IsDir() {
+			if path != root && (strings.HasPrefix(entry.Name(), ".") || entry.Name() == "vendor" || entry.Name() == "testdata") {
+				return filepath.SkipDir
 			}
-			return true
-		})
+			return nil
+		}
+		if filepath.Ext(path) != ".go" {
+			return nil
+		}
+		parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		for _, imp := range parsed.Imports {
+			importPath, _ := strconv.Unquote(imp.Path.Value)
+			if (importPath == "charm.land/huh/v2" || strings.HasPrefix(importPath, "charm.land/bubbles/v2")) && !strings.HasPrefix(filepath.ToSlash(rel), "cmd/husk/settings") {
+				t.Errorf("widget import outside center: %s", rel)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
