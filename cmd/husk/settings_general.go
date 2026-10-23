@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"maps"
+	"math/big"
 	"reflect"
 	"slices"
 	"strconv"
@@ -21,18 +23,68 @@ import (
 // fields live avoids huh's completion path and lets collapsed groups, status
 // lines and the profile corner participate in the same tab order.
 type settingsGeneral struct {
-	schema   []contracts.SettingEntry
-	fields   map[string]*settingsField
-	groups   []settingsGroup
-	expanded map[string]bool
-	active   string
-	top      int
-	lines    []string
-	hits     []string
-	saving   bool
-	queue    []settingsSave
-	styled   protocol.Palette
-	indices  map[string]int
+	schema    []contracts.SettingEntry
+	fields    map[string]*settingsField
+	groups    []settingsGroup
+	expanded  map[string]bool
+	active    string
+	top       int
+	lines     []string
+	hits      []string
+	saving    bool
+	queue     []settingsSave
+	styled    protocol.Palette
+	indices   map[string]int
+	needsView bool
+	viewKey   settingsGeneralViewKey
+}
+
+type settingsGeneralViewKey struct {
+	width, height, focus int
+	tab                  string
+	profile              bool
+}
+
+func (m *WorkbenchModel) settingsGeneralViewKey() settingsGeneralViewKey {
+	s := m.settings
+	return settingsGeneralViewKey{m.settingsContentRect().Dx(), m.settingsContentRect().Dy(), s.focus, s.tab, s.profileForm != nil}
+}
+
+// updateSettingsGeneralView is cheap on idle ticks: no schema/value reads and
+// no widget rendering unless palette, geometry, focus or field state changed.
+func (m *WorkbenchModel) updateSettingsGeneralView() {
+	s := m.settings
+	g := s.general
+	if g == nil {
+		return
+	}
+	if g.styled != protocol.Palette(m.served) || !maps.Equal(g.indices, m.ansi) {
+		for _, f := range g.fields {
+			m.buildSettingsField(f)
+		}
+		g.styled, g.indices = protocol.Palette(m.served), maps.Clone(m.ansi)
+		g.needsView = true
+	}
+	if g.needsView || g.viewKey != m.settingsGeneralViewKey() {
+		m.cacheSettingsGeneral()
+	}
+}
+
+func (m *WorkbenchModel) enterSettingsGeneral(back bool) {
+	s := m.settings
+	if s.tab != "general" || s.general == nil {
+		return
+	}
+	g := s.general
+	targets := g.targets()
+	if len(targets) == 0 {
+		return
+	}
+	g.active = targets[0]
+	if back {
+		g.active = targets[len(targets)-1]
+	}
+	m.cacheSettingsGeneral()
 }
 
 type settingsGroup struct {
@@ -88,11 +140,10 @@ func (f *settingsField) read(value any) {
 			}
 		}
 		f.text = strings.Join(lines, "\n")
-	case "duration":
-		switch v := value.(type) {
-		case time.Duration:
-			f.text = strconv.FormatInt(v.Milliseconds(), 10)
-		default:
+	case "int", "duration":
+		if n, ok := settingsInteger(value); ok {
+			f.text = strconv.FormatInt(n, 10)
+		} else {
 			f.text = fmt.Sprint(value)
 		}
 	default:
@@ -101,6 +152,33 @@ func (f *settingsField) read(value any) {
 			f.text = fmt.Sprint(value)
 		}
 	}
+}
+
+// settingsInteger mirrors the Settings service's accepted integer spellings.
+// The frontend cannot import Services; duration snapshots may also be typed.
+func settingsInteger(value any) (int64, bool) {
+	switch n := value.(type) {
+	case time.Duration:
+		return n.Milliseconds(), true
+	case int:
+		return int64(n), true
+	case int64:
+		return n, true
+	case float64:
+		i := int64(n)
+		return i, float64(i) == n
+	case json.Number:
+		if i, err := n.Int64(); err == nil {
+			return i, true
+		}
+		f, _, err := big.ParseFloat(string(n), 10, uint(len(n)*4+64), big.ToNearestEven)
+		if err != nil {
+			return 0, false
+		}
+		i, accuracy := f.Int64()
+		return i, accuracy == big.Exact
+	}
+	return 0, false
 }
 
 func (f *settingsField) value() (any, error) {
@@ -229,7 +307,7 @@ func (m *WorkbenchModel) refreshSettingsGeneral() {
 		g.groups = nil
 		for _, entry := range schema {
 			f := g.fields[entry.Key]
-			if f == nil {
+			if f == nil || f.entry.Type != entry.Type {
 				f = &settingsField{entry: entry}
 				value, source, err := m.fe.Setting(entry.Key)
 				if err != nil {
@@ -251,7 +329,6 @@ func (m *WorkbenchModel) refreshSettingsGeneral() {
 		}
 		g.fields, g.schema = fields, schema
 	}
-	retheme := g.styled != protocol.Palette(m.served) || !maps.Equal(g.indices, m.ansi)
 	for _, entry := range schema {
 		f := g.fields[entry.Key]
 		value, source, err := m.fe.Setting(entry.Key)
@@ -262,11 +339,10 @@ func (m *WorkbenchModel) refreshSettingsGeneral() {
 			}
 			f.snapshot = value
 		}
-		if changed || retheme || f.widget == nil {
+		if changed || f.widget == nil {
 			m.buildSettingsField(f)
 		}
 	}
-	g.styled, g.indices = protocol.Palette(m.served), maps.Clone(m.ansi)
 	targets := g.targets()
 	if !slices.Contains(targets, g.active) {
 		g.active = ""
@@ -274,7 +350,7 @@ func (m *WorkbenchModel) refreshSettingsGeneral() {
 			g.active = targets[0]
 		}
 	}
-	m.cacheSettingsGeneral()
+	g.needsView = true
 }
 
 // Plugin headings are traversal targets too: enter/space expands or collapses
@@ -345,6 +421,13 @@ func (m *WorkbenchModel) settingsGeneralKey(msg tea.Msg) tea.Cmd {
 	if f == nil {
 		return nil
 	}
+	_, keyInput := msg.(tea.KeyPressMsg)
+	_, pasteInput := msg.(tea.PasteMsg)
+	input := keyInput || pasteInput
+	beforeView := ""
+	if !input {
+		beforeView = f.widget.View()
+	}
 	before, _ := f.value()
 	beforeText := f.text
 	_, cmd := f.widget.Update(msg)
@@ -359,7 +442,9 @@ func (m *WorkbenchModel) settingsGeneralKey(msg tea.Msg) tea.Cmd {
 	if _, err := f.value(); err != nil {
 		f.problem = "invalid_value: " + err.Error()
 	}
-	m.cacheSettingsGeneral()
+	if input || beforeView != f.widget.View() {
+		m.cacheSettingsGeneral()
+	}
 	return cmd
 }
 
@@ -404,6 +489,7 @@ func (m *WorkbenchModel) nextSettingsSave() {
 		if m.settings != s {
 			return
 		}
+		s.sourcesRead = false
 		f := g.fields[write.key]
 		if f != nil {
 			problem := ""
@@ -453,6 +539,7 @@ func (m *WorkbenchModel) cacheSettingsGeneral() {
 	if g == nil {
 		return
 	}
+	g.needsView, g.viewKey = false, m.settingsGeneralViewKey()
 	g.lines, g.hits = nil, nil
 	base := lipgloss.NewStyle().Foreground(m.palette.Ink).Background(m.palette.SurfaceElevated)
 	add := func(text, target string) {

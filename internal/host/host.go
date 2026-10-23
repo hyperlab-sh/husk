@@ -98,6 +98,8 @@ type Root struct {
 	declWarnMu sync.Mutex                        // guards declWarned
 	declWarned map[string]bool                   // plugins whose declared document failed to decode
 
+	servicesRevision atomic.Uint64 // reload events delivered to the loop
+
 	// Before New returns, the builder owns State and drains posted callbacks.
 	postMu         sync.Mutex
 	buildPosts     []func()

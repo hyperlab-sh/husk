@@ -18,7 +18,7 @@ func keysFixture(t testing.TB) (*WorkbenchModel, *fakeFE) {
 	fe.KeyRows = contracts.KeyListing{Entries: []contracts.KeyEntry{
 		{Keys: []string{"ctrl+k", "ctrl+s"}, Action: "husk.settings.open", Source: protocol.Source{Layer: "user"}, State: "effective"},
 		{Keys: []string{"x"}, Action: "p.open", Focus: "main-stage", Plugin: "p", Source: protocol.Source{Layer: "focus-local", Plugin: "p"}, State: "shadowed", ShadowedBy: &protocol.Source{Layer: "profile"}},
-		{Keys: []string{"y"}, Action: "other.open", Plugin: "other", Source: protocol.Source{Layer: "distribution"}, State: "disabled", Disable: true},
+		{Keys: []string{"y"}, Action: "q.run", Plugin: "zeta", Source: protocol.Source{Layer: "distribution"}, State: "disabled", Disable: true},
 	}}
 	m.openSettings(map[string]any{"tab": "keys"})
 	m.settings.focus = settingsContentFocus
@@ -27,17 +27,25 @@ func keysFixture(t testing.TB) (*WorkbenchModel, *fakeFE) {
 func TestSettingsKeysListsShadowedFiltersAndNeverWrites(t *testing.T) {
 	m, fe := keysFixture(t)
 	view := ansi.Strip(m.View().Content)
-	for _, want := range []string{"KEY", "SCOPE", "ACTION", "LAYER", "STATE", "ctrl+k ctrl+s", "shadowed by", "edit keymap.json to change a key"} {
+	for _, want := range []string{"KEY", "SCOPE", "ACTION", "LAYER", "STATE", "ctrl+k ctrl+s", "shadowed by", "focus-local (p)", "main-stage (p)", "edit keymap.json to change a key"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("missing %q", want)
 		}
 	}
-	for query, want := range map[string]string{"CTRL+K": "husk.settings.open", "p.open": "p.open", "OTHER": "other.open"} {
+	for query, want := range map[string]string{"CTRL+K": "husk.settings.open", "p.open": "p.open", "ZETA": "q.run"} {
 		m.settings.keyQuery = query
 		rows := m.settingsKeyRows()
 		if len(rows) != 1 || rows[0].Action != want {
 			t.Fatalf("filter %q: %+v", query, rows)
 		}
+	}
+	m.settings.keyQuery = "x p.op"
+	if len(m.settingsKeyRows()) != 0 {
+		t.Fatal("filter matched across column boundaries")
+	}
+	m.settings.keyQuery = "zeta"
+	if strings.Contains(ansi.Strip(strings.Join(m.settingsKeysLines(), "\n")), "global (zeta)") {
+		t.Fatal("global scope carries a plugin suffix")
 	}
 	m.settings.keyQuery = ""
 	settingsPress(m, "ctrl+s")
@@ -51,7 +59,7 @@ func TestSettingsKeysListsShadowedFiltersAndNeverWrites(t *testing.T) {
 	}
 	// Shadowed rows use muted ink, not just a state label.
 	m.settings.keyQuery = "p.open"
-	if !strings.Contains(strings.Join(m.settingsKeysLines(), "\n"), "shadowed") {
+	if !strings.Contains(ansi.Strip(strings.Join(m.settingsKeysLines(), "\n")), "shadowed by profile") {
 		t.Fatal("shadowed row hidden")
 	}
 	r := m.settingsContentRect()
@@ -78,6 +86,7 @@ func TestSettingsKeysPaletteQueryPasteReloadAndProblemLimit(t *testing.T) {
 	for i := range 22 {
 		fe.KeyRows.Problems = append(fe.KeyRows.Problems, protocol.Problem{Severity: "warning", Code: fmt.Sprintf("problem%02d", i), Message: "diagnostic"})
 	}
+	fe.ServiceRev++
 	m.settle()
 	if m.settings.keyQuery != "ctrl+k" || len(m.settingsKeyRows()) != 1 || m.settingsKeyRows()[0].Action != "husk.palette.open" {
 		t.Fatal("reload did not preserve/reapply filter")

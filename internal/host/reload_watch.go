@@ -23,6 +23,7 @@ var _ contracts.Notifier = reloadWatcher{}
 
 // Notify implements contracts.Notifier.
 func (w reloadWatcher) Notify(n protocol.Message) error {
+	w.r.servicesRevision.Add(1)
 	w.r.warmCatalog()
 	var p struct {
 		Data struct {

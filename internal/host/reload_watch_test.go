@@ -53,6 +53,22 @@ func reloaded(t *testing.T, h *harness, reason string, reports ...reportData) {
 	h.loop(func() {})
 }
 
+func TestFrontendServicesRevisionTracksAllReloads(t *testing.T) {
+	h, _, fe := bootFrontend(t, nil)
+	before := fe.ServicesRevision()
+	for _, reason := range []string{"cli", "settings", "profile", "plugin"} {
+		reloaded(t, h, reason, reportData{Service: "settings", Applied: true})
+		if got := fe.ServicesRevision(); got != before+1 {
+			t.Fatalf("%s revision %d -> %d", reason, before, got)
+		}
+		before++
+	}
+	reloaded(t, h, "cli", reportData{Service: "settings", Problems: []probe{{Severity: "error", Code: "store_error"}}})
+	if fe.ServicesRevision() != before+1 {
+		t.Fatal("failed reload did not invalidate frontend sources")
+	}
+}
+
 // A services.reloaded carrying theme changed:true pushes theme.changed, with
 // Theme's serving palette, to every live Pod and to no other; changed:false or
 // another Service's change pushes nothing. The separate
