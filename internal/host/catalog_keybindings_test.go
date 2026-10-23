@@ -33,7 +33,7 @@ func TestDeclaredPluginsDocumentSpellsBindingsKeybindings(t *testing.T) {
 	}
 	hook, ready := readyHook("")
 	f := newFakes()
-	h, err := boot(t, func(c *contracts.Config) { c.Plugins = []string{dir} }, withHook(hook), WithFactory(f.factory))
+	h, err := boot(t, func(c *contracts.Config) { pluginSettings(c)["paths"] = []string{dir} }, withHook(hook), WithFactory(f.factory))
 	if err != nil {
 		t.Fatal(err)
 	}

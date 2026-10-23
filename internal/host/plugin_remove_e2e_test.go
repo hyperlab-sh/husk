@@ -63,7 +63,7 @@ func writeIdlePlugin(t *testing.T, id string) string {
 // and the order of the published facts as one watcher sees them.
 func TestPluginRemoveAgainstRealHostAndProcess(t *testing.T) {
 	hook, ready := readyHook("")
-	h, err := boot(t, func(c *contracts.Config) { c.Plugins = []string{writeIdlePlugin(t, "alpha")} }, withHook(hook))
+	h, err := boot(t, func(c *contracts.Config) { pluginSettings(c)["paths"] = []string{writeIdlePlugin(t, "alpha")} }, withHook(hook))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +257,7 @@ func TestPluginRemovedEventsOfOneTickAreNotCoalesced(t *testing.T) {
 		return errors.New("test over")
 	}
 	h, err := boot(t, func(c *contracts.Config) {
-		c.Plugins = []string{writeIdlePlugin(t, "alpha"), writeIdlePlugin(t, "beta")}
+		pluginSettings(c)["paths"] = []string{writeIdlePlugin(t, "alpha"), writeIdlePlugin(t, "beta")}
 	}, withHook(hook))
 	if err != nil {
 		t.Fatal(err)

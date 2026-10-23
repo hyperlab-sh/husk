@@ -78,7 +78,13 @@ func (p publisher) Publish(name string, data any) {
 		if name == pods.PluginExitedEvent {
 			obj = p.r.podEntry(key, obj)
 		}
-		p.r.bus.Publish(eventbus.Event{Name: name, Key: key, Source: eventbus.SourceHost, Data: obj})
+		e := eventbus.Event{Name: name, Key: key, Source: eventbus.SourceHost, Data: obj}
+		if p.r.bus == nil {
+			// Construction has no subscribers; Frontend.StartupReports retains
+			// that flight's reports instead of replaying an undeliverable event.
+			return
+		}
+		p.r.bus.Publish(e)
 	}
 	// Pods publish pods.plugin-exited from inside Update, where a blocking
 	// Post would wait on the loop it runs on; publish inline there.

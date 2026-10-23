@@ -78,7 +78,7 @@ func TestReferencePairAgainstRealHost(t *testing.T) {
 	}
 	hook, ready := readyHook("")
 	h, err := boot(t, func(c *contracts.Config) {
-		c.Plugins = []string{publisher, contributor}
+		pluginSettings(c)["paths"] = []string{publisher, contributor}
 		c.Content = func(plugin string, p protocol.SurfaceUpdateParams) {
 			if plugin != "go.reference" {
 				return

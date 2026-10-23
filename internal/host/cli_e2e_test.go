@@ -219,7 +219,7 @@ func writeStatePlugin(t *testing.T, id string) string {
 func TestStateStemCLIAgainstRealHost(t *testing.T) {
 	hook, ready := readyHook("")
 	f := newFakes()
-	h, err := boot(t, func(c *contracts.Config) { c.Plugins = []string{writeStatePlugin(t, "alpha")} },
+	h, err := boot(t, func(c *contracts.Config) { pluginSettings(c)["paths"] = []string{writeStatePlugin(t, "alpha")} },
 		withHook(hook), WithFactory(f.factory), WithVersion("9.9.9"))
 	if err != nil {
 		t.Fatal(err)

@@ -102,6 +102,24 @@ func repeatable(name, usage string) *stringFlag {
 	return f
 }
 
+// pluginInstanceDocs preserves configured values unless the matching flag was
+// explicitly supplied. Store replaces each supplied array as a whole.
+func pluginInstanceDocs(fs *flag.FlagSet) map[string]map[string]any {
+	given := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { given[f.Name] = true })
+	if !given["plugin"] && !given["plugin-dir"] {
+		return nil
+	}
+	plugins := map[string]any{}
+	if given["plugin"] {
+		plugins["paths"] = []string(*fs.Lookup("plugin").Value.(*stringFlag))
+	}
+	if given["plugin-dir"] {
+		plugins["dirs"] = []string(*fs.Lookup("plugin-dir").Value.(*stringFlag))
+	}
+	return map[string]map[string]any{"config": {"husk": map[string]any{"plugins": plugins}}}
+}
+
 func main() {
 	// argv[1] decides the mode: a first argument that does not start with
 	// "-" is a subcommand. The CLI installs no signal handler; a signal ends
@@ -114,12 +132,13 @@ func main() {
 	demoFrame := flag.Bool("demo-frame", false, "Render one frame from a built-in demo plugin that declares a border+label+close frame and exit")
 	railMode := flag.String("rail", "", "Activate rail mode on startup: modal | full-canvas | stage")
 	holdAlt := flag.Bool("hold-alt", false, "Simulate holding Alt/Option key on startup")
-	pluginPaths := repeatable("plugin", "Plugin: executable, plugin directory, or husk-plugin.json path (repeatable)")
-	pluginDirs := repeatable("plugin-dir", "Load every immediate subdirectory containing a husk-plugin.json (repeatable)")
+	repeatable("plugin", "Plugin: executable, plugin directory, or husk-plugin.json path (repeatable)")
+	repeatable("plugin-dir", "Load every immediate subdirectory containing a husk-plugin.json (repeatable)")
 	demo := flag.String("demo", "", "In-process frame demo: pubslots (requires --dump-frame)")
 	instanceName := flag.String("instance", "", "Name this instance (a-z, 0-9 and -, not digits only); default is the pid. Command mode's --instance targets one instead")
 	profileName := flag.String("profile", "", "Select a profile on startup (a-z, 0-9, _ and -); it wins over the saved selection and profile.default")
 	flag.Parse()
+	instanceDocs := pluginInstanceDocs(flag.CommandLine)
 	// Subcommands come first; a positional left over here is a misplaced one
 	// (`husk --instance notes ping`) and must not start an instance.
 	if flag.NArg() > 0 {
@@ -183,7 +202,7 @@ func main() {
 	prog := newProgramRef()
 	if *dumpFrame {
 		// runDumpFrame builds the headless program; a host Post waits for it.
-		h, err := newHost(prog, model, id, runtimeDir, []string(*pluginPaths), []string(*pluginDirs), profileFlag, host.WithVersion(buildVersion()))
+		h, err := newHost(prog, model, id, runtimeDir, instanceDocs, profileFlag, host.WithVersion(buildVersion()))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "husk: %v\n", err)
 			os.Exit(1)
@@ -196,7 +215,7 @@ func main() {
 	// it. The model attaches the host before the program runs.
 	p := tea.NewProgram(model)
 	prog.set(p)
-	h, err := newHost(prog, model, id, runtimeDir, []string(*pluginPaths), []string(*pluginDirs), profileFlag, host.WithVersion(buildVersion()), host.WithPrompt(secretPromptFunc(prog)))
+	h, err := newHost(prog, model, id, runtimeDir, instanceDocs, profileFlag, host.WithVersion(buildVersion()), host.WithPrompt(secretPromptFunc(prog)))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "husk: %v\n", err)
 		os.Exit(1)
@@ -294,7 +313,7 @@ func (r *programRef) post(msg any) bool {
 
 // newHost builds the v2 host over a private runtime directory. Nothing
 // listens until the model's Init runs the host.
-func newHost(prog *programRef, model *WorkbenchModel, id, dir string, plugins, dirs []string, profileFlag *string, opts ...host.Option) (host.Looped, error) {
+func newHost(prog *programRef, model *WorkbenchModel, id, dir string, instanceDocs map[string]map[string]any, profileFlag *string, opts ...host.Option) (host.Looped, error) {
 	h, err := host.New(contracts.Config{
 		InstanceID: id,
 		RuntimeDir: dir,
@@ -304,11 +323,10 @@ func newHost(prog *programRef, model *WorkbenchModel, id, dir string, plugins, d
 			Socket:          instance.SocketPath(dir, id),
 			ProtocolVersion: protocol.Version,
 		},
-		Plugins:     plugins,
-		PluginDirs:  dirs,
-		ProfileFlag: profileFlag,
-		Post:        prog.post,
-		Content:     model.content,
+		InstanceDocs: instanceDocs,
+		ProfileFlag:  profileFlag,
+		Post:         prog.post,
+		Content:      model.content,
 	}, append([]host.Option{host.WithLogger(func(level, msg string) { model.logf("%s: %s", level, msg) })}, opts...)...)
 	if err != nil {
 		return nil, err

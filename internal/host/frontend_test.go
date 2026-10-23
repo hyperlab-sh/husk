@@ -103,7 +103,7 @@ func bootFrontendWith(t *testing.T, mutate func(*contracts.Config), dirs ...stri
 	hook, ready := readyHook("")
 	f := newFakes()
 	h, err := boot(t, func(c *contracts.Config) {
-		c.Plugins = dirs
+		pluginSettings(c)["paths"] = dirs
 		if mutate != nil {
 			mutate(c)
 		}

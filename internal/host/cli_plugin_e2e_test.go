@@ -24,7 +24,7 @@ func bootLoggedPlugin(t *testing.T, log *string) (*harness, *fakes) {
 	path.Store(log)
 	hook, ready := readyHook("")
 	f := newFakes()
-	h, err := boot(t, func(c *contracts.Config) { c.Plugins = []string{alphaPlugin(t)} }, withHook(hook),
+	h, err := boot(t, func(c *contracts.Config) { pluginSettings(c)["paths"] = []string{alphaPlugin(t)} }, withHook(hook),
 		WithFactory(func(spec manifest.Spec, o wrapper.Options) (wrapper.Process, error) {
 			p, err := f.factory(spec, o)
 			return loggedProc{p, path}, err

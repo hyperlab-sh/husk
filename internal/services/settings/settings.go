@@ -70,7 +70,13 @@ type snapshot struct {
 // are commands, not settings; layout preferences live in State. No entry is
 // public: plugins reach the palette through theme.get.
 func Builtins() []Entry {
-	out := []Entry{{Key: "profile.default", Type: TypeString, Default: "", Owner: "husk", Apply: "live"}, {Key: "theme.name", Type: TypeString, Default: palette.Default().Name, Owner: "husk", Apply: "live"}, {Key: "theme.allow_low_contrast", Type: TypeBool, Default: false, Owner: "husk", Apply: "live"}, {Key: "husk.plugins.paths", Type: TypeStrings, Default: []string{}, Owner: "husk", Apply: "restart"}, {Key: "husk.plugins.dirs", Type: TypeStrings, Default: []string{}, Owner: "husk", Apply: "restart"}, {Key: "husk.layout.rail", Type: TypeEnum, Default: "", Enum: []string{"", "modal", "full-canvas", "stage"}, Owner: "husk", Apply: "live"}, {Key: "husk.input.hold_alt", Type: TypeBool, Default: false, Owner: "husk", Apply: "live"}}
+	out := []Entry{
+		{Key: "profile.default", Type: TypeString, Default: "", Owner: "husk", Apply: "live"},
+		{Key: "theme.name", Type: TypeString, Default: palette.Default().Name, Owner: "husk", Apply: "live"},
+		{Key: "theme.allow_low_contrast", Type: TypeBool, Default: false, Owner: "husk", Apply: "live"},
+		{Key: "husk.plugins.paths", Type: TypeStrings, Default: []string{}, Owner: "husk", Apply: "restart", Doc: "Plugin arguments loaded once at start, interpreted like --plugin; --plugin is the instance layer on top."},
+		{Key: "husk.plugins.dirs", Type: TypeStrings, Default: []string{}, Owner: "husk", Apply: "restart", Doc: "Plugin directories loaded once at start, interpreted like --plugin-dir; --plugin-dir is the instance layer on top."},
+	}
 	data, _ := json.Marshal(palette.Default())
 	var roles map[string]string
 	json.Unmarshal(data, &roles)

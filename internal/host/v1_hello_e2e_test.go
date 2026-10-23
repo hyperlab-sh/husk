@@ -82,7 +82,7 @@ func bootV1(t *testing.T, plugins ...string) (*harness, *legacySpy, *chanNotifie
 		}
 	})
 	hook, ready := readyHook("")
-	h, err := boot(t, func(c *contracts.Config) { c.Plugins = plugins }, withHook(hook), withLegacySpy(spy), logger)
+	h, err := boot(t, func(c *contracts.Config) { pluginSettings(c)["paths"] = plugins }, withHook(hook), withLegacySpy(spy), logger)
 	if err != nil {
 		t.Fatal(err)
 	}

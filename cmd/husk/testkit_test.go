@@ -155,7 +155,8 @@ type invoked struct {
 	Focus *protocol.FocusContext
 }
 
-func (f *fakeFE) Snapshot() *state.Snapshot { return f.Snap }
+func (f *fakeFE) Snapshot() *state.Snapshot                { return f.Snap }
+func (f *fakeFE) StartupReports() []contracts.ReloadReport { return nil }
 
 func (f *fakeFE) Hints(ctx contracts.KeyContext) []contracts.KeyHint {
 	if f.HintsFn == nil {

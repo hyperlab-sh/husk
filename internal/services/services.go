@@ -342,6 +342,9 @@ func (co *Coordinator) reload(parent context.Context, reason Reason, f *flight) 
 	}
 	if timeout || input.err != nil {
 		message, code := "Store resolution failed", "store_error"
+		if input.err != nil {
+			message = input.err.Error()
+		}
 		if timeout {
 			message, code = "timed out", "timed_out"
 		}
@@ -465,7 +468,7 @@ func (co *Coordinator) loadInput(f *flight) inputResult {
 	}
 	for _, problem := range resolved.Problems {
 		if problem.Code != "type_clash" {
-			return inputResult{err: errors.New("Store resolution failed")}
+			return inputResult{err: fmt.Errorf("%s (layer %s, file %s): %s", problem.Code, problem.Layer, problem.File, problem.Message)}
 		}
 	}
 	layers, err := co.opts.Store.Layers("keymap", selected)

@@ -525,7 +525,7 @@ func TestCloseIsIdempotentAndOrdered(t *testing.T) {
 	hook, ready := readyHook("")
 	f := newFakes()
 	plug := writePlugin(t, "alpha", false)
-	h, err := boot(t, func(c *contracts.Config) { c.Plugins = []string{plug} }, withHook(hook), WithFactory(f.factory),
+	h, err := boot(t, func(c *contracts.Config) { pluginSettings(c)["paths"] = []string{plug} }, withHook(hook), WithFactory(f.factory),
 		withClose(func(s string) { mu.Lock(); steps = append(steps, s); mu.Unlock() }))
 	if err != nil {
 		t.Fatal(err)
@@ -593,8 +593,8 @@ func storeStopped(r *Root) bool {
 }
 
 func TestStartupFailureClosesWhatStarted(t *testing.T) {
-	stages := []string{"manifests", "store", "state", "services", "stem", "pods", "server"}
-	for i, stage := range stages {
+	stages := []string{"store", "state", "services", "startup", "manifests", "stem", "pods", "server"}
+	for _, stage := range stages {
 		t.Run(stage, func(t *testing.T) {
 			noLeaks(t)
 			var steps []string
@@ -611,7 +611,7 @@ func TestStartupFailureClosesWhatStarted(t *testing.T) {
 			if failed == nil || !storeStopped(failed) {
 				t.Fatalf("the Store worker still runs after New failed at %s", stage)
 			}
-			storeBuilt := i >= 1
+			storeBuilt := true
 			if got := slices.Contains(steps, "store"); got != storeBuilt {
 				t.Fatalf("store closed = %v after failing %s (steps %v)", got, stage, steps)
 			}
@@ -628,13 +628,15 @@ func TestStartupFailureClosesWhatStarted(t *testing.T) {
 
 func TestBadExplicitPluginFailsNew(t *testing.T) {
 	var steps []string
-	h, err := boot(t, func(c *contracts.Config) { c.Plugins = []string{filepath.Join(t.TempDir(), "missing")} },
+	h, err := boot(t, func(c *contracts.Config) {
+		pluginSettings(c)["paths"] = []string{filepath.Join(t.TempDir(), "missing")}
+	},
 		withClose(func(s string) { steps = append(steps, s) }))
-	if err == nil || !strings.Contains(err.Error(), "--plugin") {
+	if err == nil || !strings.Contains(err.Error(), "husk.plugins.paths[0]") {
 		t.Fatalf("err = %v", err)
 	}
-	if len(steps) != 0 {
-		t.Fatalf("nothing was built, yet %v closed", steps)
+	if !slices.Equal(steps, []string{"store"}) {
+		t.Fatalf("Store must close after manifest failure: %v", steps)
 	}
 	if left := h.leftovers(); len(left) != 0 {
 		t.Fatal(left)
@@ -719,7 +721,7 @@ func (h *harness) podStatus(id string) string {
 func TestLaunchGoesLiveWithOpening(t *testing.T) {
 	hook, ready := readyHook("")
 	f := newFakes()
-	h, err := boot(t, func(c *contracts.Config) { c.Plugins = []string{writePlugin(t, "alpha", false)} }, withHook(hook), WithFactory(f.factory))
+	h, err := boot(t, func(c *contracts.Config) { pluginSettings(c)["paths"] = []string{writePlugin(t, "alpha", false)} }, withHook(hook), WithFactory(f.factory))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -765,8 +767,8 @@ type startupNotifier func(protocol.Message) error
 
 func (n startupNotifier) Notify(m protocol.Message) error { return n(m) }
 
-// The first bus delivery is observed on the loop, after the startup write-back
-// has flushed but before the launch gate can make a Pod live.
+// Startup reports are available through the frontend before the launch gate;
+// the first loop tick flushes the profile write-back before a plugin goes live.
 func TestStartupProfileFlagBeforePluginLaunch(t *testing.T) {
 	testStartupProfileFlag(t, true)
 }
@@ -780,19 +782,6 @@ func testStartupProfileFlag(t *testing.T, plugin bool) {
 	f := newFakes()
 	hook, ready := readyHook("")
 	flag := "work"
-	h, err := boot(t, func(c *contracts.Config) {
-		c.ProfileFlag = &flag
-		c.Clock = frozenClock{time.Unix(1000, 0)}
-		if err := os.MkdirAll(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "husk", "profiles", "work"), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if plugin {
-			c.Plugins = []string{writePlugin(t, "alpha", false)}
-		}
-	}, withHook(hook), WithFactory(f.factory))
-	if err != nil {
-		t.Fatal(err)
-	}
 	type observed struct {
 		reason string
 		slice  string
@@ -800,7 +789,29 @@ func testStartupProfileFlag(t *testing.T, plugin bool) {
 		pod    bool
 	}
 	events := make(chan observed, 8)
-	var reasons []string // loop-only; read through h.loop after launch completes
+	var reasons []string // loop-only
+	h, err := boot(t, func(c *contracts.Config) {
+		c.ProfileFlag = &flag
+		c.Clock = frozenClock{time.Unix(1000, 0)}
+		if err := os.MkdirAll(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "husk", "profiles", "work"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if plugin {
+			pluginSettings(c)["paths"] = []string{writePlugin(t, "alpha", false)}
+		}
+	}, withHook(hook), WithFactory(f.factory))
+	if err != nil {
+		t.Fatal(err)
+	}
+	startup := h.root.Frontend().StartupReports()
+	if len(startup) != 5 {
+		t.Fatalf("startup reports=%+v", startup)
+	}
+	for _, report := range startup {
+		if report.Gen != 1 || !report.Applied {
+			t.Fatalf("startup report=%+v", report)
+		}
+	}
 	h.loop(func() {
 		_, err := h.root.bus.Subscribe(startupNotifier(func(m protocol.Message) error {
 			var ev struct {
@@ -820,27 +831,28 @@ func testStartupProfileFlag(t *testing.T, plugin bool) {
 			t.Error(err)
 		}
 	})
+	h.loop(func() {
+		_, pod := h.root.pods.Pod("alpha")
+		if got := string(h.root.Frontend().Snapshot().Slices[state.ProfileNamespace].Value); got != `{"active":"work"}` || h.root.rt.Profile.Active() != "work" || pod {
+			t.Errorf("startup profile=%s active=%s pod=%v", got, h.root.rt.Profile.Active(), pod)
+		}
+	})
 	if plugin {
 		runHost(t, ready, h)
 	} else {
-		// Run uses this same launch path. Calling it synchronously fences its
-		// completion, so counting one event cannot race a second startup flight.
+		// Launching no plugins must not request a fallback plugin flight.
 		if err := h.root.launchPlugins(t.Context()); err != nil {
 			t.Fatal(err)
 		}
 		h.loop(func() {})
-		if len(events) == 0 {
-			t.Fatal("launch completed without a startup services.reloaded event")
+		if len(events) != 0 {
+			t.Fatal("empty launch requested an extra reload")
 		}
 	}
-	first := <-events
-	if first.reason != "startup" || first.slice != `{"active":"work"}` || first.active != "work" || first.pod {
-		t.Fatalf("first services.reloaded = %+v, want startup with work recorded before any Pod", first)
-	}
-	want := []string{"startup"}
+	var want []string
 	if plugin {
 		second := <-events
-		if second.reason != "plugin" {
+		if second.reason != "plugin" || second.slice != `{"active":"work"}` || second.active != "work" {
 			t.Fatalf("second services.reloaded = %+v, want launch gate's plugin flight", second)
 		}
 		if id := <-f.started; id != "alpha" {
@@ -874,7 +886,7 @@ func TestPublishedSlotCatalogChangeCallsCatalogChanged(t *testing.T) {
 	f := newFakes()
 	var calls int
 	h, err := boot(t, func(c *contracts.Config) {
-		c.Plugins = []string{writePlugin(t, "plain", false), writePlugin(t, "pub", true)}
+		pluginSettings(c)["paths"] = []string{writePlugin(t, "plain", false), writePlugin(t, "pub", true)}
 	}, withHook(hook), WithFactory(f.factory))
 	if err != nil {
 		t.Fatal(err)
@@ -916,7 +928,7 @@ func TestPublishedSlotCatalogChangeCallsCatalogChanged(t *testing.T) {
 func TestTeardownDropsOccupantsAndDeclarations(t *testing.T) {
 	hook, ready := readyHook("")
 	f := newFakes()
-	h, err := boot(t, func(c *contracts.Config) { c.Plugins = []string{writePlugin(t, "alpha", false)} }, withHook(hook), WithFactory(f.factory))
+	h, err := boot(t, func(c *contracts.Config) { pluginSettings(c)["paths"] = []string{writePlugin(t, "alpha", false)} }, withHook(hook), WithFactory(f.factory))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -946,7 +958,7 @@ func TestOpeningKeyStatePassesModifiersThrough(t *testing.T) {
 	hook, ready := readyHook("")
 	f := newFakes()
 	want := protocol.ModifierState{Alt: true, Shift: true}
-	h, err := boot(t, func(c *contracts.Config) { c.Plugins = []string{writePlugin(t, "alpha", false)} },
+	h, err := boot(t, func(c *contracts.Config) { pluginSettings(c)["paths"] = []string{writePlugin(t, "alpha", false)} },
 		withHook(hook), WithFactory(f.factory), WithModifiers(func() protocol.ModifierState { return want }))
 	if err != nil {
 		t.Fatal(err)
@@ -989,7 +1001,7 @@ func TestTeardownAfterShutdownMarkStartsNoWorker(t *testing.T) {
 	var accepted []bool
 	atPods := make(chan struct{})
 	proceed := make(chan struct{})
-	h, err := boot(t, func(c *contracts.Config) { c.Plugins = []string{writePlugin(t, "alpha", false)} },
+	h, err := boot(t, func(c *contracts.Config) { pluginSettings(c)["paths"] = []string{writePlugin(t, "alpha", false)} },
 		withHook(hook), WithFactory(f.factory),
 		withClose(func(step string) {
 			if step == "pods" { // plugins stopped; parked here until the Teardown is delivered
@@ -1069,7 +1081,7 @@ func bootWithWorker(t *testing.T, g *postGate, workerDone *atomic.Bool, steps *[
 	hook, ready := readyHook("")
 	f := newFakes()
 	h, err := boot(t, func(c *contracts.Config) {
-		c.Plugins = []string{writePlugin(t, "alpha", false)}
+		pluginSettings(c)["paths"] = []string{writePlugin(t, "alpha", false)}
 		g.next = c.Post
 		c.Post = g.post
 	}, append(opts, withHook(hook), WithFactory(f.factory), withClose(func(s string) { *steps = append(*steps, s) }))...)
@@ -1240,7 +1252,7 @@ func TestStoreClockAdaptsAnInjectedClock(t *testing.T) {
 // empty --plugin-dir plans none and a good one plans its plugins.
 func TestPlannedCountsResolvedPlugins(t *testing.T) {
 	empty := t.TempDir()
-	h, err := boot(t, func(c *contracts.Config) { c.PluginDirs = []string{empty} })
+	h, err := boot(t, func(c *contracts.Config) { pluginSettings(c)["dirs"] = []string{empty} })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1248,7 +1260,7 @@ func TestPlannedCountsResolvedPlugins(t *testing.T) {
 		t.Fatalf("empty dir planned %d plugins", got)
 	}
 	one := filepath.Dir(writePlugin(t, "alpha", false))
-	h2, err := boot(t, func(c *contracts.Config) { c.PluginDirs = []string{one} })
+	h2, err := boot(t, func(c *contracts.Config) { pluginSettings(c)["dirs"] = []string{one} })
 	if err != nil {
 		t.Fatal(err)
 	}

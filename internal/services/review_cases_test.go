@@ -44,10 +44,10 @@ func TestReviewEmptyCallerDeniedOnEveryUserOnlyMethod(t *testing.T) {
 			}
 		})
 	}
-	if _, _, err := set.Get(zero, "husk.input.hold_alt"); err == nil {
+	if _, _, err := set.Get(zero, "theme.name"); err == nil {
 		t.Fatal("empty caller read host settings")
 	}
-	if _, ok := set.SnapshotFor(zero).Raw("husk.input.hold_alt"); ok {
+	if _, ok := set.SnapshotFor(zero).Raw("theme.name"); ok {
 		t.Fatal("empty caller got unfiltered snapshot")
 	}
 	if _, err := sec.Read(context.Background(), zero, "x"); err == nil {
