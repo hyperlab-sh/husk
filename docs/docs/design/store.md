@@ -701,7 +701,7 @@ secrets. Explicit `GC` and `ResetSecrets` still do what they say.
 1. `cmd/husk` parses flags into `InstanceDocs`; the composition root
    (`internal/host.New`) calls `ReadBootstrap`, loads the bundle it names if
    any (a bad bundle stops the start here, [Bundles](bundles.md)), and calls
-   `store.Open` with the bundle's config as `Options.Bundle`.
+   `store.Open` with them and the bundle's config as `Options.Bundle`.
 2. State is created with Store as `Hydrator`; `Store.Attach` registers the
    `husk.store` slice and the `Listener`.
 3. Services register their slices; each persistent one is hydrated inside
