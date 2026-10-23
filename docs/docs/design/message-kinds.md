@@ -263,9 +263,9 @@ Permission rule. Let X be the caller and Y the owner:
 
 | Caller | Allowed |
 |---|---|
-| Input (the user pressed a key or chose a palette entry) | always |
+| Input (the user pressed a bound key) | always |
 | CLI from a shell outside any plugin (the user typing) | always |
-| Host | always |
+| Host (the host started the action itself: a palette entry, a rail item) | always |
 | Plugin X, X == Y | always |
 | Plugin X, X != Y | only if the catalog entry has `Public == true` |
 
@@ -288,8 +288,12 @@ Notes fixed by the implementation (`internal/stem/dispatcher`):
   Host see every entry, a plugin sees its own and the public ones. `live` is
   true for host actions. The `--owner` filter of `husk action list` is applied
   by the CLI, since the method has no parameters.
-- A Stem caller arriving over the `CallsPort` is a Host caller, not Input: it
-  gets State's focus like every caller except Input.
+- A Stem caller arriving over the `CallsPort` (`Frontend.InvokeAction`)
+  carries the kind the frontend passed: `input` for a key binding Input
+  resolved, `host` for an action the host started itself (a palette entry, a
+  rail item). An `input` caller also carries the `FocusContext` Input read on
+  that key press, and the Dispatcher uses it; a `host` caller gets State's
+  focus like every other caller.
 - A host handler that panics yields one `internal` reply and a log line.
 
 Default is deny. A plugin marks an action public in its manifest
