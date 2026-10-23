@@ -132,6 +132,9 @@ type Keyring interface {
 	Get(service, account string) (string, error)
 	// Set stores a credential.
 	Set(service, account, value string) error
+	// Delete removes a credential; a missing one is an ErrNotFound-style
+	// absence, not a failure.
+	Delete(service, account string) error
 }
 
 // Options configures paths, layered input, clock and loop delivery.

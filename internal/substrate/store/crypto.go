@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"syscall"
@@ -30,6 +31,10 @@ type osKeyring struct{}
 func (osKeyring) Get(service, account string) (string, error) { return keyring.Get(service, account) }
 func (osKeyring) Set(service, account, value string) error {
 	return keyring.Set(service, account, value)
+}
+
+func (osKeyring) Delete(service, account string) error {
+	return keyring.Delete(service, account)
 }
 
 type ageSealer struct{ identity *age.X25519Identity }
@@ -390,4 +395,59 @@ func (d *secretDoc) Keys() ([]string, error) {
 		return false, nil
 	})
 	return keys, err
+}
+
+// ResetSecrets deletes every sealed secrets/*.age namespace and the identity
+// (the keyring entry and identity.txt, when present) and nothing else: lock
+// files, config, slices and logs stay. The caller must have established that
+// no instance runs. An absent keyring, namespace directory or identity file
+// is not an error; any other failure stops the reset and is returned, so a
+// half-reset is reported rather than hidden. The cached identity is dropped.
+func (s *Store) ResetSecrets() error {
+	s.cryptoMu.Lock()
+	defer s.cryptoMu.Unlock()
+	dir, err := pathInside(s.paths.Data, []string{"secrets"}, false)
+	if err == nil {
+		err = privateExistingDir(dir)
+	}
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+	case err != nil:
+		return fmt.Errorf("store: secrets directory: %w", err)
+	default:
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return fmt.Errorf("store: read secrets directory: %w", err)
+		}
+		for _, e := range entries {
+			if e.Type().IsRegular() && strings.HasSuffix(e.Name(), ".age") {
+				if err := os.Remove(filepath.Join(dir, e.Name())); err != nil && !errors.Is(err, fs.ErrNotExist) {
+					return fmt.Errorf("store: remove sealed namespace: %w", err)
+				}
+			}
+		}
+	}
+	ring := s.opts.Keyring
+	if ring == nil {
+		ring = osKeyring{}
+	}
+	if err := ring.Delete("husk", "store-identity"); err != nil && !keyringAbsent(err) {
+		return fmt.Errorf("store: remove keyring identity: %w", err)
+	}
+	path, err := pathInside(s.paths.Data, []string{"keys", "identity.txt"}, false)
+	if err == nil {
+		if err = os.Remove(path); errors.Is(err, fs.ErrNotExist) {
+			err = nil
+		}
+	} else if errors.Is(err, fs.ErrNotExist) {
+		err = nil
+	}
+	if err != nil {
+		return fmt.Errorf("store: remove identity file: %w", err)
+	}
+	s.sealer = nil
+	s.mu.Lock()
+	s.health.KeyringFallback = false
+	s.mu.Unlock()
+	return nil
 }
