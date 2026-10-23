@@ -150,9 +150,16 @@ func TestConfigReloadReplyMapping(t *testing.T) {
 				if m.Error != nil || json.Unmarshal(m.Result, &res) != nil || len(res.Reports) != 5 {
 					t.Fatalf("reply = error %+v result %s, want a result with five reports", m.Error, m.Result)
 				}
+				// settings kept its snapshot with one error; theme, which reads
+				// it, is skipped with one warning; the other three applied.
+				want := map[string][2]any{"settings": {false, "error"}, "theme": {false, "warning"}}
 				for _, r := range res.Reports {
-					if kept := r.Service == "settings"; r.Applied == kept || (kept && (len(r.Problems) != 1 || r.Problems[0].Severity != "error")) || (!kept && len(r.Problems) != 0) {
-						t.Fatalf("report %+v: settings must be applied:false with one error problem, the rest applied:true", r)
+					w, partial := want[r.Service]
+					switch {
+					case partial && (r.Applied != w[0].(bool) || len(r.Problems) != 1 || r.Problems[0].Severity != w[1].(string)):
+						t.Fatalf("report %+v, want applied:false with one %v problem", r, w[1])
+					case !partial && (!r.Applied || len(r.Problems) != 0):
+						t.Fatalf("report %+v, want applied:true and clean", r)
 					}
 				}
 				return
