@@ -95,6 +95,16 @@ Global flags follow the subcommand (`husk ping --format json`); before it they w
 
 Results go to stdout. Errors go to stderr in the chosen format: one JSON object in JSON mode, `husk: <message>` (plus candidate lines) in table mode. Exit codes: 0 success, 1 the instance replied with an error or an admitted plugin failed to launch, 2 usage, 3 no instance, 4 several instances and none chosen, 5 transport (connect failed, timeout, connection dropped, or only unresponsive instances), 6 protocol (unreadable reply or a different protocol major), 7 environment (unusable runtime directory). The JSON `code` is from a closed set: `usage`, `no_instance`, `ambiguous`, `transport`, `protocol`, `environment`, plus the instance's own code for exit 1 (`failed` for an admitted plugin that could not launch). See [Instances and the CLI](docs/docs/design/instances.md).
 
+## Embedding in Go
+
+All packages under `pkg/` are public API, versioned with the module
+`github.com/hyperlab-sh/husk`; Go-internal directories contain test helpers only.
+Use `pkg/host` and `pkg/host/contracts` to embed a host. The existing
+`contracts.Frontend` seam exposes State snapshots and owner handles through
+`pkg/substrate/state`, now importable by embedding applications without an API
+change. Out-of-process plugins still need only the JSON-lines protocol (or
+`pkg/protocol` in Go). See [Package layout and embedding](docs/docs/architecture.md#package-layout-and-embedding).
+
 ## Concepts
 
 The layout has nine fixed slots (`activity-rail`, `sidebar-navigation`, `sidebar-list`, `thread-row-status`, `sidebar-footer`, `main-header`, `main-stage`, `side-panel`, `app-overlay`), modeled on `bb`, plus three placement surfaces (`modal-surface`, `full-canvas`, `workspace-stage`): twelve in all. Plugins mount in one of three placements from the activity rail:

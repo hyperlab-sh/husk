@@ -216,7 +216,7 @@ What an index role does downstream:
 
 ### How the sources were mapped
 
-Husk's roles are the nineteen in `pkg/theme.Palette`: `canvas`, `surface`,
+Husk's roles are the nineteen in `pkg/theme` (`Palette`): `canvas`, `surface`,
 `surface_elevated`, `surface_selected`, `surface_hover`, `slot_background`,
 `border`, `border_subtle`, `border_focused`, `ink`, `ink_muted`,
 `ink_subtle`, `accent`, `accent_secondary`, `accent_soft`, `success`,
@@ -781,10 +781,10 @@ blends a hex neighbour in the same shadow band.
 | `CheckContrast`: an unparsable value is a violation | Unchanged for hex; it takes the index map and skips every pair with an index role on either side |
 | `protocol.Palette` comment: `#RRGGBB` strings | Unchanged: values stay `#rrggbb`. The `theme.get` result and `theme.changed` params gain an optional `ansi` object (role → `0`–`15`), minor 2.4; [Protocol](protocol.md) "ANSI palette roles (minor 2.4)" and the `theme_changed` row, and [Architecture](../architecture.md) "Theme", amended. The generated wire schema carries it (`ThemeChangedParams.ansi`) |
 | Theme Service snapshot: `gen`, `palette`, `overrides` | Gains the index map (role → `0`–`15`), built with the palette; `Wire()` stays a plain conversion of the palette, and `WireANSI() (protocol.Palette, map[string]int)` returns the wire palette and a detached copy of the map from one snapshot read |
-| Theme Service `Prepare` (`internal/services/theme/theme.go`): `Changed` when `old.palette != p` | `Changed` when the palette or the index map differs (`maps.Equal`), so `"ink": 7` → `"#c0c0c0"`, same hex, publishes |
-| `contracts.Frontend` (`internal/host/contracts/frontend.go`): `Palette() protocol.Palette` | Unchanged, plus `PaletteANSI() (protocol.Palette, map[string]int)`, the palette and a detached copy of its index map from one snapshot read. Any goroutine |
-| `internal/host/frontend.go`: `Root.Palette()` returns `Theme.Wire()` | Plus `Root.PaletteANSI()` returning `Theme.WireANSI()` |
-| Theme handler (`internal/host/handlers/services/theme.go`): `themeGetResult{Palette}` | Gains `ANSI protocol.ANSIRoles` (a `map[string]int`, the type `ThemeChangedParams.ANSI` also uses) with `json:"ansi,omitempty"`; the handler fills palette and `ansi` from one `WireANSI()` call; the `theme.changed` pushes (`internal/host/loop.go` at launch, `internal/host/reload_watch.go` on change) take both from one `WireANSI()` call the same way |
+| Theme Service `Prepare` (`pkg/services/theme/theme.go`): `Changed` when `old.palette != p` | `Changed` when the palette or the index map differs (`maps.Equal`), so `"ink": 7` → `"#c0c0c0"`, same hex, publishes |
+| `contracts.Frontend` (`pkg/host/contracts/frontend.go`): `Palette() protocol.Palette` | Unchanged, plus `PaletteANSI() (protocol.Palette, map[string]int)`, the palette and a detached copy of its index map from one snapshot read. Any goroutine |
+| `pkg/host/frontend.go`: `Root.Palette()` returns `Theme.Wire()` | Plus `Root.PaletteANSI()` returning `Theme.WireANSI()` |
+| Theme handler (`pkg/host/handlers/services/theme.go`): `themeGetResult{Palette}` | Gains `ANSI protocol.ANSIRoles` (a `map[string]int`, the type `ThemeChangedParams.ANSI` also uses) with `json:"ansi,omitempty"`; the handler fills palette and `ansi` from one `WireANSI()` call; the `theme.changed` pushes (`pkg/host/loop.go` at launch, `pkg/host/reload_watch.go` on change) take both from one `WireANSI()` call the same way |
 | `cmd/husk` draws every role from its hex | Reads `PaletteANSI()` wherever it needs the map (`Palette()` stays for callers that need only the palette); `refresh` (`cmd/husk/model.go`), which today redraws only when `pal != m.palette`, compares the palette and the map: index roles drawn as `ansi.BasicColor(n)`; `castShadow` skips cells with basic or indexed colours; the View's `BackgroundColor` (OSC 11) is set only when `canvas` is not in the map |
 | `cmd/husk/compose.go` `castShadow` blends every cell's colours | Leaves a cell with an ANSI basic or indexed colour unblended ([Cell-buffer compositor](cell-buffer-compositor.md), "Popup shadow") |
 | `cmd/husk` goldens show `✦ CharmTone` and today's colours | Regenerated once with the chrome spec's colour changes |

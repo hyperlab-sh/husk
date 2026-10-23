@@ -276,7 +276,7 @@ The rule is `Public`-based for host actions too: a plugin may invoke a `husk.*`
 action only when the host's catalog marks it public. A caller of unknown kind,
 or a plugin caller with no plugin id, is denied.
 
-Notes fixed by the implementation (`internal/stem/dispatcher`):
+Notes fixed by the implementation (`pkg/stem/dispatcher`):
 
 - A well-formed id has at least two non-empty dot-separated segments, no
   whitespace, `;`, `=` or backslash, and at most 256 bytes. `args` over 1 MiB, or not
@@ -596,7 +596,7 @@ introspection; the shapes are in [Hooks](hooks.md).
   `EventSubscribePayload` are replaced by the Protocol request and
   notification envelopes. The legacy `type`-keyed envelope is gone with the
   package.
-- `pkg/manifest` (deleted; the converter is `internal/pods/manifest`): gains `actions[].public`, `events.subscribe`,
+- `pkg/manifest` (deleted; the converter is `pkg/pods/manifest`): gains `actions[].public`, `events.subscribe`,
   `events.publish[].coalesce` and `hooks.subscribe`. Existing `hooks` and
   `events` declaration arrays are read as publish declarations.
 - `docs/docs/architecture.md`: "Hooks" and "Events and lifetime" describe the
