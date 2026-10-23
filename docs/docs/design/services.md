@@ -37,11 +37,11 @@ Three specs touch the same ground. The rule that owns a topic is written once, i
 | The Keybinding Service mechanics: inputs, rebuild, generation, where loader problems go, the per-caller view of `keys.list`, the resolved-keymap size cap | this spec |
 | Merging of `distribution < user < profile < instance`, file locations, the declared-document schema, the encrypted namespace | [Store](store.md) |
 | The `husk.profile` and `husk.grants` slices as slices (scope, retention) | [State](state.md); their contents, this spec |
-| Method names, the error-code table, the request envelope, the `Palette` and `Caller` wire types | [Protocol](protocol.md); params and results of the `settings.*`, `secrets.*`, `theme.*`, `profile.*` and `config.*` methods, the `Problem` and `Report` types, this spec |
+| Method names, the error-code table, the request envelope, the `Palette`, `Caller`, `Problem` and `Source` wire types | [Protocol](protocol.md); params and results of the `settings.*`, `secrets.*`, `theme.*`, `profile.*` and `config.*` methods, the `Report` type and the problem-code tables, this spec |
 | Manifest conversion into declared documents, the launch gate, pushing `theme.changed` down a plugin's stdin | [Pods](pods.md) |
 | CLI subcommand syntax, output format, exit codes | [Instances and the CLI](instances.md); which method each `husk settings|theme|profile|secrets|config` subcommand calls, this spec |
 
-Dependencies. Services import [Store](store.md) and [State](state.md) interfaces and the `Palette` and `Caller` types from [Protocol](protocol.md). They import nothing from the Stem or Pods: the confirm dialog, the loop post function, the event publisher, the warning sink (one `func(msg string)` the host points at its log) and the distribution schema arrive as values at construction; the caller identity arrives per call. The Stem (Input, renderer, palette, footer) and the Server handlers depend on Services. The Pods host depends only on an interface it defines itself (`Reloader`, [Pods](pods.md)), which the coordinator satisfies; it imports no Services package. [Calls](calls.md) never touches Services.
+Dependencies. Services import [Store](store.md) and [State](state.md) interfaces and the `Palette`, `Caller`, `Problem` and `Source` types from [Protocol](protocol.md). They import nothing from the Stem or Pods: the confirm dialog, the loop post function, the event publisher, the warning sink (one `func(msg string)` the host points at its log) and the distribution schema arrive as values at construction; the caller identity arrives per call. The Stem (Input, renderer, palette, footer) and the Server handlers depend on Services. The Pods host depends only on an interface it defines itself (`Reloader`, [Pods](pods.md)), which the coordinator satisfies; it imports no Services package. [Calls](calls.md) never touches Services.
 
 ## Level 1: Contract
 
@@ -98,33 +98,19 @@ The `host` kind is trusted like the host itself for reading and for reload, but 
 // Generation starts at 0 (built-in snapshot) and increases by one per published rebuild.
 type Generation uint64
 
-// Problem is the one diagnostic type every Service, the coordinator and
-// `keys.list` use. Keybindings' problem object is this struct serialized.
-type Problem struct {
-    Severity string  `json:"severity"`         // "error" | "warning"
-    Code     string  `json:"code"`             // stable snake_case id from the tables below; what tests and tools match on
-    Layer    string  `json:"layer"`            // "husk" | "distribution" | "user" | "profile" | "instance" | "plugin:<id>" | "" when not layer-specific
-    Key      string  `json:"key,omitempty"`    // settings key, palette role, secret name, or the keymap entry's keys
-    Message  string  `json:"message"`          // human-readable; for people, never for matching; never a secret value or a purpose
-    Source   *Source `json:"source,omitempty"` // where the offending text is, when the Service knows
-}
-
-// Source locates a declaration. Shared with Keybindings, which defines the
-// same fields for every keymap entry.
-type Source struct {
-    Layer  string `json:"layer"`            // "husk" | "distribution" | "user" | "profile" | "instance" | "focus-local"
-    File   string `json:"file,omitempty"`   // config-relative: "config.json", "profiles/<name>/keymap.json"; "builtin" for husk; empty for focus-local
-    Line   int    `json:"line,omitempty"`   // 1-based when the parser reports one, else 0
-    Plugin string `json:"plugin,omitempty"` // declaring plugin; focus-local and plugin:<id> only
-    Order  int    `json:"order,omitempty"`  // index in the layer's array (keymap bind, manifest secrets)
-}
+// The diagnostic type is protocol.Problem, with protocol.Source for its
+// location ([Protocol](protocol.md), "Problem"): one type for every Service,
+// the coordinator and `keys.list`, defined there because it crosses the wire
+// and the host contracts must not import Services. Services define no copy.
+// Its `Code` values come from the tables in this spec and the loader table in
+// [Keybindings](keybindings.md).
 
 type Report struct {
-    Service  string     `json:"service"`  // "profile" | "settings" | "theme" | "keybinding" | "secrets"
-    Gen      Generation `json:"gen"`      // generation now serving
-    Applied  bool       `json:"applied"`  // false: the previous snapshot is still serving
-    Changed  bool       `json:"changed"`  // true when Applied and the new snapshot's value differs from the previous one
-    Problems []Problem  `json:"problems,omitempty"`
+    Service  string             `json:"service"`  // "profile" | "settings" | "theme" | "keybinding" | "secrets"
+    Gen      Generation         `json:"gen"`      // generation now serving
+    Applied  bool               `json:"applied"`  // false: the previous snapshot is still serving
+    Changed  bool               `json:"changed"`  // true when Applied and the new snapshot's value differs from the previous one
+    Problems []protocol.Problem `json:"problems,omitempty"`
 }
 
 // Every Service implements Reloadable.
@@ -152,7 +138,17 @@ Rules, each testable:
 6. `Rebuild` may run on any goroutine and writes no State. Only the posted callbacks named under Profile and Secrets write State.
 7. `Code` is the contract; `Message` is prose. Every code a Service can emit is in its table in this spec (Keybinding: the loader table in [Keybindings](keybindings.md)); a new code is a spec change. `Changed` is false whenever `Applied` is false.
 
-Codes raised by the coordinator itself, in any report: `store_error` (Store could not resolve or load a layer; the message names the config-relative file), `timed_out` (the 2 s deadline passed before this Service published), `cancelled` (the coordinator closed during the flight).
+Codes raised by the coordinator or by a candidate's `Apply`, in any report, all `error` unless noted; none builds a candidate, and the previous snapshot keeps serving:
+
+| Code | Raised by | Condition | Severity | Effect |
+| :--- | :--- | :--- | :--- | :--- |
+| `store_error` | coordinator, step 2 | Store could not resolve or load a layer (parse error, over a limit); the message names the config-relative file | error | no Service rebuilds; every report carries it; `config.reload` answers `unavailable` `store_error` |
+| `timed_out` | coordinator, step 4 | the 2 s deadline passed before this Service published | error | this and every later Service keeps its snapshot; candidates already published stay |
+| `cancelled` | coordinator | the coordinator closed during the flight | error | the Services not yet published keep their snapshots; `config.reload` answers `cancelled` `shutdown` |
+| `settings_unchanged` | coordinator, step 3 | Settings produced no candidate, so Theme was skipped (message `settings unchanged; palette unchanged`) | warning | Theme's report only: no rebuild, `applied:false`, the palette stays; the only `applied:false` report that carries no `error` |
+| `candidate_superseded` | the candidate's `Apply` | `Apply` found the candidate stale and swapped nothing: its flight's deadline had passed, the coordinator had closed, or the Service's generation moved since the rebuild | error | that Service's report says `applied:false`; the coordinator never calls `Apply` on a late candidate (step 4), so in a healthy flight this code never appears |
+
+A Service that reads the declared `plugins` documents (Settings, Keybinding, Secrets) raises `invalid_plugin_catalog` (`warning`, layer `plugin:<id>`, `Source.Plugin` set) when a plugin's document does not decode or its `id` is not its Store source; that plugin's declarations are ignored by the reporting Service, as if it had declared nothing (its configuration keys are then `unknown_key`), and every other plugin's stand. Like a bad plugin schema (Settings, "Validation"), it is never an `error`: a plugin cannot block the user's reload by shipping a bad manifest.
 
 `ReloadInput` is one consistent set of inputs, gathered once per reload and handed to every Service: the merged `config` document with per-key origins (`Store.Resolve("config", profile)`), the unmerged `config` layers (`Store.Layers("config", profile)`, for Theme's distribution check and Profile's `profile.default` rule), the unmerged `keymap` layers (`Store.Layers("keymap", profile)`), the declared documents (`Store.Declared`), the profile the coordinator selected, and `Settings`: the Settings `Snapshot` this reload published, filled in by the coordinator after Settings' candidate is applied and nil when it was not. Only Theme reads `Settings`.
 
@@ -340,7 +336,7 @@ Overrides are the settings keys `theme.palette.<role>`, one per role of `Palette
 Build, per rebuild:
 
 1. Start from the built-in palette.
-2. Apply every `theme.palette.<role>` whose `Source` is not `default` (layer order is already resolved in the Settings snapshot).
+2. Apply every `theme.palette.<role>` whose `Source` is not `default` (layer order is already resolved in the Settings snapshot) through `Overlay`. An override `Overlay` rejects is the same `invalid_color` problem as above, keyed by that role's settings key; the roles are the fixed list, so `Overlay` has no other failure.
 3. If `slot_background` was not overridden, derive it from the final `canvas` (`SlotBackground(canvas)`), so a new canvas drags the slot panel with it.
 4. Check every pair in the contrast table (`ContrastPairs()`, production code shared with the built-in palette's test): text roles need **4.5:1** on every surface they are drawn on, borders and non-text indicators need **3:1** (WCAG 2.1 SC 1.4.3 and 1.4.11).
 5. Each failing pair is a `low_contrast` problem whose message names the foreground role, the background role, the measured ratio and the minimum (`ink on surface is 2.10:1, need 4.5:1`) and whose `Key` is the settings key of the attributed role (`theme.palette.ink`), so every Settings and Theme problem's `Key` is something `husk settings get` accepts. It is attributed (`Layer`, `Source`) to the layer that overrode the foreground role; when the foreground is the built-in default, to the layer that overrode the background role; when both are overridden, to the foreground's. (At least one is overridden, since the built-in palette passes.)
@@ -382,12 +378,12 @@ Two different documents share the name `keymap`: `Store.Declared("keymap")` is a
 The Service exposes the policy view from [Keybindings](keybindings.md) (`Resolve`, `Hints`, `KeysFor`, `Listing`) plus `Reloadable`. Rules the Service adds:
 
 1. `Resolve` is pure and lock-free: it reads the snapshot pointer, no State, no clock. Input owns the typed prefix and the sequence timeout and passes the prefix in. Which candidate wins is [Keybindings](keybindings.md)'s rule and is not restated here: scope first (a binding scoped to the focused surface beats a global one), then layer (`profile` > `user` > `distribution` > `focus-local` > `husk` within one scope), then the `plugin` condition, then file order. Wherever this spec says "weakest" or "strongest", it means that ranking. Tombstones (`disable` entries), the context filters `Resolve` applies (frozen terminal, modal, text capture) and what each filter keeps are likewise [Keybindings](keybindings.md)'s, stated once there.
-2. A rebuild parses every layer, applies the loader rules of [Keybindings](keybindings.md), and reports every dropped or shadowed entry as a `Problem` whose `Code` is one of that spec's loader codes (its table is the complete list; this spec adds none); nothing disappears silently. `Source` is filled for every keymap problem: layer, config-relative file and line for config layers; `focus-local`, plugin and order for declared entries, with `Layer` `plugin:<id>`. Conversion problems Pods attached to a declared document (`global_not_allowed`, `foreign_action`, `too_many`) are imported under layer `plugin:<id>` with the code and message conversion wrote; the Service itself raises `suggestion_ignored` for each entry of the document's `suggestions` array and, as the only key parser, `unparsable_key` for a focus-local spelling it cannot parse.
+2. A rebuild parses every layer, applies the loader rules of [Keybindings](keybindings.md), and reports every dropped or shadowed entry as a `protocol.Problem` whose `Code` is one of that spec's loader codes (its table is the complete list; this spec adds only `invalid_plugin_catalog`, "Snapshots, rebuilds and reports"); nothing disappears silently. `Source` is filled for every keymap problem: layer, config-relative file and line for config layers; `focus-local`, plugin and order for declared entries, with `Layer` `plugin:<id>`. Conversion problems Pods attached to a declared document (`global_not_allowed`, `foreign_action`, `too_many`) are imported under layer `plugin:<id>` with the code and message conversion wrote; the Service itself raises `suggestion_ignored` for each entry of the document's `suggestions` array and, as the only key parser, `unparsable_key` for a focus-local spelling it cannot parse.
 3. A layer document that fails to load on a reload (parse, version, size) keeps that layer's **last good** document for the same layer and, for `profile`, the same profile name; a different profile never inherits another profile's document. At first load the layer is dropped instead ([Keybindings](keybindings.md), failure modes). The last-good documents are process memory, named under Level 0.
 4. The resolved keymap is capped at **4096 effective bindings** (the index the Service keeps in memory and `husk keys` prints). Past the cap the weakest-ranked entries are shadowed and reported `too_many`, so a flood of low-layer entries cannot displace a `profile` or `user` binding.
 5. A rebuild that leaves no effective binding for `husk.quit` or `husk.palette.open` still publishes and reports `no_exit_binding` ([Keybindings](keybindings.md), loader rules table).
 6. Lookup never fails: an unknown action id resolves, and the Dispatcher reports `not_found` at dispatch, where the user can see it. A host action declining a key (`ActionReply.Declined`, host-only and never serialized, defined in [Keybindings](keybindings.md) and [Message kinds](message-kinds.md)) is Input's and the Dispatcher's business; the Service never sees it.
-7. `keys.list` for a `plugin` caller returns only the entries whose declaring plugin is the caller or whose action the caller owns in the catalog, and only the caller's own problems; `cli` and `host` get the full listing. The Server joins the listing with State liveness and the action catalog to produce the `state` column ([Keybindings](keybindings.md)). The `problems` array of the result is `[]Problem` as defined above, serialized as is.
+7. `keys.list` for a `plugin` caller returns only the entries whose declaring plugin is the caller or whose action the caller owns in the catalog, and only the caller's own problems; `cli` and `host` get the full listing. The Server joins the listing with State liveness and the action catalog to produce the `state` column ([Keybindings](keybindings.md)). The `problems` array of the result is `[]protocol.Problem` ([Protocol](protocol.md), "Problem"), serialized as is.
 
 ### Secrets
 
@@ -504,7 +500,7 @@ CLI: `husk secrets list`, `husk secrets set <name>` (value from stdin, trailing 
 11. Reloads are serialized and coalesced as the Reload section says; a flight never runs under a requester's context.
 12. The only State writes Services make are `husk.profile` (Profile) and `husk.grants` (Secrets), both through callbacks posted to the loop. Rebuilds and reads write nothing.
 13. Services publish exactly two events: `services.reloaded` (coordinator) and `secrets.read` (Secrets); both reach `cli` watchers only.
-14. Services define no second copy of a type another layer owns: the caller identity (`protocol.Caller`), `Palette`, the settings `Entry` and the declared-document types are shared, not converted; and `Problem` is the one diagnostic type every report and `keys.list` carry.
+14. Services define no second copy of a type another layer owns: the caller identity (`protocol.Caller`), `Palette`, the settings `Entry` and the declared-document types are shared, not converted; and `protocol.Problem` is the one diagnostic type every report and `keys.list` carry.
 15. Every problem a Service can raise has a code listed in this spec or in [Keybindings](keybindings.md)' loader table; tests match on codes, never on messages.
 
 ### Failure modes
@@ -542,14 +538,14 @@ CLI: `husk secrets list`, `husk secrets set <name>` (value from stdin, trailing 
 
 ### Code layout
 
-Services live under one import root as `services/{profile,settings,theme,keybinding,secrets}` plus the coordinator in `services`. Shared value types the children and the coordinator both need (`Generation`, `Problem`, `Source`, `Report`, `ReloadInput`, `Reloadable`, `Candidate`, the settings `Entry` and the declared-document types) live in one leaf package the children import, so no child imports its parent. The caller identity is not among them: it is `protocol.Caller`, and the Services `Caller` struct is deleted. The embedded `husk` keymap sits beside the Keybinding Service. `pkg/theme` keeps `Palette`, `Default()`, `Overlay`, `SlotBackground`, `ContrastPairs` and `CheckContrast`, so the runtime check and the built-in palette's test share one rule.
+Services live under one import root as `services/{profile,settings,theme,keybinding,secrets}` plus the coordinator in `services`. Shared value types the children and the coordinator both need (`Generation`, `Report`, `ReloadInput`, `Reloadable`, `Candidate`, the settings `Entry` and the declared-document types) live in one leaf package the children import, so no child imports its parent. The caller identity and the diagnostic are not among them: they are `protocol.Caller`, `protocol.Problem` and `protocol.Source` ([Protocol](protocol.md)), because problems cross the wire (`keys.list`, the reload reports) and the host contracts that carry them must not import Services; the Services `Caller`, `Problem` and `Source` structs are deleted. The embedded `husk` keymap sits beside the Keybinding Service. `pkg/theme` keeps `Palette`, `Default()`, `Overlay`, `SlotBackground`, `ContrastPairs` and `CheckContrast`, so the runtime check and the built-in palette's test share one rule.
 
 ## Level 2: Status against the code
 
 The five Services and the coordinator exist. Items below are where the code on `main` and this spec differ; each is small and self-contained.
 
 - Caller identity: five `Caller` structs exist (Server, host contracts, Dispatcher, hooks, Services) and adapters convert between them. The spec requires the one `protocol.Caller`. The `host` kind currently counts as a user for secrets; the spec denies it secret operations.
-- `Problem` has no `Code` and no `Source`; codes are embedded in messages. The spec adds both fields and the code tables.
+- `Problem` is a Services type with no `Code` and no `Source`; codes are embedded in messages. The spec moves it to `protocol.Problem` with both fields and adds the code tables. The code also emits codes the tables did not list: `store_unavailable` for a failed Store resolution (the spec's `store_error`), `duplicate_secret_declaration` (the spec's `duplicate_secret`), `invalid_value` for a palette override `Overlay` rejects (the spec's `invalid_color`), `candidate_superseded`, `invalid_plugin_catalog` and `settings_unchanged` as `error` (the spec defines all three under "Snapshots, rebuilds and reports"; the last two are `warning`).
 - Settings exposure: every `husk.*` key is readable by every plugin. The spec adds `Entry.Public` and exposes only entries marked public; none is marked today.
 - Unknown settings keys outside a declared plugin subtree are errors that block the whole Settings rebuild. The spec makes every unknown key a warning with the raw value retained. A plugin schema error is an error in the Settings report; the spec makes it a warning that drops only that plugin's entries.
 - Profile selection reads the merged document for `profile.default` and resolves twice; the spec reads the unmerged `user` layer and resolves once. `--profile` is not wired, and the chosen profile is not written back to the slice.
@@ -572,7 +568,7 @@ The five Services and the coordinator exist. Items below are where the code on `
 
 1. Five Services with one shared rebuild shape: immutable generation-numbered snapshots, all-or-nothing per Service, one coordinator that serializes and coalesces reloads and publishes one `services.reloaded`. Dry runs take the coordinator's turn so they may invalidate Store safely.
 2. Reload order Profile, Settings, Theme, Keybinding, Secrets; Theme reads the Settings snapshot the same reload published (`ReloadInput.Settings`) and is skipped with a `settings_unchanged` warning when Settings failed; Keybinding and Secrets are independent of Settings. A late candidate is never applied.
-3. `Problem` carries a stable `Code` and, when known, a `Source`; every code is listed in this spec or in [Keybindings](keybindings.md); `keys.list`'s problem object is this type. Tests and tools match on codes; messages are prose.
+3. The diagnostic is `protocol.Problem` ([Protocol](protocol.md), "Problem"): it carries a stable `Code` and, when known, a `protocol.Source`; every code is listed in this spec or in [Keybindings](keybindings.md); `keys.list`'s problem object is this type. Tests and tools match on codes; messages are prose.
 4. Profile selection runs in the coordinator before the one `Store.Resolve` and reads `profile.default` from the unmerged `user` layer; the selected value is written back to `husk.profile` by the flight that chose it, and the slice listener ignores that write. `profile.use` writes State only, waits on the flight its write triggers (correlated by registration at write time) and replies with that flight's reports; the same name replies at once.
 5. Settings namespaces have exactly one owner each; visibility is by declaration ownership plus an explicit `public` flag on host and distribution entries. **No host settings key is readable by plugins today**; a schema entry marked `public: true` is the mechanism when a need appears, and nothing else makes a host key visible. No method writes a setting.
 6. **An unknown settings key is a warning**, kept raw for the user and never shown to plugins; an invalid value of a known key is an error, so nothing half-applies. Errors for unknown keys would let a stale key from a removed plugin or a typo freeze every setting. A plugin's schema error is a warning that unregisters only that plugin's entries; a host or distribution schema error fails construction, never a reload.

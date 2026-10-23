@@ -141,6 +141,31 @@ type FocusContext struct {
 }
 ```
 
+### Problem
+
+`Problem` lives here for the same reason as `Caller`: it crosses the wire as is (the `problems` array of `keys.list`, `settings.validate` and `theme.check`, and every report in `config.reload`, `profile.use` and `services.reloaded`), and the host contracts that carry those results must not import Services. It is the one diagnostic type every Service, the coordinator and the Keybinding listing use ([Services](services.md), "Snapshots, rebuilds and reports"; [Keybindings](keybindings.md), "What `keys.list` reports"); no module defines its own copy. The codes themselves are owned by the spec that raises them: [Services](services.md) for the Service and coordinator tables, [Keybindings](keybindings.md) for the loader table. Store's own `Problem` ([Store](store.md)) is a different type for a different reader: Services import it into one of these.
+
+```go
+// Problem is one diagnostic: a stable code, where it came from, and prose.
+type Problem struct {
+    Severity string  `json:"severity"`         // "error" | "warning"
+    Code     string  `json:"code"`             // stable snake_case id from the owning spec's table; what tests and tools match on
+    Layer    string  `json:"layer"`            // "husk" | "distribution" | "user" | "profile" | "instance" | "plugin:<id>" | "" when not layer-specific
+    Key      string  `json:"key,omitempty"`    // settings key, palette role, secret name, or the keymap entry's keys
+    Message  string  `json:"message"`          // human-readable; for people, never for matching; never a secret value or a purpose
+    Source   *Source `json:"source,omitempty"` // where the offending text is, when the reporter knows
+}
+
+// Source locates a declaration: a problem's, or a keymap entry's in `keys.list`.
+type Source struct {
+    Layer  string `json:"layer"`            // "husk" | "distribution" | "user" | "profile" | "instance" | "focus-local"
+    File   string `json:"file,omitempty"`   // config-relative: "config.json", "profiles/<name>/keymap.json"; "builtin" for husk; empty for focus-local
+    Line   int    `json:"line,omitempty"`   // 1-based when the parser reports one, else 0
+    Plugin string `json:"plugin,omitempty"` // declaring plugin; focus-local and plugin:<id> only
+    Order  int    `json:"order,omitempty"`  // index in the layer's array (keymap bind, manifest secrets)
+}
+```
+
 ### Error codes
 
 A closed enum per protocol minor version. A receiver built for an older minor treats an unknown code as `internal`.
