@@ -32,7 +32,7 @@ func TestSettingsSetUserWriteShadowedByProfileReportsWinningSource(t *testing.T)
 	}
 	r := hostSet(t, h, "theme.name", "alpha")
 	rows, err := (ports.Theme{Svc: h.root.rt.Theme}).List(t.Context(), contracts.Caller{Kind: protocol.CallerHost})
-	if err != nil || r.Source != "profile" || len(rows) != 3 || rows[1].Name != "alpha" || rows[1].Current || rows[2].Name != "zulu" || !rows[2].Current {
+	if err != nil || r.Source != "profile" || len(rows) != 11 || rows[9].Name != "alpha" || rows[9].Current || rows[10].Name != "zulu" || !rows[10].Current {
 		t.Fatalf("reply=%+v rows=%+v err=%v", r, rows, err)
 	}
 	b, err := os.ReadFile(filepath.Join(dir, "config.json"))

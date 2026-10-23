@@ -25,7 +25,7 @@ func TestThemeListServingSnapshotOrderSourceCurrent(t *testing.T) {
 			if want == "" || want == "unknown" {
 				want = palette.Default().Name
 			}
-			if err != nil || len(rows) != 3 || rows[0].Name != palette.Default().Name || rows[0].Source != "built-in" || rows[1].Name != "alpha" || rows[1].Source != "user" || rows[2].Name != "zulu" || rows[2].Source != "profile" {
+			if err != nil || len(rows) != 11 || rows[0].Name != palette.Default().Name || rows[0].Source != "built-in" || rows[9].Name != "alpha" || rows[9].Source != "user" || rows[10].Name != "zulu" || rows[10].Source != "profile" {
 				t.Fatalf("%+v %v", rows, err)
 			}
 			n := 0
@@ -45,7 +45,7 @@ func TestThemeListServingSnapshotOrderSourceCurrent(t *testing.T) {
 			in.Themes = nil
 			th.Rebuild(context.Background(), in)
 			again, _ := th.List(Caller{Kind: "cli"})
-			if len(again) != 3 || again[0].Name != palette.Default().Name {
+			if len(again) != 11 || again[0].Name != palette.Default().Name {
 				t.Fatal(again)
 			}
 		})

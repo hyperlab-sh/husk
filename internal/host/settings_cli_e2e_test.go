@@ -70,10 +70,10 @@ func TestSettingsWriteCLIAgainstRealHost(t *testing.T) {
 		t.Helper()
 		code, out, stderr := cliRun(h, "theme", "list", "--format", "json")
 		var reply struct{ Themes []contracts.ThemeEntry }
-		if code != 0 || json.Unmarshal([]byte(out), &reply) != nil || len(reply.Themes) != 2 {
+		if code != 0 || json.Unmarshal([]byte(out), &reply) != nil || len(reply.Themes) != 10 {
 			t.Fatalf("list exit=%d out=%s err=%s", code, out, stderr)
 		}
-		if reply.Themes[0].Name != palette.Default().Name || reply.Themes[0].Source != "built-in" || reply.Themes[1].Name != "evening" || reply.Themes[1].Source != "user" {
+		if reply.Themes[0].Name != palette.Default().Name || reply.Themes[0].Source != "built-in" || reply.Themes[9].Name != "evening" || reply.Themes[9].Source != "user" {
 			t.Fatalf("themes=%+v", reply.Themes)
 		}
 		for _, entry := range reply.Themes {

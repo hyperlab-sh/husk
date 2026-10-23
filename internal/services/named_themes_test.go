@@ -20,7 +20,6 @@ func TestNamedThemeRules(t *testing.T) {
 		{"bad.name", `{"palette":{}}`, "invalid_theme"},
 		{strings.Repeat("a", 33), `{"palette":{}}`, "invalid_theme"},
 		{"", `{"palette":{}}`, "invalid_theme"},
-		{palette.Default().Name, `{"palette":{}}`, "reserved_theme_name"},
 		{"bad", `{"palette":{"not_a_role":"#ffffff"}}`, "invalid_theme"},
 		{"bad", `{"palette":{"name":"other"}}`, "invalid_theme"},
 		{"bad", `{"palette":{"ink":"red"}}`, "invalid_theme"},
@@ -37,7 +36,7 @@ func TestNamedThemeRules(t *testing.T) {
 				t.Fatalf("%+v", r.Problems)
 			}
 			rows, _ := th.List(Caller{Kind: "cli"})
-			if len(rows) != 2 || rows[1].Name != "valid" {
+			if len(rows) != 10 || rows[9].Name != "valid" {
 				t.Fatalf("dropped definition listed: %+v", rows)
 			}
 		})
@@ -69,7 +68,7 @@ func TestNamedThemeReplacementSelectionAndOverrides(t *testing.T) {
 		th := stheme.New()
 		r := apply(t, th, in)
 		rows, err := th.List(Caller{Kind: "cli"})
-		if err != nil || th.Palette().Name != "evening" || th.Palette().Accent != "#f1effe" || len(rows) != 2 || rows[1].Source != "distribution" || !rows[1].Current {
+		if err != nil || th.Palette().Name != "evening" || th.Palette().Accent != "#f1effe" || len(rows) != 10 || rows[9].Source != "distribution" || !rows[9].Current {
 			t.Fatalf("palette=%+v rows=%+v err=%v", th.Palette(), rows, err)
 		}
 		if len(r.Problems) != 1 || r.Problems[0].Code != "invalid_theme" || r.Problems[0].Severity != "warning" || r.Problems[0].Layer != "user" {

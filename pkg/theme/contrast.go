@@ -86,10 +86,16 @@ func Roles(p Palette) map[string]string {
 }
 
 // CheckContrast checks the same complete table for built-in and user palettes.
-func CheckContrast(p Palette) []Violation {
+// Pairs with an ANSI index on either side are unmeasurable and skipped.
+func CheckContrast(p Palette, indices map[string]int) []Violation {
 	roles := Roles(p)
 	var out []Violation
 	for _, pair := range ContrastPairs() {
+		_, fgIndex := indices[pair.Foreground]
+		_, bgIndex := indices[pair.Background]
+		if fgIndex || bgIndex {
+			continue
+		}
 		ratio, err := Contrast(roles[pair.Foreground], roles[pair.Background])
 		if err != nil || ratio < pair.Minimum {
 			out = append(out, Violation{pair, ratio})
@@ -98,8 +104,8 @@ func CheckContrast(p Palette) []Violation {
 	return out
 }
 
-// Overlay applies hex-only role overrides, deriving slot background from canvas
-// unless explicitly supplied. It validates format; CheckContrast is separate.
+// Overlay applies hex-only role overrides without deriving any roles.
+// It validates format; CheckContrast and the build's slot derivation are separate.
 func Overlay(base Palette, overrides map[string]string) (Palette, error) {
 	roles := Roles(base)
 	for role, value := range overrides {
@@ -114,9 +120,6 @@ func Overlay(base Palette, overrides map[string]string) (Palette, error) {
 			return Palette{}, fmt.Errorf("role %s: want #RRGGBB", role)
 		}
 		roles[role] = strings.ToLower(value)
-	}
-	if _, ok := overrides["slot_background"]; !ok {
-		roles["slot_background"] = SlotBackground(roles["canvas"])
 	}
 	b, _ := json.Marshal(roles)
 	var p Palette
