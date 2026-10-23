@@ -241,6 +241,23 @@ Minor 2.4 ([Built-in themes](themes.md), "Role values"; [Services](services.md),
 
 Minor 2.5 serves terminal attachment, output, detachment and encoded input on already claimed surfaces, with full-key capture and its release action. `protocol.Version` is `2.5`; all earlier minors remain served. Runtime surfaces and terminal links are deferred. The Go API changes `SurfaceUpdateParams.Capture` from `*bool` to `*CaptureValue`; migrate boolean callers to `protocol.CaptureBool(true)` / `protocol.CaptureBool(false)` and string-mode callers to `protocol.CaptureValueAll.Ptr()` / `protocol.CaptureValueText.Ptr()`. `TerminalAttachParams.Capture` uses the same optional value type; wire booleans remain compatible.
 
+Minor 2.6 adds the optional boolean `yield` to `surface.close`: a live
+occupant can keep its layout claim behind ordinary live claims while
+releasing occupancy. All earlier minors remain served; no method, slice or
+event is added.
+
+Version history:
+
+| Version | Additive contract |
+| :--- | :--- |
+| 2.0 | Request, reply and notification envelopes and the base method families. |
+| 2.1 | Hook outcomes and listing, text capture, plugin removal. |
+| 2.2 | Plugin addition. |
+| 2.3 | Theme listing, settings writes and plugin directory metadata. |
+| 2.4 | Optional ANSI palette roles. |
+| 2.5 | Terminal attachment, output, detachment and encoded input; full-key capture. |
+| 2.6 | Optional `surface.close.yield` retains an occupied layout claim as a fallback. |
+
 Where the version is checked, since there is no handshake:
 
 - A plugin states its protocol major in its manifest (`"protocol": 2`). Manifest conversion ([Pods](pods.md)) refuses a plugin whose major differs before it is launched. The Wrapper tells the plugin the host's full version in `HUSK_PROTOCOL_VERSION`.
@@ -317,6 +334,35 @@ Direction rule: stdin carries Husk's requests and notifications; stdout carries 
 
 ```json
 {"method":"surface.update","params":{"surface":"main-stage","lines":["> search_"],"capture":true}}
+```
+
+### Surface close
+
+`surface.close` releases a surface the sender occupies. It is a notification;
+invalid params produce `protocol.error` as in the general error table.
+
+| Param | Type | Meaning |
+| :--- | :--- | :--- |
+| `surface` | string, required | The surface to release. |
+| `yield` | boolean, optional, default `false` (minor 2.6) | On an occupied layout claim, retain the declaration as yielded instead of retracting it. |
+
+With `yield` absent or false, close retracts the claim at its source, as
+before. With `yield: true`, the caller must occupy the surface through its
+own claim; otherwise the host answers `invalid_params` with a message naming
+`yield` and changes nothing. In particular, an opened non-claimed surface,
+such as a runtime modal, cannot be yielded. Runtime opening remains deferred.
+
+A yielded live claim ranks behind every ordinary live claim, with namespace
+order among yielders, and becomes ordinary again on regaining occupancy
+([State](state.md), Surfaces resolution). If no other live claimant exists,
+the yielder immediately regains occupancy and learns this through the normal
+`surface.resized`, even at unchanged dimensions. This is not an error.
+Capture is cleared and any attached terminal is detached as for any close.
+Removing the plugin drops a yielded claim like any other declaration. No new
+slice or event is introduced.
+
+```json
+{"method":"surface.close","params":{"surface":"main-stage","yield":true}}
 ```
 
 ### Surface resize snapshot
