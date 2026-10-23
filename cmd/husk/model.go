@@ -510,6 +510,12 @@ func (m *WorkbenchModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.answerSecretPrompt(secrets.Dismissed)
 		}
 		m.secretPrompt = &secretPromptState{id: msg.id, prompt: msg.prompt, reply: msg.reply}
+		return m, tea.Tick(secretPromptArmDelay, func(time.Time) tea.Msg { return secretPromptArmMsg{id: msg.id} })
+
+	case secretPromptArmMsg:
+		if m.secretPrompt != nil && m.secretPrompt.id == msg.id {
+			m.secretPrompt.armed = true
+		}
 		return m, nil
 
 	case secretPromptCloseMsg:
@@ -555,6 +561,9 @@ func (m *WorkbenchModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return next, cmd
 
 	case tea.PasteMsg:
+		if m.secretPrompt != nil {
+			return m, nil // the dialog is modal: pasted text reaches nothing
+		}
 		if m.showPalette && !m.layoutFrozen() {
 			return m.pastePalette(msg.Content)
 		}
