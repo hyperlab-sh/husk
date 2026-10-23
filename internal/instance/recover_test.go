@@ -313,6 +313,29 @@ func TestSurveyRecoversStaleEntriesWithTheirSockets(t *testing.T) {
 	}
 }
 
+func TestSurveyReportsANonSocketEntryAndLeavesItAlone(t *testing.T) {
+	dir := shortRunDir(t)
+	entryFor(t, dir, "odd", 111)
+	if err := os.WriteFile(SocketPath(dir, "odd"), []byte("precious"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	entryFor(t, dir, "dead", 222)
+	deadSocket(t, dir, "dead")
+	statuses, err := Survey(dir, nil)
+	if err != nil || len(statuses) != 1 {
+		t.Fatalf("statuses = %+v, err = %v", statuses, err)
+	}
+	if st := statuses[0]; st.Entry.ID != "odd" || st.NotSocket != SocketPath(dir, "odd") || st.Verdict != VerdictStale {
+		t.Fatalf("status = %+v, want odd stale with NotSocket set", st)
+	}
+	if b, err := os.ReadFile(SocketPath(dir, "odd")); err != nil || string(b) != "precious" {
+		t.Fatal("a non-socket path must be left alone", err)
+	}
+	if exists(EntryPath(dir, "dead")) {
+		t.Fatal("the stale entry beside it must still be recovered")
+	}
+}
+
 func TestSurveyWithTheLockHeldLeavesStaleEntriesUnresponsive(t *testing.T) {
 	dir := shortRunDir(t)
 	entryFor(t, dir, "dead", 111)

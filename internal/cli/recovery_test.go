@@ -122,3 +122,42 @@ func deadSocket(t *testing.T, path string) {
 	ln.SetUnlinkOnClose(false)
 	_ = ln.Close()
 }
+
+// A registered entry whose socket path is a regular file is never unlinked;
+// both `instances` and discovery skip it and warn naming the path.
+func TestNonSocketEntryIsSkippedWithAWarningNamingThePath(t *testing.T) {
+	setup := func(t *testing.T) (string, string) {
+		dir := shortDir(t)
+		register(t, dir, "odd", instance.SocketPath(dir, "odd"), protocol.Version)
+		if err := os.WriteFile(instance.SocketPath(dir, "odd"), []byte("precious"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return dir, instance.SocketPath(dir, "odd") + " is not a socket; instance \"odd\" skipped"
+	}
+	t.Run("instances", func(t *testing.T) {
+		dir, want := setup(t)
+		h := newHarness(t, dir, nil)
+		if got := h.run("instances", "--format", "json"); got != 0 {
+			t.Fatalf("exit = %d; stderr %q", got, h.errb.String())
+		}
+		if strings.TrimSpace(h.out.String()) != "[]" {
+			t.Fatalf("stdout = %q, want no rows", h.out.String())
+		}
+		if !strings.Contains(h.errb.String(), strings.ReplaceAll(want, `"`, `\"`)) {
+			t.Fatalf("stderr = %q", h.errb.String())
+		}
+		if b, err := os.ReadFile(instance.SocketPath(dir, "odd")); err != nil || string(b) != "precious" {
+			t.Fatal("the non-socket must be left alone", err)
+		}
+	})
+	t.Run("discovery", func(t *testing.T) {
+		dir, want := setup(t)
+		h := newHarness(t, dir, nil)
+		if got := h.run("ping", "--format", "table"); got != 3 {
+			t.Fatalf("exit = %d; stderr %q", got, h.errb.String())
+		}
+		if !strings.Contains(h.errb.String(), want) {
+			t.Fatalf("stderr = %q, want %q", h.errb.String(), want)
+		}
+	})
+}
