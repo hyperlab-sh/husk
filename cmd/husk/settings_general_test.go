@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
+	"github.com/hyperlab-sh/husk/pkg/theme"
 )
 
 func generalFixture(t testing.TB, entries ...contracts.SettingEntry) (*WorkbenchModel, *fakeFE) {
@@ -32,7 +33,7 @@ func TestSettingsGeneralGroupingOrderAndCollapsedPlugins(t *testing.T) {
 	m, _ := generalFixture(t,
 		contracts.SettingEntry{Key: "plugins.Z.nested.z", Type: "string", Default: "z", Owner: "plugin:Z"},
 		contracts.SettingEntry{Key: "dist.tools.z", Type: "string", Default: "z", Owner: "dist"},
-		contracts.SettingEntry{Key: "theme.name", Type: "string", Default: "charm", Owner: "husk"},
+		contracts.SettingEntry{Key: "theme.name", Type: "string", Default: theme.Default().Name, Owner: "husk"},
 		contracts.SettingEntry{Key: "husk.plugins.paths", Type: "strings", Default: []string{}, Owner: "husk"},
 		contracts.SettingEntry{Key: "husk.bundle", Type: "string", Default: "", Owner: "husk"},
 		contracts.SettingEntry{Key: "plugins.A.x", Type: "string", Default: "x", Owner: "plugin:A"},

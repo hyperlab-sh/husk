@@ -12,6 +12,7 @@ import (
 
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
+	"github.com/hyperlab-sh/husk/pkg/theme"
 )
 
 // Golden frame tests run the real WorkbenchModel under a tea.Program (via
@@ -100,13 +101,13 @@ var goldenFrames = map[string]func(t *testing.T) string{
 			contracts.SettingEntry{Key: "husk.bundle", Type: "string", Default: "", Owner: "husk", Apply: "restart", Doc: "Bundle directory loaded once at start."},
 			contracts.SettingEntry{Key: "husk.plugins.paths", Type: "strings", Default: []string{}, Owner: "husk", Apply: "restart", Doc: "Plugin arguments loaded once at start."},
 			contracts.SettingEntry{Key: "profile.default", Type: "string", Default: "", Owner: "husk"},
-			contracts.SettingEntry{Key: "theme.name", Type: "string", Default: "charm", Owner: "husk"})
+			contracts.SettingEntry{Key: "theme.name", Type: "string", Default: theme.Default().Name, Owner: "husk"})
 		return runGolden(t, m)
 	},
 	"TestGoldenFrameSettingsGeneralErrors": func(t *testing.T) string {
 		m, fe := generalFixture(t,
 			contracts.SettingEntry{Key: "husk.bundle", Type: "string", Default: "", Owner: "husk", Apply: "restart"},
-			contracts.SettingEntry{Key: "theme.name", Type: "string", Default: "charm", Owner: "husk"})
+			contracts.SettingEntry{Key: "theme.name", Type: "string", Default: theme.Default().Name, Owner: "husk"})
 		editGeneral(m, "husk.bundle", "example")
 		editGeneral(m, "theme.name", "evening")
 		m.saveSettingsGeneral()
