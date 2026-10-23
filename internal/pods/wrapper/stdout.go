@@ -8,7 +8,6 @@ import (
 	"io"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
@@ -48,12 +47,7 @@ func (p *firstLineReader) inspect() {
 		p.line = nil
 		return
 	}
-	var fields map[string]json.RawMessage
-	if len(bytes.TrimSuffix(p.line, []byte{'\r'})) <= protocol.MaxLineBytes && utf8.Valid(p.line) && json.Unmarshal(p.line, &fields) == nil && fields["id"] == nil && fields["method"] == nil {
-		var kind string
-		_ = json.Unmarshal(fields["type"], &kind)
-		p.legacy = kind == "hello"
-	}
+	_, p.legacy = protocol.IsLegacyHello(p.line)
 	p.done = true
 	p.line = nil
 }
@@ -162,16 +156,29 @@ func lineMessage(err error) string {
 }
 
 func (w *Wrapper) legacyHello() {
-	failure := &protocol.Error{Code: protocol.CodeVersionMismatch, Message: "unsupported protocol major 1: host speaks " + protocol.Version}
-	w.recordFailure(failure)
-	w.mu.Lock()
-	mux, q := w.stdin, w.queue
-	w.mu.Unlock()
-	if mux != nil && q != nil {
-		line := []byte(`{"type":"protocol_error","protocol_error":{"message_type":"hello","message":"unsupported protocol major 1: host speaks ` + protocol.Version + `"}}` + "\n")
-		mux.setTrailer(line)
-		_ = q.Close()
-		<-mux.closed
+	w.failMajorOne(func() {
+		w.mu.Lock()
+		mux, q := w.stdin, w.queue
+		w.mu.Unlock()
+		if mux != nil && q != nil {
+			mux.setTrailer(protocol.LegacyRejectionLine())
+			_ = q.Close()
+			<-mux.closed
+		}
+	})
+}
+
+// FailVersionMismatch fails the plugin as one that speaks protocol major 1:
+// the failure is recorded (reported as the exit's last error) and the process
+// is stopped. It is the exit path of a major-1 hello seen on stdout, where the
+// plugin is also answered on stdin, and of one seen on the socket, where the
+// Server has already answered it on its connection. Safe from any goroutine.
+func (w *Wrapper) FailVersionMismatch() { w.failMajorOne(nil) }
+
+func (w *Wrapper) failMajorOne(answer func()) {
+	w.recordFailure(&protocol.Error{Code: protocol.CodeVersionMismatch, Message: protocol.LegacyRejectionMessage()})
+	if answer != nil {
+		answer()
 	}
 	w.stop()
 }

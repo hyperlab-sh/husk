@@ -239,6 +239,7 @@ func (p *fakeProc) Send(m protocol.Message) error {
 	return nil
 }
 func (p *fakeProc) MarkShutdown()         {}
+func (p *fakeProc) FailVersionMismatch()  {}
 func (p *fakeProc) CloseStdin()           { p.once.Do(func() { close(p.done) }) }
 func (p *fakeProc) Terminate() error      { p.once.Do(func() { close(p.done) }); return nil }
 func (p *fakeProc) Kill() error           { p.once.Do(func() { close(p.done) }); return nil }

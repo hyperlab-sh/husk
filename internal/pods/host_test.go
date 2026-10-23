@@ -66,6 +66,7 @@ type fakeProcess struct {
 	once                               sync.Once
 	ignore                             bool
 	marked, closed, terminated, killed bool
+	versionMismatch                    int
 	term                               chan struct{}
 	startErr, killErr                  error
 	stubborn, closeEarly               bool
@@ -103,7 +104,21 @@ func (p *fakeProcess) Send(m protocol.Message) error {
 	return nil
 }
 func (p *fakeProcess) MarkShutdown() { p.mu.Lock(); p.marked = true; p.mu.Unlock() }
-func (p *fakeProcess) CloseStdin()   { p.mu.Lock(); p.closed = true; p.mu.Unlock() }
+
+// FailVersionMismatch mimics the Wrapper's exit path: the Closed notice (which
+// revokes the credential), then the failed exit.
+func (p *fakeProcess) FailVersionMismatch() {
+	p.mu.Lock()
+	p.versionMismatch++
+	p.info.Status = wrapper.Failed
+	p.info.LastError = protocol.LegacyRejectionMessage()
+	info := p.info
+	p.mu.Unlock()
+	p.opts.Replies.Closed(p.id, errors.New(info.LastError))
+	p.opts.Post(ExitMsg{Info: info})
+	p.once.Do(func() { close(p.done) })
+}
+func (p *fakeProcess) CloseStdin() { p.mu.Lock(); p.closed = true; p.mu.Unlock() }
 func (p *fakeProcess) Terminate() error {
 	p.mu.Lock()
 	p.terminated = true
