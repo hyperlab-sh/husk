@@ -70,6 +70,7 @@ type Root struct {
 	instStart time.Time
 
 	// Frontend support.
+	pluginCatalog  catalogCache
 	frontendSlices *contracts.FrontendSlices // set once by OwnSlices
 	hostActions    map[string]bool           // ids bound by RegisterHostAction
 	catMu          sync.Mutex                // guards the cached declared catalog
@@ -206,6 +207,10 @@ func build(cfg contracts.Config, optFns []Option) (_ *Root, err error) {
 	if err = r.stage("server", r.buildServer); err != nil {
 		return nil, err
 	}
+	// Finish the initial worker's post while the builder still owns the loop.
+	// Later refreshes never wait; construction must not leave a stray Update
+	// racing the caller's permitted pre-Run OwnSlices writes.
+	<-r.warmCatalog()
 	r.drainBuildPosts(true)
 	return r, nil
 }
