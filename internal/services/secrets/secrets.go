@@ -98,6 +98,10 @@ type Options struct {
 	// Audit receives the name of every secret revealed to a human.
 	Audit   func(name string)
 	Context context.Context
+	// WaiterJoined observes a read joining a dialog, after queue/show selection.
+	// It runs under the dialog lock and must not block or call the Service.
+	// Nil disables it; tests use it to synchronize concurrent requests.
+	WaiterJoined func(plugin string, waiters int, queued bool)
 }
 
 type snapshot struct {
@@ -378,6 +382,9 @@ func (s *Service) await(ctx context.Context, plugin, name string, req c.SecretRe
 	w := make(chan verdict, 1)
 	d.waiters = append(d.waiters, w)
 	s.pumpLocked()
+	if s.opts.WaiterJoined != nil {
+		s.opts.WaiterJoined(plugin, len(d.waiters), !d.shown && !d.accepting)
+	}
 	s.mu.Unlock()
 
 	select {
@@ -487,8 +494,10 @@ func (s *Service) acceptWrite(d *dialog) {
 	}
 	v := vDenied
 	if cur, ok := s.current.Load().declarations[d.plugin][d.name]; s.ctx.Err() == nil && ok && Digest(cur) == d.digest {
-		s.writeGrant(d.plugin, d.name, d.digest)
 		v = vContinue
+		if err := s.writeGrant(d.plugin, d.name, d.digest); err != nil {
+			v = vUnavailable
+		}
 	}
 	s.mu.Lock()
 	s.resolveLocked(d, v)
@@ -547,7 +556,7 @@ func (s *Service) reconcile(next *snapshot) {
 	}
 }
 
-func (s *Service) writeGrant(plugin, name, digest string) {
+func (s *Service) writeGrant(plugin, name, digest string) error {
 	next := []Grant{}
 	for _, g := range s.grants() {
 		if g.Plugin != plugin || g.Name != name {
@@ -556,7 +565,8 @@ func (s *Service) writeGrant(plugin, name, digest string) {
 	}
 	next = append(next, Grant{plugin, name, digest, s.opts.Clock.Now().UTC()})
 	raw, _ := json.Marshal(map[string]any{"grants": next})
-	s.handle.Set(raw)
+	_, err := s.handle.Set(raw)
+	return err
 }
 
 // postAndWait queues f on the loop and returns once it ran, so a write is
@@ -592,12 +602,16 @@ func (s *Service) Grant(ctx context.Context, caller Caller, plugin, name string)
 	}
 	digest := Digest(req)
 	granted := false
+	var writeErr error
 	err := s.postAndWait(ctx, func() {
 		cur, ok := s.current.Load().declarations[plugin][name]
 		if !ok || Digest(cur) != digest {
 			return
 		}
-		s.writeGrant(plugin, name, digest)
+		writeErr = s.writeGrant(plugin, name, digest)
+		if writeErr != nil {
+			return
+		}
 		granted = true
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -613,6 +627,9 @@ func (s *Service) Grant(ctx context.Context, caller Caller, plugin, name string)
 	if err != nil {
 		return err
 	}
+	if writeErr != nil {
+		return storageError()
+	}
 	if !granted {
 		// The declaration changed or went away before the write ran.
 		return c.Failure("not_found", "not_declared")
@@ -626,7 +643,8 @@ func (s *Service) Revoke(ctx context.Context, caller Caller, plugin, name string
 	if err := c.RequireCLI(caller); err != nil {
 		return err
 	}
-	return s.postAndWait(ctx, func() {
+	var writeErr error
+	err := s.postAndWait(ctx, func() {
 		next := []Grant{}
 		for _, g := range s.grants() {
 			if g.Plugin != plugin || g.Name != name {
@@ -634,8 +652,15 @@ func (s *Service) Revoke(ctx context.Context, caller Caller, plugin, name string
 			}
 		}
 		raw, _ := json.Marshal(map[string]any{"grants": next})
-		s.handle.Set(raw)
+		_, writeErr = s.handle.Set(raw)
 	})
+	if err != nil {
+		return err
+	}
+	if writeErr != nil {
+		return storageError()
+	}
+	return nil
 }
 
 // Set stores a value from a user-only Server adapter, never from argv.
@@ -677,6 +702,10 @@ func (s *Service) Names(caller Caller) (NamesResult, error) {
 			set[k] = true
 		}
 	}
+	granted := map[declineKey]struct{}{}
+	for _, g := range s.grants() {
+		granted[declineKey{g.Plugin, g.Name, g.Digest}] = struct{}{}
+	}
 	infos := map[string]*SecretInfo{}
 	info := func(name string) *SecretInfo {
 		if i := infos[name]; i != nil {
@@ -694,7 +723,7 @@ func (s *Service) Names(caller Caller) (NamesResult, error) {
 			i := info(name)
 			i.Declared = append(i.Declared, plugin)
 			i.Required = i.Required || req.Required
-			if s.hasGrant(plugin, name, req) {
+			if _, ok := granted[declineKey{plugin, name, Digest(req)}]; ok {
 				i.Granted = append(i.Granted, plugin)
 			}
 		}

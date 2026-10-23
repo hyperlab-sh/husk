@@ -36,6 +36,35 @@ type promptCall struct {
 
 type event struct{ Name, PluginID, Outcome string }
 
+type dialogJoin struct {
+	plugin  string
+	waiters int
+	queued  bool
+}
+
+// grantTree can lower the real State cap and retain its write capability for
+// storage-failure tests. Reads are counted to pin Names' single grant decode.
+type grantTree struct {
+	*state.State
+	maxBytes int
+	handle   *state.Handle
+	reads    atomic.Int32
+}
+
+func (s *grantTree) Register(spec state.Spec) (*state.Handle, error) {
+	if spec.Namespace == state.GrantsNamespace {
+		spec.MaxBytes = s.maxBytes
+	}
+	h, err := s.State.Register(spec)
+	s.handle = h
+	return h, err
+}
+
+func (s *grantTree) Snapshot() *state.Snapshot {
+	s.reads.Add(1)
+	return s.State.Snapshot()
+}
+
 // rig is a Secrets service with a blocking prompt fake, a recording publisher
 // and audit hook, and the package's manual clock.
 type rig struct {
@@ -47,7 +76,8 @@ type rig struct {
 	mu      sync.Mutex
 	events  []event
 	audits  []string
-	tree    *state.State
+	tree    *grantTree
+	joins   chan dialogJoin
 	prompts atomic.Int32
 	conc    atomic.Int32
 	maxc    atomic.Int32
@@ -57,11 +87,16 @@ type rigOpts struct {
 	noPrompt bool
 	post     func(func()) bool
 	crypto   *memoryCrypto
+	maxBytes int
 }
 
 func newRig(t *testing.T, o rigOpts) *rig {
 	t.Helper()
-	r := &rig{t: t, tree: state.New(state.Options{}), clk: clock(), shown: make(chan *promptCall, 16), crypto: o.crypto}
+	r := &rig{
+		t: t, tree: &grantTree{State: state.New(state.Options{}), maxBytes: o.maxBytes},
+		clk: clock(), shown: make(chan *promptCall, 16), crypto: o.crypto,
+		joins: make(chan dialogJoin, 64),
+	}
 	if r.crypto == nil {
 		r.crypto = &memoryCrypto{data: map[string][]byte{"git.token": []byte(sentinel)}}
 	}
@@ -81,6 +116,9 @@ func newRig(t *testing.T, o rigOpts) *rig {
 			r.mu.Unlock()
 		}),
 		Audit: func(name string) { r.mu.Lock(); r.audits = append(r.audits, name); r.mu.Unlock() },
+		WaiterJoined: func(plugin string, waiters int, queued bool) {
+			r.joins <- dialogJoin{plugin, waiters, queued}
+		},
 	}
 	if !o.noPrompt {
 		opts.Prompt = func(ctx context.Context, p secrets.Prompt) secrets.Answer {
@@ -135,6 +173,17 @@ func catalogWith(plugin, requests string) ReloadInput {
 func (r *rig) next() *promptCall {
 	r.t.Helper()
 	return <-r.shown
+}
+
+func (r *rig) joined(plugin string, waiters int, queued bool) {
+	r.t.Helper()
+	want := dialogJoin{plugin, waiters, queued}
+	for got := range r.joins {
+		if got == want {
+			return
+		}
+	}
+	r.t.Fatal("dialog join stream closed")
 }
 
 func (r *rig) log() []event {
@@ -295,6 +344,7 @@ func TestDialogsQueueInOrderWithTimersStartingWhenShown(t *testing.T) {
 		t.Fatalf("first = %+v", pa.p)
 	}
 	rb := r.readAsync(context.Background(), "b", "git.token")
+	r.joined("b", 1, true)
 	r.clk.advance(30e9)
 	pa.reply <- secrets.Accepted
 	if res := <-ra; res.value != sentinel {
@@ -330,6 +380,7 @@ func TestDialogSharedAndPerPluginBusy(t *testing.T) {
 	first := r.readAsync(context.Background(), "a", "git.token")
 	pc := r.next()
 	second := r.readAsync(context.Background(), "a", "git.token")
+	r.joined("a", 2, false)
 	busy := r.read("a", "other.key")
 	if reason(t, busy.err) != "busy/dialog_pending" {
 		t.Fatalf("other name = %+v", busy)
@@ -443,14 +494,18 @@ func TestOneWaiterLeavingKeepsTheDialog(t *testing.T) {
 	gone := r.readAsync(ctx, "a", "git.token")
 	pc := r.next()
 	stay := r.readAsync(context.Background(), "a", "git.token")
+	r.joined("a", 2, false)
 	cancel()
 	<-gone
-	// If the second read joined first the dialog survives; if it arrived after
-	// the first left, the dialog closed and the second read asks anew.
+	select {
+	case <-pc.closed:
+		t.Fatal("one waiter leaving closed the shared dialog")
+	default:
+	}
 	select {
 	case pc.reply <- secrets.Accepted:
 	case <-pc.closed:
-		r.next().reply <- secrets.Accepted
+		t.Fatal("one waiter leaving closed the shared dialog")
 	}
 	if res := <-stay; res.value != sentinel {
 		t.Fatalf("remaining waiter = %+v", res)
@@ -749,6 +804,125 @@ func TestNamesByCaller(t *testing.T) {
 		if i.Name == "git.token" && len(i.Declared) != 1 {
 			t.Fatalf("declared names lost on storage failure: %+v", i)
 		}
+	}
+}
+
+// A rejected State write is not a grant, including when a dialog was accepted.
+func TestGrantWriteFailure(t *testing.T) {
+	for _, via := range []string{"cli", "dialog"} {
+		t.Run(via, func(t *testing.T) {
+			// The empty slice fits, but no grant does. Use the real State cap
+			// enforcement rather than replacing Set with a fake error.
+			r := newRig(t, rigOpts{maxBytes: len(`{"grants":[]}`)})
+			r.declare("a")
+			before := r.tree.Snapshot()
+			got := r.readAsync(context.Background(), "a", "git.token")
+			pc := r.next()
+			if via == "cli" {
+				if err := r.s.Grant(context.Background(), cliCaller, "a", "git.token"); reason(t, err) != "unavailable/storage" {
+					t.Fatalf("grant = %v", err)
+				}
+				// Failure must not resolve the pending read as allowed.
+				pc.reply <- secrets.Dismissed
+			} else {
+				pc.reply <- secrets.Accepted
+			}
+			res := <-got
+			want := "denied/user_denied"
+			if via == "dialog" {
+				want = "unavailable/storage"
+				if ev := r.lastEvent(); ev != (event{"git.token", "a", "unavailable"}) {
+					t.Fatalf("failed accept event = %+v", ev)
+				}
+			}
+			if res.value != "" || reason(t, res.err) != want {
+				t.Fatalf("read after failed grant = %+v", res)
+			}
+			if r.tree.Snapshot() != before {
+				t.Fatal("failed grant changed the slice or its revision")
+			}
+		})
+	}
+}
+
+func TestRevokeWriteFailure(t *testing.T) {
+	r := newRig(t, rigOpts{})
+	r.declare("a")
+	// A revoke normally shrinks the document, so simulate a lost capability
+	// to exercise Set's failure rather than its size cap.
+	r.tree.handle.Unregister()
+	before := r.tree.Snapshot()
+	if err := r.s.Revoke(context.Background(), cliCaller, "a", "git.token"); reason(t, err) != "unavailable/storage" {
+		t.Fatalf("revoke = %v", err)
+	}
+	if r.tree.Snapshot() != before {
+		t.Fatal("failed revoke changed State")
+	}
+}
+
+// Reload must invalidate even a dialog already accepted but waiting on its
+// posted grant write. No old consent or decline memory may survive it.
+func TestRebuildBeforeAcceptedWrite(t *testing.T) {
+	for _, tc := range []struct {
+		name, declarations string
+	}{
+		{"purpose changed", `[{"name":"git.token","purpose":"Changed"}]`},
+		{"removed", `[]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			posted := make(chan func(), 1)
+			r := newRig(t, rigOpts{post: func(f func()) bool { posted <- f; return true }})
+			r.declare("a")
+			before := r.tree.Snapshot()
+			got := r.readAsync(context.Background(), "a", "git.token")
+			r.next().reply <- secrets.Accepted
+			write := <-posted // accepted, but no State write has executed
+			apply(t, r.s, catalogWith("a", tc.declarations))
+			// Reconcile closes the accepting dialog without waiting for the post.
+			if res := <-got; res.value != "" || reason(t, res.err) != "denied/user_denied" {
+				t.Fatalf("superseded accept = %+v", res)
+			}
+			if ev := r.lastEvent(); ev != (event{"git.token", "a", "user_denied"}) {
+				t.Fatalf("event = %+v", ev)
+			}
+			write()
+			if r.tree.Snapshot() != before {
+				t.Fatal("stale accepted grant changed State")
+			}
+			if tc.name == "removed" {
+				if res := r.read("a", "git.token"); reason(t, res.err) != "not_found/not_declared" {
+					t.Fatalf("removed declaration = %+v", res)
+				}
+				// Reintroducing it must prompt, not remember a denial.
+				apply(t, r.s, catalogWith("a", `[{"name":"git.token","purpose":"Changed"}]`))
+			}
+			again := r.readAsync(context.Background(), "a", "git.token")
+			pc := r.next()
+			if pc.p.Purpose != "Changed" {
+				t.Fatalf("new prompt = %+v", pc.p)
+			}
+			pc.reply <- secrets.Dismissed
+			<-again
+		})
+	}
+}
+
+func TestNamesReadsGrantsOnce(t *testing.T) {
+	r := newRig(t, rigOpts{})
+	r.declare("a", "b", "c")
+	if err := r.s.Grant(context.Background(), cliCaller, "b", "git.token"); err != nil {
+		t.Fatal(err)
+	}
+	before := r.tree.reads.Load()
+	got, err := r.s.Names(cliCaller)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reads := r.tree.reads.Load() - before; reads != 1 {
+		t.Fatalf("Names read the grants slice %d times, want once", reads)
+	}
+	if len(got.Secrets) != 1 || len(got.Secrets[0].Granted) != 1 || got.Secrets[0].Granted[0] != "b" {
+		t.Fatalf("Names = %+v", got)
 	}
 }
 
