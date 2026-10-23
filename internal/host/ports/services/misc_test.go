@@ -187,3 +187,25 @@ func TestConfigReloadRunsTheCoordinator(t *testing.T) {
 		t.Fatal("settings generation did not advance")
 	}
 }
+
+// The port copies KeyContext.Capture into the service's context: over a real
+// service with a global q binding, a capturing context no longer resolves it.
+func TestKeysResolveHonoursCapture(t *testing.T) {
+	svc := keybinding.New()
+	applyTo(t, svc, services.ReloadInput{
+		Doc:    store.Resolved{Doc: doc(t, `{}`), Origins: map[string]store.Layer{}},
+		Layers: []store.LayerDoc{{Layer: store.LayerUser, Doc: doc(t, `{"version":1,"bind":[{"key":"q","action":"husk.quit"}]}`)}},
+		Declared: map[store.DocName]map[string]store.Doc{
+			store.DeclaredPlugins: {"files": doc(t, `{"id":"files","surfaces":[{"id":"stage"}]}`)},
+		},
+	})
+	port := Keys{Svc: svc}
+	ctx := host.KeyContext{FocusSurface: "main-stage"}
+	if r := port.Resolve(ctx, []string{"q"}); r.Outcome != host.KeyMatch || r.Binding == nil || r.Binding.Action != "husk.quit" {
+		t.Fatalf("free q = %+v, want match husk.quit", r)
+	}
+	ctx.Capture = true
+	if r := port.Resolve(ctx, []string{"q"}); r.Outcome != host.KeyNoMatch {
+		t.Fatalf("capturing q = %+v, want no match", r)
+	}
+}

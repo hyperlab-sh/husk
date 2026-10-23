@@ -750,8 +750,9 @@ func TestCaptureFieldWireShape(t *testing.T) {
 		"after exit": {false, true, "false"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			p := &plugin{textMode: tc.textMode, sendOff: tc.sendOff}
-			b, err := json.Marshal(protocol.SurfaceUpdateParams{Surface: protocol.SurfaceMainStage, Lines: []string{}, Capture: p.captureField()})
+			s := protocol.SurfaceMainStage
+			p := &plugin{textMode: map[protocol.SurfaceID]bool{s: tc.textMode}, sendOff: map[protocol.SurfaceID]bool{s: tc.sendOff}}
+			b, err := json.Marshal(protocol.SurfaceUpdateParams{Surface: protocol.SurfaceMainStage, Lines: []string{}, Capture: p.captureField(s)})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -762,5 +763,25 @@ func TestCaptureFieldWireShape(t *testing.T) {
 				t.Errorf("capture on the wire = %q (present %v), want %q", got, has, tc.want)
 			}
 		})
+	}
+}
+
+// Text mode belongs to the surface that received `i`: another surface of the
+// same plugin neither captures nor consumes the one-shot capture=false.
+func TestCaptureFieldIsPerSurface(t *testing.T) {
+	other := protocol.SurfaceSidebarList
+	p := &plugin{textMode: map[protocol.SurfaceID]bool{protocol.SurfaceMainStage: true}}
+	if c := p.captureField(other); c != nil {
+		t.Errorf("other surface capture = %v, want absent", *c)
+	}
+	p = &plugin{sendOff: map[protocol.SurfaceID]bool{protocol.SurfaceMainStage: true}}
+	if c := p.captureField(other); c != nil {
+		t.Errorf("other surface consumed or sent the off frame: %v", *c)
+	}
+	if c := p.captureField(protocol.SurfaceMainStage); c == nil || *c {
+		t.Errorf("main-stage off frame = %v, want false", c)
+	}
+	if c := p.captureField(protocol.SurfaceMainStage); c != nil {
+		t.Errorf("off frame sent twice: %v", *c)
 	}
 }
