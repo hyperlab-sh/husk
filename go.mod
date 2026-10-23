@@ -4,6 +4,7 @@ go 1.26.6
 
 require (
 	charm.land/bubbletea/v2 v2.1.0
+	charm.land/huh/v2 v2.0.3
 	charm.land/lipgloss/v2 v2.0.6
 	filippo.io/age v1.2.1
 	github.com/charmbracelet/ultraviolet v0.0.0-20261008173134-6b8d4baf91b4
@@ -24,7 +25,6 @@ require (
 require (
 	al.essio.dev/pkg/shellescape v1.5.1 // indirect
 	charm.land/bubbles/v2 v2.0.0 // indirect
-	charm.land/huh/v2 v2.0.3 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/catppuccin/go v0.2.0 // indirect
 	github.com/charmbracelet/x/exp/ordered v0.1.0 // indirect

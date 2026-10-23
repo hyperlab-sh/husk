@@ -164,6 +164,8 @@ func homeTitle(key string) string {
 // column shows the spellings the effective keymap binds to it.
 func (m *WorkbenchModel) builtinCommands() []paletteCommand {
 	rows := []paletteCommand{
+		{ID: "husk.settings.open", Title: "Open settings", Category: "Workbench", Description: "Open the Settings center"},
+		{ID: "husk.theme.select", Title: "Select theme", Category: "Workbench", Description: "Open Settings on the Theme tab"},
 		{
 			ID:          "husk.home",
 			Title:       homeTitle(keyLabel(m.firstKey("husk.home"))),

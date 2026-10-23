@@ -182,6 +182,8 @@ func TestBuiltinCommandsMatchTheKeymap(t *testing.T) {
 	for _, b := range doc.Bind {
 		named[b.Action] = true
 	}
+	named["husk.settings.open"] = true
+	named["husk.theme.select"] = true
 	m := goldenModel()
 	rows := map[string]paletteCommand{}
 	for _, c := range m.builtinCommands() {
@@ -201,8 +203,8 @@ func TestBuiltinCommandsMatchTheKeymap(t *testing.T) {
 			t.Errorf("keymap action %s has no palette row", action)
 		}
 	}
-	if len(named) != 14 || len(rows) != len(named) {
-		t.Errorf("keymap names %d actions and the palette lists %d, want 14 each", len(named), len(rows))
+	if len(named) != 16 || len(rows) != len(named) {
+		t.Errorf("keymap plus unbound actions names %d actions and the palette lists %d, want 16 each", len(named), len(rows))
 	}
 	if r := rows["husk.focus.next"]; !strings.Contains(r.Shortcut, "tab") {
 		t.Errorf("shortcut column of husk.focus.next = %q", r.Shortcut)

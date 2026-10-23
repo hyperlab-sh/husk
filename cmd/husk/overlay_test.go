@@ -147,6 +147,7 @@ func TestOverlayNotInteractive(t *testing.T) {
 			// Rail cells can open host UI; begin every coordinate with the same
 			// unobstructed stage so those popups do not consume later clicks.
 			m.showPalette = false
+			m.closeSettings()
 			m.stageMode = ""
 			before := len(fe.Mice)
 			m.handleMouse(tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
@@ -162,6 +163,7 @@ func TestOverlayNotInteractive(t *testing.T) {
 			}
 		}
 	}
+	m.closeSettings() // the final bottom-bar coordinate can open the center
 	m.setFocus(protocol.SurfaceMainStage)
 	press(m, "z")
 	if len(fe.Keys) == 0 || fe.Keys[len(fe.Keys)-1].Plugin != "stage" {

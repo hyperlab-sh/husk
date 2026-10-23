@@ -230,9 +230,14 @@ func TestThemePillClickIsConsumed(t *testing.T) {
 				fe.Mice = nil
 				fe.Invoked = nil
 				_, cmd := m.handleMouse(tea.MouseClickMsg{X: x, Y: m.height - 1, Button: tea.MouseLeft})
-				if cmd != nil || len(fe.Mice) != 0 || len(fe.Invoked) != 0 || m.focusedSlot != focus || m.activeDrag != "" || m.activeToast != nil {
-					t.Fatal("pill click had side effects")
+				if cmd != nil || len(fe.Mice) != 0 || len(fe.Invoked) != 1 || m.focusedSlot != focus || m.activeDrag != "" || m.activeToast != nil {
+					t.Fatal("pill click did not exclusively invoke settings")
 				}
+				if call := fe.Invoked[0]; call.Action != "husk.settings.open" || call.Args["tab"] != "theme" {
+					t.Fatalf("pill action = %+v", call)
+				}
+				// Close the host popup before probing the adjacent surface cell.
+				m.closeSettings()
 				m.handleMouse(tea.MouseClickMsg{X: pill.Min.X - 1, Y: m.height - 1, Button: tea.MouseLeft})
 				if len(fe.Mice) != 1 {
 					t.Fatalf("adjacent cell consumed: mouse calls %d", len(fe.Mice))
