@@ -1,96 +1,47 @@
 package main
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-
 	"github.com/charmbracelet/x/ansi"
-
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
 // topBarText is the top bar with styling stripped.
-func topBarText(m *WorkbenchModel) string {
-	return ansi.Strip(m.renderTopWorkbenchBar())
-}
+func topBarText(m *WorkbenchModel) string { return ansi.Strip(m.renderTopWorkbenchBar()) }
 
-func TestWorkbenchModeLabelTracksVisibleSideSurfaces(t *testing.T) {
-	sidebar := map[protocol.SurfaceID][]string{protocol.SurfaceSidebarList: {"list"}}
-	panel := map[protocol.SurfaceID][]string{protocol.SurfaceSidePanel: {"panel"}}
-	stage := map[protocol.SurfaceID][]string{protocol.SurfaceMainStage: {"stage"}}
-
-	cases := []struct {
-		name  string
-		setup func(m *WorkbenchModel)
-		want  string
+func TestLayoutLabelTable(t *testing.T) {
+	for _, tc := range []struct {
+		placement          contracts.RailPlacement
+		left, right, modal bool
+		want               string
 	}{
-		{"zero plugins", func(m *WorkbenchModel) {}, " Workbench "},
-		{"stage only", func(m *WorkbenchModel) { goldenPlugin(m, "p.stage", stage) }, " Workbench "},
-		{"left only", func(m *WorkbenchModel) { goldenPlugin(m, "p.left", sidebar) }, " Workbench · Left "},
-		{"right only", func(m *WorkbenchModel) { goldenPlugin(m, "p.right", panel) }, " Workbench · Right "},
-		{"both", func(m *WorkbenchModel) {
-			goldenPlugin(m, "p.left", sidebar)
-			goldenPlugin(m, "p.right", panel)
-		}, " Workbench · Left + Right "},
-		{"any sidebar slot counts as left", func(m *WorkbenchModel) {
-			goldenPlugin(m, "p.foot", map[protocol.SurfaceID][]string{protocol.SurfaceSidebarFooter: {"foot"}})
-		}, " Workbench · Left "},
-		{"sidebar dock hidden", func(m *WorkbenchModel) {
-			goldenPlugin(m, "p.left", sidebar)
-			goldenPlugin(m, "p.right", panel)
-			m.showSidebar = false
-			m.recomputeLayout()
-		}, " Workbench · Right "},
-		{"side panel dock hidden", func(m *WorkbenchModel) {
-			goldenPlugin(m, "p.left", sidebar)
-			goldenPlugin(m, "p.right", panel)
-			m.showSidePane = false
-			m.recomputeLayout()
-		}, " Workbench · Left "},
-		{"both docks hidden", func(m *WorkbenchModel) {
-			goldenPlugin(m, "p.left", sidebar)
-			goldenPlugin(m, "p.right", panel)
-			m.showSidebar, m.showSidePane = false, false
-			m.recomputeLayout()
-		}, " Workbench "},
-		{"side panel does not fit beside the sidebar", func(m *WorkbenchModel) {
-			goldenPlugin(m, "p.left", sidebar)
-			goldenPlugin(m, "p.right", panel)
-			m.width = 90
-			m.recomputeLayout()
-		}, " Workbench · Left "},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
+		{"", false, false, false, "Workbench"}, {"", true, false, false, "Workbench · Left"},
+		{"", false, true, false, "Workbench · Right"}, {"", true, true, false, "Workbench · Left + Right"},
+		{contracts.PlacementStage, true, true, false, "Stage · Left"}, {contracts.PlacementStage, false, true, false, "Stage"},
+		{contracts.PlacementFullCanvas, true, true, false, "Full canvas"}, {"", true, true, true, "Modal"},
+		{contracts.PlacementFullCanvas, true, true, true, "Modal"}, {contracts.PlacementStage, true, true, true, "Modal"},
+	} {
+		t.Run(tc.want+string(tc.placement), func(t *testing.T) {
 			m := goldenModel()
-			tc.setup(m)
-			got := topBarText(m)
-			if !strings.Contains(got, tc.want) {
-				t.Errorf("top bar %q lacks label %q", got, tc.want)
+			m.activePlacement = tc.placement
+			m.showSidebar = tc.left
+			m.showSidePane = tc.right
+			if tc.modal {
+				m.openModal("p", "p.open")
 			}
-			if strings.Contains(got, "3-Column") {
-				t.Errorf("top bar %q still names a column count", got)
+			m.recomputeLayout()
+			if got := m.layoutLabel(); got != tc.want {
+				t.Fatalf("label %q, want %q", got, tc.want)
 			}
-			if tc.want == " Workbench " && strings.Contains(got, "·") {
-				t.Errorf("top bar %q names a side surface that is not visible", got)
+			if !strings.Contains(topBarText(m), " "+tc.want+" ") {
+				t.Fatal("label not drawn in top bar")
 			}
 		})
-	}
-}
-
-func TestWorkbenchModeLabelKeepsOtherPlacementLabels(t *testing.T) {
-	m := goldenModel()
-	goldenPlugin(m, "p.left", map[protocol.SurfaceID][]string{protocol.SurfaceSidebarList: {"list"}})
-	m.activePlacement = contracts.PlacementFullCanvas
-	if got := topBarText(m); !strings.Contains(got, "Full-Canvas Mode") {
-		t.Errorf("full-canvas label missing: %q", got)
-	}
-	m.activePlacement = contracts.PlacementStage
-	if got := topBarText(m); !strings.Contains(got, "Stage-minus-Sidebar Mode") {
-		t.Errorf("stage label missing: %q", got)
 	}
 }
 
@@ -106,63 +57,67 @@ func TestHomeCommandTitleHasNoColumnCount(t *testing.T) {
 	t.Fatal("husk.home command missing")
 }
 
-func sideRectCount(m *WorkbenchModel) int {
-	n := 0
-	for _, s := range []protocol.SurfaceID{
-		protocol.SurfaceSidebarNavigation, protocol.SurfaceSidebarList, protocol.SurfaceSidebarFooter, protocol.SurfaceSidePanel,
-	} {
-		if _, ok := m.slotRects[s]; ok {
-			n++
+func TestZeroPluginsLayOutEveryRegionSlot(t *testing.T) {
+	m := goldenModel()
+	want := []protocol.SurfaceID{protocol.SurfaceActivityRail, protocol.SurfaceMainHeader, protocol.SurfaceMainStage, protocol.SurfaceSidePanel, protocol.SurfaceSidebarFooter, protocol.SurfaceSidebarList, protocol.SurfaceSidebarNavigation}
+	if got := m.surfaceView().Visible; !slices.Equal(got, want) {
+		t.Fatalf("visible %v, want %v", got, want)
+	}
+	if len(m.slotRects) != len(want) {
+		t.Fatalf("rects %v", m.slotRects)
+	}
+	for _, id := range want {
+		r, ok := m.slotRects[id]
+		if !ok {
+			t.Fatalf("no rect for %s", id)
+		}
+		if id == protocol.SurfaceActivityRail {
+			continue
+		} // host buttons own the rail
+		name := humanName(id)
+		x := r.InnerX + (r.InnerW-ansi.StringWidth(name))/2
+		y := r.InnerY + (r.InnerH-1)/2
+		rows := strings.Split(m.View().Content, "\n")
+		if got := ansi.Strip(ansi.Cut(rows[y], x, x+ansi.StringWidth(name))); got != name {
+			t.Errorf("%s name at (%d,%d) = %q", id, x, y, got)
 		}
 	}
-	return n
 }
 
-func TestZeroPluginsLayDownNoSideColumns(t *testing.T) {
-	m := goldenModel()
-	if n := sideRectCount(m); n != 0 {
-		t.Fatalf("zero plugins laid out %d side rects", n)
+func surfaceText(m *WorkbenchModel, id protocol.SurfaceID) string {
+	r := m.slotRects[id]
+	rows := strings.Split(m.View().Content, "\n")
+	var out []string
+	for y := r.InnerY; y < r.InnerY+r.InnerH; y++ {
+		if s := strings.TrimSpace(ansi.Strip(ansi.Cut(rows[y], r.InnerX, r.InnerX+r.InnerW))); s != "" {
+			out = append(out, s)
+		}
 	}
-	stage := m.slotRects[protocol.SurfaceMainStage]
-	rail := m.slotRects[protocol.SurfaceActivityRail]
-	if stage.X != rail.Width || stage.X+stage.Width != goldenW {
-		t.Errorf("stage spans x=%d..%d, want the whole width after the rail (%d..%d)",
-			stage.X, stage.X+stage.Width, rail.Width, goldenW)
-	}
+	return strings.Join(out, "\n")
 }
 
-func TestSideColumnAppearsAndGoesWithPlugin(t *testing.T) {
+func TestOccupantReplacesNameAndExitRestoresIt(t *testing.T) {
 	m := goldenModel()
-	emptyStageW := m.slotRects[protocol.SurfaceMainStage].Width
-
-	hostPlugin(m, "p.side", protocol.SurfaceSidebarList, protocol.SurfaceSidePanel)
-	if _, ok := m.slotRects[protocol.SurfaceSidebarList]; !ok {
-		t.Fatal("sidebar did not appear when a plugin occupied it")
+	before := m.slotRects[protocol.SurfaceSidebarList]
+	check := func(want string) {
+		t.Helper()
+		if got := surfaceText(m, protocol.SurfaceSidebarList); strings.TrimSpace(got) != want {
+			t.Fatalf("sidebar %q, want %q", got, want)
+		}
+		if m.slotRects[protocol.SurfaceSidebarList] != before {
+			t.Fatal("column moved with occupancy")
+		}
 	}
-	if _, ok := m.slotRects[protocol.SurfaceSidePanel]; !ok {
-		t.Fatal("side panel did not appear when a plugin occupied it")
-	}
-	if w := m.slotRects[protocol.SurfaceMainStage].Width; w >= emptyStageW {
-		t.Errorf("stage did not yield space: %d >= %d", w, emptyStageW)
-	}
-	if got := topBarText(m); !strings.Contains(got, " Workbench · Left + Right ") {
-		t.Errorf("label after connect: %q", got)
-	}
-
+	check("Sidebar list")
+	hostPlugin(m, "p.side", protocol.SurfaceSidebarList)
+	check("")
+	m.content("p.side", protocol.SurfaceUpdateParams{Surface: protocol.SurfaceSidebarList, Lines: []string{"content"}})
+	check("content")
 	hostLeave(m, "p.side")
-	if n := sideRectCount(m); n != 0 {
-		t.Errorf("%d side rects survived the plugin exit", n)
-	}
-	if w := m.slotRects[protocol.SurfaceMainStage].Width; w != emptyStageW {
-		t.Errorf("stage width %d after exit, want %d", w, emptyStageW)
-	}
-	if got := topBarText(m); strings.Contains(got, "·") {
-		t.Errorf("label after exit still names a side: %q", got)
-	}
+	check("Sidebar list")
 }
 
-// The occupant of the stage learns its size from husk.geometry (the host turns
-// the write into surface.resized): it must follow side columns coming and going.
+// Geometry follows dock changes, never a side occupant's lifecycle.
 func TestStageGeometryFollowsSideColumns(t *testing.T) {
 	m := goldenModel()
 	hostPlugin(m, "p.stage", protocol.SurfaceMainStage)
@@ -173,62 +128,81 @@ func TestStageGeometryFollowsSideColumns(t *testing.T) {
 		}
 		return g.Inner.Width
 	}
-	wide := stageWidth()
-
+	narrow := stageWidth()
 	hostPlugin(m, "p.side", protocol.SurfaceSidebarList, protocol.SurfaceSidePanel)
-	if narrow := stageWidth(); narrow >= wide || narrow != m.slotRects[protocol.SurfaceMainStage].InnerW {
-		t.Fatalf("after side connect geometry says %d (layout %d), want narrower than %d", narrow, m.slotRects[protocol.SurfaceMainStage].InnerW, wide)
+	if stageWidth() != narrow {
+		t.Fatal("occupancy changed geometry")
 	}
 	hostLeave(m, "p.side")
-	if got := stageWidth(); got != wide {
-		t.Errorf("after side exit geometry says %d, want %d", got, wide)
+	if stageWidth() != narrow {
+		t.Fatal("exit changed geometry")
+	}
+	press(m, "[")
+	press(m, "]")
+	wide := stageWidth()
+	if wide <= narrow {
+		t.Fatal("docks did not release width")
+	}
+	press(m, "[")
+	press(m, "]")
+	if stageWidth() != narrow {
+		t.Fatal("dock restore changed geometry")
 	}
 }
 
-// With zero plugins the default focus (sidebar list) must survive, so a
-// sidebar plugin that connects has keys from its first frame.
 func TestDefaultFocusSurvivesZeroPluginStartup(t *testing.T) {
 	m := goldenModel()
 	if m.focusedSlot != protocol.SurfaceSidebarList {
-		t.Fatalf("zero-plugin focus moved to %q", m.focusedSlot)
+		t.Fatalf("focus %s", m.focusedSlot)
 	}
-	hostPlugin(m, "p.side", protocol.SurfaceSidebarList, protocol.SurfaceSidePanel)
+	if _, ok := m.slotRects[m.focusedSlot]; !ok {
+		t.Fatal("default focus not drawn")
+	}
+	hostPlugin(m, "p.side", protocol.SurfaceSidebarList)
+	hostLeave(m, "p.side")
 	if m.focusedSlot != protocol.SurfaceSidebarList {
-		t.Errorf("focus after sidebar plugin connects = %q, want the sidebar list", m.focusedSlot)
+		t.Fatalf("occupancy moved focus to %s", m.focusedSlot)
 	}
 }
 
-// Focus pushed off a vanished column comes back when the column does.
 func TestFocusReturnsWhenSideColumnReturns(t *testing.T) {
 	m := goldenModel()
-	hostPlugin(m, "p.side", protocol.SurfaceSidebarList, protocol.SurfaceSidePanel)
-	hostLeave(m, "p.side")
+	press(m, "[")
 	if m.focusedSlot != protocol.SurfaceMainStage {
-		t.Fatalf("focus = %q after the column vanished, want the main stage", m.focusedSlot)
+		t.Fatal("hidden sidebar kept focus")
 	}
-	hostPlugin(m, "p.side", protocol.SurfaceSidebarList, protocol.SurfaceSidePanel)
+	press(m, "[")
 	if m.focusedSlot != protocol.SurfaceSidebarList {
-		t.Errorf("focus = %q after the column returned, want the sidebar list", m.focusedSlot)
+		t.Fatal("sidebar did not recover focus")
 	}
 }
 
 func TestVanishingSideCancelsDragMovesFocusAndDisablesResizeKeys(t *testing.T) {
+	for _, narrow := range []bool{false, true} {
+		m := goldenModel()
+		m.activeDrag, m.hoverDivider = "sidepanel-width", "sidepanel-width"
+		m.focusedSlot = protocol.SurfaceSidePanel
+		if narrow {
+			m.width = narrowPanelWidth(m)
+			m.recomputeLayout()
+		} else {
+			press(m, "]")
+		}
+		if m.activeDrag != "" || m.hoverDivider != "" || m.focusedSlot != protocol.SurfaceMainStage {
+			t.Fatalf("vanished panel: drag %q hover %q focus %q", m.activeDrag, m.hoverDivider, m.focusedSlot)
+		}
+	}
 	m := goldenModel()
-	hostPlugin(m, "p.side", protocol.SurfaceSidebarList, protocol.SurfaceSidePanel)
-	m.activeDrag, m.hoverDivider = "sidepanel-width", "sidepanel-width"
-	m.focusedSlot = protocol.SurfaceSidePanel
-	hostLeave(m, "p.side")
-	if m.activeDrag != "" || m.hoverDivider != "" {
-		t.Errorf("drag %q / hover %q survived its column", m.activeDrag, m.hoverDivider)
-	}
-	if m.focusedSlot != protocol.SurfaceMainStage {
-		t.Errorf("focus stayed on vanished %q", m.focusedSlot)
-	}
-
 	w := m.sidebarWidth
+	press(m, ">")
+	if m.sidebarWidth <= w {
+		t.Fatal("empty sidebar cannot resize")
+	}
+	press(m, "<")
+	press(m, "[")
+	w = m.sidebarWidth
 	m.Update(tea.KeyPressMsg{Code: '>', Text: ">"})
-	m.Update(tea.KeyPressMsg{Code: '<', Text: "<"})
 	if m.sidebarWidth != w {
-		t.Errorf("resize keys changed sidebar width %d -> %d with no sidebar", w, m.sidebarWidth)
+		t.Fatal("hidden sidebar resized")
 	}
 }

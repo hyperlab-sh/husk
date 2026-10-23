@@ -9,16 +9,15 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
-// sidesModelPanelGone has a sidebar list and a side panel from two plugins, with focus
-// on the panel; the panel plugin then leaves, pushing focus to the stage and
-// remembering the panel.
+// sidesModelPanelGone hides the panel dock while it has focus, pushing focus
+// to the stage and remembering the panel.
 func sidesModelPanelGone(t *testing.T) *WorkbenchModel {
 	t.Helper()
 	m := goldenModel()
 	hostPlugin(m, "p.list", protocol.SurfaceSidebarList)
 	hostPlugin(m, "p.panel", protocol.SurfaceSidePanel)
 	m.focusedSlot = protocol.SurfaceSidePanel
-	hostLeave(m, "p.panel")
+	press(m, "]")
 	if m.focusedSlot != protocol.SurfaceMainStage || m.focusFallback != protocol.SurfaceSidePanel {
 		t.Fatalf("setup: focus %q fallback %q", m.focusedSlot, m.focusFallback)
 	}
@@ -34,7 +33,7 @@ func TestTabClearsFocusFallback(t *testing.T) {
 	if m.focusedSlot != protocol.SurfaceMainStage {
 		t.Fatalf("tabs left focus on %q", m.focusedSlot)
 	}
-	hostPlugin(m, "p.panel", protocol.SurfaceSidePanel)
+	press(m, "]")
 	if m.focusedSlot != protocol.SurfaceMainStage {
 		t.Errorf("returning panel stole focus: now %q", m.focusedSlot)
 	}
@@ -49,7 +48,7 @@ func TestClickClearsFocusFallback(t *testing.T) {
 	if m.focusedSlot != protocol.SurfaceMainStage {
 		t.Fatalf("click left focus on %q", m.focusedSlot)
 	}
-	hostPlugin(m, "p.panel", protocol.SurfaceSidePanel)
+	press(m, "]")
 	if m.focusedSlot != protocol.SurfaceMainStage {
 		t.Errorf("returning panel stole focus: now %q", m.focusedSlot)
 	}
@@ -58,7 +57,8 @@ func TestClickClearsFocusFallback(t *testing.T) {
 // Tab skips slots that are not on screen.
 func TestTabSkipsAbsentSlots(t *testing.T) {
 	m := goldenModel()
-	hostPlugin(m, "p.list", protocol.SurfaceSidebarList)
+	m.showSidePane = false
+	m.recomputeLayout()
 	if _, shown := m.slotRects[protocol.SurfaceSidePanel]; shown {
 		t.Fatal("setup: the side panel is shown")
 	}
@@ -85,11 +85,11 @@ func TestStagePlacementFocusFallback(t *testing.T) {
 	m.showSidebar = true
 	m.recomputeLayout()
 	m.focusedSlot = protocol.SurfaceSidebarList
-	hostLeave(m, "p.list")
+	press(m, "[")
 	if m.focusedSlot != protocol.SurfaceWorkspaceStage {
 		t.Fatalf("focus = %q after the sidebar vanished, want the workspace stage", m.focusedSlot)
 	}
-	hostPlugin(m, "p.list", protocol.SurfaceSidebarList)
+	press(m, "[")
 	if m.focusedSlot != protocol.SurfaceSidebarList {
 		t.Errorf("focus = %q after the sidebar returned, want the sidebar list", m.focusedSlot)
 	}
@@ -107,7 +107,7 @@ func TestUserFocusChangesDropFallback(t *testing.T) {
 			m := sidesModelPanelGone(t)
 			move(m)
 			want := m.focusedSlot
-			hostPlugin(m, "p.panel", protocol.SurfaceSidePanel)
+			press(m, "]")
 			if m.focusedSlot != want {
 				t.Errorf("returning panel moved focus %q -> %q", want, m.focusedSlot)
 			}
@@ -130,7 +130,8 @@ func TestStageRailItemThenReturningPanelKeepsFocus(t *testing.T) {
 	if m.focusedSlot != protocol.SurfaceWorkspaceStage {
 		t.Fatalf("setup: focus %q", m.focusedSlot)
 	}
-	hostPlugin(m, "p.panel", protocol.SurfaceSidePanel)
+	m.showSidePane = true
+	m.recomputeLayout()
 	if m.focusedSlot != protocol.SurfaceWorkspaceStage {
 		t.Errorf("focus = %q, want the workspace stage", m.focusedSlot)
 	}
@@ -143,7 +144,8 @@ func TestStagePlacementNeverRestoresSidePanel(t *testing.T) {
 	hostPlugin(m, "p.stage", protocol.SurfaceWorkspaceStage)
 	m.activePlacement = contracts.PlacementStage
 	m.focusedSlot = protocol.SurfaceWorkspaceStage // not via setFocus: fallback stays
-	hostPlugin(m, "p.panel", protocol.SurfaceSidePanel)
+	m.showSidePane = true
+	m.recomputeLayout()
 	if m.focusedSlot != protocol.SurfaceWorkspaceStage {
 		t.Errorf("focus = %q, want the workspace stage", m.focusedSlot)
 	}
@@ -161,8 +163,8 @@ func narrowPanelWidth(m *WorkbenchModel) int {
 func TestNarrowTerminalDoesNotRestoreUndrawnPanel(t *testing.T) {
 	m := sidesModelPanelGone(t)
 	m.width = narrowPanelWidth(m)
+	m.showSidePane = true
 	m.recomputeLayout()
-	hostPlugin(m, "p.panel", protocol.SurfaceSidePanel)
 	if _, drawn := m.slotRects[protocol.SurfaceSidePanel]; drawn {
 		t.Fatalf("setup: the side panel is drawn at width %d", m.width)
 	}
