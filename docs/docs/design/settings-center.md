@@ -240,18 +240,20 @@ Styling: a `huh.Theme` is built from the served `Palette` and its index map (`Pa
 
 ### Frontend seams
 
-The center drives the host through `contracts.Frontend` ([Pods](pods.md), "Frontend seams") and nothing else. It uses the existing `Snapshot`, `Palette`, `Themes` and `SetSetting` and the `PaletteANSI` seam that [Built-in themes](themes.md) adds, and it adds the seams below, all with a `host` caller and the authorization that caller has in [Services](services.md) and [Pods](pods.md):
+**Landed:** the center's host seams, including `Themes` and `SetSetting`, are available through `contracts.Frontend`. The center UI remains specified, not landed.
+
+The center drives the host through `contracts.Frontend` ([Pods](pods.md), "Frontend seams") and nothing else. It uses `Snapshot`, `Palette`, `Themes`, `SetSetting` and the `PaletteANSI` seam that [Built-in themes](themes.md) adds. The seams below use a `host` caller with the authorization that caller has in [Services](services.md) and [Pods](pods.md), except `KeyListing`, which explicitly requests the full `cli` view:
 
 | Seam | Backing method | Goroutine |
 | :--- | :--- | :--- |
-| `SettingsSchema()` | `settings.schema` with no owner (every entry) | any |
-| `Setting(key)` | `settings.get` for the host: `{value, source}` | any |
-| `KeyListing()` | `keys.list` as the Server answers a `cli` caller, states included (the join of `Listing()` with liveness and the catalog moves into one function both the handler and this seam call) | any |
-| `Profiles()` | `profile.list` | any |
+| `SettingsSchema() []SettingEntry` | `settings.schema` with no owner (every entry) | any |
+| `Setting(key) (value any, source string, err error)` | `settings.get` for the host: `{value, source}` | any |
+| `KeyListing() KeyListing` | `keys.list` as the Server answers a `cli` caller, states included (the existing Keybinding port is shared by the handler and this seam) | any |
+| `Profiles() []ProfileInfo` | `profile.list` | any |
 | `UseProfile(name, reply)` | `profile.use`; answers on the loop exactly once with `{active, reports}` or a `CodedError` | call from the loop; reply on the loop |
 | `RemovePlugin(id, reply)` | `plugin.remove` with a `host` caller ("Changes to other specs"); answers on the loop exactly once with `{plugin, status, log, reports}` or a `CodedError` | call from the loop; reply on the loop |
 | `Catalog()` | the catalog cache: `Store.Resolve("catalog", profile)` for its problems only, then `Store.Layers("catalog", profile)` validated by the rules above, on a host worker, at startup and after every `services.reloaded`, posted to the loop; `{entries, problems}` | any; a cache read, never I/O |
-| `ConfigDir()` | the user layer's config directory, for the empty-catalog message | any |
+| `ConfigDir() string` | the user layer's config directory, for the empty-catalog message | any |
 
 None of them blocks the loop: the writers run their method off the loop and post the reply, like `SetSetting`. The frontend never imports Services, Pods or Store.
 
@@ -329,7 +331,7 @@ Each named for the behaviour it pins, in `cmd/husk` on the recording fake fronte
 Nothing of the center exists; the theme selector it absorbs is itself specified and not landed, so no frontend code is replaced. What lands, in order:
 
 1. **huh compatibility check**, as "huh" says, deciding huh v2 or the fallback. One commit, no behaviour.
-2. **Seams.** `contracts.Frontend` gains `SettingsSchema`, `Setting`, `KeyListing`, `Profiles`, `UseProfile`, `RemovePlugin` and `ConfigDir` (`Catalog` landed with the reader, step 3); the root implements them over the Services ports and Pods, with the `keys.list` join moved into a shared function. `plugin.remove` admits a `host` caller ("Changes to other specs"). `husk.pods` entries and `plugin.list` gain `dir`.
+2. **Seams — landed.** `contracts.Frontend` exposes `Themes`, `SetSetting`, `SettingsSchema`, `Setting`, `KeyListing`, `Profiles`, `UseProfile`, `RemovePlugin` and `ConfigDir` (`Catalog` landed with the reader, step 3). The root implements them over the existing Services ports and Pods; `KeyListing` calls the same Keybinding port as the handler with a `cli` caller. Writes run on tracked workers and reply only through the loop. `plugin.remove` admits a `host` caller in process ("Changes to other specs"). `husk.pods` entries and `plugin.list` carry `dir`.
 3. **The catalog reader — landed**, a small package beside Services (`internal/services/catalog`), with the rules of "The catalog document", importing `pkg/protocol`, Store's layer types and the shared Store-to-Problem conversion in `services/settings`, and nothing else; tested on fixtures. The host warms its cache on a worker after the startup flight and after each `services.reloaded` and posts the result to the loop. Construction drains the initial worker's post before handing ownership to the frontend; later reloads never wait for the cache. Late workers cannot replace a newer refresh. The cache uses the serving Profile snapshot's active name.
 4. **The center** in `cmd/husk`: the modal, the tab list, the five tabs, the profile corner, the host actions `husk.settings.open` and `husk.theme.select`, the State write, the bottom-bar click, the goldens. The theme selector is implemented **as the Theme tab**, never as a standalone modal.
 
@@ -337,8 +339,8 @@ The specs this one amends, each with the minimal consistent edit: [Services](ser
 
 ### Changes to other specs
 
-- **`plugin.remove` admits a `host` caller.** Until now the four `plugin.*` methods were CLI-only. The Installed tab is the user acting through the frontend, the same trust as the CLI, so `plugin.remove` admits `cli` and `host` (an `input` caller cannot reach it: no key binds a method) and stays `denied` for `plugin`; `plugin.list`, `plugin.log` and `plugin.add` stay CLI-only, because the center reads the Pod set from State and never adds. The frontend reaches `PluginPort.Remove` through the `RemovePlugin` seam, not through the socket adapter, so on the wire `plugin.remove` stays homed `cliOnly` in `MethodHomes`, as `settings.set` does; the port itself admits `cli` and `host`. The sequence under [Pods](pods.md), "Removing a plugin", is unchanged: step 1 admits the two kinds and everything after it is caller-blind.
-- **`husk.pods` entries and `plugin.list` gain `dir`.** The plugin's directory as the converter resolved it (the directory holding `husk-plugin.json`, or the directory a bare executable or manifest file was found in), `""` for a plugin given as an implicit command line. Written by the Pod at `starting` and never changed; additive to a State slice and to a result, so a reader that ignores it is unaffected. It is listed with minor 2.3 but, being an additive field, it does not move `protocol.Version`: minor 2.3 is landed now that both `theme.list` and `settings.set` and minor 2.2's `plugin.add` are served ([Protocol](protocol.md), rule 5 of Versioning). The `dir` field may land separately. It answers "where did this plugin come from" for every load path, bundle or not.
+- **`plugin.remove` admits a `host` caller — landed.** Previously the four `plugin.*` methods were CLI-only. The Installed tab is the user acting through the frontend, the same trust as the CLI, so `plugin.remove` admits `cli` and `host` (an `input` caller cannot reach it: no key binds a method) and stays `denied` for `plugin`; `plugin.list`, `plugin.log` and `plugin.add` stay CLI-only, because the center reads the Pod set from State and never adds. The frontend reaches `PluginPort.Remove` through the `RemovePlugin` seam, not through the socket adapter, so on the wire `plugin.remove` stays homed `cliOnly` in `MethodHomes`, as `settings.set` does; the port itself admits `cli` and `host`. The sequence under [Pods](pods.md), "Removing a plugin", is unchanged: step 1 admits the two kinds and everything after it is caller-blind.
+- **`husk.pods` entries and `plugin.list` carry `dir` — landed.** The plugin's directory as the converter resolved it (the directory holding `husk-plugin.json`, or the directory a bare executable or manifest file was found in), `""` for a plugin given as an implicit command line. Written by the Pod at `starting` and never changed; additive to a State slice and to a result, so a reader that ignores it is unaffected. It is listed with minor 2.3 but, being an additive field, it does not move `protocol.Version`: minor 2.3 is landed now that both `theme.list` and `settings.set` and minor 2.2's `plugin.add` are served ([Protocol](protocol.md), rule 5 of Versioning). The `dir` field lands separately. It answers "where did this plugin come from" for every load path, bundle or not.
 - **`overlays.settings_center`** (string: `""` or a tab id) replaces the specified-not-landed `overlays.theme_selector` (bool) in `husk.surfaces`; Input's context filter reads the new field.
 - **`catalog`** joins `config`, `keymap` and `themes` as a layered Store document name.
 
