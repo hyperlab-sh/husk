@@ -36,8 +36,12 @@ func TestExitPublishesPluginExitedWithTheHuskPodsEntry(t *testing.T) {
 		info wrapper.Info
 		want map[string]any
 	}{
-		{"non-zero exit", wrapper.Info{PluginID: "p", Status: wrapper.Failed, PID: 4242, StartedAt: started, LastError: "crashed (exit status 7)", LogPath: "/logs/p.log"},
-			map[string]any{"plugin_id": "p", "status": "failed", "pid": 4242, "started_at": "2026-10-22T06:01:02Z", "last_error": "crashed (exit status 7)", "log": "/logs/p.log"}},
+		{"non-zero exit", wrapper.Info{PluginID: "p", Status: wrapper.Failed, PID: 4242, StartedAt: started, LastError: "exit status 7", LogPath: "/logs/p.log"},
+			map[string]any{"plugin_id": "p", "status": "failed", "pid": 4242, "started_at": "2026-10-22T06:01:02Z", "last_error": "exit status 7", "log": "/logs/p.log"}},
+		{"stdout EOF with the process alive", wrapper.Info{PluginID: "p", Status: wrapper.Failed, PID: 4242, LastError: "stopped reading: wrapper: stdout closed while process is running"},
+			map[string]any{"plugin_id": "p", "status": "failed", "pid": 4242, "last_error": "stopped reading: wrapper: stdout closed while process is running"}},
+		{"stdout read error", wrapper.Info{PluginID: "p", Status: wrapper.Failed, PID: 4242, LastError: "stopped reading: read stdout: connection reset by peer"},
+			map[string]any{"plugin_id": "p", "status": "failed", "pid": 4242, "last_error": "stopped reading: read stdout: connection reset by peer"}},
 		{"clean exit", wrapper.Info{PluginID: "p", Status: wrapper.Exited, PID: 4242},
 			map[string]any{"plugin_id": "p", "status": "exited", "pid": 4242}},
 	} {

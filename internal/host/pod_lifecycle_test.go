@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
 	"github.com/hyperlab-sh/husk/internal/pods/manifest"
 	"github.com/hyperlab-sh/husk/internal/pods/wrapper"
+	"github.com/hyperlab-sh/husk/internal/substrate/state"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
@@ -185,7 +187,7 @@ func TestPluginExitedEventReachesAWatcher(t *testing.T) {
 	runHost(t, ready, h)
 	<-f.started // beta
 
-	h.root.cfg.Post(wrapper.ExitMsg{Info: wrapper.Info{PluginID: "beta", Status: wrapper.Failed, LastError: "crashed (exit status 3)"}})
+	h.root.cfg.Post(wrapper.ExitMsg{Info: wrapper.Info{PluginID: "beta", Status: wrapper.Failed, LastError: "exit status 3"}})
 	// The exit's Update publishes inline and the bus delivers at the end of
 	// that tick; one loop turn makes sure the posted ExitMsg was applied.
 	h.loop(func() {})
@@ -209,7 +211,7 @@ func TestPluginExitedEventReachesAWatcher(t *testing.T) {
 	if got := seen["alpha"]; got["status"] != "failed" || got["last_error"] != "exec: no such file or directory" {
 		t.Errorf("launch failure event = %+v", got)
 	}
-	if got := seen["beta"]; got["status"] != "failed" || got["last_error"] != "crashed (exit status 3)" {
+	if got := seen["beta"]; got["status"] != "failed" || got["last_error"] != "exit status 3" {
 		t.Errorf("exit event = %+v", got)
 	}
 }
@@ -295,5 +297,79 @@ func TestPluginExitedEventCarriesTheMergedEntry(t *testing.T) {
 	}
 	if p.Data["last_error"] != "stdout closed" || p.Data["log"] != "/logs/beta.log" || p.Data["pid"] != float64(4242) || p.Data["started_at"] != started.Format(time.RFC3339Nano) || p.Data["plugin_id"] != "beta" {
 		t.Errorf("event = %+v, want the merged entry plus plugin_id", p.Data)
+	}
+}
+
+// exitingArg selects the exiting plugin modes of the test binary.
+const exitingArg = "exiting-plugin"
+
+// TestExitingPluginProcess is the plugin process of the last_error e2e test:
+// the test binary re-executed with exitingArg and a mode. "eof" closes stdout
+// and stays alive; "crash" exits with status 3. Run normally it does nothing.
+func TestExitingPluginProcess(t *testing.T) {
+	n := len(os.Args)
+	if n < 2 || os.Args[n-2] != exitingArg {
+		t.Skip("plugin process mode only")
+	}
+	switch os.Args[n-1] {
+	case "eof":
+		_ = os.Stdout.Close()
+		select {}
+	case "crash":
+		os.Exit(3)
+	}
+}
+
+// A real wrapper and a real process: the failure text husk.pods publishes
+// (the text the frontend toasts as "<id>: <last_error>") is the exact string
+// the Wrapper produced, for a non-zero exit and for a stdout that closed
+// while the process lives.
+func TestRealProcessFailureTextsReachHuskPods(t *testing.T) {
+	for _, tc := range []struct{ mode, want string }{
+		{"crash", "exit status 3"},
+		{"eof", "stopped reading: wrapper: stdout closed while process is running"},
+	} {
+		t.Run(tc.mode, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "gamma")
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			raw, _ := json.Marshal(map[string]any{
+				"manifest_version": 2, "protocol": 2, "id": "gamma", "name": "gamma", "version": "1",
+				"command": []string{os.Args[0], "-test.run=^TestExitingPluginProcess$", "--", exitingArg, tc.mode},
+			})
+			if err := os.WriteFile(filepath.Join(dir, manifest.FileName), raw, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			hook, ready := readyHook("")
+			h, err := boot(t, func(c *contracts.Config) { c.Plugins = []string{dir} }, withHook(hook))
+			if err != nil {
+				t.Fatal(err)
+			}
+			cancel, _ := runHost(t, ready, h)
+			defer cancel()
+			for i := 0; ; i++ {
+				if h.podStatus("gamma") == "failed" {
+					break
+				}
+				if i > 20000 {
+					t.Fatalf("gamma never failed (status %q)", h.podStatus("gamma"))
+				}
+				runtime.Gosched()
+			}
+			var got string
+			h.loop(func() {
+				var doc struct {
+					Plugins map[string]struct {
+						LastError string `json:"last_error"`
+					} `json:"plugins"`
+				}
+				_ = json.Unmarshal(h.root.st.Snapshot().Slices[state.PodsNamespace].Value, &doc)
+				got = doc.Plugins["gamma"].LastError
+			})
+			if got != tc.want {
+				t.Fatalf("husk.pods last_error = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
