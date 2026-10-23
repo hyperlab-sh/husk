@@ -120,6 +120,25 @@ var goldenFrames = map[string]func(t *testing.T) string{
 		m.settings.keyQuery = "p.open"
 		return runGolden(t, m)
 	},
+	"TestGoldenFrameSettingsStoreEmpty": func(t *testing.T) string {
+		m, fe := pluginsFixture(t, "store")
+		fe.CatalogRows = contracts.CatalogResult{}
+		m.settle()
+		return runGolden(t, m)
+	},
+	"TestGoldenFrameSettingsStoreCatalog": func(t *testing.T) string {
+		m, fe := pluginsFixture(t, "store")
+		fe.CatalogRows.Entries = fe.CatalogRows.Entries[1:]
+		m.settings.plugins.selectedID = "beta"
+		m.settings.plugins.dirty = true
+		m.settle()
+		return runGolden(t, m)
+	},
+	"TestGoldenFrameSettingsInstalledConfirm": func(t *testing.T) string {
+		m, _ := pluginsFixture(t, "installed")
+		m.confirmSettingsRemoval()
+		return runGolden(t, m)
+	},
 	"TestGoldenFrameSettingsTheme": func(t *testing.T) string {
 		m, _ := settingsFixture(t, "theme")
 		return runGolden(t, m)
@@ -150,6 +169,22 @@ func fullSlotsModel() *WorkbenchModel {
 		protocol.SurfaceSidePanel:         {"SIDEPANEL"},
 	})
 	return m
+}
+
+func TestGoldenFrameSettingsStoreEmpty(t *testing.T) {
+	frame := goldenFrames[t.Name()](t)
+	requireFrameGeometry(t, frame)
+	golden.RequireEqual(t, frame)
+}
+func TestGoldenFrameSettingsStoreCatalog(t *testing.T) {
+	frame := goldenFrames[t.Name()](t)
+	requireFrameGeometry(t, frame)
+	golden.RequireEqual(t, frame)
+}
+func TestGoldenFrameSettingsInstalledConfirm(t *testing.T) {
+	frame := goldenFrames[t.Name()](t)
+	requireFrameGeometry(t, frame)
+	golden.RequireEqual(t, frame)
 }
 
 func TestGoldenFrameSettingsGeneral(t *testing.T) {

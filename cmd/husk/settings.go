@@ -53,6 +53,7 @@ type settingsCenter struct {
 	servicesRevision uint64
 	keysRead         bool
 	readTab          string
+	plugins          *settingsPlugins
 }
 
 func (s *settingsCenter) dirty() bool {
@@ -201,6 +202,7 @@ func (m *WorkbenchModel) refreshSettings() {
 			s.keysRead = true
 		}
 	}
+	m.refreshSettingsPlugins()
 	s.readTab = s.tab
 	m.updateSettingsGeneralView()
 	if s.tab == "keys" {
@@ -223,6 +225,20 @@ func (m *WorkbenchModel) settingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	s := m.settings
 	key := legacyKeyString(msg)
 	s.profileError = ""
+	if s.plugins != nil {
+		s.plugins.problem = ""
+		s.plugins.dirty = true
+	}
+	if s.plugins != nil && (s.plugins.confirm != nil || s.plugins.filter != nil) {
+		if key == "ctrl+c" {
+			m.closeSettings()
+			return m, nil
+		}
+		if key != "tab" && key != "shift+tab" {
+			return m, m.settingsPluginKey(msg)
+		}
+		s.plugins.confirm, s.plugins.filter = nil, nil
+	}
 	if s.profileForm != nil && (key == "tab" || key == "shift+tab") {
 		s.profileForm = nil
 	}
@@ -302,6 +318,9 @@ func (m *WorkbenchModel) settingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.openSettingsProfiles()
 		}
 	case settingsContentFocus:
+		if s.tab == "installed" || s.tab == "store" {
+			return m, m.settingsPluginKey(msg)
+		}
 		if s.tab == "general" {
 			return m, m.settingsGeneralKey(msg)
 		}
@@ -487,6 +506,19 @@ func (m *WorkbenchModel) settingsMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) 
 		}
 		return m, nil
 	}
+	if s.plugins != nil && (s.plugins.confirm != nil || s.plugins.filter != nil) {
+		if left {
+			s.plugins.confirm, s.plugins.filter = nil, nil
+			s.plugins.dirty = true
+		}
+		if _, wheel := event.(tea.MouseWheelMsg); wheel {
+			if mouse.Button == tea.MouseWheelUp {
+				return m.settingsKey(tea.KeyPressMsg{Code: tea.KeyUp})
+			}
+			return m.settingsKey(tea.KeyPressMsg{Code: tea.KeyDown})
+		}
+		return m, nil
+	}
 	if left && point.In(m.settingsCornerRect()) {
 		s.focus = settingsProfileFocus
 		m.openSettingsProfiles()
@@ -506,6 +538,9 @@ func (m *WorkbenchModel) settingsMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) 
 	content := m.settingsContentRect()
 	if left && point.In(content) {
 		s.focus = settingsContentFocus
+		if (s.tab == "installed" || s.tab == "store") && s.plugins != nil {
+			m.settingsPluginsMouse(point)
+		}
 		if s.tab == "general" && s.general != nil {
 			g := s.general
 			at := g.top + mouse.Y - content.Min.Y

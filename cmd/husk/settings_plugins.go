@@ -1,0 +1,548 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"image"
+	"maps"
+	"path/filepath"
+	"reflect"
+	"slices"
+	"strings"
+	"unicode/utf8"
+
+	tea "charm.land/bubbletea/v2"
+	"charm.land/huh/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/hyperlab-sh/husk/internal/host/contracts"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
+)
+
+type settingsPluginRow struct {
+	ID, Status, Dir, LastError string
+	Claims                     []string
+}
+
+type settingsPlugins struct {
+	inputs         map[string]string
+	rows           []settingsPluginRow
+	held           map[string]string
+	catalog        contracts.CatalogResult
+	configDir      string
+	filtered       []contracts.CatalogEntry
+	query, surface string
+	cursor, top    int
+	selectedID     string
+	removing       map[string]bool
+	problem        string
+	confirm        *huh.Confirm
+	confirmID      string
+	confirmed      bool
+	confirmView    string
+	filter         *huh.Select[string]
+	filterView     string
+	lines          []string
+	hits           []string
+	renderKey      string
+	widgetKey      string
+	lastTab        string
+	positions      map[string][2]int
+	dirty          bool
+}
+
+func (m *WorkbenchModel) refreshSettingsPlugins() {
+	s := m.settings
+	if s.tab != "installed" && s.tab != "store" {
+		return
+	}
+	if s.plugins == nil {
+		s.plugins = &settingsPlugins{removing: map[string]bool{}, dirty: true}
+	}
+	p := s.plugins
+	if p.lastTab != s.tab {
+		if p.positions == nil {
+			p.positions = map[string][2]int{}
+		}
+		p.positions[p.lastTab] = [2]int{p.cursor, p.top}
+		pos := p.positions[s.tab]
+		p.cursor, p.top = pos[0], pos[1]
+		p.lastTab = s.tab
+		p.dirty = true
+	}
+	widgetKey := fmt.Sprintf("%d/%d/%v/%v", m.width, m.height, m.served, m.ansi)
+	if widgetKey != p.widgetKey {
+		p.widgetKey = widgetKey
+		if p.confirm != nil {
+			yes := p.confirmed
+			m.confirmSettingsRemoval()
+			p.confirmed = yes
+			p.confirmView = p.confirm.View()
+		}
+		if p.filter != nil {
+			m.openSettingsSurfaceFilter()
+		}
+	}
+	inputs := map[string]string{}
+	if m.fe != nil {
+		if snap := m.fe.Snapshot(); snap != nil {
+			inputs["husk.pods"] = string(snap.Slices["husk.pods"].Value)
+			inputs["husk.surfaces"] = string(snap.Slices["husk.surfaces"].Value)
+			for ns, entry := range snap.Slices {
+				if strings.HasSuffix(ns, ".occupants") {
+					inputs[ns] = string(entry.Value)
+				}
+			}
+		}
+	}
+	if !maps.Equal(inputs, p.inputs) {
+		p.inputs = inputs
+		var pods struct {
+			Plugins map[string]struct {
+				Status, Dir string
+				LastError   string `json:"last_error"`
+			}
+		}
+		_ = json.Unmarshal([]byte(inputs["husk.pods"]), &pods)
+		var res struct {
+			Occupants map[string]struct{ Plugin string }
+		}
+		_ = json.Unmarshal([]byte(inputs["husk.surfaces"]), &res)
+		p.held = map[string]string{}
+		for surface, occ := range res.Occupants {
+			p.held[surface] = occ.Plugin
+		}
+		selected := ""
+		if s.tab == "installed" && p.cursor < len(p.rows) {
+			selected = p.rows[p.cursor].ID
+		}
+		p.rows = nil
+		for id, pod := range pods.Plugins {
+			row := settingsPluginRow{ID: id, Status: pod.Status, Dir: pod.Dir, LastError: pod.LastError}
+			var claims map[string]json.RawMessage
+			_ = json.Unmarshal([]byte(inputs[id+".occupants"]), &claims)
+			for surface := range claims {
+				row.Claims = append(row.Claims, surface)
+			}
+			slices.Sort(row.Claims)
+			p.rows = append(p.rows, row)
+		}
+		slices.SortFunc(p.rows, func(a, b settingsPluginRow) int { return strings.Compare(a.ID, b.ID) })
+		for id := range p.removing {
+			if !slices.ContainsFunc(p.rows, func(r settingsPluginRow) bool { return r.ID == id }) {
+				delete(p.removing, id)
+			}
+		}
+		if s.tab == "installed" {
+			for i, row := range p.rows {
+				if row.ID == selected {
+					p.cursor = i
+					break
+				}
+			}
+			p.cursor = max(0, min(p.cursor, len(p.rows)-1))
+		}
+		p.dirty = true
+	}
+	if s.tab == "store" && m.fe != nil {
+		// Catalog warming posts independently of services.reloaded. Compare the
+		// cache itself so the later worker result is visible without another reload.
+		catalog := m.fe.Catalog()
+		if !reflect.DeepEqual(catalog, p.catalog) || p.configDir != m.fe.ConfigDir() {
+			p.catalog, p.configDir = catalog, m.fe.ConfigDir()
+			p.dirty = true
+		}
+	}
+	key := fmt.Sprintf("%s/%d/%d/%d/%d/%d/%s/%s/%v/%v", s.tab, m.width, m.height, s.focus, p.cursor, p.top, p.query, p.surface, m.served, m.ansi)
+	if p.dirty || key != p.renderKey {
+		p.renderKey, p.dirty = key, false
+		m.cacheSettingsPlugins()
+	}
+}
+
+func (m *WorkbenchModel) settingsPluginKey(msg tea.KeyPressMsg) tea.Cmd {
+	p := m.settings.plugins
+	if p == nil {
+		return nil
+	}
+	key := legacyKeyString(msg)
+	p.problem = ""
+	p.dirty = true
+	if p.confirm != nil {
+		switch key {
+		case "esc":
+			p.confirm = nil
+		case "enter":
+			p.confirm.Update(msg)
+			id, yes := p.confirmID, p.confirmed
+			p.confirm = nil
+			if yes {
+				m.removeSettingsPlugin(id)
+			}
+		case "left", "right", "up", "down", "h", "l", "y", "n":
+			p.confirm.Update(msg)
+			p.confirmView = p.confirm.View()
+		}
+		return nil
+	}
+	if p.filter != nil {
+		switch key {
+		case "esc":
+			p.filter = nil
+		case "enter":
+			p.filter.Update(msg)
+			p.filter = nil
+			p.cursor, p.top = 0, 0
+		case "up", "down", "ctrl+k", "ctrl+j", "home", "end":
+			p.filter.Update(msg)
+			p.filter.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+			p.filterView = p.filter.View()
+			p.cursor, p.top = 0, 0
+		}
+		return nil
+	}
+	if m.settings.tab == "installed" {
+		switch key {
+		case "enter", "x":
+			m.confirmSettingsRemoval()
+		case "up", "ctrl+k":
+			p.cursor--
+		case "down", "ctrl+j":
+			p.cursor++
+		case "home":
+			p.cursor = 0
+		case "end":
+			p.cursor = len(p.rows) - 1
+		case "pgup":
+			p.cursor -= max(1, m.settingsContentRect().Dy()/2)
+		case "pgdown":
+			p.cursor += max(1, m.settingsContentRect().Dy()/2)
+		}
+		p.cursor = max(0, min(p.cursor, len(p.rows)-1))
+	} else {
+		switch key {
+		case "enter":
+			m.openSettingsSurfaceFilter()
+		case "up", "ctrl+k":
+			p.cursor--
+		case "down", "ctrl+j":
+			p.cursor++
+		case "home":
+			p.cursor = 0
+			p.top = 0
+		case "end":
+			p.cursor = len(p.filtered) - 1
+		case "pgup":
+			p.top = max(0, p.top-max(1, m.settingsContentRect().Dy()-2))
+		case "pgdown":
+			p.top += max(1, m.settingsContentRect().Dy()-2)
+		case "backspace":
+			if len(p.query) > 0 {
+				_, n := utf8.DecodeLastRuneInString(p.query)
+				p.query = p.query[:len(p.query)-n]
+			}
+			p.cursor, p.top = 0, 0
+		default:
+			if paletteTextFor(msg, key) {
+				p.query += key
+				p.cursor, p.top = 0, 0
+			}
+		}
+		p.cursor = max(0, min(p.cursor, len(p.filtered)-1))
+		if key == "backspace" || paletteTextFor(msg, key) && key != "enter" {
+			p.selectedID = ""
+		} else if len(p.filtered) > 0 {
+			p.selectedID = p.filtered[p.cursor].ID
+		}
+	}
+	return nil
+}
+
+func (m *WorkbenchModel) confirmSettingsRemoval() {
+	p := m.settings.plugins
+	if p.cursor >= len(p.rows) || m.fe == nil {
+		return
+	}
+	id := p.rows[p.cursor].ID
+	p.confirmID, p.confirmed = id, false
+	p.confirm = huh.NewConfirm().Title("Remove " + plainText(id) + " from this instance?").Description("It is unloaded, not uninstalled: its files, settings and saved state stay, and the next start loads it again.").Value(&p.confirmed).Affirmative("yes").Negative("no")
+	p.confirm.WithKeyMap(huh.NewDefaultKeyMap())
+	p.confirm.WithTheme(settingsHuhTheme(m.palette))
+	p.confirm.WithWidth(m.settingsContentRect().Dx())
+	p.confirm.Focus()
+	p.confirmView = p.confirm.View()
+	p.dirty = true
+}
+func (m *WorkbenchModel) removeSettingsPlugin(id string) {
+	s := m.settings
+	p := s.plugins
+	p.removing[id] = true
+	p.dirty = true
+	m.fe.RemovePlugin(id, func(_ contracts.PluginRemoval, err error) {
+		if m.settings != s {
+			return
+		}
+		delete(p.removing, id)
+		if err != nil {
+			p.problem = settingsError(err)
+		}
+		p.dirty = true
+	})
+}
+func (m *WorkbenchModel) openSettingsSurfaceFilter() {
+	p := m.settings.plugins
+	options := []huh.Option[string]{huh.NewOption("any surface", "")}
+	for _, meta := range allSurfaces {
+		options = append(options, huh.NewOption(string(meta.ID), string(meta.ID)))
+	}
+	for _, id := range []protocol.SurfaceID{protocol.SurfaceModal, protocol.SurfaceFullCanvas, protocol.SurfaceWorkspaceStage} {
+		options = append(options, huh.NewOption(string(id), string(id)))
+	}
+	p.filter = huh.NewSelect[string]().Title("Surface").Options(options...).Value(&p.surface).Height(min(14, m.settingsContentRect().Dy()))
+	p.filter.WithKeyMap(huh.NewDefaultKeyMap())
+	p.filter.WithTheme(settingsHuhTheme(m.palette))
+	p.filter.WithWidth(m.settingsContentRect().Dx())
+	p.filter.Focus()
+	p.filterView = p.filter.View()
+	p.dirty = true
+}
+
+func settingsPluginCommand(e contracts.CatalogEntry) []string {
+	if filepath.IsAbs(e.Source) || strings.HasPrefix(e.Source, "~/") {
+		return []string{"husk plugin add " + e.Source}
+	}
+	return []string{e.Source, "fetch it, then: husk plugin add <directory>"}
+}
+
+func (m *WorkbenchModel) cacheSettingsPlugins() {
+	s := m.settings
+	p := s.plugins
+	base := lipgloss.NewStyle().Foreground(m.palette.Ink).Background(m.palette.SurfaceElevated)
+	muted := base.Foreground(m.palette.InkMuted)
+	width := m.settingsContentRect().Dx()
+	p.lines, p.hits = nil, nil
+	add := func(line, id string) { p.lines = append(p.lines, line); p.hits = append(p.hits, id) }
+	if s.tab == "installed" {
+		cells := [][]string{{"ID", "STATUS", "CLAIMED", "SOURCE", "REMOVE"}}
+		for _, row := range p.rows {
+			dir := row.Dir
+			if dir == "" {
+				dir = "(command line)"
+			}
+			claims := strings.Join(row.Claims, ", ")
+			if claims == "" {
+				claims = "none"
+			}
+			status := row.Status
+			if p.removing[row.ID] {
+				status = "removing…"
+			}
+			cells = append(cells, []string{row.ID, status, claims, dir, "Remove"})
+		}
+		widths := settingsKeyWidths(cells, width)
+		for i, values := range cells {
+			st := base
+			if i == 0 {
+				st = st.Bold(true)
+			} else if i-1 == p.cursor {
+				st = st.Background(m.palette.SurfaceSelected)
+			}
+			var parts []string
+			for col, value := range values {
+				style := st
+				if i > 0 && col == 1 {
+					switch p.rows[i-1].Status {
+					case "exited":
+						style = st.Foreground(m.palette.InkMuted)
+					}
+				}
+				if i > 0 && col == 2 && len(p.rows[i-1].Claims) > 0 {
+					var claims []string
+					for _, surface := range p.rows[i-1].Claims {
+						cs := st
+						if p.held[surface] != p.rows[i-1].ID {
+							cs = st.Foreground(m.palette.InkMuted)
+						}
+						claims = append(claims, cs.Render(plainText(surface)))
+					}
+					text := ansi.Truncate(strings.Join(claims, st.Render(", ")), widths[col], "…")
+					parts = append(parts, text+st.Render(strings.Repeat(" ", max(0, widths[col]-ansi.StringWidth(text)))))
+				} else {
+					text := ansi.Truncate(plainText(value), widths[col], "…")
+					padding := strings.Repeat(" ", max(0, widths[col]-ansi.StringWidth(text)))
+					if i > 0 && col == 1 && !p.removing[p.rows[i-1].ID] && (p.rows[i-1].Status == "live" || p.rows[i-1].Status == "failed") {
+						level := "success"
+						if p.rows[i-1].Status == "failed" {
+							level = "danger"
+						}
+						parts = append(parts, st.Render(m.statusMark(level, text)+padding))
+					} else {
+						parts = append(parts, style.Render(text+padding))
+					}
+				}
+			}
+			id := ""
+			if i > 0 {
+				id = p.rows[i-1].ID
+			}
+			add(strings.Join(parts, st.Render("  ")), id)
+			if i > 0 && p.rows[i-1].Status == "failed" && p.rows[i-1].LastError != "" {
+				add(m.statusMark("danger", "✕")+" "+base.Render(plainText(p.rows[i-1].LastError)), id)
+			}
+		}
+		if len(p.rows) == 0 {
+			add(muted.Render("No plugins loaded"), "")
+		}
+		if p.problem != "" {
+			add(m.statusMark("danger", "✕")+" "+base.Render(plainText(p.problem)), "")
+		}
+		add("", "")
+		add(base.Render("husk plugin add <path>"), "")
+		add(base.Render("husk plugin add --dir <dir>"), "")
+		at := 0
+		for i, id := range p.hits {
+			if p.cursor < len(p.rows) && id == p.rows[p.cursor].ID {
+				at = i
+				break
+			}
+		}
+		p.top = settingsListTop(p.top, at, len(p.lines), m.settingsContentRect().Dy())
+	} else {
+		query := strings.ToLower(p.query)
+		p.filtered = nil
+		for _, e := range p.catalog.Entries {
+			if p.surface != "" && !slices.Contains(e.Surfaces, protocol.SurfaceID(p.surface)) {
+				continue
+			}
+			if !strings.Contains(strings.ToLower(e.ID+" "+e.Name+" "+e.Description+" "+strings.Join(e.Tags, " ")), query) {
+				continue
+			}
+			p.filtered = append(p.filtered, e)
+		}
+		slices.SortFunc(p.filtered, func(a, b contracts.CatalogEntry) int {
+			if c := strings.Compare(a.Name, b.Name); c != 0 {
+				return c
+			}
+			return strings.Compare(a.ID, b.ID)
+		})
+		if p.selectedID != "" {
+			for i, e := range p.filtered {
+				if e.ID == p.selectedID {
+					p.cursor = i
+					break
+				}
+			}
+		}
+		p.cursor = max(0, min(p.cursor, len(p.filtered)-1))
+		surface := p.surface
+		if surface == "" {
+			surface = "any surface"
+		}
+		add(base.Render("Surface: "+surface+" ▾  (enter)"), "")
+		add(base.Render("❯ "+plainText(p.query)), "")
+		if len(p.catalog.Entries) == 0 {
+			for _, line := range strings.Split(ansi.Wrap("No catalog. This Husk ships none; the distribution or you supply one.", width, " "), "\n") {
+				add(base.Render(line), "")
+			}
+			add(base.Render(plainText(filepath.Join(p.configDir, "catalog.json"))), "")
+			for _, line := range strings.Split(settingsCatalogExample, "\n") {
+				add(muted.Render(line), "")
+			}
+		} else if len(p.filtered) == 0 {
+			add(muted.Render("no entry matches"), "")
+		} else {
+			height := max(1, min(6, m.settingsContentRect().Dy()/3))
+			top := settingsListTop(0, p.cursor, len(p.filtered), height)
+			for i := top; i < min(len(p.filtered), top+height); i++ {
+				e := p.filtered[i]
+				st := base
+				if i == p.cursor {
+					st = st.Background(m.palette.SurfaceSelected)
+				}
+				var surfaces []string
+				for _, surface := range e.Surfaces {
+					surfaces = append(surfaces, string(surface))
+				}
+				text := st.Render(plainText(e.Name)) + " " + st.Foreground(m.palette.InkMuted).Render(plainText(e.ID+"  "+strings.Join(surfaces, ", ")+"  "+strings.Join(e.Tags, " ")))
+				if slices.ContainsFunc(p.rows, func(r settingsPluginRow) bool { return r.ID == e.ID }) {
+					text += " " + m.statusMark("success", "installed")
+				}
+				add(text, e.ID)
+			}
+			e := p.filtered[p.cursor]
+			add("", "")
+			for _, line := range strings.Split(ansi.Wrap(plainText(e.Description), width, " "), "\n") {
+				add(base.Render(line), "")
+			}
+			var claims []string
+			for _, surface := range e.Surfaces {
+				text := muted.Render(string(surface))
+				if p.held[string(surface)] != "" {
+					text += " " + m.statusMark("warning", "taken")
+				}
+				claims = append(claims, text)
+			}
+			add(strings.Join(claims, ", "), "")
+			add(muted.Render(plainText("tags: "+strings.Join(e.Tags, ", "))), "")
+			add(muted.Render(plainText("source ("+e.SourceLayer+"): "+e.Source)), "")
+			if slices.ContainsFunc(p.rows, func(r settingsPluginRow) bool { return r.ID == e.ID }) {
+				add(base.Render("already loaded"), "")
+			} else {
+				for _, line := range settingsPluginCommand(e) {
+					add(base.Render(plainText(line)), "")
+				}
+			}
+		}
+		for _, problem := range p.catalog.Problems[:min(10, len(p.catalog.Problems))] {
+			add(m.statusMark("warning", "⚠")+" "+base.Render(plainText("warning: "+problem.Code+": "+problem.Message)), "")
+		}
+		if n := len(p.catalog.Problems) - 10; n > 0 {
+			add(muted.Render(fmt.Sprintf("and %d more", n)), "")
+		}
+		p.top = max(0, min(p.top, len(p.lines)-m.settingsContentRect().Dy()))
+	}
+}
+
+func (m *WorkbenchModel) settingsPluginsMouse(point image.Point) {
+	p := m.settings.plugins
+	r := m.settingsContentRect()
+	at := p.top + point.Y - r.Min.Y
+	if m.settings.tab == "store" && point.Y == r.Min.Y {
+		m.openSettingsSurfaceFilter()
+		return
+	}
+	if at < 0 || at >= len(p.hits) || p.hits[at] == "" {
+		return
+	}
+	id := p.hits[at]
+	if m.settings.tab == "installed" {
+		for i, row := range p.rows {
+			if row.ID == id {
+				p.cursor = i
+				break
+			}
+		}
+		if point.X >= r.Max.X-6 {
+			m.confirmSettingsRemoval()
+		}
+	} else {
+		for i, e := range p.filtered {
+			if e.ID == id {
+				p.cursor = i
+				p.selectedID = id
+				p.top = 0
+				break
+			}
+		}
+	}
+	p.dirty = true
+}
+
+const settingsCatalogExample = `{"version": 1, "entries": {
+  "editor": {"source": "~/plugins/editor",
+    "surfaces": ["main-stage"]},
+  "clock": {"source": "https://example.invalid/clock",
+    "surfaces": ["sidebar-footer"]},
+  "tree": {"source": "~/plugins/tree",
+    "surfaces": ["sidebar-list"]}
+}}`

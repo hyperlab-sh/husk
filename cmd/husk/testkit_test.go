@@ -61,11 +61,14 @@ type fakeFE struct {
 	Notices []contracts.ConfigNotice
 	// Snap, Rails, PubSlots and Frames are what the host would report; Snap
 	// nil keeps the model's directly seeded catalog.
-	Snap     *state.Snapshot
-	Rails    []contracts.RailItem
-	PubSlots []contracts.PublishedSlot
-	Acts     []contracts.PluginAction
-	Frames   map[string]map[protocol.SurfaceID]protocol.FrameSpec
+	Snap         *state.Snapshot
+	CatalogRows  contracts.CatalogResult
+	CatalogReads int
+	ConfigPath   string
+	Rails        []contracts.RailItem
+	PubSlots     []contracts.PublishedSlot
+	Acts         []contracts.PluginAction
+	Frames       map[string]map[protocol.SurfaceID]protocol.FrameSpec
 	// HintsFn answers Hints; nil advertises none.
 	HintsFn func(contracts.KeyContext) []contracts.KeyHint
 	// PaletteFn serves a palette pair; nil uses the default hex theme.
@@ -179,9 +182,15 @@ type invoked struct {
 
 func (f *fakeFE) Snapshot() *state.Snapshot                { return f.Snap }
 func (f *fakeFE) StartupReports() []contracts.ReloadReport { return nil }
-func (f *fakeFE) Catalog() contracts.CatalogResult         { return contracts.CatalogResult{} }
-func (f *fakeFE) Themes() []contracts.ThemeEntry           { return slices.Clone(f.ThemeRows) }
-func (f *fakeFE) ServicesRevision() uint64                 { return f.ServiceRev }
+func (f *fakeFE) Catalog() contracts.CatalogResult {
+	f.CatalogReads++
+	raw, _ := json.Marshal(f.CatalogRows)
+	var result contracts.CatalogResult
+	_ = json.Unmarshal(raw, &result)
+	return result
+}
+func (f *fakeFE) Themes() []contracts.ThemeEntry { return slices.Clone(f.ThemeRows) }
+func (f *fakeFE) ServicesRevision() uint64       { return f.ServiceRev }
 func (f *fakeFE) SettingsSchema() []contracts.SettingEntry {
 	f.SchemaReads++
 	return slices.Clone(f.SchemaRows)
@@ -200,7 +209,7 @@ func (f *fakeFE) Setting(key string) (any, string, error) {
 }
 func (f *fakeFE) KeyListing() contracts.KeyListing  { f.KeyListingReads++; return f.KeyRows }
 func (f *fakeFE) Profiles() []contracts.ProfileInfo { return slices.Clone(f.ProfileRows) }
-func (f *fakeFE) ConfigDir() string                 { return "" }
+func (f *fakeFE) ConfigDir() string                 { return f.ConfigPath }
 
 type settingWrite struct {
 	Key   string
@@ -438,23 +447,6 @@ func contribute(m *WorkbenchModel, slot string, c contribution) {
 // setContent publishes content for a surface the way the content sink does.
 func setContent(m *WorkbenchModel, plugin string, p protocol.SurfaceUpdateParams) {
 	m.content(plugin, p)
-}
-
-func (f *fakeFE) lastKey() (keySent, bool) {
-	if len(f.Keys) == 0 {
-		return keySent{}, false
-	}
-	return f.Keys[len(f.Keys)-1], true
-}
-
-func (f *fakeFE) keysTo(plugin string) []string {
-	var out []string
-	for _, k := range f.Keys {
-		if k.Plugin == plugin {
-			out = append(out, k.P.Key)
-		}
-	}
-	return slices.Clone(out)
 }
 
 // hello is what a test declares about a plugin: the surfaces it occupies and
