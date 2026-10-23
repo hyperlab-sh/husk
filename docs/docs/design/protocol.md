@@ -204,7 +204,7 @@ A closed enum per protocol minor version. A receiver built for an older minor tr
 | Notification with bad params | handler | `protocol.error`, `invalid_params`, with `method` | stays open |
 | Reply whose `id` matches nothing pending (late after `timeout`, or bogus) | Calls | none; logged | stays open |
 | Request or notification on a plugin's stdout | Wrapper | `protocol.error`, `invalid_message` ("stdout carries replies only") | stays open; the plugin stays up |
-| Major-1 `hello` on a plugin's stdout | Wrapper | one major-1 `protocol_error` line (see Versioning) | plugin stopped |
+| Major-1 `hello` on a plugin's stdout, or as the first line of a socket connection | Wrapper / Server | one major-1 `protocol_error` line (on stdin / on that connection, see Versioning) | plugin stopped; a socket connection is closed after the line |
 
 `protocol.error` is a notification:
 
@@ -237,7 +237,7 @@ Where the version is checked, since there is no handshake:
 - A plugin states its protocol major in its manifest (`"protocol": 2`). Manifest conversion ([Pods](pods.md)) refuses a plugin whose major differs before it is launched. The Wrapper tells the plugin the host's full version in `HUSK_PROTOCOL_VERSION`.
 - A socket caller learns the host's version from the `session.ping` result and from the registration entry ([Instances](instances.md)). The CLI compares majors and exits with its protocol error status when they differ; a plugin calling in does the same check once if it cares.
 
-A major-1 plugin that slipped through (a manifest without a version, read by the v1 converter) is recognized by its first stdout line (`{"type":"hello",...}`). Husk answers it once on stdin in the major-1 shape so the plugin can log a useful reason, then stops it:
+A major-1 plugin that slipped through (a manifest without a version, read by the v1 converter) is recognized by its first stdout line (`{"type":"hello",...}`) or by the first line of a socket connection it opens. Husk answers it once, on stdin or on that connection, in the major-1 shape so the plugin can log a useful reason, then stops it. On the socket the plugin is the live pod named by `hello.plugin_id`; a hello naming no live pod gets the line and the close and nothing else is stopped:
 
 ```json
 {"type":"protocol_error","protocol_error":{"message_type":"hello","message":"unsupported protocol major 1: host speaks 2.0"}}
@@ -386,6 +386,7 @@ Done in the cutover and retirement: `pkg/huskipc` and `pkg/manifest` are deleted
 - `pkg/manifest` (deleted; now `internal/pods/manifest`): gained the declarations removed from `hello` (owned by [Pods](pods.md)).
 - `plugins/reference`: rewritten to 2.0 in the same change; `pkg/huskipc` was deleted once nothing imported it.
 - `docs/docs/architecture.md`: the Protocol, Versioning and Errors sections were rewritten from this spec.
+- Major-1 `hello` on a socket connection: the Server tests the first line of each connection with the predicate the Wrapper uses on stdout (`protocol.IsLegacyHello`), answers it with the major-1 line, closes the connection and asks Pods to fail the live pod named by `hello.plugin_id` with `version_mismatch`. This rejects a foreign protocol; it is not a handshake.
 
 ## Decisions made here
 
