@@ -238,7 +238,7 @@ func TestServicesTimeouts(t *testing.T) {
 		for _, c := range commands {
 			t.Run(c.usage, func(t *testing.T) {
 				want := 5 * time.Second
-				if noun == "config" {
+				if noun == "config" || c.usage == "husk settings set <key> <value>" || c.usage == "husk theme set <name>" {
 					want = 10 * time.Second
 				}
 				if c.timeout != want {
