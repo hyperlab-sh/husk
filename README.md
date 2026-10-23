@@ -43,7 +43,7 @@ husk instances                        # list running instances and whether they 
 husk ping                             # session.ping to the one running instance
 husk rpc session.ping '{}'            # any method, params as a JSON object, raw result
 husk plugin list                      # every plugin Pod: status, pid, last error, log path
-husk plugin log reference             # the log file of one plugin (not_found before it exists)
+husk plugin log go.reference             # the log file of one plugin (not_found before it exists)
 husk store paths                      # config, state, data and runtime directories (local)
 husk store check                      # corrupt, quarantined and orphan records; deletes nothing
 husk store gc                         # run retention now

@@ -30,6 +30,10 @@ func TestResetSecretsDeletesSealedFilesAndIdentityOnly(t *testing.T) {
 	if err := os.WriteFile(identity, []byte("AGE-SECRET-KEY-x\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	temp := filepath.Join(paths.Data, "secrets", ".alpha.age.tmp-123456")
+	if err := os.WriteFile(temp, []byte("crash"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	keep := []string{
 		filepath.Join(paths.Data, "secrets", ".alpha.lock"),
 		filepath.Join(paths.Data, "other.txt"),
@@ -53,6 +57,7 @@ func TestResetSecretsDeletesSealedFilesAndIdentityOnly(t *testing.T) {
 		filepath.Join(paths.Data, "secrets", "alpha.age"),
 		filepath.Join(paths.Data, "secrets", "beta.age"),
 		identity,
+		temp,
 	} {
 		if _, err := os.Lstat(p); !os.IsNotExist(err) {
 			t.Errorf("%s survived the reset (err %v)", p, err)
