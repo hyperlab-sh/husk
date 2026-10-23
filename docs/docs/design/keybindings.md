@@ -157,7 +157,7 @@ A binding names one key with `key` or two to four keys with `keys`; exactly one 
 | The terminal becomes frozen while keys are pending | Nothing special. The next key is resolved under the Frozen filter. |
 | A reload swaps the keymap while keys are pending | Nothing special. The next key is resolved against the keymap current at that moment. |
 
-If, within one scope, layer and plugin condition, an effective binding's sequence is a strict prefix of another effective binding's sequence, the longer one can never be typed. The loader drops the longer one and reports `unreachable`. (The same prefix in two different scopes or layers is not a conflict: ranking decides at run time.) A tombstone is not the shorter sequence here: a same-layer tombstone that precedes a longer binding on its prefix makes that binding untypeable, so order the tombstone after it.
+If, within one scope, layer and plugin condition, an effective binding's sequence is a strict prefix of another effective binding's sequence, the longer one can never be typed. The loader drops the longer one and reports `unreachable`. (The same prefix in two different scopes or layers is not a conflict: ranking decides at run time.) A tombstone is not the shorter sequence here: a same-layer tombstone that precedes a longer binding on its prefix makes that binding untypeable, so order the tombstone after it. The same order dependence holds between a statically shadowed shorter entry and a longer effective one in one layer, scope and condition: under a Frozen or modal filter that removes the shadower, file order decides which of the two resolves.
 
 ### Keymap file shape
 
@@ -477,7 +477,7 @@ Loader order, which decides which problem an entry gets when more than one rule 
 1. Per document: `parse_error`, `unsupported_version`, `too_large`, then per entry `invalid_entry`, `invalid_key` or `unparsable_key`, and the per-document `too_many` cap.
 2. `duplicate` within one layer.
 3. Static shadowing between entries that differ in layer or in whether `plugin` is set, per the rule under "`husk keys`"; shadowed entries take no further part. Two entries in the same layer, scope and condition are never shadowed by each other here: an equal sequence is a `duplicate` (step 2), a prefix is `unreachable` (step 4).
-4. `unreachable` among the entries still effective.
+4. `unreachable` among the entries still effective. A statically shadowed entry whose strict prefix is in the resolution set within the same layer, scope and condition also leaves the resolution set, with no problem.
 5. The 4096 cap over the entries still effective. The static order for the cap is: scope (surface before global), layer rank, `plugin` set before unset, then `Source.Plugin`, then `Source.Order`; the last entries in that order are dropped.
 6. `no_exit_binding`.
 
@@ -570,7 +570,7 @@ This is the complete list of codes.
 | Loader reports a document over 256 KiB as `too_many` | Report `too_large`. **Landed**; a missing `bind` also names the key `bind`. |
 | Conversion accepts `focus_bindings` as an alias of `keybindings` | Accept `keybindings` only. **Landed**: a manifest that still spells `focus_bindings` gets an `ignored_field` warning and binds nothing. The service no longer re-checks focus-local ownership, scope or the 128-entry cap; conversion owns them. |
 | Declared document name `focus-keymap` | `keymap` (D64; rename unit). |
-| Resolution index holds effective entries only | **Landed**: it holds every entry except duplicates, `unreachable` and cap-dropped ones. If the 4096 cap drops a shadower, the entries it shadowed keep their `shadowed` state but resolve in its place. `Hints` reads effective entries and skips any whose proper prefix already matches. |
+| Resolution index holds effective entries only | **Landed**: it holds every entry except duplicates, `unreachable` and cap-dropped ones, and statically shadowed entries whose strict prefix is in the resolution set within the same layer, scope and condition (no extra problem). The 2048 bound is per file, so the index grows with the plugin count (128 entries each). If the 4096 cap drops a shadower, the entries it shadowed keep their `shadowed` state but resolve in its place. `Hints` reads effective entries and skips any whose proper prefix already matches. |
 | `docs/docs/architecture.md`, "Input routing" | Says layer order decides; now scope decides first. **Landed.** |
 
 Behavior changes users can notice, compared with the layer-first draft of this spec:

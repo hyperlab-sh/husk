@@ -276,10 +276,11 @@ func (s *Service) Hints(ctx KeyContext) []Hint {
 		if b.Hint == "" || seen[triple(b)] {
 			continue
 		}
-		// A shorter sequence that already matches in ctx ends the sequence early.
+		// Every proper prefix must wait for the next key; a match or a tombstone
+		// there ends the sequence before this binding.
 		reachable := true
 		for n := 1; n < len(b.Keys); n++ {
-			reachable = reachable && s.Resolve(ctx, b.Keys[:n]).Outcome != Match
+			reachable = reachable && s.Resolve(ctx, b.Keys[:n]).Outcome == Prefix
 		}
 		r := s.Resolve(ctx, b.Keys)
 		if reachable && r.Outcome == Match && r.Binding.Action == b.Action && r.Binding.Source == b.Source {
