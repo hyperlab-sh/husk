@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hyperlab-sh/husk/internal/cli"
 	"github.com/hyperlab-sh/husk/internal/cli/output"
@@ -164,16 +165,30 @@ func watchRun(t *testing.T, h *harness, args ...string) (lines <-chan string, ex
 	return ls, ex
 }
 
+// failBound caps every wait for something that should already be happening,
+// so a hang is reported as a failure instead of waiting for go test's
+// timeout (t.Context() ends only after the test body returns). It bounds a
+// failure; nothing sleeps on it.
+const failBound = 5 * time.Second
+
+func boundCtx(t *testing.T) context.Context {
+	t.Helper()
+	ctx, stop := context.WithTimeout(context.Background(), failBound)
+	t.Cleanup(stop)
+	return ctx
+}
+
 func nextLine(t *testing.T, lines <-chan string) string {
 	t.Helper()
+	ctx := boundCtx(t)
 	select {
 	case l, ok := <-lines:
 		if !ok {
 			t.Fatal("stream ended")
 		}
 		return l
-	case <-t.Context().Done():
-		t.Fatal("test ended while waiting for a stream line")
+	case <-ctx.Done():
+		t.Fatal("no stream line within the bound")
 	}
 	return ""
 }
@@ -223,7 +238,9 @@ func TestStateStemCLIAgainstRealHost(t *testing.T) {
 		// returns (so the reply is written) and the host shuts down on a
 		// later loop turn.
 		if err := fe.RegisterHostAction("husk.quit", func(map[string]any) (map[string]any, error) {
-			go h.loop(func() { _ = h.root.Close() })
+			go func() { // not h.loop: it calls t.Fatal, which is invalid off the test goroutine
+				_ = h.root.do(context.Background(), func() { _ = h.root.Close() })
+			}()
 			close(quit)
 			return nil, nil
 		}); err != nil {
@@ -254,6 +271,7 @@ func TestStateStemCLIAgainstRealHost(t *testing.T) {
 	var stateWatchExit <-chan int // joined in the last subtest
 	t.Run("state set, get and a watch seeing the change", func(t *testing.T) {
 		lines, exit := watchRun(t, h, "state", "watch", "alpha.state", "--format", "json")
+		stateWatchExit = exit // before any assertion: the last subtest joins it
 		var open struct {
 			Slices []struct{ Slice string } `json:"slices"`
 		}
@@ -307,7 +325,6 @@ func TestStateStemCLIAgainstRealHost(t *testing.T) {
 		if code != 0 || !strings.Contains(stdout, `"alpha.state"`) {
 			t.Fatalf("dump: exit %d stdout %.80q stderr %q", code, stdout, stderr)
 		}
-		stateWatchExit = exit
 	})
 
 	t.Run("state clear is the user's", func(t *testing.T) {
@@ -378,9 +395,10 @@ func TestStateStemCLIAgainstRealHost(t *testing.T) {
 		if code != 0 || stdout != "{}\n" {
 			t.Fatalf("invoke husk.quit: exit %d stdout %q stderr %q, want exit 0 and {}", code, stdout, stderr)
 		}
+		ctx := boundCtx(t)
 		select {
 		case <-quit:
-		case <-t.Context().Done():
+		case <-ctx.Done():
 			t.Fatal("husk.quit handler never ran")
 		}
 	})
@@ -393,13 +411,14 @@ func TestStateStemCLIAgainstRealHost(t *testing.T) {
 		if err := h.root.Close(); err != nil { // idempotent after husk.quit
 			t.Fatal(err)
 		}
+		ctx := boundCtx(t)
 		for name, ch := range map[string]<-chan int{"event watch": eventWatchExit, "state watch": stateWatchExit} {
 			select {
 			case code := <-ch:
 				if code != output.ExitTransport {
 					t.Fatalf("%s exit = %d, want %d", name, code, output.ExitTransport)
 				}
-			case <-t.Context().Done():
+			case <-ctx.Done():
 				t.Fatalf("%s outlived the instance", name)
 			}
 		}
