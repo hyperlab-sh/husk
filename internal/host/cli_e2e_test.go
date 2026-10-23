@@ -219,16 +219,20 @@ func TestStateStemCLIAgainstRealHost(t *testing.T) {
 	quit := make(chan struct{})
 	h.loop(func() {
 		fe := h.root.Frontend()
-		// Like cmd/husk's husk.quit: the host shuts down from inside the
-		// handler, on the loop, before the action.invoke reply is written.
+		// Like cmd/husk's husk.quit once husk-f9p is fixed: the handler
+		// returns (so the reply is written) and the host shuts down on a
+		// later loop turn.
 		if err := fe.RegisterHostAction("husk.quit", func(map[string]any) (map[string]any, error) {
-			_ = h.root.Close()
+			go h.loop(func() { _ = h.root.Close() })
 			close(quit)
 			return nil, nil
 		}); err != nil {
 			t.Fatal(err)
 		}
 	})
+
+	eventLines, eventWatchExit := watchRun(t, h, "event", "watch", "user.*", "--format", "json")
+	nextLine(t, eventLines) // opening: the watch is registered
 
 	t.Run("state lists the slice descriptors", func(t *testing.T) {
 		code, stdout, stderr := cliRun(h, "state", "--format", "table")
@@ -368,11 +372,8 @@ func TestStateStemCLIAgainstRealHost(t *testing.T) {
 		}
 	})
 
-	t.Run("action invoke husk.quit replies, then ends the instance and every watch with exit 5", func(t *testing.T) {
+	t.Run("action invoke husk.quit replies", func(t *testing.T) {
 		t.Skip("husk-f9p: quitCmd closes the Server before the reply is written")
-		lines, exit := watchRun(t, h, "event", "watch", "user.*", "--format", "json")
-		nextLine(t, lines) // opening
-
 		code, stdout, stderr := cliRun(h, "action", "invoke", "husk.quit", "--format", "json")
 		if code != 0 || stdout != "{}\n" {
 			t.Fatalf("invoke husk.quit: exit %d stdout %q stderr %q, want exit 0 and {}", code, stdout, stderr)
@@ -382,11 +383,17 @@ func TestStateStemCLIAgainstRealHost(t *testing.T) {
 		case <-t.Context().Done():
 			t.Fatal("husk.quit handler never ran")
 		}
+	})
+
+	t.Run("stopping the instance ends every watch with exit 5", func(t *testing.T) {
 		cancel()
 		if err := <-result; err != nil {
 			t.Fatal(err)
 		}
-		for name, ch := range map[string]<-chan int{"event watch": exit, "state watch": stateWatchExit} {
+		if err := h.root.Close(); err != nil { // idempotent after husk.quit
+			t.Fatal(err)
+		}
+		for name, ch := range map[string]<-chan int{"event watch": eventWatchExit, "state watch": stateWatchExit} {
 			select {
 			case code := <-ch:
 				if code != output.ExitTransport {
@@ -397,7 +404,7 @@ func TestStateStemCLIAgainstRealHost(t *testing.T) {
 			}
 		}
 		if code, _, _ := cliRun(h, "ping", "--format", "json"); code != output.ExitNoInstance {
-			t.Fatalf("ping after quit: exit %d, want %d (the instance is gone)", code, output.ExitNoInstance)
+			t.Fatalf("ping after stop: exit %d, want %d (the instance is gone)", code, output.ExitNoInstance)
 		}
 	})
 }
