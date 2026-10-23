@@ -249,15 +249,17 @@ func (w *State) apply(ctx context.Context, namespace string, f func() (uint64, e
 	}) {
 		return 0, contracts.NewError(protocol.CodeUnavailable, "the host loop no longer runs", nil)
 	}
-	select {
-	case o := <-done:
-		if o.err != nil {
-			return o.rev, w.mapWriteError(namespace, o.rev, limit, o.err)
+	o, ok := await(ctx, done)
+	if !ok {
+		if errors.Is(context.Cause(ctx), contracts.ErrShutdown) {
+			return 0, ctxError(ctx)
 		}
-		return o.rev, nil
-	case <-ctx.Done():
 		return 0, contracts.NewError(protocol.CodeCancelled, "request ended before the write was applied", nil)
 	}
+	if o.err != nil {
+		return o.rev, w.mapWriteError(namespace, o.rev, limit, o.err)
+	}
+	return o.rev, nil
 }
 
 // mapWriteError maps a substrate write error to the wire codes state.md

@@ -62,6 +62,10 @@ type DataError interface {
 	Data() map[string]any
 }
 
+// ErrShutdown is the cancellation cause of a request context ended because
+// the host is shutting down, as opposed to the caller going away.
+var ErrShutdown = errors.New("host is shutting down")
+
 // NewError returns a CodedError that also implements DataError. data may be nil.
 func NewError(code protocol.Code, message string, data map[string]any) CodedError {
 	return &codedError{code: string(code), message: message, data: data}

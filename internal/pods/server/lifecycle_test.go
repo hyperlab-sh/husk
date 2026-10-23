@@ -205,6 +205,9 @@ func TestRequestDuringDrainIsRefusedAsShutdown(t *testing.T) {
 		t.Fatalf("refusal = %+v", m2)
 	}
 	s.mu.Lock()
+	if len(s.conns) != 1 {
+		t.Errorf("connections = %d, want 1", len(s.conns))
+	}
 	for conn := range s.conns {
 		if n := len(conn.slots); n != 1 {
 			t.Errorf("admission slots in use = %d, want 1 (the refused request's slot is released)", n)
