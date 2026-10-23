@@ -53,9 +53,13 @@ func TestFailLegacyOnlyFailsALivePod(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			h, loop, _, procs := publisherFixtureWithLoop(t)
 			tc.setup(t, h)
-			before := len(loop.statuses)
+			h.worker = func(f func()) { f() } // a wrong fail would run here, inside Handle
+			before, logsBefore := len(loop.statuses), len(loop.logs)
 			h.FailLegacy(tc.id)
 			drain(h, loop)
+			if got := loop.logs[logsBefore:]; len(got) != 1 || got[0].Level != "debug" || !strings.Contains(got[0].Message, "names no live plugin") {
+				t.Fatalf("logs = %+v, want exactly the no-op debug line", got)
+			}
 			for id, p := range procs {
 				if p.versionMismatch != 0 {
 					t.Fatalf("pod %s was failed", id)

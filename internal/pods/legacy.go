@@ -3,6 +3,8 @@ package pods
 import (
 	"fmt"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/hyperlab-sh/husk/internal/pods/wrapper"
 )
 
@@ -21,7 +23,8 @@ func (h *Host) FailLegacy(pluginID string) { h.loop.Post(LegacyHelloMsg{PluginID
 //
 // The process is failed on a worker: the Wrapper reports its closing through
 // Loop.Post, which may block for backpressure, and a loop that posts to itself
-// from Update deadlocks.
+// from Update deadlocks. It runs through the Remover's tracked workers when
+// wired, so Host shutdown waits for it.
 func (h *Host) failLegacy(id string) {
 	p := h.pods[id]
 	_, removing := h.removing[id]
@@ -29,5 +32,17 @@ func (h *Host) failLegacy(id string) {
 		h.loop.Log(LogMsg{PluginID: id, Level: "debug", Message: fmt.Sprintf("major-1 hello on the socket names no live plugin (%q); nothing stopped", id)})
 		return
 	}
-	go p.process.FailVersionMismatch()
+	process := p.process
+	h.goWorker(process.FailVersionMismatch)
+}
+
+// goWorker runs f off the loop: on the composition root's tracked workers when
+// wired, else a plain goroutine. h.worker replaces both (tests run f inline so
+// a wrongly started fail is visible deterministically).
+func (h *Host) goWorker(f func()) {
+	if h.worker != nil {
+		h.worker(f)
+		return
+	}
+	h.spawn(func() tea.Msg { f(); return nil })
 }

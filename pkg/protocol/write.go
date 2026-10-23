@@ -43,7 +43,8 @@ func (w *Writer) Send(m Message) error {
 
 // SendLine writes or queues one pre-encoded line. line must hold a single JSON
 // line of at most MaxLineBytes; a missing final newline is added. Used for the
-// major-1 rejection, which is not a v2 Message.
+// major-1 rejection, which is not a v2 Message. It exists for the host;
+// plugins send Messages.
 func (w *Writer) SendLine(line []byte) error {
 	line = bytes.TrimSuffix(line, []byte{'\n'})
 	if len(line) > MaxLineBytes {

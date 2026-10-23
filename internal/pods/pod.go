@@ -29,7 +29,7 @@ func (p *Pod) Info() wrapper.Info {
 }
 
 // ProcessDone is closed when the Pod's process has exited; nil before it was
-// started. Loop-only, like the Pod.
+// started. A test and frontend observation seam. Loop-only, like the Pod.
 func (p *Pod) ProcessDone() <-chan struct{} {
 	if p.process == nil {
 		return nil
