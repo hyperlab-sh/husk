@@ -103,7 +103,11 @@ func TestCallerAttributionPerRequestAndTokenRevocation(t *testing.T) {
 		if m.HasToken() {
 			panic("credential leaked to handler")
 		}
-		data, _ := json.Marshal(c)
+		// ConnID is never serialized, so the echo carries it separately.
+		data, _ := json.Marshal(struct {
+			Caller
+			ConnID uint64 `json:"conn_id"`
+		}{c, c.ConnID})
 		return protocol.Message{Result: data}
 	}))
 	start(t, s)
@@ -124,7 +128,10 @@ func TestCallerAttributionPerRequestAndTokenRevocation(t *testing.T) {
 			}
 			continue
 		}
-		var caller Caller
+		var caller struct {
+			Caller
+			ConnID uint64 `json:"conn_id"`
+		}
 		if err := json.Unmarshal(got.Result, &caller); err != nil {
 			t.Fatal(err)
 		}

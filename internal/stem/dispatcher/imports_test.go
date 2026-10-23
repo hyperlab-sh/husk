@@ -16,6 +16,7 @@ func TestImportsStayWithinAllowList(t *testing.T) {
 		"github.com/hyperlab-sh/husk/internal/stem/calls":      true,
 		"github.com/hyperlab-sh/husk/internal/substrate/state": true,
 		"github.com/hyperlab-sh/husk/internal/host/contracts":  true,
+		"github.com/hyperlab-sh/husk/pkg/protocol":             true,
 	}
 	files, _ := filepath.Glob("*.go")
 	for _, f := range files {
