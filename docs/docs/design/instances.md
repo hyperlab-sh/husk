@@ -508,7 +508,7 @@ What `main` has and what this spec changes. Rows without a "today" are new.
 | The Server (`internal/pods/server`) runs the claim with its own `recoverStale` and `gofrs/flock`; `Close` compares `os.SameFile` of the path against an `Lstat` taken after bind. | **Landed:** the Server calls `instance.RecoverStale`; one implementation of the protocol. The after-bind `Lstat` is `instance.SocketIdentity`, taken after each successful bind and passed to `Unregister`. |
 | The Server's `session.ping` reads `HostVersion` from `Entry.HuskVersion`; `cmd/husk` passes no version. | **Landed:** `host_version` set from the build version (`host.WithVersion`) in both places. |
 | `cmd/husk/main.go` is start mode only; the id is always the pid. | `argv[1]` dispatch to `internal/cli` (landed). **Landed:** start mode `--instance <name>`. Open: `--profile`, `--distribution`. |
-| No CLI. | `internal/cli` with the shell contract above; commands land per owner spec. |
+| No CLI. | `internal/cli` with the shell contract above; commands land per owner spec. Landed: `instances`, `ping`, `rpc`, `state` (`get`, `dump`, `watch`, `set`, `patch`, `clear` without `--force`), `action` (`list`, `invoke`) and `event` (`emit`, `watch`). Still to land: `state clear --force` and `hook list`, `keys`, the Services nouns, `plugin` and `store`. |
 | `cmd/husk/socket_security.go` `createSocketDir` (fresh `husk-*` directory per run) | Done: the Server binds at `<id>.sock` in the shared runtime directory. |
 | `pluginEnv` removes `HUSK_SOCKET_PATH` for stdio plugins | Done in the Wrapper: all variables set for every plugin. |
 | Plugin logs under the socket directory | Done: `$XDG_STATE_HOME/husk/logs/<id>/<plugin>.log` through Store. |

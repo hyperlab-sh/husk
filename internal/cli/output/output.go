@@ -80,6 +80,18 @@ func (o Options) WriteJSON(raw []byte) error {
 	return err
 }
 
+// WriteLine prints one compact JSON document and a newline, whatever the
+// terminal: the line format of a stream.
+func (o Options) WriteLine(raw []byte) error {
+	var out bytes.Buffer
+	if err := json.Compact(&out, raw); err != nil {
+		return Protocol(err, "unreadable reply: %v", err)
+	}
+	out.WriteByte('\n')
+	_, err := o.Stdout.Write(out.Bytes())
+	return err
+}
+
 // Result prints a raw JSON result in the chosen format: the document itself
 // in JSON mode, the generic rendering in table mode.
 func (o Options) Result(raw json.RawMessage) error {

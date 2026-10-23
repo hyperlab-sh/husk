@@ -44,7 +44,21 @@ husk ping                             # session.ping to the one running instance
 husk rpc session.ping '{}'            # any method, params as a JSON object, raw result
 husk ping --instance 4242             # choose an instance by id (or --socket <path>)
 husk ping --format table --timeout 5s
+
+husk state                            # slice descriptors (state.snapshot without values)
+husk state get <slice> [<pointer>]    # one slice, or the value at a JSON Pointer
+husk state dump                       # every slice with its value
+husk state watch [<slice>...]         # baseline, then one JSON line per change
+husk state set '<json>'               # {"slice": ..., "value": ...}; a plugin's own slice (else denied)
+husk state patch '<json>' [--if-revision <n>]   # {"slice": ..., "patch": ...}, merge patch
+husk state clear <namespace>          # reset a slice to its initial value (the user only)
+husk action list [--owner <id>]       # the action catalog
+husk action invoke <action-id> [--arg k=v]... [--args-json '<json>']
+husk event emit <name> [--data '<json>']
+husk event watch '<pattern>'          # one JSON line per matching event, e.g. 'user.*'
 ```
+
+JSON arguments (`<json>`, `--args-json`, `--data`) must be objects; `-` reads one from stdin. `--arg` pairs build an object of strings and exclude `--args-json`. `state watch` and `event watch` print the opening reply and then one JSON line per notification until a signal ends them; they reject `--timeout`, bound the opening at 5 s, and exit 5 (`instance went away`) when the instance exits. The CLI checks syntax only: ownership, namespace and permission rules are the instance's and come back as exit 1 with its message.
 
 Global flags follow the subcommand (`husk ping --format json`); before it they would reach the instance's own flag parser. `ping` and `rpc` take `--instance <id>` or `--socket <path>` (not both), `--format json|table` (default `table` on a terminal, `json` otherwise) and `--timeout <duration>`; the flags may come before or after the arguments. `instances` reads the local registry only, so it takes `--format` and rejects `--instance`, `--socket` and `--timeout` (exit 2). Explicit targets (`--socket`, `--instance`, `HUSK_SOCKET_PATH`, `HUSK_INSTANCE`) are never probed; only discovery (no target, so the registry is surveyed) probes, 500 ms per entry. With exactly one live instance, that one is used; unresponsive entries are reported as `unresponsive` warnings. The client opens one connection and sends `session.ping` first to check the protocol major, then the command's request. `--timeout` starts after connecting (`ping` 2s, `rpc` 30s by default; `0` means the default, a negative value is a usage error). `husk` installs no signal handlers, so SIGINT, SIGTERM and SIGPIPE end it by the signal. An absent runtime directory is an empty registry (`husk instances` lists nothing, discovery exits 3); an unusable one (not private to the user, or a symlink) exits 7.
 
