@@ -55,7 +55,7 @@ func TestTableAlignsWideCells(t *testing.T) {
 		{"漢字", "A     B\n漢字  x\nabcd  y\n"},
 		{"한글", "A     B\n한글  x\nabcd  y\n"},
 		{"e\u0301e\u0301", "A     B\ne\u0301e\u0301    x\nabcd  y\n"},
-		{"a\u2060b", "A     B\na\u2060b   x\nabcd  y\n"},
+		{"a\u2060b", "A     B\na\u2060b    x\nabcd  y\n"},
 	} {
 		var b bytes.Buffer
 		if err := WriteTable(&b, []string{"A", "B"}, [][]string{{tc.first, "x"}, {"abcd", "y"}}); err != nil {
