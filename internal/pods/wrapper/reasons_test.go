@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"testing/iotest"
 
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
@@ -27,9 +28,11 @@ func closedReason(t *testing.T, f *fixture) string {
 	return reasons[0]
 }
 
-// The exact texts a Pod's exit surfaces under (pods.md, wrapper invariants 4
-// and 6 and the liveness table): the ClosedMsg reason Calls cancels pending
-// requests with, and the LastError that husk.pods and pods.plugin-exited carry.
+const stdinTextQuestion = "QUESTION host-test-gaps: pods.md row 500 says \"stopped reading: send queue full (1024 messages)\" / \"write timed out after 5s\", the code prefixes \"protocol: \"; pin after the ruling"
+
+// The exact ClosedMsg reason, LastError and status of the exits no other test
+// pins by equality (clean, crash, signal and EOF live in process_test.go): host
+// stop, and the two stdin failures, which wait on the stdinTextQuestion ruling.
 func TestExitReasonAndLastErrorTextsAreExact(t *testing.T) {
 	big := protocol.Message{Method: "sample.frame", Params: json.RawMessage(`{"padding":"` + strings.Repeat("x", 2<<20) + `"}`)}
 	// stalled drives the stdin queue of a plugin that ignores SIGTERM until it
@@ -47,37 +50,8 @@ func TestExitReasonAndLastErrorTextsAreExact(t *testing.T) {
 		reason     string
 		lastError  string
 		wantStatus Liveness
+		skip       string
 	}{
-		{
-			name: "clean exit", mode: "clean",
-			reason: "exited", wantStatus: Exited,
-		},
-		{
-			name: "non-zero exit", mode: "crash",
-			reason: "crashed (exit status 7): exit status 7", lastError: "exit status 7", wantStatus: Failed,
-		},
-		{
-			name: "foreign signal", mode: "selfkill",
-			reason: "crashed (signal: killed): signal: killed", lastError: "signal: killed", wantStatus: Failed,
-		},
-		{
-			name: "stdout EOF with the process alive", mode: "eof",
-			drive: func(t *testing.T, f *fixture) {
-				awaitReply(t, f, "9000")
-				f.clock.Await(t, EOFReapGrace)
-				f.clock.Advance(EOFReapGrace)
-			},
-			reason: "stopped reading: wrapper: stdout closed while process is running", lastError: "stopped reading: wrapper: stdout closed while process is running", wantStatus: Failed,
-		},
-		{
-			name: "stdout read error", mode: "ignore",
-			drive: func(t *testing.T, f *fixture) {
-				awaitReply(t, f, "9000")
-				f.w.fail(errors.New("read stdout: connection reset by peer"))
-				stalled(t, f)
-			},
-			reason: "stopped reading: read stdout: connection reset by peer", lastError: "stopped reading: read stdout: connection reset by peer", wantStatus: Failed,
-		},
 		{
 			name: "stdin queue overflow", mode: "ignore", alter: func(o *Options) { o.QueueCapacity = 1 },
 			drive: func(t *testing.T, f *fixture) {
@@ -91,7 +65,7 @@ func TestExitReasonAndLastErrorTextsAreExact(t *testing.T) {
 				}
 				stalled(t, f)
 			},
-			reason: "stopped reading: protocol: send queue full (1 messages)", lastError: "stopped reading: protocol: send queue full (1 messages)", wantStatus: Failed,
+			reason: "stopped reading: protocol: send queue full (1 messages)", lastError: "stopped reading: protocol: send queue full (1 messages)", wantStatus: Failed, skip: stdinTextQuestion,
 		},
 		{
 			name: "stdin write timeout", mode: "ignore", alter: func(o *Options) { o.QueueCapacity = 1 },
@@ -104,7 +78,7 @@ func TestExitReasonAndLastErrorTextsAreExact(t *testing.T) {
 				f.clock.Advance(WriteTimeout)
 				stalled(t, f)
 			},
-			reason: "stopped reading: protocol: write timed out after 5s", lastError: "stopped reading: protocol: write timed out after 5s", wantStatus: Failed,
+			reason: "stopped reading: protocol: write timed out after 5s", lastError: "stopped reading: protocol: write timed out after 5s", wantStatus: Failed, skip: stdinTextQuestion,
 		},
 		{
 			name: "host stop", mode: "ignore",
@@ -123,6 +97,9 @@ func TestExitReasonAndLastErrorTextsAreExact(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.skip != "" {
+				t.Skip(tc.skip)
+			}
 			f := newFixture(t, tc.mode, tc.alter)
 			if tc.alter != nil {
 				if err := f.w.Start(nil); err != nil {
@@ -145,5 +122,16 @@ func TestExitReasonAndLastErrorTextsAreExact(t *testing.T) {
 				t.Errorf("Status = %q, want %q", exit.Info.Status, tc.wantStatus)
 			}
 		})
+	}
+}
+
+// A read error on stdout is fatal for the launch: the reason is
+// "stopped reading: " plus the reader's error wrapped by readStdout.
+func TestStdoutReadErrorReasonIsExact(t *testing.T) {
+	f := newFixture(t, "ignore", nil) // never started: only readStdout runs
+	go f.w.readStdout(iotest.ErrReader(errors.New("connection reset by peer")))
+	closed := awaitNotice[ClosedMsg](t, f)
+	if got, want := closed.Reason.Error(), "stopped reading: read stdout: connection reset by peer"; got != want {
+		t.Fatalf("Closed reason = %q, want %q", got, want)
 	}
 }

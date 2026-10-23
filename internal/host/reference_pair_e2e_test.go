@@ -65,7 +65,7 @@ func TestReferencePairAgainstRealHost(t *testing.T) {
 	var mu sync.Mutex
 	latest := map[protocol.SurfaceID][]string{} // publisher surface -> lines of its last surface.update
 	tokens := map[string]string{}
-	// The wrapper itself is the real one; the factory only records each
+	// The wrapper itself is the real one (the default factory in pods.Host); the factory only records each
 	// process's token so the test can speak as the contributor.
 	factory := func(spec manifest.Spec, o wrapper.Options) (wrapper.Process, error) {
 		p, err := wrapper.New(spec, o)
@@ -96,8 +96,9 @@ func TestReferencePairAgainstRealHost(t *testing.T) {
 
 	waitLive := func(id string) {
 		t.Helper()
-		for i := 0; h.podStatus(id) != "live"; i++ {
-			if i > 5000 {
+		deadline := time.Now().Add(failBound)
+		for h.podStatus(id) != "live" {
+			if time.Now().After(deadline) {
 				t.Fatalf("%s never went live (status %q)", id, h.podStatus(id))
 			}
 			runtime.Gosched()
@@ -133,11 +134,18 @@ func TestReferencePairAgainstRealHost(t *testing.T) {
 	for {
 		mu.Lock()
 		var text string
+		var allowed bool
 		for _, lines := range latest {
 			text += strings.Join(lines, "\n") + "\n"
+			for _, l := range lines {
+				// The status line is "size WxH · replies: <result>", padded.
+				if _, res, ok := strings.Cut(l, "replies: "); ok && strings.TrimSpace(res) == "refresh allowed by 1" {
+					allowed = true
+				}
+			}
 		}
 		mu.Unlock()
-		if strings.Contains(text, "replies: refresh allowed by 1") {
+		if allowed {
 			break
 		}
 		if time.Now().After(deadline) {
