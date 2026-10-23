@@ -76,6 +76,12 @@ type ActionReply struct {
 	Result map[string]any
 	// Err is nil on success.
 	Err *ActionError
+	// Declined is set only by a host handler that refuses a key press: the
+	// action had nothing to do and the key belongs to the focused occupant. It
+	// is host-only and never serialized: an in-process caller receives it
+	// unchanged, and the wire port answers it with an empty success. A plugin
+	// action cannot decline, so replies converted from an owner never set it.
+	Declined bool
 }
 
 // ActionError is a failed request.

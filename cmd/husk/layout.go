@@ -113,6 +113,7 @@ func (m *WorkbenchModel) leaveUndrawnSides(prev map[protocol.SurfaceID]SlotRect)
 	_, hadFocused := prev[m.focusedSlot]
 	_, drawn := m.slotRects[m.focusedSlot]
 	if hadFocused && !drawn {
+		m.clearPending()
 		m.focusFallback, m.focusedSlot = m.focusedSlot, m.centreSlot()
 	}
 }
@@ -136,6 +137,7 @@ func (m *WorkbenchModel) restoreFocusFallback() {
 	if _, drawn := m.slotRects[fb]; !drawn {
 		return
 	}
+	m.clearPending()
 	m.focusedSlot, m.focusFallback = fb, ""
 }
 

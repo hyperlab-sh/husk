@@ -99,7 +99,8 @@ func TestStagePlacementFocusFallback(t *testing.T) {
 // panel back, and expects focus unchanged.
 func TestUserFocusChangesDropFallback(t *testing.T) {
 	for name, move := range map[string]func(*WorkbenchModel){
-		"home":         func(m *WorkbenchModel) { m.run("husk.home", nil) },
+		// husk.home declines on the home layout, so give it somewhere to go.
+		"home":         func(m *WorkbenchModel) { m.stageMode = "hotspots"; m.run("husk.home", nil) },
 		"toggle stage": func(m *WorkbenchModel) { m.run("husk.hotspots.toggle_stage", nil) },
 	} {
 		t.Run(name, func(t *testing.T) {

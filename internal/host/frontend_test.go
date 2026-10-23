@@ -187,7 +187,7 @@ func TestInvokeActionRunsHostActionsAsTheStem(t *testing.T) {
 	invoke := func(id string, args map[string]any) outcome {
 		var o outcome
 		replies := 0
-		fe.InvokeAction(id, args, func(res map[string]any, err error) { replies++; o = outcome{res, err} })
+		fe.InvokeAction(id, args, protocol.CallerHost, nil, func(res map[string]any, _ bool, err error) { replies++; o = outcome{res, err} })
 		if replies != 1 {
 			t.Fatalf("%s: reply called %d times, want exactly once", id, replies)
 		}
@@ -677,7 +677,7 @@ func TestRegisterHostActionRefusesWhatWouldShadowOrMisroute(t *testing.T) {
 		// and never reaches the host handler.
 		pending := h.root.disp.Pending()
 		replied := false
-		fe.InvokeAction("alpha.open", nil, func(map[string]any, error) { replied = true })
+		fe.InvokeAction("alpha.open", nil, protocol.CallerHost, nil, func(map[string]any, bool, error) { replied = true })
 		if called || replied {
 			t.Errorf("alpha.open was answered by the host (handler called=%v, replied=%v)", called, replied)
 		}
@@ -951,5 +951,150 @@ func TestDeclaredCatalogIsCachedByRevision(t *testing.T) {
 	h.root.store.Undeclare("one")
 	if got := h.root.Actions(); len(got) != 1 || got[0].Plugin != "two" {
 		t.Fatalf("Undeclare did not invalidate: %+v", got)
+	}
+}
+
+// InvokeAction validates the caller kind against the focus snapshot before
+// anything is dispatched, and carries a host handler's decline in the reply.
+func TestInvokeActionKindAndFocus(t *testing.T) {
+	var mu sync.Mutex
+	var logs []string
+	hook, ready := readyHook("")
+	h, err := boot(t, nil, withHook(hook), WithLogger(func(_, msg string) {
+		mu.Lock()
+		logs = append(logs, msg)
+		mu.Unlock()
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancel, _ := runHost(t, ready, h)
+	defer cancel()
+	fe := h.root.Frontend()
+	focus := &protocol.FocusContext{Surface: "main-stage", Owner: "alpha"}
+	tests := []struct {
+		name     string
+		kind     protocol.CallerKind
+		focus    *protocol.FocusContext
+		wantCode string
+		wantLog  string // substring of the one log line; empty for none
+	}{
+		{"input with its focus", protocol.CallerInput, focus, "", ""},
+		{"input without focus", protocol.CallerInput, nil, string(protocol.CodeInvalidParams), "input"},
+		{"host without focus", protocol.CallerHost, nil, "", ""},
+		{"host with focus", protocol.CallerHost, focus, string(protocol.CodeInvalidParams), "host"},
+		{"cli", protocol.CallerCLI, nil, string(protocol.CodeDenied), ""},
+		{"plugin", protocol.CallerPlugin, nil, string(protocol.CodeDenied), ""},
+		{"zero kind", "", nil, string(protocol.CodeDenied), ""},
+	}
+	h.loop(func() {
+		if err := fe.RegisterHostAction("husk.test.ping", func(map[string]any) (map[string]any, error) { return nil, nil }); err != nil {
+			t.Fatal(err)
+		}
+	})
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mu.Lock()
+			logs = nil
+			mu.Unlock()
+			var replies int
+			var gotErr error
+			h.loop(func() {
+				fe.InvokeAction("husk.test.ping", nil, tc.kind, tc.focus, func(_ map[string]any, declined bool, err error) {
+					replies++
+					gotErr = err
+					if declined {
+						t.Error("declined set for a handler that did not decline")
+					}
+				})
+			})
+			if replies != 1 {
+				t.Fatalf("reply ran %d times, want exactly once, before InvokeAction returned", replies)
+			}
+			if got := codeOf(gotErr); got != tc.wantCode {
+				t.Fatalf("code = %q (%v), want %q", got, gotErr, tc.wantCode)
+			}
+			mu.Lock()
+			logged := slices.DeleteFunc(slices.Clone(logs), func(l string) bool { return !strings.Contains(l, "InvokeAction") })
+			mu.Unlock()
+			switch {
+			case tc.wantLog == "" && len(logged) != 0:
+				t.Errorf("unexpected log lines %q", logged)
+			case tc.wantLog != "" && (len(logged) != 1 || !strings.Contains(logged[0], tc.wantLog)):
+				t.Errorf("log = %q, want exactly one line naming %q", logged, tc.wantLog)
+			}
+		})
+	}
+}
+
+func TestInvokeActionDeclined(t *testing.T) {
+	h, _, fe := bootFrontend(t, nil)
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{"bare sentinel", contracts.ErrDeclined},
+		{"wrapped sentinel", fmt.Errorf("home: %w", contracts.ErrDeclined)},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h.loop(func() {
+				if err := fe.RegisterHostAction("husk.test.decline", func(map[string]any) (map[string]any, error) { return map[string]any{"x": 1}, tc.err }); err != nil {
+					t.Fatal(err)
+				}
+				replies := 0
+				var res map[string]any
+				var declined bool
+				var err error
+				fe.InvokeAction("husk.test.decline", nil, protocol.CallerHost, nil, func(r map[string]any, d bool, e error) {
+					replies++
+					res, declined, err = r, d, e
+				})
+				if replies != 1 {
+					t.Fatalf("reply ran %d times before return, want 1", replies)
+				}
+				if !declined || err != nil || res != nil {
+					t.Fatalf("declined=%v err=%v res=%v, want declined with no error and no result", declined, err, res)
+				}
+			})
+		})
+	}
+}
+
+// A key binding dispatches with Input's own focus, not State's: the plugin
+// receives the snapshot Input read on that key press.
+func TestInvokeActionInputFocusReachesThePlugin(t *testing.T) {
+	h, f, fe := bootFrontend(t, nil)
+	snap := &protocol.FocusContext{Surface: "input-view", Owner: "elsewhere"}
+	h.loop(func() {
+		fe.InvokeAction("alpha.open", nil, protocol.CallerInput, snap, func(map[string]any, bool, error) {})
+		fe.InvokeAction("alpha.open", nil, protocol.CallerHost, nil, func(map[string]any, bool, error) {})
+	})
+	p := f.proc("alpha")
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	type wire struct {
+		Caller protocol.Caller       `json:"caller"`
+		Focus  protocol.FocusContext `json:"focus"`
+	}
+	var got []wire
+	for _, m := range p.sent {
+		if m.Method != "action.invoke" {
+			continue
+		}
+		var w wire
+		if err := json.Unmarshal(m.Params, &w); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, w)
+	}
+	if len(got) != 2 {
+		t.Fatalf("action.invoke deliveries = %d, want 2", len(got))
+	}
+	if got[0].Caller.Kind != protocol.CallerInput || got[0].Focus != *snap {
+		t.Errorf("input delivery = %+v, want kind input and focus %+v", got[0], *snap)
+	}
+	if got[1].Caller.Kind != protocol.CallerHost || got[1].Focus == *snap {
+		t.Errorf("host delivery = %+v, want kind host and State's focus", got[1])
 	}
 }

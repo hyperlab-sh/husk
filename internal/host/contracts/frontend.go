@@ -37,12 +37,19 @@ type Frontend interface {
 	// Any goroutine.
 	KeysFor(action string) []string
 
-	// InvokeAction runs action through the Dispatcher with the Stem as the
-	// caller (a key binding or a palette choice, acting for the user). reply
-	// is called exactly once on the loop, possibly before InvokeAction
-	// returns; err is nil on success or a CodedError (denied, not_found,
-	// unavailable, timeout ...). Loop only.
-	InvokeAction(action string, args map[string]any, reply func(result map[string]any, err error))
+	// InvokeAction runs action through the Dispatcher as kind: CallerInput for
+	// a key binding Input resolved, with focus, the FocusContext Input read on
+	// that key press (the Dispatcher uses it instead of State's), or
+	// CallerHost for an action the host starts itself (a palette choice, a rail
+	// item), with a nil focus. The two mismatches (input without focus, host
+	// with focus) are composition bugs: nothing is dispatched, reply runs
+	// synchronously with invalid_params and the host logs one line naming the
+	// kind. Any other kind is denied. reply is called exactly once on the
+	// loop, possibly before InvokeAction returns (always before, for a host
+	// action); err is nil on success or a CodedError (denied, not_found,
+	// unavailable, timeout ...), and declined is true when a host handler
+	// returned ErrDeclined, in which case result and err are empty. Loop only.
+	InvokeAction(action string, args map[string]any, kind protocol.CallerKind, focus *protocol.FocusContext, reply func(result map[string]any, declined bool, err error))
 
 	// RegisterHostAction binds an in-process handler for a husk.* action id or
 	// for the id of a rail item some declared plugin carries (RailItems), and
@@ -154,7 +161,8 @@ type PluginRefusal struct {
 }
 
 // HostActionHandler serves one host action on the loop. args is the
-// invocation's JSON object, possibly nil; a nil result is an empty object.
+// invocation's JSON object, possibly nil; a nil result is an empty object. A
+// handler that has nothing to do for a key press returns ErrDeclined.
 type HostActionHandler func(args map[string]any) (result map[string]any, err error)
 
 // RailPlacement is how a rail item opens its surface. It has the same wire

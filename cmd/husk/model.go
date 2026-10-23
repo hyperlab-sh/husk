@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"io"
@@ -61,6 +62,14 @@ type toastExpireMsg struct {
 type toastPollMsg struct{}
 
 const toastPollInterval = 500 * time.Millisecond
+
+// sequenceTimeout is how long Input waits for the next key of a multi-key
+// binding before it discards the keys typed so far (keybindings.md, Limits).
+const sequenceTimeout = 1500 * time.Millisecond
+
+// sequenceTimeoutMsg ends the pending sequence of generation gen. A message of
+// an older generation is stale: its sequence already ended or moved on.
+type sequenceTimeoutMsg struct{ gen uint64 }
 
 type modifierTickMsg struct{}
 
@@ -159,8 +168,14 @@ type WorkbenchModel struct {
 	// vanished; it comes back when the column does.
 	focusFallback protocol.SurfaceID
 
-	// pendingKeys is the prefix of a multi-key binding typed so far.
+	// pendingKeys is the prefix of a multi-key binding typed so far. seqGen
+	// counts every start and end of a pending sequence, so a timeout message
+	// from an earlier one is told apart and ignored.
 	pendingKeys []string
+	seqGen      uint64
+	// after schedules msg to arrive after d; nil means tea.Tick. Tests set it
+	// to stand in for the clock.
+	after func(d time.Duration, msg tea.Msg) tea.Cmd
 
 	modifiers  protocol.ModifierState
 	altLatched bool
@@ -495,6 +510,12 @@ func (m *WorkbenchModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case sequenceTimeoutMsg:
+		if msg.gen == m.seqGen && len(m.pendingKeys) > 0 {
+			m.clearPending()
+		}
+		return m, nil
+
 	case toastPollMsg:
 		m.toastPollOn = false
 		return m, nil // settle re-reads the queue and re-arms the poll
@@ -522,8 +543,10 @@ func (m *WorkbenchModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.showPalette && !m.layoutFrozen() {
 			return m.pastePalette(msg.Content)
 		}
-		// v1 delivered bracketed paste as a key whose string was wrapped in
-		// brackets, preventing pasted text from triggering host shortcuts.
+		// A paste ends a pending sequence, then travels as one key. v1 delivered
+		// bracketed paste as a key whose string was wrapped in brackets,
+		// preventing pasted text from triggering host shortcuts.
+		m.clearPending()
 		return m.handleKey(tea.KeyPressMsg{Code: tea.KeyExtended, Text: "[" + msg.Content + "]"})
 
 	case tea.KeyboardEnhancementsMsg:
@@ -806,7 +829,11 @@ func (m *WorkbenchModel) refresh() bool {
 	if reflect.DeepEqual(next, prev) {
 		return changed
 	}
+	owner := m.keyContext().FocusOwner
 	m.plugins, m.railItems, m.catalog = live, rails, cat
+	if m.keyContext().FocusOwner != owner {
+		m.clearPending() // a prefix typed for one occupant never completes on another
+	}
 	m.registerActions()
 	m.pruneContent()
 	m.dropGoneSurfaces()
@@ -983,24 +1010,38 @@ func (m *WorkbenchModel) flushState() bool {
 	return wrote
 }
 
-// run invokes an action as the user: through the host's Dispatcher when one is
-// attached, otherwise directly on the model's own handlers. A refusal toasts.
+// run starts an action the host itself initiates (a palette choice, a rail
+// click, a close button): kind host, no focus snapshot.
 func (m *WorkbenchModel) run(action string, args map[string]any) {
+	m.invoke(action, args, protocol.CallerHost, nil)
+}
+
+// invoke runs an action as kind: through the host's Dispatcher when one is
+// attached, otherwise directly on the model's own handlers. A refusal toasts.
+// It reports whether a host handler declined, which is known on return only
+// for host actions: a plugin action answers later and never declines.
+func (m *WorkbenchModel) invoke(action string, args map[string]any, kind protocol.CallerKind, focus *protocol.FocusContext) (declined bool) {
 	if m.fe == nil {
 		if h := m.actions[action]; h != nil {
-			_, _ = h(args)
+			_, err := h(args)
+			return errors.Is(err, contracts.ErrDeclined)
 		} else if ri, ok := m.railItemByID(action); ok {
 			m.activateRailItem(ri)
 		}
-		return
+		return false
 	}
-	m.fe.InvokeAction(action, args, func(_ map[string]any, err error) {
+	m.fe.InvokeAction(action, args, kind, focus, func(_ map[string]any, d bool, err error) {
+		if d {
+			declined = true
+			return
+		}
 		if err == nil {
 			return
 		}
 		m.logf("action %s: %v", action, err)
 		m.cmds = append(m.cmds, m.showLocalToast("warn", "Action failed", action+": "+err.Error()))
 	})
+	return declined
 }
 
 // registerActions binds the model's handlers with the host: the husk.* set
@@ -1051,8 +1092,14 @@ func (m *WorkbenchModel) hostActionTable() map[string]contracts.HostActionHandle
 		return func(map[string]any) (map[string]any, error) { f(); return nil, nil }
 	}
 	return map[string]contracts.HostActionHandler{
-		"husk.quit":         do(func() { m.cmds = append(m.cmds, func() tea.Msg { return quitMsg{} }) }),
-		"husk.home":         do(m.activateHomeWorkbench),
+		"husk.quit": do(func() { m.cmds = append(m.cmds, func() tea.Msg { return quitMsg{} }) }),
+		"husk.home": func(map[string]any) (map[string]any, error) {
+			if !m.homeApplies() {
+				return nil, contracts.ErrDeclined // nothing to leave: the key is the occupant's
+			}
+			m.activateHomeWorkbench()
+			return nil, nil
+		},
 		"husk.palette.open": do(m.openPalette),
 		"husk.hotspots.toggle_stage": do(func() {
 			m.activeRailID = ""
@@ -1118,6 +1165,7 @@ func (m *WorkbenchModel) hostActionTable() map[string]contracts.HostActionHandle
 }
 
 func (m *WorkbenchModel) openPalette() {
+	m.clearPending()
 	m.showPalette = true
 	m.paletteQuery = ""
 	m.paletteCursor, m.paletteTop = 0, 0
@@ -1150,6 +1198,7 @@ func (m *WorkbenchModel) focusNext() {
 // any remembered fallback slot, so a column that returns later does not take
 // the focus back.
 func (m *WorkbenchModel) setFocus(slot protocol.SurfaceID) {
+	m.clearPending()
 	m.focusedSlot = slot
 	m.focusFallback = ""
 }
@@ -1228,11 +1277,15 @@ func (m *WorkbenchModel) modalOwner() modalState { return m.modal }
 
 // openModal makes pluginID's rail item railID the open modal.
 func (m *WorkbenchModel) openModal(pluginID, railID string) {
+	m.clearPending()
 	m.modal = modalState{PluginID: pluginID, RailID: railID}
 }
 
 // closeModal dismisses the open modal, if any.
-func (m *WorkbenchModel) closeModal() { m.modal = modalState{} }
+func (m *WorkbenchModel) closeModal() {
+	m.clearPending()
+	m.modal = modalState{}
+}
 
 // surfaceOwner is the plugin that holds slot's claim: the occupant ("" when
 // the host draws it). Write authorisation, published-content cleanup and

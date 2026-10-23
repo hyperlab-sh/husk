@@ -43,28 +43,45 @@ func (r *Root) Hints(ctx contracts.KeyContext) []contracts.KeyHint { return r.ke
 // KeysFor implements contracts.Frontend.
 func (r *Root) KeysFor(action string) []string { return r.keys().KeysFor(action) }
 
-// InvokeAction implements contracts.Frontend. The Stem is the caller, which
-// the Dispatcher treats as the host acting for the user. Loop only.
-func (r *Root) InvokeAction(action string, args map[string]any, reply func(map[string]any, error)) {
-	r.disp.Invoke(dispatcher.ActionRequest{
-		Action: action,
-		Args:   args,
-		Caller: dispatcher.Caller{Kind: dispatcher.CallerHost},
-		Reply: func(res dispatcher.ActionReply) {
-			if reply == nil {
-				return
-			}
-			if res.Err != nil {
-				reply(nil, contracts.NewError(protocol.Code(res.Err.Code), res.Err.Message, res.Err.Data))
-				return
-			}
+// InvokeAction implements contracts.Frontend. A key binding arrives as
+// CallerInput with Input's own focus snapshot; an action the host starts
+// itself arrives as CallerHost with none. Loop only.
+func (r *Root) InvokeAction(action string, args map[string]any, kind protocol.CallerKind, focus *protocol.FocusContext, reply func(map[string]any, bool, error)) {
+	if reply == nil {
+		reply = func(map[string]any, bool, error) {}
+	}
+	req := dispatcher.ActionRequest{Action: action, Args: args, Caller: dispatcher.Caller{Kind: kind}}
+	switch {
+	case kind == protocol.CallerInput && focus == nil:
+		r.logf("frontend: InvokeAction(%q) as %s without a focus snapshot; not dispatched", action, kind)
+		reply(nil, false, contracts.NewError(protocol.CodeInvalidParams, "an input action needs the focus snapshot of its key press", nil))
+		return
+	case kind == protocol.CallerHost && focus != nil:
+		r.logf("frontend: InvokeAction(%q) as %s with a focus snapshot; not dispatched", action, kind)
+		reply(nil, false, contracts.NewError(protocol.CodeInvalidParams, "a host action carries no focus snapshot", nil))
+		return
+	case kind != protocol.CallerInput && kind != protocol.CallerHost:
+		reply(nil, false, contracts.NewError(protocol.CodeDenied, fmt.Sprintf("caller kind %q may not use InvokeAction", kind), nil))
+		return
+	}
+	if focus != nil {
+		req.Focus = *focus
+	}
+	req.Reply = func(res dispatcher.ActionReply) {
+		switch {
+		case res.Err != nil:
+			reply(nil, false, contracts.NewError(protocol.Code(res.Err.Code), res.Err.Message, res.Err.Data))
+		case res.Declined:
+			reply(nil, true, nil)
+		default:
 			out := res.Result
 			if out == nil {
 				out = map[string]any{}
 			}
-			reply(out, nil)
-		},
-	})
+			reply(out, false, nil)
+		}
+	}
+	r.disp.Invoke(req)
 }
 
 // RegisterHostAction implements contracts.Frontend. Loop only.
@@ -90,6 +107,9 @@ func (r *Root) RegisterHostAction(id string, handler contracts.HostActionHandler
 	r.hostActions[id] = true
 	r.disp.RegisterHost(id, func(req dispatcher.ActionRequest) dispatcher.ActionReply {
 		res, err := handler(req.Args)
+		if errors.Is(err, contracts.ErrDeclined) {
+			return dispatcher.ActionReply{Declined: true}
+		}
 		if err != nil {
 			var ce contracts.CodedError
 			if errors.As(err, &ce) {

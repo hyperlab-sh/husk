@@ -537,3 +537,52 @@ func TestStateViews(t *testing.T) {
 		t.Fatal("null surface")
 	}
 }
+
+func TestHostDeclinePassesThroughToInProcessCallers(t *testing.T) {
+	r := newRig(t)
+	ranBefore := false
+	r.d.RegisterHost("husk.quit", func(dispatcher.ActionRequest) dispatcher.ActionReply {
+		ranBefore = true
+		return dispatcher.ActionReply{Declined: true}
+	})
+	for _, kind := range []dispatcher.CallerKind{dispatcher.CallerInput, dispatcher.CallerHost, dispatcher.CallerCLI} {
+		ranBefore = false
+		var got []dispatcher.ActionReply
+		r.d.Invoke(dispatcher.ActionRequest{Action: "husk.quit", Caller: dispatcher.Caller{Kind: kind},
+			Reply: func(a dispatcher.ActionReply) { got = append(got, a) }})
+		if !ranBefore || len(got) != 1 {
+			t.Fatalf("%s: handler ran=%v, replies=%d: a host action's Reply must run before Invoke returns", kind, ranBefore, len(got))
+		}
+		if !got[0].Declined || got[0].Err != nil || got[0].Result != nil {
+			t.Fatalf("%s: reply = %+v, want Declined passed unchanged", kind, got[0])
+		}
+	}
+}
+
+// A plugin action cannot decline, and Declined has no wire form: the request
+// params a plugin receives carry no such field, and an owner's reply never
+// sets it.
+func TestDeclinedNeverSerialized(t *testing.T) {
+	r := newRig(t)
+	got := r.invoke(dispatcher.ActionRequest{Action: "notes.new", Caller: dispatcher.Caller{Kind: dispatcher.CallerInput}})
+	raw := r.out.sent[len(r.out.sent)-1].msg.Params
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatal(err)
+	}
+	for k := range fields {
+		if strings.Contains(strings.ToLower(k), "declin") {
+			t.Fatalf("params carry %q: %s", k, raw)
+		}
+	}
+	if len(*got) != 0 {
+		t.Fatalf("a plugin action replied before the owner did: %+v", *got)
+	}
+	// The owner answers {"declined":true}: it is just a result key, not the flag.
+	if n := r.d.Complete(resolve(t, r, 1, `{"result":{"declined":true}}`)...); n != 1 {
+		t.Fatalf("delivered %d", n)
+	}
+	if len(*got) != 1 || (*got)[0].Declined || (*got)[0].Result["declined"] != true {
+		t.Fatalf("reply = %+v, want an ordinary result with Declined false", *got)
+	}
+}
