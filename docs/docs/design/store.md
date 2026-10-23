@@ -122,7 +122,7 @@ func (s *Store) Close(ctx context.Context) error
 
 ```go
 type Doc = map[string]any // decoded JSON object; values are Doc, []any, string, float64, bool, nil
-type DocName string       // "config", "keymap"; [a-z0-9_-] segments joined by "/"
+type DocName string       // "config", "keymap", "themes"; [a-z0-9_-] segments joined by "/"
 
 type Layer string
 const (
@@ -147,7 +147,11 @@ func (s *Store) Resolve(name DocName, profile string) (Resolved, error)
 // Layers returns one document per layer, unmerged, tagged with its layer and
 // file path. The Keybinding service resolves keymaps across layers itself,
 // because rank, scope and tombstones are not a document merge
-// ([Keybindings](keybindings.md)).
+// ([Keybindings](keybindings.md)); the Theme service reads the "themes"
+// document the same way, because a named theme is replaced whole by a higher
+// layer and keeps its source layer ([Services](services.md), "Named themes").
+// Store knows neither document's meaning; both are files named <doc>.json in
+// the directory tree below.
 func (s *Store) Layers(name DocName, profile string) ([]LayerDoc, error)
 
 type LayerDoc struct {
@@ -172,6 +176,10 @@ func (s *Store) Invalidate()
 // one writable layer's file: user, profile (needs profile name) or the named
 // instance's file. Comments and formatting of untouched parts survive.
 // A hidden per-file .<doc>.json.lock covers the complete read-modify-write.
+// A missing file is created with the patch as its content; a file that does
+// not parse is left untouched and the error says so (invariant 8). Its one
+// caller in v1 is `settings.set` ([Services](services.md), "Writing one key"),
+// which patches a single key of "config" in the user layer.
 func (s *Store) Patch(name DocName, layer Layer, profile string, patch Doc) error
 
 // Declared documents: in-memory only, written by Pods' manifest conversion,
@@ -546,7 +554,7 @@ to the XDG defaults below. Windows is out of scope (Unix sockets).
 
 ```text
 $XDG_CONFIG_HOME/husk/                  ~/.config/husk          0700
-  <doc>.json                            user layer, e.g. config.json, keymap.json
+  <doc>.json                            user layer, e.g. config.json, keymap.json, themes.json
   profiles/<profile>/<doc>.json         profile layer
   instances/<name>/<doc>.json           instance layer file part, named instances
 

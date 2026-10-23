@@ -487,6 +487,8 @@ first live claim wins among the claims that arrive after the re-registration.
 
 `overlays.modal` gains `surface`: the id of the modal's surface, `modal-surface` for a rail item and the dynamic id for a runtime modal, so the frontend's `FocusSurface` while a modal is open is whichever of the two it is. The example value above becomes `"overlays":{"modal":{"plugin":"","rail_item":"","surface":""},...}` and `"runtime":{}`, `"terminals":{}` are always present, `{}` when empty, like `capture`.
 
+`overlays` gains `theme_selector` (bool, Level 1, not landed, with the theme selector of [Services](services.md), "The theme selector"): true while the frontend's theme selector modal is open. It is written by the frontend through `UpdateSurfaceView` like `palette` and `slot_explorer`, read by Input (the selector consumes every key while open, [Keybindings](keybindings.md) context filters) and by `husk state get husk.surfaces`, and is false whenever the selector is closed by any path. The example becomes `"overlays":{"modal":{...},"palette":false,"slot_explorer":false,"theme_selector":false}`.
+
 #### Frontend-owned slices
 
 `husk.layout`, `husk.geometry`, `husk.focus` and the view half of
