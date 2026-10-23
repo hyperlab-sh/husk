@@ -430,7 +430,11 @@ func (r *Runner) advance(c *call, params json.RawMessage) {
 		if params == nil {
 			var err error
 			if params, err = encodeParams(c.def, ch.data); err != nil {
-				entry.Err = err.(*HookError)
+				var he *HookError
+				if !errors.As(err, &he) {
+					he = &HookError{Code: CodeInternal, Message: err.Error()}
+				}
+				entry.Err = he
 				c.entries = append(c.entries, entry)
 				continue
 			}
@@ -455,7 +459,7 @@ func (r *Runner) advance(c *call, params json.RawMessage) {
 
 // shutdownError is the entry of a leg that Calls closing cut short.
 func shutdownError() *HookError {
-	return &HookError{Code: protocol.CodeCancelled, Message: "shutting down", Data: map[string]any{"reason": "shutdown"}}
+	return &HookError{Code: protocol.CodeCancelled, Message: "husk is shutting down", Data: map[string]any{"reason": "shutdown"}}
 }
 
 // isShutdown reports whether e is the cancelled/shutdown error: the host is
@@ -528,7 +532,9 @@ func (r *Runner) Complete(results ...calls.Result) int {
 			if entry.Data != nil {
 				c.chain.data = entry.Data
 			}
-			if isShutdown(entry.Err) {
+			// A cancelled/shutdown entry ends the chain only when Calls itself
+			// is closed; a subscriber can send the same error as its reply.
+			if isShutdown(entry.Err) && errors.Is(r.opts.Calls.CanSend(), calls.ErrClosed) {
 				r.finish(c)
 			} else {
 				r.advance(c, nil)
