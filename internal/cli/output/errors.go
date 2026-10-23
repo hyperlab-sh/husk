@@ -43,6 +43,7 @@ const (
 	CodeProtocol    = "protocol"
 	CodeEnvironment = "environment"
 	CodeStore       = "store"
+	CodeCreate      = "create"
 )
 
 // WarningUnresponsive is the only warning code of v1.
@@ -110,6 +111,11 @@ func Environment(cause error, format string, a ...any) *Error {
 // Store is a failed local store command.
 func Store(cause error, format string, a ...any) *Error {
 	return &Error{Exit: ExitRemote, Code: CodeStore, Message: fmt.Sprintf(format, a...), Err: cause}
+}
+
+// Create is a failed local scaffold command.
+func Create(cause error, format string, a ...any) *Error {
+	return &Error{Exit: ExitRemote, Code: CodeCreate, Message: fmt.Sprintf(format, a...), Err: cause}
 }
 
 // Ambiguous is discovery finding several live instances; the candidates go

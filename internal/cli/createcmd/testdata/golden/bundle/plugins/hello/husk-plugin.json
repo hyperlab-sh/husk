@@ -1,0 +1,12 @@
+{
+  "manifest_version": 2,
+  "protocol": 2,
+  "id": "hello",
+  "name": "Hello",
+  "version": "0.1.0",
+  "description": "The example plugin husk create wrote. Replace it with your own.",
+  "command": ["./hello"],
+  "surfaces": [
+    {"id": "main-stage", "frame": {"border": true, "label": "Hello", "close": false}}
+  ]
+}
