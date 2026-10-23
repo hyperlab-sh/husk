@@ -595,6 +595,10 @@ func (m *WorkbenchModel) handleMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if isLeftClick && image.Pt(msg.X, msg.Y).In(themePillRect(m.width, m.height, m.palette.Name)) {
+		return m, nil
+	}
+
 	if isLeftClick {
 		if slot, ok := m.closeHitAt(msg.X, msg.Y); ok {
 			if slot == protocol.SurfaceModal {

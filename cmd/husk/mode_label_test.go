@@ -11,9 +11,6 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
-// topBarText is the top bar with styling stripped.
-func topBarText(m *WorkbenchModel) string { return ansi.Strip(m.renderTopWorkbenchBar()) }
-
 func TestLayoutLabelTable(t *testing.T) {
 	for _, tc := range []struct {
 		placement          contracts.RailPlacement
@@ -38,8 +35,8 @@ func TestLayoutLabelTable(t *testing.T) {
 			if got := m.layoutLabel(); got != tc.want {
 				t.Fatalf("label %q, want %q", got, tc.want)
 			}
-			if !strings.Contains(topBarText(m), " "+tc.want+" ") {
-				t.Fatal("label not drawn in top bar")
+			if !strings.Contains(ansi.Strip(m.renderBottomKeybindBar()), " "+tc.want+" ") {
+				t.Fatal("label not drawn in bottom bar")
 			}
 		})
 	}

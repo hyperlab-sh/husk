@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"image"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -129,21 +130,16 @@ func (m *WorkbenchModel) renderActivityRailBox() string {
 		}
 		isHovered := m.hoverRailIdx == idx
 
-		centerCell := " " + b.icon + " "
-		if showShortcuts {
-			short := b.shortcut
-			if strings.EqualFold(short, "ctrl+p") {
-				short = "^P"
-			}
-			switch len(short) {
-			case 1:
-				centerCell = " " + short + " "
-			case 2:
-				centerCell = " " + short
-			default:
-				centerCell = fitLineWidth(short, 3)
+		text := b.icon
+		if showShortcuts && b.shortcut != "" {
+			text = b.shortcut
+			if strings.EqualFold(text, "ctrl+p") {
+				text = "^P"
 			}
 		}
+		text = ansi.Truncate(text, 5, "…")
+		left := (5 - ansi.StringWidth(text) + 1) / 2
+		centerCell := strings.Repeat(" ", left) + text + strings.Repeat(" ", 5-left-ansi.StringWidth(text))
 
 		if b.active || isHovered || showShortcuts {
 			pillColor := lipgloss.Color(m.palette.SurfaceSelected)
@@ -159,19 +155,19 @@ func (m *WorkbenchModel) renderActivityRailBox() string {
 				iconFg = lipgloss.Color(m.palette.Warning)
 			}
 
-			capStyle := lipgloss.NewStyle().Foreground(pillColor).Background(railBg)
+			tileStyle := lipgloss.NewStyle().Background(pillColor)
 			midStyle := lipgloss.NewStyle().Foreground(iconFg).Background(pillColor).Bold(b.active || showShortcuts)
 			pad := bgRowStyle.Render(" ")
 
-			rows[b.startY] = pad + capStyle.Render("▄▄▄") + pad
+			rows[b.startY] = pad + tileStyle.Render("     ") + pad
 			rows[b.startY+1] = pad + midStyle.Render(centerCell) + pad
-			rows[b.startY+2] = pad + capStyle.Render("▀▀▀") + pad
+			rows[b.startY+2] = pad + tileStyle.Render("     ") + pad
 		} else {
 			iconStyle := lipgloss.NewStyle().
 				Foreground(lipgloss.Color(m.palette.InkMuted)).
 				Background(railBg)
 			rows[b.startY] = emptyRow
-			rows[b.startY+1] = bgRowStyle.Render("  ") + iconStyle.Render(b.icon) + bgRowStyle.Render("  ")
+			rows[b.startY+1] = bgRowStyle.Render(" ") + iconStyle.Render(centerCell) + bgRowStyle.Render(" ")
 			rows[b.startY+2] = emptyRow
 		}
 	}
@@ -231,23 +227,7 @@ func (m *WorkbenchModel) renderTopWorkbenchBar() string {
 		Background(lipgloss.Color(m.palette.Accent)).
 		Bold(true).
 		Padding(0, 1).
-		Render("◆ HUSK WORKBENCH")
-
-	sub := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(m.palette.InkMuted)).
-		Render(" " + m.layoutLabel() + " ")
-
-	pluginCountBadge := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(m.palette.Success)).
-		Background(lipgloss.Color(m.palette.SurfaceElevated)).
-		Padding(0, 1).
-		Render(fmt.Sprintf("● %d plugins", len(m.plugins)))
-
-	themePill := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(m.palette.AccentSecondary)).
-		Background(lipgloss.Color(m.palette.SurfaceElevated)).
-		Padding(0, 1).
-		Render("✦ " + m.palette.Name)
+		Render("◈ HUSK")
 
 	dragPill := ""
 	if m.activeDrag != "" {
@@ -284,39 +264,8 @@ func (m *WorkbenchModel) renderTopWorkbenchBar() string {
 			Render("⌥ ALT HELD · Shortcuts Active") + " "
 	}
 
-	head := brand + sub + pluginCountBadge + " "
-	right := dragPill + themePill
-	// Rail shortcuts come from the rail items plugins declared, spelled as the
-	// rail's own shortcut labels. Entries that do not fit beside the right-hand
-	// pills are dropped from the end rather than pushing those pills off.
-	var railKeys []string
-	if k := m.firstKey("husk.home"); k != "" {
-		railKeys = append(railKeys, keyLabel(k)+" home")
-	}
-	for _, ri := range m.orderedRailItems() {
-		if k := m.firstKey(ri.ID); k != "" {
-			railKeys = append(railKeys, keyLabel(k)+" "+ri.Label)
-		}
-	}
-	railStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(m.palette.Info)).
-		Background(lipgloss.Color(m.palette.SurfaceElevated)).
-		Padding(0, 1)
-	budget := m.width - ansi.StringWidth(head) - ansi.StringWidth(right) - 1
-	railHint := ""
-	for n := len(railKeys); n > 0; n-- {
-		text := "Rail: " + strings.Join(railKeys[:n], "  ")
-		if n < len(railKeys) {
-			text += "  …"
-		}
-		if r := railStyle.Render(text); ansi.StringWidth(r) <= budget {
-			railHint = r
-			break
-		}
-	}
-	left := head + railHint
-	gap := max(1, m.width-ansi.StringWidth(left)-ansi.StringWidth(right))
-	line := left + strings.Repeat(" ", gap) + right
+	gap := max(1, m.width-ansi.StringWidth(brand)-ansi.StringWidth(dragPill))
+	line := brand + strings.Repeat(" ", gap) + dragPill
 	return lipgloss.NewStyle().
 		Background(lipgloss.Color(m.palette.Surface)).
 		Render(fitLineWidth(line, m.width))
@@ -336,21 +285,38 @@ func (m *WorkbenchModel) renderBottomKeybindBar() string {
 		return keyStyle.Render(k) + " " + descStyle.Render(d)
 	}
 
-	var parts []string
+	left := descStyle.Render(" " + m.layoutLabel() + " ")
+	pillRect := themePillRect(m.width, m.height, m.palette.Name)
 	for _, h := range m.footerHints() {
-		parts = append(parts, hint(h.key, h.desc))
+		group := sep + hint(h.key, h.desc)
+		if ansi.StringWidth(left)+ansi.StringWidth(group)+1 > pillRect.Min.X {
+			break
+		}
+		left += group
 	}
-	left := strings.Join(parts, sep)
-
-	ipcStat := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(m.palette.InkSubtle)).
-		Render(fmt.Sprintf("ipc: %d ", m.totalIPCEvents))
-
-	gap := max(1, m.width-ansi.StringWidth(left)-ansi.StringWidth(ipcStat))
-	line := " " + left + strings.Repeat(" ", max(0, gap-1)) + ipcStat
+	pill := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(m.palette.AccentSecondary)).
+		Background(lipgloss.Color(m.palette.SurfaceElevated)).
+		Padding(0, 1).
+		Render("✦ " + themePillName(m.palette.Name))
+	line := left + strings.Repeat(" ", max(1, pillRect.Min.X-ansi.StringWidth(left))) + pill
 	return lipgloss.NewStyle().
 		Background(lipgloss.Color(m.palette.Surface)).
 		Render(fitLineWidth(line, m.width))
+}
+
+// themePillName bounds the name independently of ANSI byte length.
+func themePillName(name string) string {
+	if name == "" {
+		name = "theme"
+	}
+	return ansi.Truncate(name, 24, "…")
+}
+
+// themePillRect is shared by rendering and input; View never records hit state.
+func themePillRect(width, height int, name string) image.Rectangle {
+	w := 4 + ansi.StringWidth(themePillName(name)) // padding, star and space
+	return image.Rect(width-w, height-1, width, height)
 }
 
 // regionSlot includes the rail for completeness; View draws its host buttons

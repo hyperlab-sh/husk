@@ -201,31 +201,30 @@ type WorkbenchModel struct {
 	activePlacement contracts.RailPlacement
 	modal           modalState // the one source of truth for the open modal; use modalOwner/openModal/closeModal
 
-	showHotspots   bool
-	stageMode      string // "plugin" or "hotspots"
-	hotspotCursor  int
-	showPalette    bool
-	secretPrompt   *secretPromptState // the Secrets confirm dialog, when one is up
-	paletteQuery   string
-	paletteCursor  int
-	paletteTop     int // first result row drawn; follows the cursor (movePaletteCursor)
-	activeToast    *contracts.Toast
-	engineToast    bool // activeToast came from the engine queue
-	toastPollOn    bool
-	toastSeq       int
-	refusalsShown  int      // host refusals already reported
-	noticesSeen    uint64   // newest host config notice already toasted
-	failures       []string // plugin failures noted, not yet toasted
-	shownFailures  []string // lines of the failure toast now up
-	pendingConfig  string   // config notice text raised this settle, not yet toasted
-	shownConfig    string   // config notice text folded into the failure toast now up
-	failureSeq     int      // toastSeq of that toast
-	totalIPCEvents uint64   // surface updates the host routed here
+	showHotspots  bool
+	stageMode     string // "plugin" or "hotspots"
+	hotspotCursor int
+	showPalette   bool
+	secretPrompt  *secretPromptState // the Secrets confirm dialog, when one is up
+	paletteQuery  string
+	paletteCursor int
+	paletteTop    int // first result row drawn; follows the cursor (movePaletteCursor)
+	activeToast   *contracts.Toast
+	engineToast   bool // activeToast came from the engine queue
+	toastPollOn   bool
+	toastSeq      int
+	refusalsShown int      // host refusals already reported
+	noticesSeen   uint64   // newest host config notice already toasted
+	failures      []string // plugin failures noted, not yet toasted
+	shownFailures []string // lines of the failure toast now up
+	pendingConfig string   // config notice text raised this settle, not yet toasted
+	shownConfig   string   // config notice text folded into the failure toast now up
+	failureSeq    int      // toastSeq of that toast
 
 	logOut io.Writer // host log lines, such as launch failures
 }
 
-const activityRailWidth = 5
+const activityRailWidth = 7
 
 func newWorkbenchModel() *WorkbenchModel {
 	m := &WorkbenchModel{
@@ -275,7 +274,6 @@ func (m *WorkbenchModel) attach(h host.Looped, closeGate func()) {
 // here on the loop. The engine already checked occupancy, so the plugin id is
 // the authority and the update's own plugin_id is overwritten.
 func (m *WorkbenchModel) content(plugin string, p protocol.SurfaceUpdateParams) {
-	m.totalIPCEvents++
 	update := p
 	update.PluginID = plugin
 	update.Lines = slices.Clone(p.Lines)

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -86,7 +87,10 @@ type dumpFrameDriver struct {
 // content it published. A change restarts the quiet window.
 func (d *dumpFrameDriver) activity() string {
 	m := d.WorkbenchModel
-	return fmt.Sprintf("%d/%d/%v", m.totalIPCEvents, len(m.slotUpdates), m.podStatus)
+	// JSON sorts map keys and snapshots pointed-to updates, so both in-place
+	// changes and replacement content restart settling, independent of order.
+	content, _ := json.Marshal(m.slotUpdates)
+	return fmt.Sprintf("%s/%v", content, m.podStatus)
 }
 
 func (d *dumpFrameDriver) Init() tea.Cmd {

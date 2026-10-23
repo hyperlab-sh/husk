@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 
@@ -33,8 +32,8 @@ func TestRailShortcutLabel(t *testing.T) {
 	}
 }
 
-// A plugin that leaves takes its rail items out of the rail buttons and the
-// top-bar hint: refresh keeps only live plugins' items.
+// A plugin that leaves takes its rail items out of the rail buttons:
+// refresh keeps only live plugins' items.
 func TestDepartedPluginRailItemsArePruned(t *testing.T) {
 	m := newWorkbenchModel()
 	fe := withFE(m)
@@ -43,8 +42,8 @@ func TestDepartedPluginRailItemsArePruned(t *testing.T) {
 	fe.Snap = snapshot(1, map[string]string{"gone": "live"}, surfaces.Surfaces{})
 	m.refresh()
 	m.width = 200
-	if !strings.Contains(ansi.Strip(m.renderTopWorkbenchBar()), "F7 Gone") {
-		t.Fatal("rail hint missing while the plugin is live")
+	if len(m.railButtons()) != 4 || m.railButtons()[1].shortcut != "F7" {
+		t.Fatal("rail item missing while the plugin is live")
 	}
 	fe.Snap = snapshot(2, map[string]string{"gone": "exited"}, surfaces.Surfaces{})
 	m.refresh()
@@ -58,36 +57,29 @@ func TestDepartedPluginRailItemsArePruned(t *testing.T) {
 	}
 }
 
-// Many declared rail shortcuts must not push the theme pill off the top bar:
-// trailing hint entries are dropped and marked with an ellipsis.
-func TestTopBarRailHintFitsWidth(t *testing.T) {
-	m := newWorkbenchModel()
-	fe := withFE(m)
-	for i := range 30 {
-		id := fmt.Sprintf("p.item%d", i)
-		fe.Rails = append(fe.Rails, contracts.RailItem{ID: id, Plugin: "p", Label: fmt.Sprintf("Item number %d", i), Placement: contracts.PlacementModal})
-		fe.bind(fmt.Sprintf("ctrl+%c", 'a'+i%26), id)
-	}
-	m.plugins["p"] = true
-	m.railItems = fe.Rails
-	for _, w := range []int{84, 144, 400} {
-		m.width = w
-		bar := ansi.Strip(m.renderTopWorkbenchBar())
-		if got := ansi.StringWidth(bar); got > w {
-			t.Fatalf("width %d: top bar is %d cells", w, got)
-		}
-		if !strings.Contains(bar, m.palette.Name) {
-			t.Fatalf("width %d: theme pill pushed off: %q", w, bar)
-		}
-		if w == 144 && !strings.Contains(bar, "…") {
-			t.Fatalf("width %d: truncated hint lacks ellipsis: %q", w, bar)
-		}
-		if strings.Contains(bar, "CTRL+") {
-			t.Fatalf("width %d: shortcut not formatted: %q", w, bar)
-		}
-	}
-	m.width = 400
-	if bar := ansi.Strip(m.renderTopWorkbenchBar()); !strings.Contains(bar, "Ctrl+a Item number 0") {
-		t.Fatalf("wide bar lacks formatted hint: %q", bar)
+func TestTopBarIsBrandAndOneTransientPill(t *testing.T) {
+	for _, tc := range []struct {
+		name, drag, divider string
+		hover               int
+		alt                 bool
+		want                string
+	}{
+		{"idle", "", "", -1, false, ""},
+		{"alt", "", "", -1, true, "⌥ ALT HELD · Shortcuts Active"},
+		{"rail beats alt", "", "", 0, true, " Home Workbench (F1)"},
+		{"divider beats rail", "", "sidebar-width", 0, true, "⇄ Drag border: sidebar-width"},
+		{"drag beats divider", "sidebar-width", "sidepanel-width", 0, true, "⇄ Dragging sidebar-width"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := goldenModel()
+			m.activeDrag, m.hoverDivider, m.hoverRailIdx, m.modifiers.Alt = tc.drag, tc.divider, tc.hover, tc.alt
+			for _, w := range []int{84, 144, 400} {
+				m.width = w
+				bar := ansi.Strip(m.renderTopWorkbenchBar())
+				if ansi.StringWidth(bar) != w || !strings.HasPrefix(bar, " ◈ HUSK ") || strings.TrimSpace(bar[len(" ◈ HUSK "):]) != tc.want {
+					t.Fatalf("width %d: unexpected bar %q, pill %q", w, bar, tc.want)
+				}
+			}
+		})
 	}
 }
