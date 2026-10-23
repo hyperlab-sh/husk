@@ -23,7 +23,15 @@ require (
 
 require (
 	al.essio.dev/pkg/shellescape v1.5.1 // indirect
+	charm.land/bubbles/v2 v2.0.0 // indirect
+	charm.land/huh/v2 v2.0.3 // indirect
+	github.com/atotto/clipboard v0.1.4 // indirect
+	github.com/catppuccin/go v0.2.0 // indirect
+	github.com/charmbracelet/x/exp/ordered v0.1.0 // indirect
+	github.com/charmbracelet/x/exp/strings v0.0.0-20240722160745-212f7b056ed0 // indirect
 	github.com/danieljoos/wincred v1.2.2 // indirect
+	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/mitchellh/hashstructure/v2 v2.0.2 // indirect
 	golang.org/x/crypto v0.24.0 // indirect
 	golang.org/x/text v0.16.0 // indirect
 )
