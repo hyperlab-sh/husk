@@ -17,13 +17,20 @@ func TestProfileServe(t *testing.T) {
 	port.Profiles = []contracts.ProfileInfo{{Name: "work", Source: "user", Active: true}}
 	h := Profile{Port: port}
 
-	var profiles []contracts.ProfileInfo
 	reply := h.Serve(context.Background(), cliCaller, req(t, "profile.list", `{}`), nil)
-	if reply.Error != nil || json.Unmarshal(reply.Result, &profiles) != nil || len(profiles) != 1 || profiles[0].Name != "work" {
-		t.Fatalf("list = %s / %+v", reply.Result, reply.Error)
+	if want := `{"profiles":[{"name":"work","source":"user","active":true}]}`; reply.Error != nil || string(reply.Result) != want {
+		t.Fatalf("list = %s / %+v, want %s", reply.Result, reply.Error, want)
 	}
-	if reply := h.Serve(context.Background(), cliCaller, req(t, "profile.use", `{"name":"work"}`), nil); reply.Error != nil || string(reply.Result) != "{}" {
-		t.Fatalf("use = %+v %s", reply.Error, reply.Result)
+	port.Used = contracts.ProfileUseResult{Active: "work", Reports: []contracts.ReloadReport{{Service: "profile", Gen: 2, Applied: true}}}
+	reply = h.Serve(context.Background(), cliCaller, req(t, "profile.use", `{"name":"work"}`), nil)
+	if want := `{"active":"work","reports":[{"service":"profile","gen":2,"applied":true}]}`; reply.Error != nil || string(reply.Result) != want {
+		t.Fatalf("use = %s / %+v, want %s", reply.Result, reply.Error, want)
+	}
+	// "" selects no profile: it is a value, not a missing parameter.
+	port.Used = contracts.ProfileUseResult{}
+	reply = h.Serve(context.Background(), cliCaller, req(t, "profile.use", `{"name":""}`), nil)
+	if want := `{"active":"","reports":[]}`; reply.Error != nil || string(reply.Result) != want {
+		t.Fatalf("use empty = %s / %+v, want %s", reply.Result, reply.Error, want)
 	}
 	for _, method := range []string{"profile.list", "profile.use"} {
 		errp := replyErr(t, h.Serve(context.Background(), pluginCaller("files"), protocol.Message{Method: method}, nil))
@@ -35,7 +42,7 @@ func TestProfileServe(t *testing.T) {
 	if errp.Code != protocol.CodeInvalidParams {
 		t.Fatalf("use without name: %s", errp.Code)
 	}
-	if calls := rec.Methods(); !equalStrings(calls, []string{"Profile.List", "Profile.Use"}) {
+	if calls := rec.Methods(); !equalStrings(calls, []string{"Profile.List", "Profile.Use", "Profile.Use"}) {
 		t.Fatalf("calls = %v (plugin denials must not reach the port)", calls)
 	}
 	errp = replyErr(t, h.Serve(context.Background(), cliCaller, protocol.Message{Method: "profile.poke"}, nil))
@@ -48,7 +55,7 @@ func TestThemeServe(t *testing.T) {
 	rec := fakes.NewRecorder()
 	port := fakes.NewTheme(rec)
 	port.Palette = protocol.Palette{Name: "dusk", Ink: "#eee"}
-	port.CheckResult = contracts.ThemeCheckResult{Applied: false}
+	port.CheckResult = contracts.ThemeCheckResult{OK: false}
 	h := Theme{Port: port}
 
 	// theme.get is open to plugins too: they colour their own output.
@@ -59,9 +66,9 @@ func TestThemeServe(t *testing.T) {
 			t.Fatalf("get = %v", got)
 		}
 	}
-	check := decode(t, h.Serve(context.Background(), cliCaller, req(t, "theme.check", `{}`), nil))
-	if _, has := check["applied"]; !has {
-		t.Fatalf("check = %v", check)
+	check := h.Serve(context.Background(), cliCaller, req(t, "theme.check", `{}`), nil)
+	if want := `{"ok":false,"problems":null}`; string(check.Result) != want {
+		t.Fatalf("check = %s, want %s", check.Result, want)
 	}
 	errp := replyErr(t, h.Serve(context.Background(), pluginCaller("files"), protocol.Message{Method: "theme.check"}, nil))
 	if errp.Code != protocol.CodeDenied {

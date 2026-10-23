@@ -4,6 +4,7 @@ package profile
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"sync/atomic"
 
@@ -22,7 +23,25 @@ type ProfileInfo struct {
 	Active bool   `json:"active"`
 }
 
+// Waiter is a registration on one reload flight.
+type Waiter interface {
+	// Wait blocks until the flight ends or ctx does. Cancelling ctx detaches
+	// this waiter only.
+	Wait(ctx context.Context) ([]c.Report, error)
+}
+
+// Reloader is the coordinator seam profile.use needs.
+type Reloader interface {
+	// AwaitProfile runs on the loop right after the slice write: it registers
+	// a waiter on the flight that write causes, without blocking.
+	AwaitProfile(name string) Waiter
+	// LastReports are the reports of the most recent completed flight.
+	LastReports() []c.Report
+}
+
 // Options is constructed on the loop; State registration happens in New only.
+// Flag is the --profile start flag: a selection input of the startup flight,
+// never written to State by itself.
 type Options struct {
 	Store   StoreReader
 	State   c.Tree
@@ -34,9 +53,10 @@ type Options struct {
 
 // Service owns only its profile handle and a replaceable read snapshot.
 type Service struct {
-	opts    Options
-	handle  *state.Handle
-	current atomic.Pointer[snapshot]
+	opts     Options
+	handle   *state.Handle
+	current  atomic.Pointer[snapshot]
+	reloader Reloader
 }
 type snapshot struct {
 	gen    c.Generation
@@ -53,21 +73,18 @@ func New(opts Options) (*Service, error) {
 		return nil, err
 	}
 	s.handle = h
-	if opts.Flag != nil {
-		b, _ := json.Marshal(map[string]string{"active": *opts.Flag})
-		if _, setErr := h.Set(b); setErr != nil {
-			return nil, setErr
-		}
-	}
 	s.current.Store(&snapshot{active: s.stateActive()})
 	return s, err
 }
+
+// Bind connects the coordinator; call it once, before the first profile.use.
+func (s *Service) Bind(r Reloader) { s.reloader = r }
+
 func (s *Service) stateActive() string {
-	entry := s.opts.State.Snapshot().Slices[state.ProfileNamespace]
 	var v struct {
 		Active string `json:"active"`
 	}
-	json.Unmarshal(entry.Value, &v)
+	json.Unmarshal(s.opts.State.Snapshot().Slices[state.ProfileNamespace].Value, &v)
 	return v.Active
 }
 
@@ -88,53 +105,109 @@ func (s *Service) ListFor(caller c.Caller) ([]ProfileInfo, error) {
 	return s.List(), nil
 }
 
-// Use validates a name and posts the State mutation; reload follows its listener.
-func (s *Service) Use(caller c.Caller, name string) error {
+// Use implements profile.use. A name equal to the active profile replies at
+// once with the most recent flight's reports and writes nothing. Otherwise the
+// slice write is posted to the loop and, in the same callback, the requester
+// registers on the flight that write causes; the reply carries that flight's
+// reports. Correlation is the registration, never a comparison of names.
+func (s *Service) Use(ctx context.Context, caller c.Caller, name string) (string, []c.Report, error) {
 	if err := c.RequireUser(caller); err != nil {
-		return err
+		return "", nil, err
 	}
+	snap := s.current.Load()
 	known := name == ""
-	for _, p := range s.current.Load().list {
-		if p.Name == name {
-			known = true
-		}
+	for _, p := range snap.list {
+		known = known || p.Name == name
 	}
 	if !known {
-		return c.Failure("not_found", "unknown_profile")
+		return "", nil, c.Failure("not_found", "unknown_profile")
 	}
-	if s.opts.Post == nil || !s.opts.Post(func() { b, _ := json.Marshal(map[string]string{"active": name}); s.handle.Set(b) }) {
-		return c.Failure("unavailable", "loop_closed")
+	if s.reloader == nil {
+		return "", nil, c.Failure("unavailable", "no_reloader")
 	}
-	return nil
+	if name == snap.active {
+		return name, s.reloader.LastReports(), nil
+	}
+	type registered struct {
+		w   Waiter
+		err error
+	}
+	reg := make(chan registered, 1)
+	if s.opts.Post == nil || !s.opts.Post(func() {
+		b, _ := json.Marshal(map[string]string{"active": name})
+		if _, err := s.handle.Set(b); err != nil {
+			reg <- registered{err: err}
+			return
+		}
+		reg <- registered{w: s.reloader.AwaitProfile(name)}
+	}) {
+		return "", nil, c.Failure("unavailable", "loop_closed")
+	}
+	select {
+	case r := <-reg:
+		if r.err != nil {
+			return "", nil, c.Failure("unavailable", "state_write")
+		}
+		reports, err := r.w.Wait(ctx)
+		return name, reports, err
+	case <-ctx.Done():
+		return "", nil, ctx.Err()
+	}
 }
 
-// ChooseProfile computes the startup/current selection from State and the base
-// user document, before the coordinator resolves the selected profile layer.
-func (s *Service) ChooseProfile(base store.Resolved) string {
-	active := s.stateActive()
-	if s.Generation() == 0 && s.opts.Flag == nil && !s.opts.State.Snapshot().Slices[state.ProfileNamespace].Hydrated && active == "" && base.Origins["profile.default"] == store.LayerUser {
-		v, _ := c.Dotted(base.Doc, "profile.default")
-		active, _ = v.(string)
+// Select is step 2's profile choice, before the one Store.Resolve. layers are
+// the unmerged config layers read without a profile; only the user layer's
+// profile.default counts. First match wins: the --profile flag (startup flight
+// only), a name in the husk.profile slice (an empty slice written after
+// registration is an explicit "no profile"), the user-layer default, none. A
+// name Store does not list is not activated: unknown_profile and "".
+func (s *Service) Select(startup bool, layers []store.LayerDoc, names []string) (string, []c.Problem) {
+	name, layer, key := "", "", ""
+	entry := s.opts.State.Snapshot().Slices[state.ProfileNamespace]
+	switch active := s.stateActive(); {
+	case startup && s.opts.Flag != nil:
+		name = *s.opts.Flag
+	case active != "":
+		name = active
+	case entry.Revision > 1:
+		// profile.use "" or a write-back of "": the user chose no profile.
+	default:
+		for _, l := range layers {
+			if v, ok := c.Dotted(l.Doc, "profile.default"); ok && l.Layer == store.LayerUser {
+				name, _ = v.(string)
+				layer, key = "user", "profile.default"
+			}
+		}
 	}
-	return active
+	if name == "" {
+		return "", nil
+	}
+	for _, n := range names {
+		if n == name {
+			return name, nil
+		}
+	}
+	return "", []c.Problem{{Severity: "warning", Code: "unknown_profile", Layer: layer, Key: key, Message: fmt.Sprintf("profile %s does not exist; using no profile", name)}}
 }
 
-// Rebuild revalidates selection and prepares a whole list without mutating State.
+// Rebuild prepares the profile list for the selection the coordinator made. It
+// writes no State; Apply posts the slice write-back when the selection differs
+// from the slice.
 func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c.Report, error) {
 	old := s.current.Load()
-	r := c.Report{Service: "profile", Gen: old.gen}
+	r := c.Report{Service: "profile", Gen: old.gen, Problems: append([]c.Problem(nil), in.ProfileProblems...)}
 	if ctx.Err() != nil {
 		return c.ContextError(ctx, r)
 	}
-	active := s.stateActive()
-	if old.gen == 0 && s.opts.Flag == nil && !s.opts.State.Snapshot().Slices[state.ProfileNamespace].Hydrated && active == "" && in.Doc.Origins["profile.default"] == store.LayerUser {
-		v, _ := c.Dotted(in.Doc.Doc, "profile.default")
-		active, _ = v.(string)
-	}
 	original := s.stateActive()
-	requested := active
+	active := original
 	if in.Profile != nil {
 		active = *in.Profile
+	}
+	for _, l := range in.ConfigLayers {
+		if _, ok := c.Dotted(l.Doc, "profile.default"); ok && l.Layer != store.LayerUser {
+			r.Problems = append(r.Problems, c.Problem{Severity: "warning", Code: "profile_default_ignored", Layer: string(l.Layer), Key: "profile.default", Message: "profile.default is honoured from the user layer only", Source: &c.Source{Layer: string(l.Layer), File: l.File}})
+		}
 	}
 	names := s.opts.Store.Profiles()
 	sources := map[string]store.Layer{}
@@ -144,7 +217,6 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 	sort.Strings(names)
 	next := &snapshot{gen: old.gen + 1, active: active}
 	found := active == ""
-	requestedFound := requested == ""
 	for _, name := range names {
 		source := "user"
 		if layer, ok := sources[name]; ok {
@@ -155,11 +227,13 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 		}
 		next.list = append(next.list, ProfileInfo{name, source, name == active})
 		found = found || name == active
-		requestedFound = requestedFound || name == requested
 	}
-	if !found || !requestedFound {
+	if !found {
 		next.active = ""
-		c.Issue(&r.Problems, "warning", "unknown_profile", "user", "profile.default", "unknown or deleted active profile; using no profile")
+		for i := range next.list {
+			next.list[i].Active = false
+		}
+		r.Problems = append(r.Problems, c.Problem{Severity: "warning", Code: "unknown_profile", Message: fmt.Sprintf("profile %s does not exist; using no profile", active)})
 	}
 	if ctx.Err() != nil {
 		return c.ContextError(ctx, r)
@@ -170,7 +244,7 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 		}
 		if next.active != s.stateActive() && s.opts.Post != nil {
 			s.opts.Post(func() {
-				if s.stateActive() == original || s.stateActive() == "" {
+				if s.stateActive() == original {
 					b, _ := json.Marshal(map[string]string{"active": next.active})
 					s.handle.Set(b)
 				}

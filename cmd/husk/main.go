@@ -20,6 +20,7 @@ import (
 	"github.com/hyperlab-sh/husk/internal/host"
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
 	"github.com/hyperlab-sh/husk/internal/instance"
+	"github.com/hyperlab-sh/husk/internal/substrate/store"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
@@ -70,6 +71,20 @@ func startInstanceID(name string, given bool, pid int) (string, error) {
 	return name, nil
 }
 
+// startProfile validates --profile before anything touches the filesystem. A
+// given empty name is invalid, like an empty --instance. It returns nil when
+// the flag was not given. The alphabet is Store's profile-directory alphabet,
+// the only one the specs fix.
+func startProfile(name string, given bool) (*string, error) {
+	if !given {
+		return nil, nil
+	}
+	if !store.ValidProfile(name) {
+		return nil, fmt.Errorf("invalid profile name %q: use a-z, 0-9, _ and -", name)
+	}
+	return &name, nil
+}
+
 // stringFlag is a repeatable string flag.
 type stringFlag []string
 
@@ -103,6 +118,7 @@ func main() {
 	pluginDirs := repeatable("plugin-dir", "Load every immediate subdirectory containing a husk-plugin.json (repeatable)")
 	demo := flag.String("demo", "", "In-process frame demo: pubslots (requires --dump-frame)")
 	instanceName := flag.String("instance", "", "Name this instance (a-z, 0-9 and -, not digits only); default is the pid. Command mode's --instance targets one instead")
+	profileName := flag.String("profile", "", "Select a profile on startup (a-z, 0-9, _ and -); it wins over the saved selection and profile.default")
 	flag.Parse()
 	// Subcommands come first; a positional left over here is a misplaced one
 	// (`husk --instance notes ping`) and must not start an instance.
@@ -112,6 +128,11 @@ func main() {
 	}
 	// The name is validated before anything touches the filesystem.
 	id, err := startInstanceID(*instanceName, flagSet("instance"), os.Getpid())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "husk: %v\n", err)
+		os.Exit(2)
+	}
+	profileFlag, err := startProfile(*profileName, flagSet("profile"))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "husk: %v\n", err)
 		os.Exit(2)
@@ -162,7 +183,7 @@ func main() {
 	prog := newProgramRef()
 	if *dumpFrame {
 		// runDumpFrame builds the headless program; a host Post waits for it.
-		h, err := newHost(prog, model, id, runtimeDir, []string(*pluginPaths), []string(*pluginDirs), host.WithVersion(buildVersion()))
+		h, err := newHost(prog, model, id, runtimeDir, []string(*pluginPaths), []string(*pluginDirs), profileFlag, host.WithVersion(buildVersion()))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "husk: %v\n", err)
 			os.Exit(1)
@@ -175,7 +196,7 @@ func main() {
 	// it. The model attaches the host before the program runs.
 	p := tea.NewProgram(model)
 	prog.set(p)
-	h, err := newHost(prog, model, id, runtimeDir, []string(*pluginPaths), []string(*pluginDirs), host.WithVersion(buildVersion()))
+	h, err := newHost(prog, model, id, runtimeDir, []string(*pluginPaths), []string(*pluginDirs), profileFlag, host.WithVersion(buildVersion()))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "husk: %v\n", err)
 		os.Exit(1)
@@ -273,7 +294,7 @@ func (r *programRef) post(msg any) bool {
 
 // newHost builds the v2 host over a private runtime directory. Nothing
 // listens until the model's Init runs the host.
-func newHost(prog *programRef, model *WorkbenchModel, id, dir string, plugins, dirs []string, opts ...host.Option) (host.Looped, error) {
+func newHost(prog *programRef, model *WorkbenchModel, id, dir string, plugins, dirs []string, profileFlag *string, opts ...host.Option) (host.Looped, error) {
 	h, err := host.New(contracts.Config{
 		InstanceID: id,
 		RuntimeDir: dir,
@@ -283,10 +304,11 @@ func newHost(prog *programRef, model *WorkbenchModel, id, dir string, plugins, d
 			Socket:          instance.SocketPath(dir, id),
 			ProtocolVersion: protocol.Version,
 		},
-		Plugins:    plugins,
-		PluginDirs: dirs,
-		Post:       prog.post,
-		Content:    model.content,
+		Plugins:     plugins,
+		PluginDirs:  dirs,
+		ProfileFlag: profileFlag,
+		Post:        prog.post,
+		Content:     model.content,
 	}, append([]host.Option{host.WithLogger(func(level, msg string) { model.logf("%s: %s", level, msg) })}, opts...)...)
 	if err != nil {
 		return nil, err

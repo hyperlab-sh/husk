@@ -103,7 +103,13 @@ func validDoc(n DocName) bool {
 	}
 	return true
 }
-func validProfile(p string) bool { return p == "" || validDoc(DocName(p)) && !strings.Contains(p, "/") }
+
+// ValidProfile reports whether name is a spelling Store accepts for a profile
+// directory: lowercase letters, digits, '_' and '-'. The empty name is not a
+// profile, so it is rejected here although Store's internal paths accept it as
+// "no profile".
+func ValidProfile(name string) bool { return name != "" && validProfile(name) }
+func validProfile(p string) bool    { return p == "" || validDoc(DocName(p)) && !strings.Contains(p, "/") }
 func clearOrigins(origins map[string]Layer, path string) {
 	for p := range origins {
 		if p == path || strings.HasPrefix(p, path+".") {

@@ -59,7 +59,7 @@ func quitRepliesBeforeStop(t *testing.T, id string, quitArgs func(id string) []s
 		tea.WithWindowSize(goldenW, goldenH),
 	)
 	prog.set(p)
-	h, err := newHost(prog, model, id, dir, nil, nil)
+	h, err := newHost(prog, model, id, dir, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

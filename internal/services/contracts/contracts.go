@@ -54,6 +54,9 @@ type ReloadInput struct {
 	Settings     SettingsSnapshot
 	Profile      *string
 	ConfigLayers []store.LayerDoc
+	// ProfileProblems are the selection warnings the coordinator's step 2
+	// raised (unknown_profile); Profile adds them to its report.
+	ProfileProblems []Problem
 }
 
 // Candidate holds an unpublished immutable snapshot. Apply is called at most
@@ -226,11 +229,15 @@ func Decode(v any, out any) error {
 	return d.Decode(out)
 }
 
-// Invalid returns every accumulated problem rather than the first.
+// ErrInvalid is what Invalid returns: the rebuild found an error problem, so
+// there is no candidate. A dry run turns it into ok:false, not a failure.
+var ErrInvalid = errors.New("service validation failed")
+
+// Invalid returns ErrInvalid when any accumulated problem is an error.
 func Invalid(ps []Problem) error {
 	for _, p := range ps {
 		if p.Severity == "error" {
-			return errors.New("service validation failed")
+			return ErrInvalid
 		}
 	}
 	return nil
@@ -279,6 +286,9 @@ type SettingDecl struct {
 	Doc     string   `json:"doc,omitempty"`
 	Owner   string   `json:"owner,omitempty"`
 	Apply   string   `json:"apply,omitempty"`
+	// Public marks a host or distribution entry plugins may read. A plugin
+	// entry may not carry it (invalid_schema_entry).
+	Public bool `json:"public,omitempty"`
 }
 
 // Catalogs decodes declared plugin objects and collects malformed catalog problems.
@@ -288,7 +298,7 @@ func Catalogs(in ReloadInput) (map[string]Catalog, []Problem) {
 	for id, doc := range in.Declared[store.DeclaredPlugins] {
 		var c Catalog
 		if err := Decode(doc, &c); err != nil || c.ID != id {
-			Issue(&ps, "warning", "invalid_plugin_catalog", "plugin:"+id, "", "invalid plugin catalog")
+			ps = append(ps, Problem{Severity: "warning", Code: "invalid_plugin_catalog", Layer: "plugin:" + id, Message: "invalid plugin catalog", Source: &Source{Layer: "plugin:" + id, Plugin: id}})
 			continue
 		}
 		out[id] = c

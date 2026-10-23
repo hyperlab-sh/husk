@@ -4,6 +4,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	c "github.com/hyperlab-sh/husk/internal/services/contracts"
@@ -34,6 +35,9 @@ type Caller = c.Caller
 type Reason string
 
 const (
+	// ReasonStartup denotes the process's first reload, run by the composition
+	// root after State hydration and before the first plugin launches.
+	ReasonStartup Reason = "startup"
 	// ReasonCLI denotes config.reload.
 	ReasonCLI Reason = "cli"
 	// ReasonProfile denotes a profile State change.
@@ -53,10 +57,13 @@ type StoreReader interface {
 
 // Options injects services, Store input, loop-safe publication and deadline time.
 type Options struct {
-	Store     StoreReader
-	Services  map[string]Reloadable
-	Settings  func() c.SettingsSnapshot
-	Profile   func(store.Resolved) string
+	Store    StoreReader
+	Services map[string]Reloadable
+	Settings func() c.SettingsSnapshot
+	// Profile is step 2's profile choice: whether this is the startup flight,
+	// the unmerged config layers read without a profile, and the profile names
+	// Store lists. It returns the selected name and its selection problems.
+	Profile   func(startup bool, layers []store.LayerDoc, names []string) (string, []Problem)
 	State     c.Tree
 	Publisher c.Publisher
 	Clock     c.Clock
@@ -65,7 +72,8 @@ type Options struct {
 type flight struct {
 	done     chan struct{}
 	reason   Reason
-	captured bool // protected by Coordinator.mu; set before gathering Store inputs
+	captured bool // protected by Coordinator.mu; set once Store.Invalidate returned
+	started  bool // protected by Coordinator.mu; the worker was launched
 	reports  []Report
 	err      error
 }
@@ -78,6 +86,16 @@ type Coordinator struct {
 	queued *flight
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	// selected is the profile the running or last flight chose; the slice
+	// listener ignores a change to it. expect is the name a profile.use just
+	// wrote and already registered a flight for. last holds the reports of the
+	// most recent completed flight. All guarded by mu.
+	selected     string
+	haveSelected bool
+	expect       string
+	hasExpect    bool
+	last         []Report
 }
 
 // NewCoordinator installs a nonblocking loop listener. Call it on the loop.
@@ -101,11 +119,11 @@ func NewCoordinator(opts Options) (*Coordinator, error) {
 	co := &Coordinator{opts: opts, ctx: ctx, cancel: cancel}
 	if opts.State != nil {
 		seen := opts.State.Snapshot().Slices[state.ProfileNamespace].Revision
-		opts.State.OnFlush(func(changes []state.Change, _ *state.Snapshot) {
+		opts.State.OnFlush(func(changes []state.Change, snap *state.Snapshot) {
 			for _, change := range changes {
 				if change.Namespace == state.ProfileNamespace && change.Revision > seen && co.ctx.Err() == nil {
 					seen = change.Revision
-					go co.Reload(co.ctx, ReasonProfile)
+					co.profileChanged(snap.Slices[state.ProfileNamespace].Value)
 					return
 				}
 			}
@@ -143,34 +161,103 @@ func (co *Coordinator) Reload(ctx context.Context, reason Reason) ([]Report, err
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	// ctx.Done() must not be read before the flight is joined: tests take its
+	// first call as the signal that this caller is parked on it.
+	return co.waiter(co.request(reason, false)).Wait(ctx)
+}
+
+// request joins the running flight when it has not yet captured, otherwise the
+// single queued follow-up, otherwise starts one. A request from the loop
+// (onLoop) only creates the flight; its worker launches at Tick, the end of the
+// loop tick, so every request posted in that tick joins the same flight.
+func (co *Coordinator) request(reason Reason, onLoop bool) *flight {
 	co.mu.Lock()
+	defer co.mu.Unlock()
 	f := co.active
-	start := f == nil
-	if start {
+	switch {
+	case f == nil:
 		f = &flight{done: make(chan struct{}), reason: reason}
 		co.active = f
-	} else if f.captured {
+		if !onLoop {
+			f.started = true
+			go co.execute(f)
+		}
+	case f.captured:
 		if co.queued == nil {
 			co.queued = &flight{done: make(chan struct{}), reason: reason}
 		}
 		f = co.queued
 	}
-	co.mu.Unlock()
-	if start {
-		go co.execute(f)
+	return f
+}
+
+// Tick launches the worker of a flight the loop requested in this tick. The
+// host calls it at the end of every Update, after State flushed.
+func (co *Coordinator) Tick() {
+	co.mu.Lock()
+	f := co.active
+	if f == nil || f.started {
+		co.mu.Unlock()
+		return
 	}
-	// ctx.Done() must not be read before the flight is joined above: tests
-	// take its first call as the signal that this caller is parked on it.
+	f.started = true
+	co.mu.Unlock()
+	go co.execute(f)
+}
+
+// profileChanged is the slice listener's body, on the loop. It ignores the
+// write a flight made to follow its own selection and the one a profile.use
+// already registered a flight for; any other value starts a profile reload.
+func (co *Coordinator) profileChanged(raw json.RawMessage) {
+	var v struct {
+		Active string `json:"active"`
+	}
+	json.Unmarshal(raw, &v)
+	co.mu.Lock()
+	skip := co.haveSelected && v.Active == co.selected || co.hasExpect && v.Active == co.expect
+	co.hasExpect = false
+	co.mu.Unlock()
+	if !skip {
+		co.request(ReasonProfile, true)
+	}
+}
+
+// AwaitProfile implements profile.Reloader. It runs on the loop, in the
+// callback that wrote the slice: it registers the requester on the flight that
+// write causes and tells the slice listener not to request a second one.
+func (co *Coordinator) AwaitProfile(name string) profile.Waiter {
+	co.mu.Lock()
+	co.expect, co.hasExpect = name, true
+	co.mu.Unlock()
+	return co.waiter(co.request(ReasonProfile, true))
+}
+
+// LastReports implements profile.Reloader.
+func (co *Coordinator) LastReports() []Report {
+	co.mu.Lock()
+	defer co.mu.Unlock()
+	return c.Clone(co.last)
+}
+
+type flightWait struct {
+	co *Coordinator
+	f  *flight
+}
+
+func (co *Coordinator) waiter(f *flight) flightWait { return flightWait{co, f} }
+
+// Wait implements profile.Waiter.
+func (w flightWait) Wait(ctx context.Context) ([]Report, error) {
 	select {
-	case <-f.done:
+	case <-w.f.done:
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		return c.Clone(f.reports), f.err
+		return c.Clone(w.f.reports), w.f.err
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case <-co.ctx.Done():
-		return nil, co.ctx.Err()
+	case <-w.co.ctx.Done():
+		return nil, w.co.ctx.Err()
 	}
 }
 func (co *Coordinator) execute(f *flight) {
@@ -178,10 +265,14 @@ func (co *Coordinator) execute(f *flight) {
 	co.mu.Lock()
 	f.reports = c.Clone(reports)
 	f.err = err
+	co.last = c.Clone(reports)
 	close(f.done)
 	co.active = co.queued
 	co.queued = nil
 	next := co.active
+	if next != nil {
+		next.started = true
+	}
 	co.mu.Unlock()
 	if next != nil {
 		go co.execute(next)
@@ -218,11 +309,8 @@ func (co *Coordinator) reload(parent context.Context, reason Reason, f *flight) 
 		}
 	}
 	defer publish()
-	co.mu.Lock()
-	f.captured = true
-	co.mu.Unlock()
 	inputs := make(chan inputResult, 1)
-	go func() { inputs <- co.loadInput() }()
+	go func() { inputs <- co.loadInput(f) }()
 	var input inputResult
 	timeout := false
 	select {
@@ -332,29 +420,31 @@ func rebuildProblem(err error) Problem {
 	return Problem{Severity: "error", Code: code, Message: err.Error()}
 }
 
-func (co *Coordinator) loadInput() inputResult {
+// loadInput is step 2. Capture is the Store.Invalidate call: it is the first
+// thing a flight does, a request arriving before it joins the flight, and one
+// arriving after it goes to the queued follow-up. f is nil for a dry run.
+func (co *Coordinator) loadInput(f *flight) inputResult {
 	co.opts.Store.Invalidate()
-	base, err := co.opts.Store.Resolve("config", "")
-	if err != nil {
-		return inputResult{err: err}
+	if f != nil {
+		co.mu.Lock()
+		f.captured = true
+		co.mu.Unlock()
 	}
 	selected := ""
+	var selectionProblems []Problem
 	if co.opts.Profile != nil {
-		selected = co.opts.Profile(base)
-	}
-	if selected != "" {
-		valid := false
-		for _, name := range co.opts.Store.Profiles() {
-			valid = valid || name == selected
+		layers, err := co.opts.Store.Layers("config", "")
+		if err != nil {
+			return inputResult{err: err}
 		}
-		if !valid {
-			selected = ""
-		}
+		selected, selectionProblems = co.opts.Profile(f != nil && f.reason == ReasonStartup, layers, co.opts.Store.Profiles())
 	}
-	resolved := base
-	if selected != "" {
-		resolved, err = co.opts.Store.Resolve("config", selected)
+	if f != nil {
+		co.mu.Lock()
+		co.selected, co.haveSelected = selected, true
+		co.mu.Unlock()
 	}
+	resolved, err := co.opts.Store.Resolve("config", selected)
 	if err != nil {
 		return inputResult{err: err}
 	}
@@ -371,7 +461,7 @@ func (co *Coordinator) loadInput() inputResult {
 	if err != nil {
 		return inputResult{err: err}
 	}
-	return inputResult{in: ReloadInput{Doc: resolved, Layers: layers, ConfigLayers: configLayers, Declared: map[store.DocName]map[string]store.Doc{store.DeclaredPlugins: co.opts.Store.Declared(store.DeclaredPlugins), store.DeclaredKeymap: co.opts.Store.Declared(store.DeclaredKeymap)}, Profile: &selected}}
+	return inputResult{in: ReloadInput{Doc: resolved, Layers: layers, ConfigLayers: configLayers, Declared: map[store.DocName]map[string]store.Doc{store.DeclaredPlugins: co.opts.Store.Declared(store.DeclaredPlugins), store.DeclaredKeymap: co.opts.Store.Declared(store.DeclaredKeymap)}, Profile: &selected, ProfileProblems: selectionProblems}}
 }
 
 // Inputs collects fresh user-authorized disk input for dry validation/checks.
@@ -386,7 +476,7 @@ func (co *Coordinator) Inputs(ctx context.Context, caller Caller) (ReloadInput, 
 	timer := co.opts.Clock.NewTimer(2 * time.Second)
 	defer timer.Stop()
 	result := make(chan inputResult, 1)
-	go func() { result <- co.loadInput() }()
+	go func() { result <- co.loadInput(nil) }()
 	select {
 	case loaded := <-result:
 		if loaded.err != nil {
@@ -415,19 +505,22 @@ type Runtime struct {
 
 // RuntimeOptions injects the same ports without importing a Pod implementation.
 type RuntimeOptions struct {
-	Store         StoreReader
-	State         c.Tree
-	Post          c.Post
-	Publisher     c.Publisher
-	Clock         c.Clock
-	Crypto        store.SecretDoc
-	Prompt        func(secrets.Prompt) <-chan bool
-	Audit         func(string)
+	Store     StoreReader
+	State     c.Tree
+	Post      c.Post
+	Publisher c.Publisher
+	Clock     c.Clock
+	Crypto    store.SecretDoc
+	Prompt    func(secrets.Prompt) <-chan bool
+	Audit     func(string)
+	// ProfileFlag is the --profile start flag: a selection input of the
+	// startup flight only.
 	ProfileFlag   *string
 	ProfileSource func(string) string
 	Schema        []settings.Entry
-	Warn          func(Problem)
-	Context       context.Context
+	// Warn is the warning sink for unregistered settings keys.
+	Warn    func(msg string)
+	Context context.Context
 }
 
 // New constructs the complete Services set, without loading files on the loop.
@@ -436,18 +529,22 @@ func New(opts RuntimeOptions) (*Runtime, error) {
 	if p == nil {
 		return nil, err
 	}
-	set := settings.New(settings.Options{Schema: opts.Schema, Warn: opts.Warn})
+	set, setErr := settings.New(settings.Options{Schema: opts.Schema, Warn: opts.Warn})
+	if setErr != nil {
+		return nil, setErr
+	}
 	th := theme.New()
 	kb := keybinding.New()
 	sec, secretErr := secrets.New(secrets.Options{State: opts.State, Post: opts.Post, Crypto: opts.Crypto, Prompt: opts.Prompt, Clock: opts.Clock, Publisher: opts.Publisher, Audit: opts.Audit, Context: opts.Context})
 	if sec == nil {
 		return nil, secretErr
 	}
-	co, coErr := NewCoordinator(Options{Store: opts.Store, State: opts.State, Publisher: opts.Publisher, Clock: opts.Clock, Context: opts.Context, Profile: p.ChooseProfile, Settings: set.Snapshot, Services: map[string]Reloadable{"profile": p, "settings": set, "theme": th, "keybinding": kb, "secrets": sec}})
+	co, coErr := NewCoordinator(Options{Store: opts.Store, State: opts.State, Publisher: opts.Publisher, Clock: opts.Clock, Context: opts.Context, Profile: p.Select, Settings: set.Snapshot, Services: map[string]Reloadable{"profile": p, "settings": set, "theme": th, "keybinding": kb, "secrets": sec}})
 	if coErr != nil {
 		sec.Close()
 		return nil, coErr
 	}
+	p.Bind(co)
 	return &Runtime{co, p, set, th, kb, sec}, errors.Join(err, secretErr)
 }
 

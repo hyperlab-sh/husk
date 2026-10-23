@@ -24,14 +24,14 @@ func TestReviewEmptyCallerDeniedOnEveryUserOnlyMethod(t *testing.T) {
 	p, _ := profile.New(profile.Options{Store: &fakeStore{}, State: tree, Post: post})
 	sec, _ := secrets.New(secrets.Options{State: tree, Post: post, Clock: clock(), Crypto: &memoryCrypto{data: map[string][]byte{}}})
 	defer sec.Close()
-	set := settings.New(settings.Options{})
+	set := newSet(settings.Options{})
 	theme := stheme.New()
 	co, _ := NewCoordinator(Options{Store: &fakeStore{}, Services: fakeServices(), Clock: clock()})
 	defer co.Close()
 	ctx := context.Background()
 	zero := Caller{}
 	cases := map[string]func() error{
-		"profile.list": func() error { _, e := p.ListFor(zero); return e }, "profile.use": func() error { return p.Use(zero, "") },
+		"profile.list": func() error { _, e := p.ListFor(zero); return e }, "profile.use": func() error { _, _, e := p.Use(ctx, zero, ""); return e },
 		"settings.list": func() error { _, e := set.List(zero); return e }, "settings.schema": func() error { _, e := set.SchemaFor(zero, ""); return e }, "settings.validate": func() error { _, e := set.Validate(ctx, zero, input(`{}`)); return e }, "settings.preview": func() error { _, _, e := set.Preview(ctx, zero, input(`{}`)); return e },
 		"theme.check":   func() error { _, e := theme.Check(ctx, zero, input(`{}`)); return e },
 		"config.reload": func() error { _, e := co.ReloadFor(ctx, zero); return e }, "config.inputs": func() error { _, e := co.Inputs(ctx, zero); return e },
@@ -100,7 +100,7 @@ func TestReviewKeyListingExactCatalogOwnership(t *testing.T) {
 }
 
 func TestReviewSecretSettingsChecksAreExactAndOwnerScoped(t *testing.T) {
-	set := settings.New(settings.Options{})
+	set := newSet(settings.Options{})
 	in := catalog("a")
 	in.Declared[store.DeclaredPlugins]["a"]["secret_requests"] = []any{map[string]any{"name": "name", "purpose": "Own secret"}, map[string]any{"name": "default"}, map[string]any{"name": "paths"}, map[string]any{"name": "enabled"}}
 	in.Declared[store.DeclaredPlugins]["a"]["settings_declared"] = nil
@@ -111,8 +111,9 @@ func TestReviewSecretSettingsChecksAreExactAndOwnerScoped(t *testing.T) {
 		t.Fatal("foreign secret broke host or another owner")
 	}
 	in.Declared[store.DeclaredPlugins]["a"]["settings_declared"] = []any{map[string]any{"key": "plugins.a.name", "type": "string", "default": ""}}
-	if candidate, report, err := set.Rebuild(context.Background(), in); err == nil || candidate != nil || !hasMessage(report, "secrets are not settings") {
-		t.Fatal("own exact secret/settings collision was accepted", report, err)
+	candidate, report, err := set.Rebuild(context.Background(), in)
+	if err != nil || candidate == nil || !hasProblem(report.Problems, "secret_as_setting", "warning") || report.Problems[0].Source.Plugin != "a" {
+		t.Fatal("own exact secret/settings collision not a plugin warning", report, err)
 	}
 	in.Declared[store.DeclaredPlugins]["a"]["secret_requests"] = []any{map[string]any{"name": "git.token"}}
 	in.Declared[store.DeclaredPlugins]["a"]["settings_declared"] = []any{map[string]any{"key": "plugins.a.token", "type": "string", "default": ""}}
@@ -213,7 +214,7 @@ func TestReviewRevealAuditAndEveryReadOutcome(t *testing.T) {
 
 func TestReviewSchemaForExposureAndLocalKeyBoundaries(t *testing.T) {
 	in := catalog("a")
-	set := settings.New(settings.Options{Schema: []settings.Entry{{Key: "dist.key", Type: "bool", Default: false, Owner: "dist", Apply: "live"}}})
+	set := newSet(settings.Options{Schema: []settings.Entry{{Key: "dist.key", Type: "bool", Default: false, Owner: "dist", Apply: "live"}}})
 	apply(t, set, in)
 	schema, err := set.SchemaFor(Caller{Kind: "cli"}, "plugin:a")
 	if err != nil || len(schema) != 1 || schema[0].Key != "plugins.a.enabled" {
@@ -231,17 +232,18 @@ func TestReviewSchemaForExposureAndLocalKeyBoundaries(t *testing.T) {
 	for _, key := range []string{"husk.injected", "plugins.other.key"} {
 		bad := catalog("a")
 		bad.Declared[store.DeclaredPlugins]["a"]["settings_declared"] = []any{map[string]any{"key": key, "type": "bool", "default": false}}
-		if _, _, err := set.Rebuild(context.Background(), bad); err == nil {
-			t.Fatal("foreign schema accepted", key)
+		if _, r, err := set.Rebuild(context.Background(), bad); err != nil || !hasProblem(r.Problems, "foreign_schema_key", "warning") {
+			t.Fatal("foreign schema not refused as a warning", key, r.Problems, err)
 		}
 	}
 	for _, local := range []string{"", "Upper", "with.dot", "with space", "with/slash", "ümlaut", "a", "0", "_", "-", "snake_key", "with-hyphen"} {
 		t.Run(local, func(t *testing.T) {
 			fixture := catalog("a")
 			fixture.Declared[store.DeclaredPlugins]["a"]["settings_declared"] = []any{map[string]any{"key": "plugins.a." + local, "type": "bool", "default": false}}
-			_, _, err := set.Rebuild(context.Background(), fixture)
+			_, r, err := set.Rebuild(context.Background(), fixture)
+			refused := hasProblem(r.Problems, "foreign_schema_key", "warning") || hasProblem(r.Problems, "invalid_schema_entry", "warning")
 			valid := local == "a" || local == "0" || local == "_" || local == "-" || local == "snake_key" || local == "with-hyphen"
-			if (err == nil) != valid {
+			if err != nil || refused == valid {
 				t.Fatal("local boundary", local, err)
 			}
 		})

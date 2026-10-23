@@ -291,18 +291,18 @@ func (r *Root) buildServices() error {
 		// No dialog is wired: a grant prompt is refused, never granted.
 		prompt = denyPrompt
 	}
-	// Not wired yet (cutover follow-ups): ProfileFlag (--profile) and Audit
-	// (secrets auditing). Both are Config additions for the cmd/husk unit.
+	// Not wired yet: Audit (secrets auditing).
 	rt, err := services.New(services.RuntimeOptions{
-		Store:     r.store,
-		State:     r.st,
-		Post:      r.post,
-		Publisher: publisher{r},
-		Clock:     storeClock{r.clock},
-		Crypto:    secretsDoc,
-		Prompt:    prompt,
-		Warn: func(p services.Problem) {
-			r.log(pods.LogMsg{Level: "warn", Message: "services: " + p.Message})
+		Store:       r.store,
+		State:       r.st,
+		Post:        r.post,
+		Publisher:   publisher{r},
+		Clock:       storeClock{r.clock},
+		Crypto:      secretsDoc,
+		Prompt:      prompt,
+		ProfileFlag: r.cfg.ProfileFlag,
+		Warn: func(msg string) {
+			r.log(pods.LogMsg{Level: "warn", Message: msg})
 		},
 		Context: r.ctx,
 	})
@@ -451,14 +451,20 @@ func (r *Root) Run(ctx context.Context) error {
 	return nil
 }
 
-// launchPlugins adds every configured plugin as one batch and requests its
-// launch sequence. With no plugin to launch there is no launch reload, so the
-// initial Services load runs here instead.
+// launchPlugins runs the startup reload, then adds every configured plugin as
+// one batch and requests its launch sequence. The startup flight is the first
+// reload of the process and runs before any plugin launches, so the launch
+// gate's plugin flight is never the first. A failed startup flight leaves the
+// built-in snapshots serving and is reported like any reload; it does not stop
+// the host.
 func (r *Root) launchPlugins(ctx context.Context) error {
 	if r.opts.afterStage != nil {
 		if err := r.opts.afterStage("run"); err != nil {
 			return fmt.Errorf("host: run: %w", err)
 		}
+	}
+	if _, err := r.rt.Coordinator.Reload(ctx, services.ReasonStartup); err != nil && ctx.Err() != nil {
+		return fmt.Errorf("host: startup reload: %w", ctx.Err())
 	}
 	var cmd tea.Cmd
 	if err := r.do(ctx, func() {
@@ -472,16 +478,15 @@ func (r *Root) launchPlugins(ctx context.Context) error {
 		}
 		cmd = r.pods.Prepare()
 	}); err != nil {
+		if r.ctx.Err() != nil {
+			// Close ran during the startup flight: nothing is left to launch.
+			return nil
+		}
 		return fmt.Errorf("host: launch plugins: %w", err)
 	}
 	if cmd != nil {
 		r.spawn(cmd)
-		return nil
 	}
-	r.spawn(func() tea.Msg {
-		_, _ = r.rt.Coordinator.Reload(r.ctx, services.ReasonPlugin)
-		return nil
-	})
 	return nil
 }
 

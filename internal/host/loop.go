@@ -169,6 +169,11 @@ func (r *Root) tick() {
 	if r.st != nil {
 		r.st.Flush()
 	}
+	if r.rt != nil {
+		// A flight the State listener or a profile.use requested in this tick
+		// launches now, so every request of the tick joined it.
+		r.rt.Coordinator.Tick()
+	}
 	if r.engine != nil {
 		// A resolution the engine commits here (a claim that resolves, a
 		// release) lands in State after this tick's flush, so the listener

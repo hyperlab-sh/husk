@@ -14,8 +14,10 @@ type Profile struct {
 	Port contracts.ProfilePort
 }
 
+// profileUseParams: "" selects no profile, so the name is required to be
+// present, not non-empty.
 type profileUseParams struct {
-	Name string `json:"name"`
+	Name *string `json:"name"`
 }
 
 // Serve implements contracts.Handler.
@@ -32,19 +34,25 @@ func (h Profile) Serve(ctx context.Context, c contracts.Caller, req protocol.Mes
 		if profiles == nil {
 			profiles = []contracts.ProfileInfo{}
 		}
-		return handlers.Reply(req, profiles)
+		return handlers.Reply(req, struct {
+			Profiles []contracts.ProfileInfo `json:"profiles"`
+		}{profiles})
 	case protocol.MethodProfileUse:
 		var p profileUseParams
 		if bad := handlers.DecodeParams(req, &p); bad != nil {
 			return *bad
 		}
-		if bad := handlers.RequireString(req, "params.name", p.Name); bad != nil {
-			return *bad
+		if p.Name == nil {
+			return handlers.InvalidParams(req, "params.name", "is required")
 		}
-		if err := h.Port.Use(ctx, c, p.Name); err != nil {
+		res, err := h.Port.Use(ctx, c, *p.Name)
+		if err != nil {
 			return handlers.ErrorReply(req, err)
 		}
-		return handlers.Reply(req, nil)
+		if res.Reports == nil {
+			res.Reports = []contracts.ReloadReport{}
+		}
+		return handlers.Reply(req, res)
 	}
 	return handlers.UnknownMethod(req)
 }

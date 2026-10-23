@@ -4,6 +4,7 @@ package settings
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"reflect"
@@ -42,16 +43,19 @@ type Entry = c.SettingDecl
 // Snapshot is the immutable reader interface shared through contracts.
 type Snapshot = c.SettingsSnapshot
 
-// Options supplies trusted schemas and a value-free unknown-key warning callback.
+// Options supplies the distribution schema and the warning sink.
 type Options struct {
 	Schema []Entry
-	Warn   func(c.Problem)
+	// Warn receives `settings: unregistered key <key>` once per key per
+	// process. It is not a Problem and appears in no report.
+	Warn func(msg string)
 }
 
 // Service publishes immutable snapshots through a single atomic pointer.
 type Service struct {
 	current atomic.Pointer[snapshot]
 	opts    Options
+	base    map[string]Entry // validated host and distribution entries
 	unknown atomic.Pointer[map[string]bool]
 }
 type snapshot struct {
@@ -63,7 +67,8 @@ type snapshot struct {
 }
 
 // Builtins returns the complete host/Theme/Profile schema. Frame-dump/demo flags
-// are commands, not settings; layout preferences live in State.
+// are commands, not settings; layout preferences live in State. No entry is
+// public: plugins reach the palette through theme.get.
 func Builtins() []Entry {
 	out := []Entry{{Key: "profile.default", Type: TypeString, Default: "", Owner: "husk", Apply: "restart"}, {Key: "theme.name", Type: TypeString, Default: palette.Default().Name, Owner: "husk", Apply: "live"}, {Key: "theme.allow_low_contrast", Type: TypeBool, Default: false, Owner: "husk", Apply: "live"}, {Key: "husk.plugins.paths", Type: TypeStrings, Default: []string{}, Owner: "husk", Apply: "restart"}, {Key: "husk.plugins.dirs", Type: TypeStrings, Default: []string{}, Owner: "husk", Apply: "restart"}, {Key: "husk.layout.rail", Type: TypeEnum, Default: "", Enum: []string{"", "modal", "full-canvas", "stage"}, Owner: "husk", Apply: "live"}, {Key: "husk.input.hold_alt", Type: TypeBool, Default: false, Owner: "husk", Apply: "live"}}
 	data, _ := json.Marshal(palette.Default())
@@ -78,29 +83,72 @@ func Builtins() []Entry {
 	return out
 }
 
-// New initializes built-in defaults before the first reload. It performs no I/O.
-func New(opts Options) *Service {
-	s := &Service{opts: opts}
+// New initializes the built-in snapshot before the first reload. It performs
+// no I/O. A duplicate, foreign, invalid-default or invalid built-in or
+// distribution entry is a programming error: New returns an error naming the
+// entry and the process does not start.
+func New(opts Options) (*Service, error) {
+	s := &Service{opts: opts, base: map[string]Entry{}}
 	s.opts.Schema = c.Clone(opts.Schema)
 	m := map[string]bool{}
 	s.unknown.Store(&m)
-	schema := map[string]Entry{}
-	for _, e := range Builtins() {
-		schema[e.Key] = e
-	}
-	for _, e := range opts.Schema {
+	add := func(e Entry, source string) error {
+		if e.Owner == "" && source == "dist" {
+			e.Owner = "dist"
+		}
+		if e.Owner != source {
+			return fmt.Errorf("settings: %s schema entry %q: foreign_schema_key: owner %q", source, e.Key, e.Owner)
+		}
+		if _, dup := s.base[e.Key]; dup {
+			return fmt.Errorf("settings: %s schema entry %q: duplicate_schema_key", source, e.Key)
+		}
+		if code := entryProblem(e, false); code != "" {
+			return fmt.Errorf("settings: %s schema entry %q: %s", source, e.Key, code)
+		}
 		if e.Apply == "" {
 			e.Apply = "live"
 		}
-		if _, exists := schema[e.Key]; exists || !validSchemaKey(e.Key, e.Owner) {
-			continue
-		}
-		if _, err := validate(e, e.Default); err == nil {
-			schema[e.Key] = e
+		s.base[e.Key] = e
+		return nil
+	}
+	for _, e := range Builtins() {
+		if err := add(e, "husk"); err != nil {
+			return nil, err
 		}
 	}
-	s.current.Store(defaults(schema, s.warning))
-	return s
+	for _, e := range s.opts.Schema {
+		if err := add(e, "dist"); err != nil {
+			return nil, err
+		}
+	}
+	s.current.Store(defaults(s.base, s.warning))
+	return s, nil
+}
+
+// entryProblem returns the schema problem code of one entry, or "". Key and
+// owner agreement is checked first, then the entry's own shape, then its
+// default.
+func entryProblem(e Entry, plugin bool) string {
+	if !validSchemaKey(e.Key, e.Owner) {
+		return "foreign_schema_key"
+	}
+	switch e.Type {
+	case TypeString, TypeInt, TypeBool, TypeDuration, TypeEnum, TypeStrings:
+	default:
+		return "invalid_schema_entry"
+	}
+	switch e.Apply {
+	case "", "live", "restart":
+	default:
+		return "invalid_schema_entry"
+	}
+	if e.Type == TypeEnum && len(e.Enum) == 0 || plugin && e.Public {
+		return "invalid_schema_entry"
+	}
+	if _, err := validate(e, e.Default); err != nil {
+		return "invalid_schema_default"
+	}
+	return ""
 }
 func defaults(schema map[string]Entry, warn func(string)) *snapshot {
 	n := &snapshot{values: map[string]any{}, raw: map[string]any{}, sources: map[string]string{}, schema: c.Clone(schema), warn: warn}
@@ -124,7 +172,7 @@ func (s *Service) warning(key string) {
 		next[key] = true
 		if s.unknown.CompareAndSwap(old, &next) {
 			if s.opts.Warn != nil {
-				s.opts.Warn(c.Problem{Severity: "warning", Code: "unknown_key", Key: key, Message: "unregistered key"})
+				s.opts.Warn("settings: unregistered key " + key)
 			}
 			return
 		}
@@ -134,8 +182,16 @@ func (s *Service) warning(key string) {
 // Snapshot loads an immutable reader without locking.
 func (s *Service) Snapshot() Snapshot { return s.current.Load() }
 
-// SnapshotFor filters access to exact declared keys plus public husk.* keys.
-// Snapshot itself is trusted Stem access and must not be handed to plugins.
+// visible reports whether a plugin may read the entry: its own declaration,
+// or a host or distribution entry marked public. A key prefix is never
+// authorization.
+func visible(caller c.Caller, e Entry) bool {
+	return e.Owner == "plugin:"+caller.PluginID || e.Public && (e.Owner == "husk" || e.Owner == "dist")
+}
+
+// SnapshotFor filters access: a user gets the full snapshot, a plugin exactly
+// its own declared entries plus public host and distribution entries. The
+// full Snapshot is trusted Stem access and must not be handed to plugins.
 func (s *Service) SnapshotFor(caller c.Caller) Snapshot {
 	if c.IsUser(caller) {
 		return s.Snapshot()
@@ -147,7 +203,7 @@ func (s *Service) SnapshotFor(caller c.Caller) Snapshot {
 		return out
 	}
 	for key, entry := range old.schema {
-		if entry.Owner == "plugin:"+caller.PluginID || strings.HasPrefix(key, "husk.") {
+		if visible(caller, entry) {
 			out.schema[key] = c.Clone(entry)
 			out.values[key] = cloneTyped(old.values[key])
 			out.raw[key] = c.Clone(old.raw[key])
@@ -171,14 +227,19 @@ func (s *Service) Schema() []Entry {
 	return out
 }
 
-// Get authorizes exact declared settings ownership; prefixes are not identities.
+// Get answers settings.get. A user sees every known key and every retained
+// unknown key; a plugin sees only what visible allows. A key unknown to this
+// caller is not_found/unknown_setting for everyone, never denied, so a plugin
+// cannot learn whether another owner's key exists.
 func (s *Service) Get(caller c.Caller, key string) (any, string, error) {
 	if err := c.CheckCaller(caller); err != nil {
 		return nil, "", err
 	}
 	snap := s.current.Load()
-	if !c.IsUser(caller) && (caller.PluginID == "" || !strings.HasPrefix(key, "husk.") && snap.schema[key].Owner != "plugin:"+caller.PluginID) {
-		return nil, "", c.Failure("denied", "undeclared_setting")
+	if !c.IsUser(caller) {
+		if e, ok := snap.schema[key]; !ok || !visible(caller, e) {
+			return nil, "", c.Failure("not_found", "unknown_setting")
+		}
 	}
 	v, ok := snap.Raw(key)
 	if !ok {
@@ -187,12 +248,26 @@ func (s *Service) Get(caller c.Caller, key string) (any, string, error) {
 	return v, snap.Source(key), nil
 }
 
-// List is the user-only settings.list view.
-func (s *Service) List(caller c.Caller) (map[string]any, error) {
+// ListEntry is one settings.list row.
+type ListEntry struct {
+	Key    string
+	Value  any
+	Source string
+}
+
+// List is the user-only settings.list view: every known key and every
+// retained unknown key, sorted by key.
+func (s *Service) List(caller c.Caller) ([]ListEntry, error) {
 	if err := c.RequireUser(caller); err != nil {
 		return nil, err
 	}
-	return c.Clone(s.current.Load().raw), nil
+	snap := s.current.Load()
+	out := make([]ListEntry, 0, len(snap.raw))
+	for key, v := range snap.raw {
+		out = append(out, ListEntry{Key: key, Value: c.Clone(v), Source: snap.Source(key)})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
+	return out, nil
 }
 
 // SchemaFor is the user-only settings.schema view, optionally filtered by owner.
@@ -209,37 +284,49 @@ func (s *Service) SchemaFor(caller c.Caller, owner string) ([]Entry, error) {
 	return out, nil
 }
 
-// Validate prepares a dry candidate and never publishes it.
-func (s *Service) Validate(ctx context.Context, caller c.Caller, in c.ReloadInput) (c.Report, error) {
-	if err := c.RequireUser(caller); err != nil {
-		return c.Report{}, err
-	}
-	_, r, err := s.Rebuild(ctx, in)
-	return r, err
+// Check is the outcome of a dry run: OK is whether a reload now would publish
+// this Service's candidate, Problems is every problem found.
+type Check struct {
+	OK       bool
+	Problems []c.Problem
 }
 
-// Preview validates fresh input against the same restart baseline but publishes
-// only into an isolated service, never into the live snapshot. Theme.check uses
-// this typed view; invalid input returns the current live view plus all problems.
-func (s *Service) Preview(ctx context.Context, caller c.Caller, in c.ReloadInput) (Snapshot, c.Report, error) {
+// Validate prepares a dry candidate and never publishes it. An invalid input
+// is OK=false with its problems, not an error.
+func (s *Service) Validate(ctx context.Context, caller c.Caller, in c.ReloadInput) (Check, error) {
 	if err := c.RequireUser(caller); err != nil {
-		return s.Snapshot(), c.Report{}, err
+		return Check{}, err
 	}
-	shadow := &Service{opts: s.opts}
+	_, r, err := s.Rebuild(ctx, in)
+	if err != nil && !errors.Is(err, c.ErrInvalid) {
+		return Check{}, err
+	}
+	return Check{OK: err == nil, Problems: r.Problems}, nil
+}
+
+// Preview validates fresh input against the same restart baseline but builds
+// only an isolated snapshot, never the live one. theme.check uses the typed
+// snapshot as the one Theme would see; it is nil when the input is invalid.
+func (s *Service) Preview(ctx context.Context, caller c.Caller, in c.ReloadInput) (Snapshot, Check, error) {
+	if err := c.RequireUser(caller); err != nil {
+		return nil, Check{}, err
+	}
+	shadow := &Service{opts: s.opts, base: s.base}
+	shadow.opts.Warn = nil
 	shadow.current.Store(s.current.Load())
 	m := map[string]bool{}
 	shadow.unknown.Store(&m)
 	candidate, report, err := shadow.Rebuild(ctx, in)
+	if errors.Is(err, c.ErrInvalid) {
+		return nil, Check{Problems: report.Problems}, nil
+	}
 	if err != nil {
-		return s.Snapshot(), report, err
+		return nil, Check{}, err
 	}
-	applied := candidate.Apply()
-	if !applied.Applied {
-		return s.Snapshot(), applied, c.SafeError("unavailable")
+	if !candidate.Apply().Applied {
+		return nil, Check{}, c.SafeError("unavailable")
 	}
-	report.Gen = s.Generation()
-	report.Applied = false
-	return shadow.Snapshot(), report, nil
+	return shadow.Snapshot(), Check{OK: true, Problems: report.Problems}, nil
 }
 
 // Rebuild checks all schemas and values, returning an unpublished candidate.
@@ -249,60 +336,28 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 	if ctx.Err() != nil {
 		return c.ContextError(ctx, r)
 	}
-	schema := map[string]Entry{}
-	for _, e := range Builtins() {
-		schema[e.Key] = e
-	}
-	for _, e := range s.opts.Schema {
-		if e.Apply == "" {
-			e.Apply = "live"
-		}
-		if _, exists := schema[e.Key]; exists {
-			c.Issue(&r.Problems, "error", "duplicate_schema_key", e.Owner, e.Key, "duplicate schema key")
-			continue
-		}
-		schema[e.Key] = e
-	}
+	schema := maps.Clone(s.base)
 	catalog, ps := c.Catalogs(in)
 	r.Problems = append(r.Problems, ps...)
-	for id, cat := range catalog {
-		secretNames := map[string]bool{}
-		for _, req := range cat.SecretRequests {
-			secretNames[req.Name] = true
-		}
-		for _, e := range cat.SettingsDeclared {
-			if !strings.HasPrefix(e.Key, "plugins."+id+".") {
-				c.Issue(&r.Problems, "error", "foreign_schema_key", "plugin:"+id, e.Key, "foreign schema key")
-				continue
-			}
-			e.Owner = "plugin:" + id
-			local := strings.TrimPrefix(e.Key, "plugins."+id+".")
-			if secretNames[local] || secretNames[e.Key] {
-				c.Issue(&r.Problems, "error", "secret_as_setting", e.Owner, e.Key, "secrets are not settings")
-			}
-			if e.Apply == "" {
-				e.Apply = "live"
-			}
-			if _, exists := schema[e.Key]; exists {
-				c.Issue(&r.Problems, "error", "duplicate_schema_key", e.Owner, e.Key, "duplicate schema key")
-				continue
-			}
-			schema[e.Key] = e
-		}
+	ids := make([]string, 0, len(catalog))
+	for id := range catalog {
+		ids = append(ids, id)
 	}
-	for key, e := range schema {
-		if !validSchemaKey(key, e.Owner) || e.Apply != "live" && e.Apply != "restart" {
-			c.Issue(&r.Problems, "error", "invalid_schema_entry", e.Owner, key, "invalid schema key or apply policy")
-		}
-		if _, err := validate(e, e.Default); err != nil {
-			c.Issue(&r.Problems, "error", "invalid_schema_default", e.Owner, key, "invalid schema default")
-		}
-		if e.Owner == "dist" && !strings.HasPrefix(key, "dist.") {
-			c.Issue(&r.Problems, "error", "foreign_schema_key", e.Owner, key, "foreign schema key")
-		}
+	sort.Strings(ids)
+	for _, id := range ids {
+		registerPlugin(schema, id, catalog[id], &r.Problems)
 	}
 	next := defaults(schema, s.warning)
 	next.gen = old.gen + 1
+	layerFiles := map[string]string{}
+	for _, l := range in.ConfigLayers {
+		layerFiles[string(l.Layer)] = l.File
+	}
+	for _, p := range in.Doc.Problems {
+		if p.Code == "type_clash" {
+			r.Problems = append(r.Problems, c.Problem{Severity: "warning", Code: "type_clash", Layer: string(p.Layer), Key: p.Path, Message: fmt.Sprintf("%s: the %s layer replaces a value of a different type from the %s layer", p.Path, p.Layer, p.LowerLayer), Source: sourceOf(string(p.Layer), layerFiles)})
+		}
+	}
 	flat := map[string]any{}
 	flatten("", in.Doc.Doc, flat)
 	for key, raw := range flat {
@@ -312,45 +367,37 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 		}
 		e, known := schema[key]
 		if !known {
-			owner := ""
-			for id := range catalog {
-				if strings.HasPrefix(key, "plugins."+id+".") && len(id) > len(owner) {
-					owner = id
-				}
-			}
-			untyped := owner != "" && len(catalog[owner].SettingsDeclared) == 0
-			if untyped {
-				c.Issue(&r.Problems, "warning", "unknown_key", layer, key, "plugin has no schema; raw value retained")
-				next.raw[key] = c.Clone(raw)
-				next.sources[key] = layer
-			} else {
-				c.Issue(&r.Problems, "error", "unknown_key", layer, key, "unregistered settings key")
-			}
+			r.Problems = append(r.Problems, c.Problem{Severity: "warning", Code: "unknown_key", Layer: layer, Key: key, Message: key + ": no schema entry; the value is kept and no plugin sees it", Source: sourceOf(layer, layerFiles)})
+			next.raw[key] = c.Clone(raw)
+			next.sources[key] = layer
 			continue
 		}
 		v, err := validate(e, raw)
 		if err != nil {
-			c.Issue(&r.Problems, "error", "invalid_value", layer, key, err.Error())
+			r.Problems = append(r.Problems, c.Problem{Severity: "error", Code: "invalid_value", Layer: layer, Key: key, Message: fmt.Sprintf("%s layer: %s: want %s", layer, key, wantOf(e)), Source: sourceOf(layer, layerFiles)})
 			continue
 		}
 		next.raw[key] = c.Clone(raw)
 		next.sources[key] = layer
-		if _, initialized := old.values[key]; e.Apply == "restart" && initialized && old.gen > 0 && !reflect.DeepEqual(v, old.values[key]) {
-			next.values[key] = cloneTyped(old.values[key])
-			c.Issue(&r.Problems, "warning", "restart_required", layer, key, "restart required")
-		} else {
-			next.values[key] = v
-		}
+		next.values[key] = v
 	}
-	// Removing a restart setting is itself a change back to its schema default.
+	// The value in force for a restart key is what the first successful load
+	// produced; later loads keep it and say what is pending. Removing the key
+	// counts as a change back to the default.
 	if old.gen > 0 {
 		for key, e := range schema {
-			if _, initialized := old.values[key]; e.Apply == "restart" && initialized && !reflect.DeepEqual(next.values[key], old.values[key]) {
-				next.values[key] = cloneTyped(old.values[key])
-				c.Issue(&r.Problems, "warning", "restart_required", next.sources[key], key, "restart required")
+			prev, initialized := old.values[key]
+			if e.Apply != "restart" || !initialized || reflect.DeepEqual(next.values[key], prev) {
+				continue
 			}
+			wanted := next.raw[key]
+			r.Problems = append(r.Problems, c.Problem{Severity: "warning", Code: "restart_required", Layer: next.sources[key], Key: key, Message: fmt.Sprintf("%s: restart required; in force %s, configured %s", key, jsonText(old.raw[key]), jsonText(wanted)), Source: sourceOf(next.sources[key], layerFiles)})
+			next.values[key] = cloneTyped(prev)
+			next.raw[key] = c.Clone(old.raw[key])
+			next.sources[key] = old.sources[key]
 		}
 	}
+	sort.SliceStable(r.Problems, func(i, j int) bool { return r.Problems[i].Key < r.Problems[j].Key })
 	if err := c.Invalid(r.Problems); err != nil {
 		return nil, r, err
 	}
@@ -358,6 +405,80 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 		return c.ContextError(ctx, r)
 	}
 	return c.Prepare(ctx, r, func() bool { return s.current.CompareAndSwap(old, next) }, s.Generation), r, nil
+}
+
+// registerPlugin adds one plugin's declared entries to schema, all or nothing:
+// any problem is a warning against layer plugin:<id> and none of its entries
+// is registered.
+func registerPlugin(schema map[string]Entry, id string, cat c.Catalog, ps *[]c.Problem) {
+	owner := "plugin:" + id
+	secrets := map[string]bool{}
+	for _, req := range cat.SecretRequests {
+		secrets[req.Name] = true
+	}
+	prefix := "plugins." + id + "."
+	seen := map[string]bool{}
+	var accepted []Entry
+	bad := false
+	for _, e := range cat.SettingsDeclared {
+		e.Owner = owner
+		code := entryProblem(e, true)
+		switch {
+		case code == "foreign_schema_key":
+		case seen[e.Key] || schema[e.Key].Key != "":
+			code = "duplicate_schema_key"
+		case code != "":
+		case secrets[strings.TrimPrefix(e.Key, prefix)]:
+			code = "secret_as_setting"
+		}
+		if code != "" {
+			bad = true
+			*ps = append(*ps, c.Problem{Severity: "warning", Code: code, Layer: owner, Key: e.Key, Message: schemaMessage(code), Source: &c.Source{Layer: owner, Plugin: id}})
+			continue
+		}
+		seen[e.Key] = true
+		if e.Apply == "" {
+			e.Apply = "live"
+		}
+		accepted = append(accepted, e)
+	}
+	if bad {
+		return
+	}
+	for _, e := range accepted {
+		schema[e.Key] = e
+	}
+}
+func schemaMessage(code string) string {
+	switch code {
+	case "foreign_schema_key":
+		return "schema key is not in this plugin's namespace; its settings are not registered"
+	case "duplicate_schema_key":
+		return "duplicate schema key; the plugin's settings are not registered"
+	case "invalid_schema_default":
+		return "schema default does not match its type; the plugin's settings are not registered"
+	case "secret_as_setting":
+		return "setting is named like one of the plugin's secrets; the plugin's settings are not registered"
+	}
+	return "invalid schema entry; the plugin's settings are not registered"
+}
+
+// sourceOf names the layer and its config-relative file, as Store reports it.
+func sourceOf(layer string, files map[string]string) *c.Source {
+	return &c.Source{Layer: layer, File: files[layer]}
+}
+func wantOf(e Entry) string {
+	if e.Type == TypeEnum {
+		return "one of " + strings.Join(e.Enum, ", ")
+	}
+	return e.Type
+}
+func jsonText(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return "?"
+	}
+	return string(b)
 }
 func flatten(prefix string, m map[string]any, out map[string]any) {
 	for k, v := range m {

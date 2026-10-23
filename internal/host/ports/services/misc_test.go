@@ -6,6 +6,7 @@ import (
 
 	host "github.com/hyperlab-sh/husk/internal/host/contracts"
 	services "github.com/hyperlab-sh/husk/internal/services"
+	c "github.com/hyperlab-sh/husk/internal/services/contracts"
 	"github.com/hyperlab-sh/husk/internal/services/keybinding"
 	"github.com/hyperlab-sh/husk/internal/services/profile"
 	"github.com/hyperlab-sh/husk/internal/services/secrets"
@@ -32,12 +33,13 @@ func TestThemeGetOpenToPluginsCheckUserOnly(t *testing.T) {
 	}
 	// A dry check with good input applies nothing and reports no problems;
 	// theme reads overrides from the Settings snapshot the coordinator wires.
-	settingsSvc := settings.New(settings.Options{})
+	settingsSvc := newSet(settings.Options{})
 	applyTo(t, settingsSvc, services.ReloadInput{Doc: store.Resolved{Doc: doc(t, `{}`), Origins: map[string]store.Layer{}}})
 	in := services.ReloadInput{Doc: store.Resolved{Doc: doc(t, `{}`), Origins: map[string]store.Layer{}}, Settings: settingsSvc.Snapshot()}
 	port.Inputs = staticInputs{in: in}
+	port.Settings = settingsSvc
 	res, err := port.Check(context.Background(), userCaller)
-	if err != nil || res.Applied || len(res.Problems) != 0 {
+	if err != nil || !res.OK || len(res.Problems) != 0 {
 		t.Fatalf("check = %+v err=%v", res, err)
 	}
 	if got := svc.Palette().Name; got == "" {
@@ -70,18 +72,37 @@ func TestProfileListAndUseUserOnly(t *testing.T) {
 		t.Fatalf("plugin list: %s/%s", code, reason)
 	}
 
-	if err := port.Use(ctx, filesCaller, "work"); err == nil {
+	if _, err := port.Use(ctx, filesCaller, "work"); err == nil {
 		t.Fatal("plugin profile.use allowed")
 	}
-	if err := port.Use(ctx, userCaller, "nope"); err == nil {
+	if _, err := port.Use(ctx, userCaller, "nope"); err == nil {
 		t.Fatal("unknown profile accepted")
 	} else if code, reason := codedOf(t, err); code != "not_found" || reason != "unknown_profile" {
 		t.Fatalf("unknown profile: %s/%s", code, reason)
 	}
-	if err := port.Use(ctx, userCaller, "work"); err != nil {
-		t.Fatalf("use: %v", err)
+	// The State mutation is loop-posted and the reply waits for the flight it
+	// caused: run the post, then the fake flight answers the registration.
+	svc.Bind(fakeReloader{reports: []c.Report{{Service: "profile", Gen: 7, Applied: true}}})
+	type outcome struct {
+		res host.ProfileUseResult
+		err error
 	}
-	runPosted(t, posts) // the State mutation is loop-posted
+	done := make(chan outcome, 1)
+	go func() { res, err := port.Use(ctx, userCaller, "work"); done <- outcome{res, err} }()
+	runPosted(t, posts)
+	got := <-done
+	if got.err != nil || got.res.Active != "work" || len(got.res.Reports) != 1 || got.res.Reports[0].Gen != 7 {
+		t.Fatalf("use = %+v err=%v", got.res, got.err)
+	}
+}
+
+// fakeReloader answers every profile.use registration with canned reports.
+type fakeReloader struct{ reports []c.Report }
+
+func (f fakeReloader) AwaitProfile(string) profile.Waiter { return f }
+func (f fakeReloader) LastReports() []c.Report            { return f.reports }
+func (f fakeReloader) Wait(context.Context) ([]c.Report, error) {
+	return f.reports, nil
 }
 
 func TestKeysListScopesThePluginView(t *testing.T) {
@@ -135,7 +156,7 @@ func TestKeysListScopesThePluginView(t *testing.T) {
 func TestConfigReloadRunsTheCoordinator(t *testing.T) {
 	tree := state.New(state.Options{})
 	posts := make(chan func(), 8)
-	settingsSvc := settings.New(settings.Options{})
+	settingsSvc := newSet(settings.Options{})
 	themeSvc := theme.New()
 	kb := keybinding.New()
 	profSvc, err := profile.New(profile.Options{Store: &fakeStoreReader{profiles: []string{"work"}}, State: tree, Post: func(f func()) bool { posts <- f; return true }})

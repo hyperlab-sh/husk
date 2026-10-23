@@ -7,21 +7,18 @@ import (
 	"github.com/hyperlab-sh/husk/internal/services/settings"
 	"github.com/hyperlab-sh/husk/internal/substrate/state"
 	"github.com/hyperlab-sh/husk/internal/substrate/store"
+	"strings"
 	"testing"
 )
 
 func TestSchemaAuthorityDefaultsAndNewRestartPlugin(t *testing.T) {
 	for _, entry := range []settings.Entry{{Key: "theme.name", Type: "string", Default: "overwrite", Owner: "husk", Apply: "live"}, {Key: "dist.bad", Type: "string", Default: "x", Owner: "unknown", Apply: "live"}, {Key: "plugins.foreign.key", Type: "bool", Default: true, Owner: "dist", Apply: "live"}} {
-		s := settings.New(settings.Options{Schema: []settings.Entry{entry}})
-		candidate, _, err := s.Rebuild(context.Background(), input(`{}`))
-		if err == nil || candidate != nil {
-			t.Fatal("schema authority accepted", entry)
-		}
-		if s.Snapshot().String("theme.name") == "overwrite" {
-			t.Fatal("invalid defaults replaced built-in")
+		s, err := settings.New(settings.Options{Schema: []settings.Entry{entry}})
+		if err == nil || s != nil || !strings.Contains(err.Error(), entry.Key) {
+			t.Fatal("schema authority accepted or entry not named", entry, err)
 		}
 	}
-	s := settings.New(settings.Options{})
+	s := newSet(settings.Options{})
 	apply(t, s, input(`{}`))
 	in := catalog("new")
 	in.Declared[store.DeclaredPlugins]["new"]["settings_declared"] = []any{map[string]any{"key": "plugins.new.enabled", "type": "bool", "default": false, "apply": "restart"}}
@@ -82,9 +79,9 @@ func TestUserExposureDryPreviewAndNoGenerationChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := settings.New(settings.Options{})
+	s := newSet(settings.Options{})
 	preview, r, err := s.Preview(context.Background(), Caller{Kind: "cli"}, in)
-	if err != nil || r.Applied || s.Generation() != 0 || preview.String("theme.name") != "Preview" || s.Snapshot().String("theme.name") == "Preview" {
+	if err != nil || !r.OK || s.Generation() != 0 || preview.String("theme.name") != "Preview" || s.Snapshot().String("theme.name") == "Preview" {
 		t.Fatal("preview mutated live cache", r, err)
 	}
 }

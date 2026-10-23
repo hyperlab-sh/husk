@@ -93,7 +93,7 @@ func TestInvalidCallersDeniedEverywhere(t *testing.T) {
 	p, _ := profile.New(profile.Options{Store: &fakeStore{}, State: tree, Post: post})
 	sec, _ := secrets.New(secrets.Options{State: tree, Post: post, Clock: clock(), Crypto: &memoryCrypto{data: map[string][]byte{}}})
 	defer sec.Close()
-	set := settings.New(settings.Options{})
+	set := newSet(settings.Options{})
 	th := stheme.New()
 	kb := keybinding.New()
 	co, _ := NewCoordinator(Options{Store: &fakeStore{}, Services: fakeServices(), Clock: clock()})
@@ -112,7 +112,7 @@ func TestInvalidCallersDeniedEverywhere(t *testing.T) {
 	for name, k := range bad {
 		calls := map[string]func() error{
 			"profile.list":      func() error { _, e := p.ListFor(k); return e },
-			"profile.use":       func() error { return p.Use(k, "") },
+			"profile.use":       func() error { _, _, e := p.Use(ctx, k, ""); return e },
 			"settings.get":      func() error { _, _, e := set.Get(k, "husk.x"); return e },
 			"settings.list":     func() error { _, e := set.List(k); return e },
 			"settings.schema":   func() error { _, e := set.SchemaFor(k, ""); return e },
@@ -161,11 +161,11 @@ func TestCallerHelpers(t *testing.T) {
 // SnapshotFor never serves a plugin's view to an invalid caller, even one
 // that carries a plugin id.
 func TestSnapshotForInvalidCallerIsEmpty(t *testing.T) {
-	s := settings.New(settings.Options{Schema: []settings.Entry{{Key: "husk.theme", Type: "string", Default: "Public", Owner: "husk", Apply: "live"}}})
+	s := newSet(settings.Options{Schema: []settings.Entry{{Key: "dist.theme", Type: "string", Default: "Public", Owner: "dist", Apply: "live", Public: true}}})
 	apply(t, s, catalog("a"))
 	for name, k := range map[string]Caller{"bogus with id": {Kind: "bogus", PluginID: "a"}, "cli with id": {Kind: protocol.CallerCLI, PluginID: "a"}, "zero": {}} {
 		view := s.SnapshotFor(k)
-		if _, ok := view.Raw("plugins.a.enabled"); ok || view.String("husk.theme") != "" {
+		if _, ok := view.Raw("plugins.a.enabled"); ok || view.String("dist.theme") != "" {
 			t.Errorf("%s got a filtered view", name)
 		}
 	}

@@ -8,8 +8,8 @@ import (
 )
 
 // Profile implements contracts.ProfilePort over the profile service. List and
-// Use are user-only in the service; Use validates the name and posts its
-// mutation to the loop, so this wrapper stays synchronous and stateless.
+// Use are user-only in the service; Use validates the name, posts its
+// mutation to the loop and waits for the reload that mutation caused.
 type Profile struct {
 	Svc *profile.Service
 }
@@ -29,7 +29,12 @@ func (p Profile) List(ctx context.Context, hc host.Caller) ([]host.ProfileInfo, 
 	return out, nil
 }
 
-// Use implements contracts.ProfilePort.
-func (p Profile) Use(ctx context.Context, hc host.Caller, name string) error {
-	return coded(p.Svc.Use(hc, name))
+// Use implements contracts.ProfilePort: the reply carries the reports of the
+// reload the change caused; a flight error passes through coded unchanged.
+func (p Profile) Use(ctx context.Context, hc host.Caller, name string) (host.ProfileUseResult, error) {
+	active, reports, err := p.Svc.Use(ctx, hc, name)
+	if err != nil {
+		return host.ProfileUseResult{}, coded(err)
+	}
+	return host.ProfileUseResult{Active: active, Reports: Reports(reports)}, nil
 }

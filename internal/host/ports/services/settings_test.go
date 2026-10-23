@@ -46,7 +46,7 @@ func codedOf(t *testing.T, err error) (string, string) {
 }
 
 func TestSettingsGetOwnershipMatrix(t *testing.T) {
-	svc := settings.New(settings.Options{})
+	svc := newSet(settings.Options{Schema: []settings.Entry{{Key: "dist.rail", Type: "string", Default: "", Owner: "dist", Apply: "live", Public: true}, {Key: "dist.hidden", Type: "string", Default: "", Owner: "dist", Apply: "live"}}})
 	in := declaredSettingsInput(t, `{"plugins":{"a":{"mode":"alpha"},"a.b":{"mode":"beta"},"files":{"tree":true}}}`)
 	applyTo(t, svc, in)
 	port := Settings{Svc: svc, Inputs: staticInputs{in: in}}
@@ -61,12 +61,14 @@ func TestSettingsGetOwnershipMatrix(t *testing.T) {
 	}{
 		{name: "own declared key", caller: aCaller, key: "plugins.a.mode", value: "alpha"},
 		// A dotted prefix is not an identity: a must not read a.b's key,
-		// and the refusal is narrowed so it cannot learn the key exists.
-		{name: "sibling under prefix", caller: aCaller, key: "plugins.a.b.mode", code: "not_found", reason: "undeclared_setting"},
+		// and the refusal is the same unknown_setting as an absent key.
+		{name: "sibling under prefix", caller: aCaller, key: "plugins.a.b.mode", code: "not_found", reason: "unknown_setting"},
 		{name: "exact dotted owner", caller: abCaller, key: "plugins.a.b.mode", value: "beta"},
-		{name: "foreign owner", caller: filesCaller, key: "plugins.other.key", code: "not_found", reason: "undeclared_setting"},
-		{name: "public husk default", caller: filesCaller, key: "husk.layout.rail", value: ""},
-		{name: "public but absent husk key", caller: filesCaller, key: "husk.nope", code: "not_found", reason: "unknown_setting"},
+		{name: "foreign owner", caller: filesCaller, key: "plugins.other.key", code: "not_found", reason: "unknown_setting"},
+		{name: "public dist default", caller: filesCaller, key: "dist.rail", value: ""},
+		{name: "non-public dist key", caller: filesCaller, key: "dist.hidden", code: "not_found", reason: "unknown_setting"},
+		{name: "non-public host key", caller: filesCaller, key: "husk.layout.rail", code: "not_found", reason: "unknown_setting"},
+		{name: "absent husk key", caller: filesCaller, key: "husk.nope", code: "not_found", reason: "unknown_setting"},
 		{name: "cli reads any owner", caller: userCaller, key: "plugins.files.tree", value: true},
 		{name: "cli absent key", caller: userCaller, key: "nope", code: "not_found", reason: "unknown_setting"},
 	}
@@ -95,14 +97,18 @@ func TestSettingsGetOwnershipMatrix(t *testing.T) {
 }
 
 func TestSettingsListSchemaValidate(t *testing.T) {
-	svc := settings.New(settings.Options{})
+	svc := newSet(settings.Options{})
 	in := declaredSettingsInput(t, `{"plugins":{"files":{"tree":true}}}`)
 	applyTo(t, svc, in)
 	port := Settings{Svc: svc, Inputs: staticInputs{in: in}}
 
-	values, err := port.List(context.Background(), userCaller)
+	rows, err := port.List(context.Background(), userCaller)
+	values := map[string]any{}
+	for _, r := range rows {
+		values[r.Key] = r.Value
+	}
 	if err != nil || values["plugins.files.tree"] != true || values["plugins.a.mode"] != "auto" {
-		t.Fatalf("list = %#v err=%v (set values plus schema defaults)", values, err)
+		t.Fatalf("list = %#v err=%v (set values plus schema defaults)", rows, err)
 	}
 	if _, err := port.List(context.Background(), filesCaller); err == nil {
 		t.Fatal("plugin settings.list allowed")
@@ -124,8 +130,8 @@ func TestSettingsListSchemaValidate(t *testing.T) {
 
 	// settings.validate dry-runs fresh input through the Inputs seam.
 	rep, err := port.Validate(context.Background(), userCaller)
-	if err != nil || rep.Applied {
-		t.Fatalf("validate = %+v err=%v (dry, never applied)", rep, err)
+	if err != nil || !rep.OK {
+		t.Fatalf("validate = %+v err=%v (ok: a reload would publish)", rep, err)
 	}
 	if _, err := port.Validate(context.Background(), filesCaller); err == nil {
 		t.Fatal("plugin settings.validate allowed")
@@ -140,16 +146,16 @@ func TestSettingsListSchemaValidate(t *testing.T) {
 }
 
 func TestSettingsValidateReportsProblemsWithoutApplying(t *testing.T) {
-	svc := settings.New(settings.Options{})
+	svc := newSet(settings.Options{})
 	good := declaredSettingsInput(t, `{"plugins":{"files":{"tree":true}}}`)
 	applyTo(t, svc, good)
-	// Fresh input with a type violation: tree must be a bool. Rebuild
-	// refuses hard-invalid input, so Validate returns the refusal and the
-	// live snapshot keeps the good value.
+	// Fresh input with a type violation: tree must be a bool. The dry run
+	// answers ok:false with the problem, and the live snapshot keeps the
+	// good value.
 	bad := declaredSettingsInput(t, `{"plugins":{"files":{"tree":"yes"}}}`)
 	port := Settings{Svc: svc, Inputs: staticInputs{in: bad}}
-	if _, err := port.Validate(context.Background(), userCaller); err == nil {
-		t.Fatal("type violation accepted")
+	if res, err := port.Validate(context.Background(), userCaller); err != nil || res.OK || len(res.Problems) != 1 || res.Problems[0].Code != "invalid_value" {
+		t.Fatalf("type violation: %+v err=%v", res, err)
 	}
 	if v := svc.Snapshot().Bool("plugins.files.tree"); !v {
 		t.Fatal("validate mutated the live snapshot")
@@ -157,7 +163,7 @@ func TestSettingsValidateReportsProblemsWithoutApplying(t *testing.T) {
 	// Good input validates clean and still applies nothing.
 	port.Inputs = staticInputs{in: good}
 	rep, err := port.Validate(context.Background(), userCaller)
-	if err != nil || rep.Applied {
+	if err != nil || !rep.OK {
 		t.Fatalf("validate = %+v err=%v", rep, err)
 	}
 	if v := svc.Snapshot().Bool("plugins.files.tree"); !v {
@@ -166,7 +172,7 @@ func TestSettingsValidateReportsProblemsWithoutApplying(t *testing.T) {
 }
 
 func TestSettingsSchemaEntriesAreDetached(t *testing.T) {
-	svc := settings.New(settings.Options{})
+	svc := newSet(settings.Options{})
 	in := declaredSettingsInput(t, `{}`)
 	applyTo(t, svc, in)
 	port := Settings{Svc: svc, Inputs: staticInputs{in: in}}
