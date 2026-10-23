@@ -440,7 +440,7 @@ func (p *plugin) gateStatus(m protocol.Message) string {
 	}
 	var out struct {
 		Kind    string `json:"kind"`
-		Allowed bool   `json:"allowed"`
+		Allowed *bool  `json:"allowed"`
 		Vetoes  []struct {
 			PluginID string `json:"plugin_id"`
 			Reason   string `json:"reason"`
@@ -453,12 +453,25 @@ func (p *plugin) gateStatus(m protocol.Message) string {
 		fmt.Fprintf(p.log, "reference: bad hook.call result: %v\n", err)
 		return "refresh outcome unreadable"
 	}
-	if !out.Allowed {
+	// Anything that is not a well-formed gate outcome is unreadable, never a
+	// veto: a broken answer must not silently block a refresh.
+	if out.Kind != gateKind {
+		return fmt.Sprintf("refresh outcome of kind %q", out.Kind)
+	}
+	if out.Allowed == nil {
+		fmt.Fprintln(p.log, "reference: gate outcome without allowed")
+		return "refresh outcome unreadable"
+	}
+	if !*out.Allowed {
 		if len(out.Vetoes) == 0 {
 			return "refresh vetoed"
 		}
 		v := out.Vetoes[0]
-		return fmt.Sprintf("refresh vetoed by %s: %s", v.PluginID, v.Reason)
+		more := ""
+		if n := len(out.Vetoes) - 1; n > 0 {
+			more = fmt.Sprintf(" (+%d more)", n)
+		}
+		return fmt.Sprintf("refresh vetoed by %s: %s%s", v.PluginID, v.Reason, more)
 	}
 	asked := 0
 	for _, r := range out.Results {
