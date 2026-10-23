@@ -83,8 +83,8 @@ package store // substrate/store
 // crypto identity lazily, and starts the persistence goroutine. It touches no
 // slice until State asks it to hydrate one. It preloads every persisted slice
 // of this instance's scopes into memory so Hydrate is a map lookup. With
-// Options.Passive, Open writes nothing on its own: no GC, no quarantine, no
-// metadata reset.
+// Options.Passive, Open writes nothing on its own beyond creating its config,
+// state and data directories: no GC, no quarantine, no metadata write or reset.
 func Open(opts Options) (*Store, error)
 
 type Options struct {
@@ -386,7 +386,8 @@ type SecretDoc interface {
   refused with `unavailable` and a diagnostic explaining the sealed namespaces;
   neither the keyring identity nor `identity.txt` is replaced. An unreadable or
   unsafe namespace directory also fails closed. Restore the provider/key, or
-  explicitly reset secrets before creating a different identity.
+  run `husk store reset-secrets` (`ResetSecrets`) before creating a different
+  identity.
 - If definite absence and no sealed namespaces permit creation but the subsequent
   keyring write fails, the new identity falls back to
   `$XDG_DATA_HOME/husk/keys/identity.txt`, mode 0600. An existing private fallback
@@ -397,7 +398,8 @@ type SecretDoc interface {
   secret either: every slice is readable by every reader ([State](state.md)
   invariant 14), so a secret in a slice would leak through `state.get`.
 - Out of scope for v1: key rotation (only `husk store reset-secrets`, which
-  deletes every sealed file), passphrase unlock, sharing the key across
+  deletes every sealed namespace and both identity copies, the keyring entry
+  and `identity.txt`), passphrase unlock, sharing the key across
   devices (the cloud source must solve it before syncing secrets), memory
   locking, protection from malware running as the same user, and integrity
   checks on non-secret files.
@@ -449,6 +451,15 @@ func (s *Store) OpenPluginLog(pluginID string) (*os.File, error)
 func (s *Store) GC(ctx context.Context) (GCReport, error)
 func (s *Store) Check(ctx context.Context) (CheckReport, error)
 func (s *Store) Paths() Paths // every resolved directory, for `husk store paths`
+
+// ResetSecrets deletes every sealed secrets/<ns>.age file (and the
+// .<ns>.age.tmp-* crash temps of their writes), the keyring identity and
+// keys/identity.txt, and nothing else: lock files, config, slices and logs
+// stay. The caller must have established that no instance runs. An absent
+// keyring, directory or file is not an error; any other failure stops the
+// reset and is returned, so a half-reset is reported, never hidden. The cached
+// identity is dropped and keyring_fallback cleared.
+func (s *Store) ResetSecrets() error
 ```
 
 Policy semantics on disk, by `Retention.Policy`:
@@ -568,7 +579,9 @@ Today's per-run `mkdtemp` directory is replaced by that check.
    except by an explicit `Patch` or CLI command.
 8. A file Store cannot read is never overwritten. Read errors are `unavailable`,
    not evidence of corruption; only readable malformed slice/metadata bytes are
-   quarantined. Config and encrypted secrets stay untouched until repaired.
+   quarantined, and never by a passive `Open` (`Options.Passive`): the store
+   commands leave them in place and report them (`Check`, `unavailable`).
+   Config and encrypted secrets stay untouched until repaired.
 9. Higher layers always win; layer order is fixed and not configurable.
 
 ### Limits and timings
@@ -583,7 +596,7 @@ Today's per-run `mkdtemp` directory is replaced by that check.
 | Config file maximum size | 1 MiB | A larger hand-edited file is a mistake, not config |
 | Secret value / namespace plaintext JSON | 64 KiB per value / 64 MiB per namespace | Bounds decryption memory; ciphertext reads allow additional age framing overhead, so every accepted write can be read back |
 | Merge maximum depth | 64 | Stops pathological documents before recursion cost matters |
-| GC interval | at start, then every 1 h | Off the loop; cheap directory listings |
+| GC interval | at start and then every 1 h in start mode; never with `Options.Passive` (only an explicit `GC`) | Off the loop; cheap directory listings |
 | Stale temp file age | 10 min | Only Store's `.<name>.tmp-<random decimal suffix>` pattern is eligible; similar hidden user files are not |
 | Quarantined copies per file | 3, deleted 30 days after quarantine | Quarantine refreshes mtime; an old corrupt file gets a full evidence window |
 | Plugin log retention | 14 days; target 20 instance log directories | Live/unresponsive instances and recent logs (including empty ones) are protected; only eligible empty directories are pruned to the soft count target |
@@ -592,9 +605,9 @@ Today's per-run `mkdtemp` directory is replaced by that check.
 
 | Condition | Who detects | What happens | What the user or plugin sees |
 | :--- | :--- | :--- | :--- |
-| Readable slice file fails to parse or has no envelope | retention, at hydrate | Renamed to `<file>.corrupt-<UTC stamp>` with a fresh quarantine mtime; slice hydrates empty; next change writes fresh | `store` diagnostic entry, warn toast "Slice reset: <namespace>"; plugin finds its slice empty |
+| Readable slice file fails to parse or has no envelope | retention, at preload | Renamed to `<file>.corrupt-<UTC stamp>` with a fresh quarantine mtime; slice hydrates empty; next change writes fresh. With `Options.Passive`: left in place, slice blocked as in the row below, listed by `Check` as `invalid_slice` | `store` diagnostic entry, warn toast "Slice reset: <namespace>"; plugin finds its slice empty. Passive: `unavailable` diagnostic |
 | Slice file cannot be read (permissions/mode) | retention, at preload | File untouched, not quarantined; persistence disabled this run until explicit clear/restart | `unavailable` diagnostic; owner starts at Initial |
-| Readable instance `meta.json` is malformed | Store, at Open | Quarantined with fresh mtime; fresh metadata written; startup continues | `metadata_reset` diagnostic; evidence available through Check |
+| Readable instance `meta.json` is malformed | Store, at Open | Quarantined with fresh mtime; fresh metadata written; startup continues. With `Options.Passive`: left in place, nothing written, not reported (the store commands open anonymously, so they never read it) | `metadata_reset` diagnostic; evidence available through Check. Passive: nothing |
 | Slice envelope `husk_store` newer than known | retention, at hydrate | File left untouched; slice hydrates empty; persistence of that slice disabled this run | Diagnostic "written by a newer Husk"; plugin finds slice empty |
 | Config file fails to parse | layers, at resolve | That layer skipped for that document; previous good resolution kept after a reload | `Resolved.Problems` with file, line, column; Settings surfaces it; `husk config reload` reports it |
 | Config file over 1 MiB or depth over 64 | layers | Layer skipped | Same as parse failure |
@@ -626,12 +639,19 @@ files or discards the internal diagnostic history.
 | Command | Needs a running instance | Calls |
 | :--- | :--- | :--- |
 | `husk store paths` | no | `Paths` |
-| `husk store check` | no | `Check`: parses every file, lists corrupt, quarantined and orphan slice directories (namespaces not registered in 90 days); deletes nothing |
+| `husk store check` | no | `Check`: parses every file, lists corrupt, quarantined and orphan slice directories (namespaces not registered in 90 days); deletes nothing, and the passive `Open` before it moves nothing |
 | `husk store gc` | no | `GC` |
-| `husk store reset-secrets` | no, refuses while any instance runs | deletes every sealed file and the identity |
+| `husk store reset-secrets` | no, refuses while `Survey` finds any live or unresponsive instance | `ResetSecrets`: every sealed namespace (and its crash temps), the keyring identity and `identity.txt`; nothing else |
 | `husk state clear <namespace>` | yes, through the instance | `ClearSlice` deletes shared user and this instance's copies only, then the handler calls `State.Clear` ([State](state.md)); other instances are untouched |
 | `husk config reload` | yes | `Invalidate`, through Services |
 | `husk plugin remove <id>` | yes, through the instance | `Undeclare` of the plugin's two declared documents, then a Services reload with reason `plugin` ([Pods](pods.md)); the plugin's slice is unregistered and its pending persistent writes flushed (invariant 5); no file is deleted and `RemovePlugin` is not called |
+
+Every `husk store` verb opens Store with `Options.Passive`: `Open` itself
+collects, quarantines and writes nothing (no startup or periodic GC, no preload
+quarantine, no `meta.json` write or reset; it still creates its config, state and
+data directories, never the runtime directory). So `check` moves nothing, `gc`'s
+report is the whole collection of that run, and `reset-secrets` touches only
+secrets. Explicit `GC` and `ResetSecrets` still do what they say.
 
 ### Startup and shutdown order
 
@@ -644,7 +664,8 @@ files or discards the internal diagnostic history.
    each plugin's slice. Then the Services first load runs, reading the
    declared documents; only after it completes do the Wrappers launch the
    processes (the launch gate, [Pods](pods.md)).
-5. GC runs once in the background.
+5. GC runs once in the background (start mode only; a passive `Open`
+   schedules no GC).
 6. Exit: the Calls table closes ([Calls](calls.md)), the Server stops
    accepting and unregisters the instance (entry and socket,
    [Instances](instances.md)), Pods stop plugins (2 s grace), then
