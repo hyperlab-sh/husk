@@ -437,21 +437,21 @@ func TestCatalogDeclarerOverStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	focus, err := spec.KeymapJSON()
+	keymapJSON, err := spec.KeymapJSON()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := declarer.Declare("files", catalog, focus); err != nil {
+	if err := declarer.Declare("files", catalog, keymapJSON); err != nil {
 		t.Fatal(err)
 	}
 	assertDocEqual(t, "catalog", catalog, s.Declared(store.DeclaredPlugins)["files"])
-	assertDocEqual(t, "keymap", focus, s.Declared(store.DeclaredKeymap)["files"])
+	assertDocEqual(t, "keymap", keymapJSON, s.Declared(store.DeclaredKeymap)["files"])
 
 	// Replacing a declaration leaves no residue from the earlier one.
 	replaced := specWithSlice("files")
 	replaced.SettingsDeclared = nil
 	catalog2, _ := replaced.CatalogJSON()
-	if err := declarer.Declare("files", catalog2, focus); err != nil {
+	if err := declarer.Declare("files", catalog2, keymapJSON); err != nil {
 		t.Fatal(err)
 	}
 	assertDocEqual(t, "replaced catalog", catalog2, s.Declared(store.DeclaredPlugins)["files"])
@@ -464,7 +464,7 @@ func TestCatalogDeclarerOverStore(t *testing.T) {
 		t.Fatal("undeclare left keymap", docs)
 	}
 
-	if err := declarer.Declare("files", json.RawMessage("not json"), focus); err == nil {
+	if err := declarer.Declare("files", json.RawMessage("not json"), keymapJSON); err == nil {
 		t.Fatal("invalid catalog accepted")
 	}
 }
@@ -534,9 +534,9 @@ func TestLaunchIntegrationRealSeams(t *testing.T) {
 	// Declared documents serve the manifest catalogs.
 	files := specWithSlice("files")
 	catalog, _ := files.CatalogJSON()
-	focus, _ := files.KeymapJSON()
+	keymapJSON, _ := files.KeymapJSON()
 	assertDocEqual(t, "catalog", catalog, st.Declared(store.DeclaredPlugins)["files"])
-	assertDocEqual(t, "keymap", focus, st.Declared(store.DeclaredKeymap)["files"])
+	assertDocEqual(t, "keymap", keymapJSON, st.Declared(store.DeclaredKeymap)["files"])
 
 	// The plugin slice is registered with the plugin as owner, value {}.
 	entry, ok := tree.Snapshot().Slices["files.state"]

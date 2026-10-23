@@ -163,12 +163,12 @@ func (c CatalogDeclarer) Declare(pluginID string, catalog, keymap json.RawMessag
 	if err != nil {
 		return fmt.Errorf("launch: plugin %s catalog: %w", pluginID, err)
 	}
-	focusDoc, err := decodeDoc(keymap)
+	keymapDoc, err := decodeDoc(keymap)
 	if err != nil {
 		return fmt.Errorf("launch: plugin %s keymap: %w", pluginID, err)
 	}
 	c.Store.Declare(store.DeclaredPlugins, pluginID, catalogDoc)
-	c.Store.Declare(store.DeclaredKeymap, pluginID, focusDoc)
+	c.Store.Declare(store.DeclaredKeymap, pluginID, keymapDoc)
 	return nil
 }
 
@@ -279,13 +279,13 @@ func (p Preparer) Prepare(ctx context.Context, gate uint64, specs []manifest.Spe
 			failed[spec.ID] = fmt.Errorf("catalog: %w", err)
 			continue
 		}
-		focus, err := spec.KeymapJSON()
+		keymapJSON, err := spec.KeymapJSON()
 		if err != nil {
 			failed[spec.ID] = fmt.Errorf("keymap: %w", err)
 			continue
 		}
 		if p.Catalog != nil {
-			if err := p.Catalog.Declare(spec.ID, catalog, focus); err != nil {
+			if err := p.Catalog.Declare(spec.ID, catalog, keymapJSON); err != nil {
 				failed[spec.ID] = err
 				continue
 			}

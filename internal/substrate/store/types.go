@@ -36,7 +36,10 @@ const (
 	LayerInstance Layer = "instance"
 	// DeclaredPlugins holds per-plugin catalogs, separate from config layers.
 	DeclaredPlugins DocName = "plugins"
-	// DeclaredKeymap holds manifest focus-local bindings, never user keymaps.
+	// DeclaredKeymap holds manifest focus-local bindings (D64), never user
+	// keymaps. The layered user keymap (D90) is the "keymap" layer files read
+	// by Layers/Resolve and consumed by internal/services/keybinding; declared
+	// documents are a separate namespace (see Declared) and never enter layers.
 	DeclaredKeymap DocName = "keymap"
 	// ConflictLastWriterWins is the reserved multi-source reconciliation policy.
 	ConflictLastWriterWins = "last-writer-wins"
