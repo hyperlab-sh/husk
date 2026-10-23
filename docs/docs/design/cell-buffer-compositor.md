@@ -340,8 +340,9 @@ plugin covers only the cells it paints. No plugin kind is named here.
   no empty-surface rendering.
 - **Z order.** The overlay is blitted after the bars, every layout and
   placement surface and the modal (its shadow included), and before the
-  toast, the command palette and the Settings center ([Settings center](settings-center.md)). The host's own popups stay reachable above
-  any plugin; the modal, a plugin surface, can be annotated.
+  toast, the command palette and the Settings center
+  ([Settings center](settings-center.md)). The host's own popups stay
+  reachable above any plugin; the modal, a plugin surface, can be annotated.
 - **Transparency.** The occupant's `lines` are parsed cell by cell like any
   surface's (`blitLines`, one line at a time from a zero pen, clipped to the
   frame). A cell is **transparent** when its glyph is a plain space (U+0020)

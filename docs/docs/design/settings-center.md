@@ -9,9 +9,7 @@ tags: [architecture-v2, frontend, services, pods]
 
 # Settings center
 
-**Landed:** the center shell, host actions, bottom-bar entry point, Theme tab,
-profile corner, host seams and catalog reader. General, Keys, Store and Installed
-are selectable but their content panes remain specified, not landed.
+**Landed:** the center shell, host actions, bottom-bar entry point, Theme tab, profile corner, host seams and catalog reader. General, Keys, Store and Installed are selectable but their content panes remain specified, not landed.
 
 ## Level 0: What and why
 
@@ -52,7 +50,7 @@ The center is opened by the host action **`husk.settings.open`** ([Keybindings](
 
 Two more entry points open it on the Theme tab. **`husk.theme.select`** stays a host action with its catalog entry (`Select theme`) and no built-in key; it is an alias that runs `husk.settings.open` with `tab: theme`, kept so a keymap entry written for the selector keeps working. **The theme name in the bottom bar** (the right slot that shows the served palette's name; its content, clipping and hit rect are the frontend layout's) runs the same action with `tab: theme` on a left click.
 
-The action does nothing while the terminal is frozen, while a plugin's modal or a runtime modal is open, or while the palette is open: its handler (registered through `Frontend.RegisterHostAction`) returns `contracts.ErrDeclined`, so a bound key goes to the occupant like any declined key and a `cli` `action.invoke` gets an empty success reply ([Keybindings](keybindings.md), the decline mechanism), exactly as `husk.theme.select` does. While the center is **already open**, `husk.settings.open` with a `tab` switches to that tab and without one does nothing; it never closes the center (so a bound key is not a toggle; `esc` is the close). Opening writes `overlays.settings_center` in `husk.surfaces` ([State](state.md)) with the active tab's id, and every tab switch rewrites it.
+The action does nothing while the terminal is frozen, while a plugin's modal or a runtime modal is open, or while the palette or the secret prompt is open: its handler (registered through `Frontend.RegisterHostAction`) returns `contracts.ErrDeclined`, so a bound key goes to the occupant like any declined key and a `cli` `action.invoke` gets an empty success reply ([Keybindings](keybindings.md), the decline mechanism), exactly as `husk.theme.select` does. While the center is **already open**, `husk.settings.open` with a `tab` switches to that tab and without one does nothing; it never closes the center (so a bound key is not a toggle; `esc` is the close). Opening writes `overlays.settings_center` in `husk.surfaces` ([State](state.md)) with the active tab's id, and every tab switch rewrites it.
 
 Closing: `esc`, `ctrl+c` (closes the center, never quits, as for the palette), a click outside the modal (except the theme pill, which switches to Theme even while the center is open), and the frozen-terminal transition each close it and write `overlays.settings_center: ""`. Closing **discards dirty fields with no prompt** in v1 (operator ruling); the footer says `esc close (discards edits)` while any field is dirty. A pending reply (a `settings.set`, `profile.use` or `plugin.remove` the center is waiting on) is dropped when it arrives; the write or removal it may have made stands, exactly as for the theme selector. A `profile`, `plugin` or `settings` reload while the center is open does not close it; each tab re-reads its source when the reload publishes ("Reloads while open").
 
@@ -232,10 +230,7 @@ The built-in catalog is empty: the host embeds no `catalog.json`. A distribution
 
 ### huh
 
-**Landed:** `charm.land/huh/v2` v2.0.3 and its Bubbles v2 dependency build with
-Bubble Tea v2.1.0 and the existing Ultraviolet pin unchanged. Select and Confirm
-render in the workbench compositor under teatest/v2; no fallback or pin bump was
-needed. Production huh use is confined to the center's files.
+**Landed:** `charm.land/huh/v2` v2.0.3 and its Bubbles v2 dependency build with Bubble Tea v2.1.0 and the existing Ultraviolet pin unchanged. Select and Confirm render in the workbench compositor under teatest/v2; no fallback or pin bump was needed. Production huh use is confined to the center's files.
 
 Forms are built with **`charm.land/huh/v2`** (the canonical vanity path, like `charm.land/bubbletea/v2`; not the old GitHub module path), the line of huh that targets Bubble Tea v2, because Husk is on Bubble Tea v2 (`charmbracelet/x/exp/teatest/v2`, `charmbracelet/ultraviolet` in `go.mod`); the v1 module targets Bubble Tea v1 and cannot be mixed in.
 
