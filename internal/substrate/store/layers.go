@@ -229,29 +229,32 @@ func (s *Store) loadLayers(name DocName, profile string) (layerLoad, error) {
 			out.problems = append(out.problems, p)
 			return
 		}
-		out.layers = append(out.layers, LayerDoc{Layer: layer, File: layerFile, Doc: d})
+		out.layers = append(out.layers, LayerDoc{Layer: layer, File: layerFile, Doc: d, MemberOrder: memberOrder(b)})
 	}
 	if s.opts.Distribution != nil {
 		b, err := fs.ReadFile(s.opts.Distribution, string(name)+".json")
-		appendDoc(LayerDistribution, "", string(name)+".json", b, err)
+		appendDoc(LayerDistribution, string(name)+".json", string(name)+".json", b, err)
 		// Distribution profiles are defaults inside the same single layer.
 		if profile != "" {
 			b, err = fs.ReadFile(s.opts.Distribution, "profiles/"+profile+"/"+string(name)+".json")
 			if !errors.Is(err, fs.ErrNotExist) {
 				var previous Doc = Doc{}
+				var order map[string][]string
 				file := "profiles/" + profile + "/" + string(name) + ".json"
 				if len(out.layers) > 0 {
 					file = out.layers[0].File
 					previous = out.layers[0].Doc
+					order = out.layers[0].MemberOrder
 					out.layers = out.layers[:0]
 				}
-				appendDoc(LayerDistribution, "", file, b, err)
+				appendDoc(LayerDistribution, "profiles/"+profile+"/"+string(name)+".json", file, b, err)
 				if len(out.layers) > 0 {
 					var ps []Problem
 					mergeDoc(previous, out.layers[0].Doc, LayerDistribution, map[string]Layer{}, &ps, "")
 					out.layers[0].Doc = previous
+					out.layers[0].MemberOrder = overlayOrder(order, out.layers[0].MemberOrder)
 				} else if len(previous) > 0 {
-					out.layers = append(out.layers, LayerDoc{Layer: LayerDistribution, File: file, Doc: previous})
+					out.layers = append(out.layers, LayerDoc{Layer: LayerDistribution, File: file, Doc: previous, MemberOrder: order})
 				}
 			}
 		}
@@ -274,9 +277,11 @@ func (s *Store) loadLayers(name DocName, profile string) (layerLoad, error) {
 	}
 	if d, ok := s.opts.InstanceDocs[name]; ok {
 		var previous Doc
+		var order map[string][]string
 		for i := range out.layers {
 			if out.layers[i].Layer == LayerInstance {
 				previous = out.layers[i].Doc
+				order = out.layers[i].MemberOrder
 				out.layers = append(out.layers[:i], out.layers[i+1:]...)
 				break
 			}
@@ -285,7 +290,7 @@ func (s *Store) loadLayers(name DocName, profile string) (layerLoad, error) {
 			previous = Doc{}
 		}
 		overlayDoc(previous, d)
-		out.layers = append(out.layers, LayerDoc{Layer: LayerInstance, Doc: previous})
+		out.layers = append(out.layers, LayerDoc{Layer: LayerInstance, Doc: previous, MemberOrder: overlayOrder(order, docOrder(d))})
 	}
 	return out, nil
 }
@@ -304,6 +309,7 @@ func (s *Store) Layers(name DocName, profile string) ([]LayerDoc, error) {
 	for i, l := range load.layers {
 		out[i] = l
 		out[i].Doc = copyDoc(l.Doc)
+		out[i].MemberOrder = copyOrder(l.MemberOrder)
 	}
 	return out, nil
 }

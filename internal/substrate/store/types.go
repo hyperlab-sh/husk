@@ -90,6 +90,9 @@ type LayerDoc struct {
 	File string
 	// Doc is an independent unmerged object.
 	Doc Doc
+	// MemberOrder records object keys in file order, keyed by JSON pointer.
+	// Programmatic objects without an order use lexical key order.
+	MemberOrder map[string][]string
 }
 
 // InstanceRef selects persistence eligibility and the instance storage key.
