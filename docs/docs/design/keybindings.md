@@ -403,8 +403,8 @@ Widget-local keys are not keymap entries. The command palette and the slot inspe
 ### Rail items, palette and footer
 
 - A rail item is addressable as an action by its id ([Pods](pods.md)). Binding a key to a rail item id activates the item; pressing it while the item is active returns home, and closes the item if it is a modal.
-- Rail buttons, palette rows and the top bar show `KeysFor(action)[0]`, the effective key, or nothing. They never show a manifest `shortcut`.
-- The footer shows, in this order, one key per action (`KeysFor(action)[0]`): `husk.home`; `Hints(ctx)`, at most four; `husk.layout.reset`; `husk.sidebar.toggle`, `husk.sidepanel.toggle` and `husk.docks.cycle` together; `husk.palette.open`; `husk.quit`. A group is left out when nothing binds its action.
+- Rail buttons and palette rows show `KeysFor(action)[0]`, the effective key, or nothing. They never show a manifest `shortcut`.
+- The footer shows, in this order, one key per action (`KeysFor(action)[0]`): `husk.home`; `Hints(ctx)`, at most four; `husk.layout.reset`; `husk.sidebar.toggle`, `husk.sidepanel.toggle` and `husk.docks.cycle` together; `husk.palette.open`; `husk.quit`. A group is left out when nothing binds its action. A dock key is shown only when pressing it changes the frame, and hint groups that do not fit are dropped whole from the end ([Workbench chrome](chrome.md)).
 
 ### Reload
 

@@ -23,20 +23,21 @@ duplicate the rail and the footer. Its bottom bar shows an IPC counter nobody
 reads. And its rail buttons are tall pills whose caps depend on half-block
 glyphs.
 
-This spec fixes four things, each a ruling of the operator (2026-10-23, all
-final):
+This spec fixes four things:
 
 1. **Every surface the layout has a place for is laid out, occupied or not.**
    An unoccupied surface is drawn with its humanised surface name so the layout
-   is visible. The footer's dock keys never point at a dock that is not drawn.
+   is visible. The footer's dock keys never point at a dock that pressing them
+   cannot bring on screen: a dock key is shown only when pressing it changes
+   the frame.
 2. **Rail buttons are tiles, closer to square**, drawn from whole cells.
 3. **The top bar is the brand and the transient status pills**, nothing else.
 4. **The bottom bar shows the layout label at the left and the theme name at
    the right**, around the key hints. The theme name is clickable; it opens the
    theme selector once one exists.
 
-Husk has no normal/insert modes and this spec introduces none. Where the
-operator's ruling says "mode", it means the layout label defined under "The
+Husk has no normal/insert modes and this spec introduces none. Where this
+spec's requirements say "mode", they mean the layout label defined under "The
 layout label" below: a description of what is on screen, derived from the
 layout, never a state that changes how keys are read.
 
@@ -53,12 +54,14 @@ puts in its rail are consumer concerns and do not belong in the frontend.
   `activity-rail`, `sidebar-navigation`, `sidebar-list`, `sidebar-footer`,
   `main-header`, `main-stage`, `side-panel`. The **placement surfaces** are
   `modal-surface`, `full-canvas` and `workspace-stage`, which exist while a
-  rail item with that placement is active. `thread-row-status` and
+  rail item with that placement is active (`modal-surface` while a modal is
+  open). `thread-row-status` and
   `app-overlay` have no rect (see Decisions 7 and 8).
 - A surface is **drawn** when the frontend gives it a rect in `husk.geometry`
   and lists it in `husk.surfaces.visible`. It is **occupied** when
   `husk.surfaces.occupants` has an entry for it ([State](state.md), "Surfaces
-  resolution"); otherwise it is **empty**. Drawn and occupied are independent:
+  resolution"). A drawn **region slot** with no occupant is **empty**; a
+  placement surface is never empty (below). Drawn and occupied are independent:
   a drawn surface may be empty, and an occupied surface may be hidden (its dock
   is off, or it does not fit).
 - A **dock** is a side column the user can show or hide: the sidebar (the three
@@ -99,11 +102,13 @@ Placements: `full-canvas` draws the rail and one `full-canvas` surface over
 everything right of it; `stage` draws the rail, the sidebar (if its dock is on)
 and one `workspace-stage` surface over the rest; the side panel is never drawn
 in either. `modal-surface` is drawn over the default layout at the modal rect.
-A placement surface is drawn only while its rail item is active, and it always
-has an occupant (the rail item's plugin, [Architecture](../architecture.md),
-"Input routing"), so it is never empty in the sense below; a placement surface
-whose plugin has not sent content yet is a blank canvas like any occupied
-surface.
+A placement surface is drawn only while its rail item is active (or its modal
+is open), and it always has a plugin behind it: its registry occupant, or,
+when no plugin claimed it in a manifest, the plugin that declared the active
+rail item, which then receives its keys ([Architecture](../architecture.md),
+"Input routing"; `keyOwner` in `cmd/husk`). So a placement surface is never
+empty and never shows its name, whatever `husk.surfaces.occupants` says; until
+content arrives it is a blank canvas like any occupied surface.
 
 `husk.surfaces.visible` lists every drawn surface, empty ones included; a
 surface that is not drawn is not listed, whatever its occupancy.
@@ -118,9 +123,11 @@ The minimum terminal size stays 84x24. Below it the whole frame is the
 size"; nothing in this spec applies there.
 
 At or above the minimum, exactly one surface can be collapsed for lack of room:
-the **side panel**. It is drawn only when the centre column beside the sidebar
-would keep at least 72 cells (`minPanelCentreWidth`); with the default sidebar
-width of 38 that is a terminal of at least 117 cells, and with the sidebar
+the **side panel**. It is drawn only when the width right of the sidebar (the
+rail and the sidebar subtracted, before the panel takes its share) is at least
+72 cells (`minPanelCentreWidth`, the test `remW-leftW >= minPanelCentreWidth`
+in `placeSlots`); with the 7-cell rail and the default sidebar width of 38 that
+is a terminal of at least 117 cells, and with the sidebar
 dock off a panel always fits at the minimum width. The sidebar never collapses
 for width (its cap at half the remaining width keeps the centre at or above
 30), and no surface collapses for height (the bands shrink to the minimums
@@ -145,7 +152,7 @@ and footer") shows `husk.sidebar.toggle`, `husk.sidepanel.toggle` and
 | Key | Shown when |
 | :--- | :--- |
 | `husk.sidebar.toggle` | The placement is not `full-canvas` |
-| `husk.sidepanel.toggle` | The placement is the default one and the panel fits, computed with the sidebar's current shown state (so it is shown when the panel is drawn, and when it is hidden by preference but would be drawn if shown) |
+| `husk.sidepanel.toggle` | The placement is the default one (an open modal does not change the placement) and the panel fits, computed with the sidebar's current shown state (so it is shown when the panel is drawn, and when it is hidden by preference but would be drawn if shown) |
 | `husk.docks.cycle` | Both of the above are shown |
 
 Keys whose action nothing binds are left out as before. When no key is shown
@@ -154,7 +161,8 @@ shows: hiding a key hides a hint, never a binding.
 
 ### Empty surfaces
 
-A drawn, empty surface shows its humanised name, and nothing else:
+A drawn, empty surface (a region slot with no occupant) shows its humanised
+name, and nothing else:
 
 - The name is drawn in one line, centred horizontally and vertically in the
   surface's inner rect (the rect itself, since an empty surface has no
@@ -171,20 +179,23 @@ A drawn, empty surface shows its humanised name, and nothing else:
   nothing.
 - Published regions never apply: a region is declared on a surface its
   publisher occupies, so an empty surface has none.
-- Hotspot badges (`husk.hotspots.badges`) are drawn after the name, so a badge
-  that lands on the name's row covers it.
+- Hotspot badges (toggled by `husk.hotspots.badges`) are drawn after the
+  name, so a badge that lands on the name's row covers it.
+- While the slot explorer is open (`husk.hotspots.toggle_stage`), `main-stage`
+  shows the explorer as today, not its name.
 
 Which surfaces are empty is read from `husk.surfaces.occupants` of the current
 snapshot, the same source the renderer uses to decide whose content a surface
-shows. An occupant that leaves `live` is vacated by the Surfaces engine, so a
+shows (`surfaceOwner`), for region slots only. An occupant that leaves `live` is vacated by the Surfaces engine, so a
 crashed plugin's surface shows the name from the tick the engine vacates it,
 and an occupant that has claimed but not drawn shows a blank canvas, never the
 name: the pixels of an occupied surface belong to its occupant.
 
 Input on an empty surface is unchanged: a key for it is dropped, a click on it
 reaches no plugin, and it can hold focus (the default focus before any plugin
-connects is `sidebar-list`, and `husk.focus.next` cycles through drawn
-surfaces, empty or not). Focus is not drawn on an empty surface because there
+connects is `sidebar-list`, and `husk.focus.next` keeps its fixed order,
+`sidebar-list`, `main-stage`, `side-panel` (`sidebar-list`,
+`workspace-stage` under `stage`), skipping those not drawn, empty or not). Focus is not drawn on an empty surface because there
 is no border to highlight.
 
 ### The rail
@@ -194,19 +205,22 @@ is a **tile**: 5 cells wide and 3 rows tall, drawn from whole cells with the
 tile background, no half-block caps, with one cell of rail background on each
 side. The icon sits on the middle row, centred in the 5 cells (a 1-cell icon
 has two cells of tile on each side; a 2-cell icon has two on the left and one
-on the right). Tiles are stacked from the top of the rail with one blank row
-between them (a stride of 4 rows), and the palette tile sits at the bottom of
-the rail when the rail is at least 6 rows taller than the tiles above it, as
-today. With the canonical 1:2 terminal cell a tile is 5 units wide by 6 tall,
+on the right). In rail rows (row 0 is the rail rect's first row), the first
+tile is rows 1 to 3 and each next tile starts 4 rows lower (one blank row
+between tiles). The palette tile is rows `h-4` to `h-2` of a rail `h` rows
+tall when `h >= next+6`, `next` being the row the palette tile would otherwise
+start on (today's test, with the new stride); otherwise it is stacked like the
+others. With the canonical 1:2 terminal cell a tile is 5 units wide by 6 tall,
 and with the 1:1.67 cell of most monospace fonts it is square.
 
 The three states keep today's colours and the rules for them. **Active**:
 tile background `surface_selected`, icon `accent`, bold. **Hovered**: tile
 background `surface_elevated`, icon `ink`. **Idle**: no tile; the icon alone in
 `ink_muted` on the rail background. While Alt is held (or latched) every button
-is drawn as a tile with its effective key (`KeysFor(id)[0]`, `ctrl+p` spelled
-`^P`) centred on the middle row in `warning`, clipped to the 5 cells; a button
-with no key keeps its icon. The hit zone of a button is its 3 rows across the
+is drawn as a tile (the active one on `surface_selected`, the others on
+`surface_elevated`) with its effective key (`KeysFor(id)[0]`, spelled as the
+rail spells it today, `ctrl+p` as `^P`) centred on the middle row in `warning`,
+bold, clipped to the 5 cells; a button with no key keeps its icon. The hit zone of a button is its 3 rows across the
 rail's width, as today. `husk.hotspots.toggle_stage` and `husk.palette.open`
 keep their tiles; what the rail holds with no plugins is unchanged (home, the
 slot explorer, the palette).
@@ -239,9 +253,11 @@ The last row, full width, background `surface`. Three parts:
    ` │ ` in `border`: the groups [Keybindings](keybindings.md) lists, in that
    order, with the docks group filtered as above. Key in `accent` bold,
    description in `ink_muted`.
-3. **The theme name**, at the right, `✦ <name>` with one cell of padding on
-   each side, in `accent_secondary` on `surface_elevated` (the pill the top
+3. **The theme name**, at the right edge, `✦ <name>` with one cell of padding
+   on each side, in `accent_secondary` on `surface_elevated` (the pill the top
    bar showed, moved down).
+
+The cells between the last hint and the theme name are blank bar background.
 
 The label and the theme name are always drawn. The theme name is clipped to 24
 cells with a `…` tail, so the two together never exceed 54 cells and always fit
@@ -251,16 +267,15 @@ dropped whole, never clipped. The `ipc: N` counter is removed and
 `totalIPCEvents` leaves the model.
 
 **The theme name** is the served palette's `name` (`protocol.Palette.Name`, the
-value `theme.changed` carries). Theme sets it from the `theme.name` setting
-when one is configured and leaves the built-in palette's name otherwise
+value `theme.changed` carries). Theme copies the `theme.name` setting into it,
+and that setting's default is the built-in palette's name
 ([Services](services.md), "Theme"), so with `theme.name` unset the slot shows
-the built-in name, `CharmTone`. Should a palette arrive with an empty name the
-slot shows `theme`, so the click target below keeps a visible extent. The
+`CharmTone`. Should the name be empty (`theme.name` set to `""`) the slot
+shows `theme`, so the click target below keeps a visible extent. The
 frontend reads the name from `Frontend.Palette()`, never from Settings.
 
 **Clicking the theme name** (a left click on any cell of the pill) opens the
-theme selector once the theme selector spec lands (`spec/theme-selector`),
-which names the host action the click runs. Until then the click is consumed
+theme selector once the theme selector spec lands, which names the host action the click runs. Until then the click is consumed
 (it reaches no surface and starts no drag) and does nothing; hover does not
 change the pill. No other cell of the bottom bar is a click target.
 
@@ -350,9 +365,10 @@ All in `package main` under `cmd/husk`. `pkg/` is untouched.
 | `defaultLayoutLabel` | Becomes `layoutLabel` with the table above; called by the bottom bar |
 | `renderBottomKeybindBar`: hints and `ipc: N` | Layout label, hints with group dropping, theme pill; a hit rect for the pill recorded for `input.go` |
 | `footerHints` (`commands.go`): docks group from bound keys | Docks group filtered by placement and fit |
-| `drawSurface`: content or blank canvas | Content, or the humanised name when `surfaceOwner(slot) == ""` |
+| `drawSurface`: content or blank canvas | Content, or the humanised name when the slot is a region slot and `surfaceOwner(slot) == ""` (never for `full-canvas` or `workspace-stage`; `drawModal` is unchanged) |
+| `dropVanishedSides`, `leaveUndrawnSides` | Unchanged; a side column now vanishes only by its dock or the fit rule, never because a plugin left |
 | `totalIPCEvents` | Removed |
-| `mode_label_test.go` | Rewritten for the table above and the inverted layout rule |
+| `mode_label_test.go` | Rewritten for the table above and the inverted layout rule; other `cmd/husk` tests that assume zero plugins lay out no side rects, or read the top-bar label (`focus_fallback_test.go`, `surface_owner_test.go`), are updated the same way |
 
 A click on the theme pill is routed in `input.go` before surface hit-testing,
 as the rail and the dividers are. The action it runs is left for the theme
@@ -360,8 +376,9 @@ selector spec; until then the handler is a no-op that still consumes the
 click.
 
 [Architecture](../architecture.md) ("Slots", "Surfaces and frames", "Minimum
-size", "Input routing") and [Services](services.md) ("Settings", `theme.name`)
-are amended with this spec.
+size", "Input routing"), [Services](services.md) ("Settings", `theme.name`),
+[Keybindings](keybindings.md) ("Rail items, palette and footer") and the
+`husk.surfaces` example in [State](state.md) are amended with this spec.
 
 ## Decisions taken by this spec
 
@@ -381,7 +398,7 @@ are amended with this spec.
    the panel's fit threshold moves from 115 to 117 cells with default widths.
 4. **Collapse order is: side panel, then nothing, then the too-small screen.**
    This is today's fit rule stated as a rule rather than widened: the panel
-   already yields below 72 centre cells, and the sidebar's half-width cap
+   already yields when fewer than 72 cells are left right of the sidebar, and the sidebar's half-width cap
    already keeps the centre at 30 or more. No new thresholds.
 5. **A collapsed panel has no collapsed form.** A stub column or marker would
    be chrome Husk invents, and the label and footer already say the panel is
@@ -398,14 +415,16 @@ are amended with this spec.
 8. **`app-overlay` is not laid out.** It is the layer the palette, toasts and
    modals draw on, not a region; it has no rect to show a name in.
 9. **Placement surfaces are never "empty".** A rail item's plugin occupies the
-   surface it opens, so the name is not drawn there; before content arrives
+   surface it opens or, when it did not claim it, receives its keys, so the
+   name is not drawn there; before content arrives
    the surface is a blank canvas like any occupied one.
 10. **The layout label drops the word "Mode"** and the three placement
     phrases, and a modal shows `Modal` alone (as the top bar showed one phrase
     for an open modal today). Husk is mode-free; the label is a readout.
 11. **The theme slot reads `Palette.Name`**, not the `theme.name` setting
     directly, because Theme already folds the setting into the served palette
-    and the frontend has no Settings read seam. An empty name shows `theme`.
+    and the frontend has no Settings read seam. `CharmTone` when unset (the
+    setting's default); an empty name shows `theme`.
 12. **Hint groups are dropped whole from the end**, never clipped, so a
     half-shown key never misleads; the label and theme name always draw.
 

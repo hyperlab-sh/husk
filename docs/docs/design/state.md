@@ -401,7 +401,7 @@ Value shapes:
   "occupants":{"main-stage":{"surface":"main-stage","plugin":"example.editor"}},
   "contributions":{"example.editor.toolbar":[{"slot":"example.editor.toolbar","id":"example.git.branch","plugin":"example.git","label":"main"}]},
   "capture":{"main-stage":true},
-  "visible":["activity-rail","sidebar-list","main-header","main-stage"],
+  "visible":["activity-rail","main-header","main-stage","side-panel","sidebar-footer","sidebar-list","sidebar-navigation"],
   "placement":{"rail_item":"","kind":""},
   "overlays":{"modal":{"plugin":"","rail_item":""},"palette":false,"slot_explorer":false}
 }}
