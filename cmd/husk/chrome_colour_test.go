@@ -1,7 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"go/ast"
+	"go/format"
 	"go/parser"
 	"go/token"
 	"image/color"
@@ -12,7 +14,114 @@ import (
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
+	"github.com/hyperlab-sh/husk/pkg/frame"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
+
+// auditChromeRoles keeps drawing-role reads explicit and attributes each one
+// to its receiver-qualified method or package initializer, including literals.
+func auditChromeRoles(f *ast.File) (map[string]map[string]int, []string) {
+	counts := make(map[string]map[string]int)
+	var violations []string
+	checkAliases := func(name string, values []ast.Expr) {
+		for _, value := range values {
+			if sel, ok := ast.Unparen(value).(*ast.SelectorExpr); ok && sel.Sel.Name == "palette" {
+				violations = append(violations, name+": palette alias hides role reads")
+			}
+		}
+	}
+	walk := func(name string, node ast.Node) {
+		ast.Inspect(node, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.AssignStmt:
+				checkAliases(name, n.Rhs)
+			case *ast.ValueSpec:
+				checkAliases(name, n.Values)
+			case *ast.SelectorExpr:
+				palette, ok := ast.Unparen(n.X).(*ast.SelectorExpr)
+				if !ok || palette.Sel.Name != "palette" || n.Sel.Name == "Name" {
+					return true
+				}
+				if counts[name] == nil {
+					counts[name] = make(map[string]int)
+				}
+				role := n.Sel.Name
+				counts[name][role]++
+				allowed := true
+				switch role {
+				case "AccentSecondary", "AccentSoft":
+					allowed = false
+				case "Success", "Warning", "Danger", "Info":
+					allowed = name == "(*WorkbenchModel).drawToast" || name == "(*WorkbenchModel).statusMark"
+				case "Accent":
+					allowed = name == "(*WorkbenchModel).renderActivityRailBox" || name == "(*WorkbenchModel).drawCommandPalette" || name == "(*WorkbenchModel).dividerEdgeStyles"
+				}
+				if !allowed {
+					violations = append(violations, fmt.Sprintf("%s: forbidden %s", name, role))
+				}
+			}
+			return true
+		})
+	}
+	for _, decl := range f.Decls {
+		switch decl := decl.(type) {
+		case *ast.FuncDecl:
+			name := decl.Name.Name
+			if decl.Recv != nil {
+				var receiver strings.Builder
+				if err := format.Node(&receiver, token.NewFileSet(), decl.Recv.List[0].Type); err != nil {
+					violations = append(violations, "unreadable receiver: "+err.Error())
+				}
+				name = "(" + receiver.String() + ")." + name
+			}
+			walk(name, decl)
+		case *ast.GenDecl:
+			for _, spec := range decl.Specs {
+				if value, ok := spec.(*ast.ValueSpec); ok {
+					var names []string
+					for _, id := range value.Names {
+						names = append(names, id.Name)
+					}
+					walk("package initializer "+strings.Join(names, ","), value)
+				}
+			}
+		}
+	}
+	return counts, violations
+}
+
+func TestChromeRoleAuditRejectsBypasses(t *testing.T) {
+	for _, tc := range []struct {
+		name, source string
+		bad          bool
+	}{
+		{"assignment alias", `func (m *WorkbenchModel) draw() { p := m.palette; _ = p.Warning }`, true},
+		{"declaration alias", `func (m *WorkbenchModel) draw() { var p = m.palette; _ = p.Warning }`, true},
+		{"package alias", `var p = m.palette`, true},
+		{"foreign toast", `func (m *Other) drawToast() { _ = m.palette.Warning }`, true},
+		{"foreign status mark", `func (m *Other) statusMark() { _ = m.palette.Success }`, true},
+		{"foreign rail", `func (m *Other) renderActivityRailBox() { _ = m.palette.Accent }`, true},
+		{"bare function", `func drawToast(m *WorkbenchModel) { _ = m.palette.Warning }`, true},
+		{"package literal", `var f = func(m *WorkbenchModel) { _ = m.palette.Warning }`, true},
+		{"package literal alias", `var f = func(m *WorkbenchModel) { p := m.palette; _ = p.Warning }`, true},
+		{"secondary accent", `func (m *WorkbenchModel) drawToast() { _ = m.palette.AccentSecondary }`, true},
+		{"soft accent", `func (m *WorkbenchModel) drawToast() { _ = m.palette.AccentSoft }`, true},
+		{"host toast", `func (m *WorkbenchModel) drawToast() { _ = m.palette.Warning }`, false},
+		{"host status mark", `func (m *WorkbenchModel) statusMark() { _ = m.palette.Success }`, false},
+		{"neutral literal", `var f = func(m *WorkbenchModel) { _ = m.palette.Ink }`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, err := parser.ParseFile(token.NewFileSet(), "chrome.go", "package main\n"+tc.source, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			counts, violations := auditChromeRoles(f)
+			if got := len(violations) > 0; got != tc.bad {
+				t.Fatalf("violations %v, counts %v; want rejected %t", violations, counts, tc.bad)
+			}
+		})
+	}
+}
 
 func TestChromeColourDiscipline(t *testing.T) {
 	t.Run("source roles", func(t *testing.T) {
@@ -21,7 +130,7 @@ func TestChromeColourDiscipline(t *testing.T) {
 			t.Fatal(err)
 		}
 		counts := make(map[string]map[string]int)
-		bad := false
+		var violations []string
 		for _, path := range files {
 			if strings.HasSuffix(path, "_test.go") {
 				continue
@@ -30,59 +139,45 @@ func TestChromeColourDiscipline(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, decl := range f.Decls {
-				fn, ok := decl.(*ast.FuncDecl)
-				if !ok {
-					continue
+			fileCounts, bad := auditChromeRoles(f)
+			violations = append(violations, bad...)
+			for fn, roles := range fileCounts {
+				if counts[fn] == nil {
+					counts[fn] = make(map[string]int)
 				}
-				name := fn.Name.Name
-				ast.Inspect(fn, func(n ast.Node) bool {
-					role, ok := n.(*ast.SelectorExpr)
-					if !ok {
-						return true
-					}
-					palette, ok := role.X.(*ast.SelectorExpr)
-					if !ok || palette.Sel.Name != "palette" {
-						return true
-					}
-					if counts[name] == nil {
-						counts[name] = make(map[string]int)
-					}
-					r := role.Sel.Name
-					counts[name][r]++
-					switch r {
-					case "AccentSecondary", "AccentSoft":
-						bad = true
-					case "Success", "Warning", "Danger", "Info":
-						bad = bad || (name != "drawToast" && name != "statusMark")
-					case "Accent":
-						bad = bad || (name != "renderActivityRailBox" && name != "drawCommandPalette" && name != "dividerEdgeStyles")
-					}
-					return true
-				})
+				for role, n := range roles {
+					counts[fn][role] += n
+				}
 			}
 		}
-		if bad {
-			t.Fatalf("chrome role discipline violated; references per function: %v", counts)
+		if len(violations) > 0 {
+			t.Fatalf("chrome role discipline violated: %v; references per function: %v", violations, counts)
 		}
 		for _, fn := range []string{"renderActivityRailBox", "drawCommandPalette", "dividerEdgeStyles"} {
-			if counts[fn]["Accent"] != 1 {
-				t.Errorf("want one accent reference in %s; counts: %v", fn, counts)
+			name := "(*WorkbenchModel)." + fn
+			if counts[name]["Accent"] != 1 {
+				t.Errorf("want one accent reference in %s; counts: %v", name, counts)
 			}
 		}
 	})
 	t.Run("empty frame accent only on active tile", func(t *testing.T) {
 		m := goldenModel()
-		rail := m.slotRects["activity-rail"]
+		rail := m.slotRects[protocol.SurfaceActivityRail]
+		cells := frameCells(m.View().Content)
+		acc := lipgloss.Color(m.palette.Accent)
 		active := 0
 		for _, b := range m.railButtons() {
 			if b.active {
 				active++
-				for y, row := range frameCells(m.View().Content) {
+				for y, row := range cells {
 					for x, cell := range row {
 						want := x >= rail.X+1 && x < rail.X+6 && y == rail.Y+b.startY+1
-						if got := sameColor(cell.Style.Fg, lipgloss.Color(m.palette.Accent)); got != want {
+						got := sameColor(cell.Style.Fg, acc) || sameColor(cell.Style.Bg, acc) || sameColor(cell.Style.UnderlineColor, acc)
+						if got != want {
 							t.Errorf("accent at %d,%d = %t, want %t", x, y, got, want)
+						}
+						if sameColor(cell.Style.Bg, acc) {
+							t.Errorf("accent background at %d,%d; active tile accent must be foreground only", x, y)
 						}
 					}
 				}
@@ -92,6 +187,66 @@ func TestChromeColourDiscipline(t *testing.T) {
 			t.Fatalf("active tiles = %d, want 1", active)
 		}
 	})
+}
+
+func TestChromeManipulationRoles(t *testing.T) {
+	for _, name := range []string{"hover edge", "drag edge", "drag pill", "hover pill", "Alt pill", "focused label", "unfocused label", "hotspot", "palette header", "palette shortcut"} {
+		t.Run(name, func(t *testing.T) {
+			m := goldenModel()
+			c := newCanvas(m.width, m.height)
+			defer c.release()
+			text, fg, bg, bold := "", m.palette.Ink, "", true
+			slot := protocol.SurfaceMainStage
+			r := m.slotRects[slot]
+			switch name {
+			case "hover edge", "drag edge":
+				m.hoverDivider = "sidebar-width"
+				if name == "drag edge" {
+					m.activeDrag = m.hoverDivider
+					fg = m.palette.Accent
+				}
+				m.drawChrome(c, slot, r, frame.Spec{Border: true}, "")
+				text = "┃"
+			case "drag pill":
+				m.activeDrag = "sidebar-width"
+				text, bg = "⇄ Dragging sidebar-width", m.palette.SurfaceSelected
+				c.blitBlock(0, 0, m.renderTopWorkbenchBar())
+			case "hover pill":
+				m.hoverDivider = "sidebar-width"
+				text, bg = "⇄ Drag border: sidebar-width", m.palette.SurfaceElevated
+				c.blitBlock(0, 0, m.renderTopWorkbenchBar())
+			case "Alt pill":
+				m.modifiers.Alt = true
+				text, bg = "⌥ ALT HELD · Shortcuts Active", m.palette.SurfaceElevated
+				c.blitBlock(0, 0, m.renderTopWorkbenchBar())
+			case "focused label", "unfocused label":
+				text = "Borderless label"
+				fg = m.palette.InkMuted
+				if name == "focused label" {
+					m.focusedSlot = slot
+					fg = m.palette.Ink
+				}
+				m.drawChrome(c, slot, r, frame.Spec{Label: text}, text)
+			case "hotspot":
+				m.showHotspots = true
+				text, bg = "⑥ main-stage", m.palette.SurfaceSelected
+				m.drawSurface(c, slot, "⑥", string(slot))
+			case "palette header":
+				text, fg = "⑧ COMMAND PALETTE (app-overlay)", m.palette.InkMuted
+				m.drawCommandPalette(c)
+			case "palette shortcut":
+				cmd := paletteCommand{Title: "Example", Shortcut: "ctrl+x"}
+				text, fg, bold = cmd.Shortcut, m.palette.InkMuted, false
+				c.blitBlock(0, 0, m.paletteRow(cmd, false, 78, paletteColumns([]paletteCommand{cmd}, 78)))
+			}
+			cells := frameCells(c.render())
+			var background []color.Color
+			if bg != "" {
+				background = append(background, lipgloss.Color(bg))
+			}
+			requireChromeText(t, cells, text, lipgloss.Color(fg), bold, background...)
+		})
+	}
 }
 
 func TestSelectedChromeNeverUsesSubtleInk(t *testing.T) {
@@ -125,7 +280,7 @@ func TestSelectedChromeNeverUsesSubtleInk(t *testing.T) {
 }
 
 // requireChromeText checks every cell of a specific visible text run.
-func requireChromeText(t *testing.T, cells uv.Lines, text string, fg color.Color, bold bool) {
+func requireChromeText(t *testing.T, cells uv.Lines, text string, fg color.Color, bold bool, bg ...color.Color) {
 	t.Helper()
 	for _, row := range cells {
 		var plain strings.Builder
@@ -136,6 +291,9 @@ func requireChromeText(t *testing.T, cells uv.Lines, text string, fg color.Color
 			// The fixtures use one-cell glyphs; count runes, not UTF-8 bytes.
 			x := len([]rune(plain.String()[:start]))
 			for _, cell := range row[x : x+len([]rune(text))] {
+				if len(bg) > 0 && !sameColor(cell.Style.Bg, bg[0]) {
+					t.Errorf("%q cell %q background %v, want %v", text, cell.Content, cell.Style.Bg, bg[0])
+				}
 				if !sameColor(cell.Style.Fg, fg) || (cell.Style.Attrs&uv.AttrBold != 0) != bold {
 					t.Errorf("%q cell %q has style %+v, want foreground %v bold %t", text, cell.Content, cell.Style, fg, bold)
 				}

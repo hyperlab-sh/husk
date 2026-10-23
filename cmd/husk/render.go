@@ -146,12 +146,8 @@ func (m *WorkbenchModel) renderActivityRailBox() string {
 			iconFg := lipgloss.Color(m.palette.Accent)
 			if !b.active {
 				pillColor = lipgloss.Color(m.palette.SurfaceElevated)
-				if showShortcuts {
-					iconFg = lipgloss.Color(m.palette.Ink)
-				} else {
-					iconFg = lipgloss.Color(m.palette.Ink)
-				}
-			} else if showShortcuts {
+				iconFg = lipgloss.Color(m.palette.Ink)
+			} else if showShortcuts && b.shortcut != "" {
 				iconFg = lipgloss.Color(m.palette.Ink)
 			}
 
@@ -658,18 +654,18 @@ func (m *WorkbenchModel) drawToast(c *canvas) {
 	if m.activeToast == nil {
 		return
 	}
-	borderCol := lipgloss.Color(m.palette.Info)
+	levelCol := lipgloss.Color(m.palette.Info)
 	switch m.activeToast.Level {
 	case "success":
-		borderCol = lipgloss.Color(m.palette.Success)
+		levelCol = lipgloss.Color(m.palette.Success)
 	case "error":
-		borderCol = lipgloss.Color(m.palette.Danger)
+		levelCol = lipgloss.Color(m.palette.Danger)
 	case "warn":
-		borderCol = lipgloss.Color(m.palette.Warning)
+		levelCol = lipgloss.Color(m.palette.Warning)
 	}
 
 	toastW := min(48, m.width-6)
-	title := lipgloss.NewStyle().Foreground(borderCol).Bold(true).Render("● " + m.activeToast.Title)
+	title := lipgloss.NewStyle().Foreground(levelCol).Bold(true).Render("● " + m.activeToast.Title)
 	msg := lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.Ink)).Render(ansi.Truncate(m.activeToast.Message, toastW-4, "…"))
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
