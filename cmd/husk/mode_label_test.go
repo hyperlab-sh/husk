@@ -56,7 +56,7 @@ func TestHomeCommandTitleHasNoColumnCount(t *testing.T) {
 
 func TestZeroPluginsLayOutEveryRegionSlot(t *testing.T) {
 	m := goldenModel()
-	want := []protocol.SurfaceID{protocol.SurfaceActivityRail, protocol.SurfaceMainHeader, protocol.SurfaceMainStage, protocol.SurfaceSidePanel, protocol.SurfaceSidebarFooter, protocol.SurfaceSidebarList, protocol.SurfaceSidebarNavigation}
+	want := []protocol.SurfaceID{protocol.SurfaceActivityRail, protocol.SurfaceAppOverlay, protocol.SurfaceMainHeader, protocol.SurfaceMainStage, protocol.SurfaceSidePanel, protocol.SurfaceSidebarFooter, protocol.SurfaceSidebarList, protocol.SurfaceSidebarNavigation}
 	if got := m.surfaceView().Visible; !slices.Equal(got, want) {
 		t.Fatalf("visible %v, want %v", got, want)
 	}
@@ -68,9 +68,9 @@ func TestZeroPluginsLayOutEveryRegionSlot(t *testing.T) {
 		if !ok {
 			t.Fatalf("no rect for %s", id)
 		}
-		if id == protocol.SurfaceActivityRail {
+		if id == protocol.SurfaceActivityRail || id == protocol.SurfaceAppOverlay {
 			continue
-		} // host buttons own the rail
+		} // host buttons own the rail; the overlay is a layer, not an empty region
 		name := id.Humanised()
 		x := r.InnerX + (r.InnerW-ansi.StringWidth(name))/2
 		y := r.InnerY + (r.InnerH-1)/2
