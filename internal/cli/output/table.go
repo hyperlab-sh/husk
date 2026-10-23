@@ -169,7 +169,26 @@ func compactJSON(v any) string {
 	return strings.TrimSuffix(b.String(), "\n")
 }
 
+// width measures with East Asian ambiguous characters one column wide, so a
+// table lays out the same under any LANG, LC_ALL or RUNEWIDTH_EASTASIAN (as
+// the TUI does).
+var width = func() *runewidth.Condition {
+	c := runewidth.NewCondition()
+	c.EastAsianWidth = false
+	return c
+}()
+
 // displayWidth is the number of terminal columns s occupies: combining and
 // format marks take none, East Asian wide and fullwidth characters and emoji
-// take two. The width rules come from go-runewidth.
-func displayWidth(s string) int { return runewidth.StringWidth(s) }
+// take two. The widths come from go-runewidth, except that every format
+// character (Cf) but the zero-width joiner counts as zero: the library gives
+// some of them (U+2060, the tag block) one column. The joiner stays so the
+// library still measures an emoji sequence as one glyph.
+func displayWidth(s string) int {
+	return width.StringWidth(strings.Map(func(r rune) rune {
+		if r != '\u200d' && unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return r
+	}, s))
+}
