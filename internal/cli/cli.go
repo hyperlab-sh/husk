@@ -21,6 +21,7 @@ import (
 
 	"github.com/hyperlab-sh/husk/internal/cli/output"
 	"github.com/hyperlab-sh/husk/internal/instance"
+	"golang.org/x/term"
 )
 
 // Env is everything Main reads from the process, so tests drive it without
@@ -47,17 +48,15 @@ func OSEnv() Env {
 		Stdout:      os.Stdout,
 		Stderr:      os.Stderr,
 		Stdin:       os.Stdin,
-		StdoutIsTTY: isCharDevice(os.Stdout),
+		StdoutIsTTY: isTerminal(os.Stdout),
 		Getenv:      os.Getenv,
 		RuntimeDir:  instance.LookupRuntimeDir,
 	}
 }
 
-// isCharDevice reports whether f is a terminal-like character device.
-func isCharDevice(f *os.File) bool {
-	fi, err := f.Stat()
-	return err == nil && fi.Mode()&os.ModeCharDevice != 0
-}
+// isTerminal reports whether f is a terminal. A character-device check is not
+// enough: /dev/null is one.
+func isTerminal(f *os.File) bool { return term.IsTerminal(int(f.Fd())) }
 
 // command is one subcommand of the table.
 type command struct {
