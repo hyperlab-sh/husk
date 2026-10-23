@@ -38,7 +38,8 @@ func (s *Service) Palette() palette.Palette { return s.current.Load().palette }
 // Wire returns the same roles for protocol.theme.get/theme.changed.
 func (s *Service) Wire() protocol.Palette { return protocol.Palette(s.Palette()) }
 
-// Overrides returns a detached role map.
+// Overrides returns the detached roles applied over the built-in: the selected
+// theme's roles, then theme.palette overrides, and the resolved theme name.
 func (s *Service) Overrides() map[string]string { return c.Clone(s.current.Load().overrides) }
 
 // Get implements theme.get for every authenticated caller.
@@ -173,11 +174,10 @@ func attribute(in c.ReloadInput, selected definition, name, fg, bg string) (key,
 	return "theme.palette." + fg, "default", ""
 }
 
-// configFile is the config-relative file of a layer's config document, from
-// the layer documents the reload was given: for a profile the suffix from the
-// last "/profiles/", for an instance from the last "/instances/", for the user
-// layer "config.json". Empty when the layer has no file (distribution, an
-// instance folded from flags) or was not supplied.
+// configFile returns relative Store paths verbatim, including distribution
+// root-relative files and config-relative profile/instance files. For absolute
+// paths it retains the profile/instance suffix or the user's config.json name.
+// It is empty when no file was supplied, including folded multi-file layers.
 func configFile(in c.ReloadInput, layer string) string {
 	for _, l := range in.ConfigLayers {
 		if string(l.Layer) != layer || l.File == "" {

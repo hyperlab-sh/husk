@@ -60,6 +60,68 @@ func TestNamedThemeReplacementSelectionAndOverrides(t *testing.T) {
 			}
 		})
 	}
+	t.Run("invalid user retains distribution", func(t *testing.T) {
+		in := themeInput(t, `{"theme":{"name":"evening"}}`, nil)
+		in.Themes = []store.LayerDoc{
+			namedLayer(store.LayerDistribution, `{"themes":{"evening":{"palette":{"accent":"#f1effe"}}}}`),
+			namedLayer(store.LayerUser, `{"themes":{"evening":{"palette":{"ink":"bad"}}}}`),
+		}
+		th := stheme.New()
+		r := apply(t, th, in)
+		rows, err := th.List(Caller{Kind: "cli"})
+		if err != nil || th.Palette().Name != "evening" || th.Palette().Accent != "#f1effe" || len(rows) != 2 || rows[1].Source != "distribution" || !rows[1].Current {
+			t.Fatalf("palette=%+v rows=%+v err=%v", th.Palette(), rows, err)
+		}
+		if len(r.Problems) != 1 || r.Problems[0].Code != "invalid_theme" || r.Problems[0].Severity != "warning" || r.Problems[0].Layer != "user" {
+			t.Fatalf("%+v", r.Problems)
+		}
+	})
+}
+
+func TestNamedThemeInvalidReasonUsesDocumentRoleOrder(t *testing.T) {
+	for _, order := range [][]string{{"zzz_bad", "aaa_bad"}, {"aaa_bad", "zzz_bad"}} {
+		t.Run(order[0], func(t *testing.T) {
+			in := themeInput(t, `{}`, nil)
+			l := namedLayer(store.LayerUser, `{"themes":{"broken":{"palette":{"zzz_bad":"#ffffff","aaa_bad":"#ffffff"}}}}`)
+			l.MemberOrder = map[string][]string{"/themes/broken/palette": order}
+			in.Themes = []store.LayerDoc{l}
+			r := apply(t, stheme.New(), in)
+			if len(r.Problems) != 1 || r.Problems[0].Code != "invalid_theme" || r.Problems[0].Message != "theme broken: unknown role "+order[0] {
+				t.Fatalf("%+v", r.Problems)
+			}
+		})
+	}
+}
+
+func TestThemeConfigProblemFiles(t *testing.T) {
+	for _, source := range []store.LayerDoc{{Layer: store.LayerDistribution, File: "config.json"}, {Layer: store.LayerProfile, File: "profiles/daily/config.json"}} {
+		for _, code := range []string{"unknown_theme", "low_contrast"} {
+			t.Run(string(source.Layer)+"/"+code, func(t *testing.T) {
+				key, raw := "theme.name", `{"theme":{"name":"absent"}}`
+				if code == "low_contrast" {
+					key, raw = "theme.palette.ink", `{"theme":{"palette":{"ink":"#000000"}}}`
+				}
+				in := themeInput(t, raw, map[string]store.Layer{key: source.Layer}, source)
+				_, r, err := stheme.New().Rebuild(t.Context(), in)
+				if (err != nil) != (code == "low_contrast") {
+					t.Fatalf("report=%+v err=%v", r, err)
+				}
+				found := false
+				for _, p := range r.Problems {
+					if p.Code != code {
+						continue
+					}
+					found = true
+					if p.Key != key || p.Layer != string(source.Layer) || p.Source == nil || p.Source.File != source.File || p.Source.Layer != string(source.Layer) {
+						t.Fatalf("%+v", p)
+					}
+				}
+				if !found {
+					t.Fatalf("missing %s: %+v", code, r.Problems)
+				}
+			})
+		}
+	}
 }
 
 func TestNamedThemeUnknownAttributedToSelection(t *testing.T) {
