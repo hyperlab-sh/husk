@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -68,8 +69,19 @@ type command struct {
 	// --socket and --timeout.
 	local bool
 	// run executes the command; args are the positional arguments left
-	// after the global flags.
+	// after the global flags. A noun with verbs and no run of its own needs
+	// a verb.
 	run func(ctx context.Context, inv *Invocation, args []string) error
+	// verbs are the subcommands of a noun (husk state get): the first
+	// positional argument picks one. A noun with verbs and a run of its own
+	// runs it when no verb is given (husk state).
+	verbs map[string]command
+	// accepts names the command-specific flags this command takes (the
+	// others in extraFlags are a usage error for it).
+	accepts []string
+	// stream marks a watch: it rejects --timeout, and timeout is only the
+	// opening bound.
+	stream bool
 }
 
 // builtins is the socket command table of this package.
@@ -78,6 +90,9 @@ func builtins() map[string]command {
 		"instances": {usage: "husk instances", local: true, run: runInstances},
 		"ping":      {usage: "husk ping", timeout: 2 * time.Second, run: runPing},
 		"rpc":       {usage: "husk rpc <method> [<params-json>]", timeout: 30 * time.Second, run: runRPC},
+		"state":     stateCommand(),
+		"action":    actionCommand(),
+		"event":     eventCommand(),
 	}
 }
 
@@ -132,6 +147,10 @@ type Invocation struct {
 	timeout time.Duration
 	// dir is the runtime directory resolution read, for stale recovery.
 	dir string
+	// The command-specific flags; flagSet says which were given.
+	owner, argsJSON, data, ifRevision string
+	args                              []string
+	flagSet                           map[string]bool
 }
 
 // withTimeout bounds ctx by the command's --timeout, from now on.
@@ -175,6 +194,11 @@ func Main(ctx context.Context, args []string, env Env) int {
 	fs.StringVar(&inv.socket, "socket", "", "")
 	fs.StringVar(&format, "format", "", "")
 	fs.DurationVar(&timeout, "timeout", 0, "")
+	fs.StringVar(&inv.owner, "owner", "", "")
+	fs.StringVar(&inv.argsJSON, "args-json", "", "")
+	fs.StringVar(&inv.data, "data", "", "")
+	fs.StringVar(&inv.ifRevision, "if-revision", "", "")
+	fs.Func("arg", "", func(v string) error { inv.args = append(inv.args, v); return nil })
 	pos, err := parseInterspersed(fs, args[1:])
 	if err != nil {
 		if err == flag.ErrHelp {
@@ -194,6 +218,25 @@ func Main(ctx context.Context, args []string, env Env) int {
 
 	set := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	inv.flagSet = set
+	if len(cmd.verbs) > 0 && len(pos) > 0 {
+		verb, ok := cmd.verbs[pos[0]]
+		if !ok {
+			return inv.out.Report(output.Usage("unknown command %q", noun+" "+pos[0]))
+		}
+		cmd, pos = verb, pos[1:]
+	} else if cmd.run == nil {
+		return inv.out.Report(output.Usage("husk %s needs a command", noun))
+	}
+	for name := range set {
+		if isGlobalFlag(name) || slices.Contains(cmd.accepts, name) {
+			continue
+		}
+		return inv.out.Report(output.Usage("this command does not take --%s", name))
+	}
+	if cmd.stream && set["timeout"] {
+		return inv.out.Report(output.Usage("watch commands end only by signal or disconnect and do not take --timeout"))
+	}
 	if cmd.local {
 		for _, name := range []string{"instance", "socket", "timeout"} {
 			if set[name] {
@@ -300,12 +343,44 @@ func parseInterspersed(fs *flag.FlagSet, args []string) ([]string, error) {
 	}
 }
 
-func commandUsage(w io.Writer, cmd command, noun string) {
-	fmt.Fprintf(w, "usage: %s", cmd.usage)
-	if !cmd.local {
-		fmt.Fprint(w, " [--instance <id> | --socket <path>] [--timeout <duration>]")
+// isGlobalFlag reports whether name is one of the flags every command takes.
+func isGlobalFlag(name string) bool {
+	switch name {
+	case "instance", "socket", "format", "timeout":
+		return true
 	}
-	fmt.Fprint(w, " [--format json|table]\n")
+	return false
+}
+
+// synopses are the usage lines of a command: its own, or one per verb.
+func synopses(cmd command) []string {
+	var out []string
+	if cmd.run != nil {
+		out = append(out, cmd.usage)
+	}
+	verbs := make([]string, 0, len(cmd.verbs))
+	for v := range cmd.verbs {
+		verbs = append(verbs, v)
+	}
+	sort.Strings(verbs)
+	for _, v := range verbs {
+		out = append(out, cmd.verbs[v].usage)
+	}
+	return out
+}
+
+func commandUsage(w io.Writer, cmd command, noun string) {
+	for i, line := range synopses(cmd) {
+		prefix := "usage: "
+		if i > 0 {
+			prefix = "       "
+		}
+		fmt.Fprintf(w, "%s%s\n", prefix, line)
+	}
+	if !cmd.local {
+		fmt.Fprint(w, "       [--instance <id> | --socket <path>] [--timeout <duration>]\n")
+	}
+	fmt.Fprint(w, "       [--format json|table]\n")
 }
 
 func usage(w io.Writer, cmds map[string]command) {
@@ -317,7 +392,9 @@ func usage(w io.Writer, cmds map[string]command) {
 	var b strings.Builder
 	b.WriteString("usage: husk [flags]                 start an instance\n")
 	for _, n := range nouns {
-		fmt.Fprintf(&b, "       %s\n", cmds[n].usage)
+		for _, line := range synopses(cmds[n]) {
+			fmt.Fprintf(&b, "       %s\n", line)
+		}
 	}
 	b.WriteString("       husk help\n")
 	b.WriteString("\nglobal flags follow the command: --instance <id> | --socket <path>, --format json|table, --timeout <duration>\n")

@@ -149,10 +149,19 @@ type Stream struct {
 	// Result is the raw result of the opening reply (for state.watch the
 	// current entries).
 	Result json.RawMessage
+	// notify is the stream's own notification method; empty accepts all.
+	notify string
+}
+
+// Only restricts Next to the notifications of the stream's own method
+// (state.changed, event.deliver); any other notification is ignored.
+func (s *Stream) Only(method string) *Stream {
+	s.notify = method
+	return s
 }
 
 // Stream sends a request and, on a success reply, returns a Stream over
-// the same connection. It is the API behind the later watch commands.
+// the same connection. It is the API behind the watch commands.
 func (c *Client) Stream(ctx context.Context, method string, params any) (*Stream, error) {
 	res, err := c.Call(ctx, method, params)
 	if err != nil {
@@ -163,8 +172,7 @@ func (c *Client) Stream(ctx context.Context, method string, params any) (*Stream
 
 // Next returns the next notification. When the connection ends it returns an
 // ExitTransport error "instance went away"; ctx ending returns ctx's error
-// wrapped as ExitTransport, which the caller maps (an interrupt is a
-// watch's normal end).
+// wrapped as ExitTransport.
 func (s *Stream) Next(ctx context.Context) (protocol.Message, error) {
 	for {
 		m, err := s.c.next(ctx, "instance went away")
@@ -176,6 +184,9 @@ func (s *Stream) Next(ctx context.Context) (protocol.Message, error) {
 		}
 		if m.Method == protocol.MethodProtocolError {
 			return protocol.Message{}, protocolErrorNotification(m)
+		}
+		if s.notify != "" && m.Method != s.notify {
+			continue
 		}
 		return m, nil
 	}
