@@ -625,6 +625,9 @@ func TestManifestsAreValidV2AndMatchThePlugin(t *testing.T) {
 	if len(surfaces) != 1 || surfaces[0] != pub.Surfaces[0].ID {
 		t.Errorf("code renders %v, manifest claims %v", surfaces, pub.Surfaces)
 	}
+	if len(pub.SecretRequests) != 1 || pub.SecretRequests[0].Name != secretName || pub.SecretRequests[0].Required || pub.SecretRequests[0].Purpose == "" {
+		t.Errorf("publisher secrets = %+v", pub.SecretRequests)
+	}
 	if len(pub.RailItems) != 0 || len(act.Surfaces) != 0 {
 		t.Errorf("no rail items or contributor surfaces expected: %+v %+v", pub.RailItems, act.Surfaces)
 	}
@@ -634,8 +637,8 @@ func TestManifestsAreValidV2AndMatchThePlugin(t *testing.T) {
 	if len(pub.HooksDeclared) != 1 || pub.HooksDeclared[0].ID != refreshHook || pub.HooksDeclared[0].Title == "" || pub.HooksDeclared[0].Kind != manifest.HookGate {
 		t.Errorf("hooks = %+v", pub.HooksDeclared)
 	}
-	if len(pub.Actions) != 1 || pub.Actions[0].ID != refreshAction || pub.Actions[0].Title != "Refresh" {
-		t.Errorf("publisher actions = %+v", pub.Actions)
+	if len(pub.Actions) != 2 || pub.Actions[0].ID != refreshAction || pub.Actions[0].Title != "Refresh" || pub.Actions[1].ID != secretCheckAction {
+		t.Errorf("publisher actions = %+v, want {%s, %s}", pub.Actions, refreshAction, secretCheckAction)
 	}
 	if len(pub.EventsDeclared) != 1 || pub.EventsDeclared[0].Name != selectionEvent || pub.EventsDeclared[0].Title == "" {
 		t.Errorf("events = %+v", pub.EventsDeclared)
@@ -766,6 +769,44 @@ func TestCaptureFieldWireShape(t *testing.T) {
 	}
 }
 
+// secret-check asks the host for the declared secret and replies to the action
+// once the read is decided: set:true on a value, the error's code and reason
+// otherwise, and never the value.
+func TestSecretCheckRepliesWithoutTheValue(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		reply string
+		want  map[string]any
+	}{
+		{"value", `{"id":%s,"result":{"name":"go.reference.token","value":"s3cret"}}`, map[string]any{"set": true}},
+		{"declined", `{"id":%s,"error":{"code":"denied","message":"denied: user_denied","data":{"reason":"user_denied"}}}`, map[string]any{"code": "denied", "reason": "user_denied"}},
+		{"unset", `{"id":%s,"error":{"code":"not_found","message":"not_found: unset","data":{"reason":"unset"}}}`, map[string]any{"code": "not_found", "reason": "unset"}},
+		{"no reason", `{"id":%s,"error":{"code":"internal","message":"boom"}}`, map[string]any{"code": "internal", "reason": ""}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := start(t, false)
+			h.send(`{"id":"inv-1","method":"action.invoke","params":{"action":"` + secretCheckAction + `"}}`)
+			get := h.sockNext(protocol.MethodSecretsGet)
+			if got := decode[map[string]string](t, get.Params); got["name"] != secretName {
+				t.Fatalf("secrets.get params = %v", got)
+			}
+			// The action is not answered until the read is.
+			h.stdoutBarrier()
+			h.toSocket(fmt.Sprintf(tc.reply, get.ID.String()))
+			rep := h.outNext()
+			if rep.ID == nil || rep.ID.String() != `"inv-1"` || rep.Error != nil {
+				t.Fatalf("action reply = %+v", rep)
+			}
+			if strings.Contains(string(rep.Result), "s3cret") {
+				t.Fatalf("reply leaks the value: %s", rep.Result)
+			}
+			if got := decode[map[string]any](t, rep.Result); fmt.Sprint(got) != fmt.Sprint(tc.want) {
+				t.Fatalf("reply = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 // Text mode belongs to the surface that received `i`: another surface of the
 // same plugin neither captures nor consumes the one-shot capture=false.
 func TestCaptureFieldIsPerSurface(t *testing.T) {
@@ -783,5 +824,14 @@ func TestCaptureFieldIsPerSurface(t *testing.T) {
 	}
 	if c := p.captureField(protocol.SurfaceMainStage); c != nil {
 		t.Errorf("off frame sent twice: %v", *c)
+	}
+}
+
+func TestSecretCheckIsNotTheContributorsAction(t *testing.T) {
+	h := start(t, true)
+	h.sockNext(protocol.MethodSlotContribute)
+	h.send(`{"id":"inv-1","method":"action.invoke","params":{"action":"` + secretCheckAction + `"}}`)
+	if m := h.outNext(); m.Error == nil || m.Error.Code != protocol.CodeNotFound {
+		t.Fatalf("contributor answered secret-check: %+v", m)
 	}
 }

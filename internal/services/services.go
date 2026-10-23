@@ -526,7 +526,7 @@ type RuntimeOptions struct {
 	Publisher c.Publisher
 	Clock     c.Clock
 	Crypto    store.SecretDoc
-	Prompt    func(secrets.Prompt) <-chan bool
+	Prompt    func(context.Context, secrets.Prompt) secrets.Answer
 	Audit     func(string)
 	// ProfileFlag is the --profile start flag: a selection input of the
 	// startup flight only.

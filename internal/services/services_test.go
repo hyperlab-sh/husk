@@ -7,7 +7,6 @@ import (
 	"fmt"
 	c "github.com/hyperlab-sh/husk/internal/services/contracts"
 	"github.com/hyperlab-sh/husk/internal/services/keybinding"
-	"github.com/hyperlab-sh/husk/internal/services/secrets"
 	"github.com/hyperlab-sh/husk/internal/services/settings"
 	stheme "github.com/hyperlab-sh/husk/internal/services/theme"
 	"github.com/hyperlab-sh/husk/internal/substrate/state"
@@ -264,11 +263,15 @@ func (c *manualClock) advance(d time.Duration) {
 }
 
 type memoryCrypto struct {
-	data map[string][]byte
-	err  error
+	data  map[string][]byte
+	err   error
+	onGet func() // runs before Get answers, to interleave with a read
 }
 
 func (m *memoryCrypto) Get(k string) ([]byte, bool, error) {
+	if m.onGet != nil {
+		m.onGet()
+	}
 	v, ok := m.data[k]
 	return append([]byte(nil), v...), ok, m.err
 }
@@ -286,82 +289,6 @@ func (m *memoryCrypto) Keys() ([]string, error) {
 		out = append(out, k)
 	}
 	return out, m.err
-}
-func TestSecretsConsentDigestTimeoutAndNoValueLeaks(t *testing.T) {
-	tree := state.New(state.Options{})
-	clock := clock()
-	posts := make(chan func(), 8)
-	answers := make(chan bool, 1)
-	prompts := make(chan secrets.Prompt, 8)
-	events := make(chan any, 20)
-	crypto := &memoryCrypto{data: map[string][]byte{}}
-	sec, err := secrets.New(secrets.Options{State: tree, Post: func(f func()) bool { posts <- f; return true }, Crypto: crypto, Clock: clock, Prompt: func(p secrets.Prompt) <-chan bool { prompts <- p; return answers }, Publisher: c.PublishFunc(func(_ string, v any) { events <- v })})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer sec.Close()
-	in := catalog("files")
-	report := apply(t, sec, in)
-	marker := "NEVER_LEAK_SECRET_VALUE"
-	if err = sec.Set(Caller{Kind: "cli"}, "git.token", []byte(marker)); err != nil {
-		t.Fatal(err)
-	}
-	plugin := Caller{Kind: "plugin", PluginID: "files"}
-	for _, fn := range []func() error{func() error { return sec.Grant(plugin, "files", "git.token") }, func() error { return sec.Revoke(plugin, "files", "git.token") }, func() error { return sec.Set(plugin, "git.token", []byte("bad")) }, func() error { _, err := sec.Reveal(plugin, "git.token"); return err }} {
-		if fn() == nil {
-			t.Fatal("plugin mutation allowed")
-		}
-	}
-	if _, err = sec.Read(plugin, "other.key"); err == nil {
-		t.Fatal("undeclared read")
-	}
-	if _, err = sec.Read(plugin, "git.token"); err == nil {
-		t.Fatal("ungranted read")
-	}
-	<-prompts
-	answers <- true
-	(<-posts)()
-	if value, err := sec.Read(plugin, "git.token"); err != nil || string(value) != marker {
-		t.Fatal("accepted grant failed", err)
-	}
-	if err = sec.Revoke(Caller{Kind: "cli"}, "files", "git.token"); err != nil {
-		t.Fatal(err)
-	}
-	(<-posts)()
-	sec.Read(plugin, "git.token")
-	<-prompts
-	timer := <-clock.created // first prompt timer already stopped; the next is active.
-	<-timer.stopped
-	timer = <-clock.created
-	clock.advance(time.Minute)
-	<-timer.stopped
-	if _, err = sec.Read(plugin, "git.token"); err == nil || !strings.Contains(err.Error(), "user_denied") {
-		t.Fatal("timeout denial", err)
-	}
-	if err = sec.Grant(Caller{Kind: "cli"}, "files", "git.token"); err != nil {
-		t.Fatal(err)
-	}
-	(<-posts)()
-	in.Declared[store.DeclaredPlugins]["files"]["secret_requests"] = []any{map[string]any{"name": "git.token", "purpose": "Different"}}
-	apply(t, sec, in)
-	if gs, _ := sec.Grants(Caller{Kind: "cli"}); len(gs) != 0 {
-		t.Fatal("digest failed to void grant")
-	}
-	crypto.err = errors.New(marker)
-	if _, err = sec.Read(Caller{Kind: "cli"}, "git.token"); err == nil || strings.Contains(err.Error(), marker) {
-		t.Fatal("crypto error leaked value")
-	}
-	serialized, _ := json.Marshal([]any{report, tree.Snapshot()})
-	if strings.Contains(string(serialized), marker) {
-		t.Fatal("State/report leak")
-	}
-	close(events)
-	for event := range events {
-		raw, _ := json.Marshal(event)
-		if strings.Contains(string(raw), marker) {
-			t.Fatal("event leak")
-		}
-	}
 }
 
 type fakeStore struct {

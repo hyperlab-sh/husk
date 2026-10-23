@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -18,17 +19,18 @@ import (
 
 // newSecrets wires a real secrets service with an in-memory crypto doc, a
 // prompt seam and loop posts, declaring one git.token request for "files".
-func newSecrets(t *testing.T) (Secrets, *secrets.Service, chan func(), chan bool, *fakeClock) {
+func newSecrets(t *testing.T) (Secrets, *secrets.Service, chan func(), chan secrets.Answer, *fakeClock) {
 	port, svc, posts, answers, clock, _ := newSecretsWithCrypto(t)
 	return port, svc, posts, answers, clock
 }
 
 // newSecretsWithCrypto also hands back the store crypto so tests can inject
-// read errors or plant stored bytes directly.
-func newSecretsWithCrypto(t *testing.T) (Secrets, *secrets.Service, chan func(), chan bool, *fakeClock, *memoryCrypto) {
+// read errors or plant stored bytes directly. The dialog blocks on answers
+// until its ctx is cancelled, like the real one.
+func newSecretsWithCrypto(t *testing.T) (Secrets, *secrets.Service, chan func(), chan secrets.Answer, *fakeClock, *memoryCrypto) {
 	t.Helper()
 	posts := make(chan func(), 8)
-	answers := make(chan bool, 1)
+	answers := make(chan secrets.Answer, 1)
 	clock := &fakeClock{}
 	crypto := &memoryCrypto{data: map[string][]byte{}}
 	in := services.ReloadInput{
@@ -44,7 +46,14 @@ func newSecretsWithCrypto(t *testing.T) (Secrets, *secrets.Service, chan func(),
 		Clock:  clock,
 		Crypto: crypto,
 		Post:   func(f func()) bool { posts <- f; return true },
-		Prompt: func(secrets.Prompt) <-chan bool { return answers },
+		Prompt: func(ctx context.Context, _ secrets.Prompt) secrets.Answer {
+			select {
+			case a := <-answers:
+				return a
+			case <-ctx.Done():
+				return secrets.Dismissed
+			}
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -54,20 +63,46 @@ func newSecretsWithCrypto(t *testing.T) (Secrets, *secrets.Service, chan func(),
 	return Secrets{Svc: svc}, svc, posts, answers, clock, crypto
 }
 
+type getResult struct {
+	value string
+	err   error
+}
+
+// getAsync runs a port read on its own goroutine: a plugin's ungranted read
+// blocks until the dialog is answered.
+func getAsync(port Secrets, caller host.Caller, name string) <-chan getResult {
+	out := make(chan getResult, 1)
+	go func() {
+		v, err := port.Get(context.Background(), caller, name)
+		out <- getResult{v, err}
+	}()
+	return out
+}
+
 func TestSecretsUserLifecycleAndViews(t *testing.T) {
-	port, svc, _, _, _ := newSecrets(t)
+	port, _, posts, _, _ := newSecrets(t)
 	ctx := context.Background()
 
-	if err := port.Set(ctx, userCaller, "git.token", []byte("tok")); err != nil {
+	if err := port.Set(ctx, userCaller, "git.token", "tok"); err != nil {
 		t.Fatalf("set: %v", err)
 	}
 	value, err := port.Reveal(ctx, userCaller, "git.token")
-	if err != nil || string(value) != "tok" {
+	if err != nil || value != "tok" {
 		t.Fatalf("reveal = %q err=%v", value, err)
 	}
 	names, err := port.Names(ctx, userCaller)
-	if err != nil || len(names) != 1 || names[0].Name != "git.token" || !names[0].Set || len(names[0].Declared) != 1 || names[0].Declared[0] != "files" {
-		t.Fatalf("names = %+v err=%v", names, err)
+	yes := true
+	want := host.SecretNames{Storage: "ok", Secrets: []host.SecretInfo{{Name: "git.token", Declared: []string{"files"}, Granted: []string{}, Set: &yes, Required: true}}}
+	if err != nil || !reflect.DeepEqual(names, want) {
+		t.Fatalf("names = %+v err=%v, want %+v", names, err, want)
+	}
+
+	// Grant and revoke return once the posted write ran.
+	granted := make(chan error, 1)
+	go func() { granted <- port.Grant(ctx, userCaller, "files", "git.token") }()
+	runPosted(t, posts)
+	if err := <-granted; err != nil {
+		t.Fatalf("grant: %v", err)
 	}
 
 	// Plugin-mutating methods are user-only.
@@ -75,7 +110,7 @@ func TestSecretsUserLifecycleAndViews(t *testing.T) {
 		name string
 		call func() error
 	}{
-		{"set", func() error { return port.Set(ctx, filesCaller, "git.token", []byte("x")) }},
+		{"set", func() error { return port.Set(ctx, filesCaller, "git.token", "x") }},
 		{"grant", func() error { return port.Grant(ctx, filesCaller, "files", "git.token") }},
 		{"revoke", func() error { return port.Revoke(ctx, filesCaller, "files", "git.token") }},
 		{"reveal", func() error { _, err := port.Reveal(ctx, filesCaller, "git.token"); return err }},
@@ -86,13 +121,12 @@ func TestSecretsUserLifecycleAndViews(t *testing.T) {
 			t.Fatalf("plugin %s: %s/%s", op.name, code, reason)
 		}
 	}
-	_ = svc
 }
 
-func TestSecretsPluginReadRequiresDeclarationAndGrant(t *testing.T) {
+func TestSecretsPluginReadBlocksOnTheDialog(t *testing.T) {
 	port, _, posts, answers, _ := newSecrets(t)
 	ctx := context.Background()
-	if err := port.Set(ctx, userCaller, "git.token", []byte("tok")); err != nil {
+	if err := port.Set(ctx, userCaller, "git.token", "tok"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -109,41 +143,54 @@ func TestSecretsPluginReadRequiresDeclarationAndGrant(t *testing.T) {
 		t.Fatalf("undeclared name: %s", code)
 	}
 
-	// First declared read: no grant yet, so the service prompts and the
-	// call returns denied/needs_grant.
-	if _, err := port.Get(ctx, filesCaller, "git.token"); err == nil {
-		t.Fatal("ungranted read allowed")
-	} else if code, reason := codedOf(t, err); code != "denied" || reason != "needs_grant" {
-		t.Fatalf("ungranted read: %s/%s", code, reason)
+	// A declared, ungranted read waits for the answer; accept writes the
+	// grant on the loop and the same call returns the value.
+	read := getAsync(port, filesCaller, "git.token")
+	select {
+	case r := <-read:
+		t.Fatalf("ungranted read returned before the dialog was answered: %+v", r)
+	default:
 	}
-	answers <- true
+	answers <- secrets.Accepted
 	runPosted(t, posts)
-
-	// Second read: grant recorded, value delivered.
-	value, err := port.Get(ctx, filesCaller, "git.token")
-	if err != nil || string(value) != "tok" {
-		t.Fatalf("granted read = %q err=%v", value, err)
+	if r := <-read; r.err != nil || r.value != "tok" {
+		t.Fatalf("accepted read = %q err=%v", r.value, r.err)
+	}
+	// The grant is recorded: the next read does not ask.
+	if v, err := port.Get(ctx, filesCaller, "git.token"); err != nil || v != "tok" {
+		t.Fatalf("granted read = %q err=%v", v, err)
 	}
 }
 
-func TestSecretsDeniedPromptSticksUntilRevoked(t *testing.T) {
-	port, _, _, answers, clock := newSecrets(t)
+func TestSecretsDeclinedPromptSticksUntilGranted(t *testing.T) {
+	port, _, posts, answers, _ := newSecrets(t)
 	ctx := context.Background()
-	if err := port.Set(ctx, userCaller, "git.token", []byte("tok")); err != nil {
+	if err := port.Set(ctx, userCaller, "git.token", "tok"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := port.Get(ctx, filesCaller, "git.token"); err == nil {
-		t.Fatal("ungranted read allowed")
+	read := getAsync(port, filesCaller, "git.token")
+	answers <- secrets.Declined
+	if r := <-read; r.err == nil {
+		t.Fatal("declined read allowed")
+	} else if code, reason := codedOf(t, r.err); code != "denied" || reason != "user_denied" {
+		t.Fatalf("declined read: %s/%s", code, reason)
 	}
-	answers <- false
-	// The deny path posts nothing; the prompt goroutine's deferred Stop
-	// runs after its pending-marker write, so it is the sync point.
-	<-clock.timers[0].stopped
-	// The denial is remembered: the next read fails without a new prompt.
+	// The decline is remembered: the next read fails without a dialog (no
+	// answer is queued, so a dialog would block here).
 	if _, err := port.Get(ctx, filesCaller, "git.token"); err == nil {
-		t.Fatal("denied grant forgotten")
+		t.Fatal("declined grant forgotten")
 	} else if code, reason := codedOf(t, err); code != "denied" || reason != "user_denied" {
-		t.Fatalf("post-denial read: %s/%s", code, reason)
+		t.Fatalf("post-decline read: %s/%s", code, reason)
+	}
+	// A CLI grant clears the memory.
+	granted := make(chan error, 1)
+	go func() { granted <- port.Grant(ctx, userCaller, "files", "git.token") }()
+	runPosted(t, posts)
+	if err := <-granted; err != nil {
+		t.Fatal(err)
+	}
+	if v, err := port.Get(ctx, filesCaller, "git.token"); err != nil || v != "tok" {
+		t.Fatalf("read after grant = %q err=%v", v, err)
 	}
 }
 
@@ -152,7 +199,7 @@ func TestSecretsUnsetValueIsNotLeaked(t *testing.T) {
 	ctx := context.Background()
 	if _, err := port.Get(ctx, userCaller, "git.token"); err == nil {
 		t.Fatal("unset read allowed")
-	} else if code, reason := codedOf(t, err); code != "not_found" || reason != "secret_unset" {
+	} else if code, reason := codedOf(t, err); code != "not_found" || reason != "unset" {
 		t.Fatalf("unset read: %s/%s", code, reason)
 	}
 }
@@ -188,22 +235,20 @@ func TestSecretValueNeverAppearsInErrorStrings(t *testing.T) {
 	const value = "hunter2-super-secret"
 	port, _, posts, answers, _, crypto := newSecretsWithCrypto(t)
 	ctx := context.Background()
-	if err := port.Set(ctx, userCaller, "git.token", []byte(value)); err != nil {
+	if err := port.Set(ctx, userCaller, "git.token", value); err != nil {
 		t.Fatal(err)
 	}
-	// Grant through the prompt flow, like the grant test: read returns
-	// needs_grant, the answer posts the grant to the loop.
-	if _, err := port.Get(ctx, filesCaller, "git.token"); err == nil {
-		t.Fatal("ungranted read allowed")
-	}
-	answers <- true
+	// Grant through the prompt flow: the read waits, the answer posts the
+	// grant to the loop and the same call returns the value.
+	read := getAsync(port, filesCaller, "git.token")
+	answers <- secrets.Accepted
 	runPosted(t, posts)
 
 	// The granted read returns the value, so the scan below is not vacuous.
-	if got, err := port.Get(ctx, filesCaller, "git.token"); err != nil {
-		t.Fatalf("granted read failed: %v", err)
-	} else if string(got) != value {
-		t.Fatalf("granted read = %q", got)
+	if r := <-read; r.err != nil {
+		t.Fatalf("granted read failed: %v", r.err)
+	} else if r.value != value {
+		t.Fatalf("granted read = %q", r.value)
 	}
 
 	// Paths where the value (or its bytes) is actually in scope when the
@@ -244,7 +289,7 @@ func TestSecretValueNeverAppearsInErrorStrings(t *testing.T) {
 			_, err := port.Get(ctx, host.Caller{Kind: host.CallerPlugin, PluginID: "other"}, "git.token")
 			return err
 		}),
-		mustErr(t, func() error { return port.Set(ctx, filesCaller, "git.token", []byte("x")) }),
+		mustErr(t, func() error { return port.Set(ctx, filesCaller, "git.token", "x") }),
 		mustErr(t, func() error { return port.Grant(ctx, filesCaller, "files", "git.token") }),
 	)
 	for i, err := range errs {

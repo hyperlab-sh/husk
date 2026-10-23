@@ -3,12 +3,10 @@ package services
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	c "github.com/hyperlab-sh/husk/internal/services/contracts"
 	"github.com/hyperlab-sh/husk/internal/services/keybinding"
 	"github.com/hyperlab-sh/husk/internal/services/profile"
-	"github.com/hyperlab-sh/husk/internal/services/secrets"
 	"github.com/hyperlab-sh/husk/internal/services/settings"
 	stheme "github.com/hyperlab-sh/husk/internal/services/theme"
 	"github.com/hyperlab-sh/husk/internal/substrate/state"
@@ -315,44 +313,6 @@ func TestRuntimeDefaultsListenerAndSettingsFreeze(t *testing.T) {
 	_, _, err = newSettings.Rebuild(context.Background(), input(`{"theme":{"name":5}}`))
 	if err == nil || newSettings.Snapshot() == nil || newSettings.Snapshot().String("theme.name") == "" {
 		t.Fatal("first-load defaults missing")
-	}
-}
-func TestSecretsMissingBrokenMetadataCapsAndPendingDigest(t *testing.T) {
-	tree := state.New(state.Options{})
-	posts := make(chan func(), 8)
-	answers := make(chan bool, 1)
-	prompted := make(chan struct{}, 8)
-	crypto := &memoryCrypto{data: map[string][]byte{}}
-	sec, _ := secrets.New(secrets.Options{State: tree, Clock: clock(), Post: func(f func()) bool { posts <- f; return true }, Crypto: crypto, Prompt: func(secrets.Prompt) <-chan bool { prompted <- struct{}{}; return answers }})
-	defer sec.Close()
-	in := catalog("files")
-	apply(t, sec, in)
-	plugin := Caller{Kind: "plugin", PluginID: "files"}
-	sec.Read(plugin, "git.token")
-	<-prompted
-	in.Declared[store.DeclaredPlugins]["files"]["secret_requests"] = []any{map[string]any{"name": "git.token", "purpose": "new purpose"}}
-	apply(t, sec, in)
-	answers <- true
-	(<-posts)()
-	if grants, _ := sec.Grants(Caller{Kind: "cli"}); len(grants) != 0 {
-		t.Fatal("stale dialog grant applied")
-	}
-	if err := sec.Set(Caller{Kind: "cli"}, "git.token", make([]byte, 64*1024+1)); err == nil {
-		t.Fatal("secret cap")
-	}
-	if err := sec.Set(Caller{Kind: "cli"}, "Bad Name", nil); err == nil {
-		t.Fatal("secret name")
-	}
-	if _, err := sec.Read(Caller{Kind: "cli"}, "git.token"); err == nil {
-		t.Fatal("unset secret")
-	}
-	crypto.err = errors.New("sensitive failure payload")
-	infos, err := sec.Names(Caller{Kind: "cli"})
-	if err == nil || len(infos) != 1 || !infos[0].Broken || strings.Contains(err.Error(), "sensitive") {
-		t.Fatal("broken metadata", infos, err)
-	}
-	if _, err = sec.Grants(plugin); err == nil {
-		t.Fatal("plugin grants inventory")
 	}
 }
 

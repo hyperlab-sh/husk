@@ -36,11 +36,17 @@ func TestSecretsMethodsByCallerKind(t *testing.T) {
 	input := Caller{Kind: protocol.CallerInput}
 	plugin := Caller{Kind: protocol.CallerPlugin, PluginID: "a"}
 	methods := map[string]func(*secrets.Service, Caller) error{
-		"get":    func(s *secrets.Service, k Caller) error { _, e := s.Read(k, "git.token"); return e },
-		"reveal": func(s *secrets.Service, k Caller) error { _, e := s.Reveal(k, "git.token"); return e },
-		"set":    func(s *secrets.Service, k Caller) error { return s.Set(k, "git.token", []byte("v")) },
-		"grant":  func(s *secrets.Service, k Caller) error { return s.Grant(k, "a", "git.token") },
-		"revoke": func(s *secrets.Service, k Caller) error { return s.Revoke(k, "a", "git.token") },
+		"get": func(s *secrets.Service, k Caller) error {
+			_, e := s.Read(context.Background(), k, "git.token")
+			return e
+		},
+		"reveal": func(s *secrets.Service, k Caller) error {
+			_, e := s.Reveal(context.Background(), k, "git.token")
+			return e
+		},
+		"set":    func(s *secrets.Service, k Caller) error { return s.Set(k, "git.token", "v") },
+		"grant":  func(s *secrets.Service, k Caller) error { return s.Grant(context.Background(), k, "a", "git.token") },
+		"revoke": func(s *secrets.Service, k Caller) error { return s.Revoke(context.Background(), k, "a", "git.token") },
 		"names":  func(s *secrets.Service, k Caller) error { _, e := s.Names(k); return e },
 	}
 	// want[method][kind] is the failure code/reason, "" for allowed.
@@ -79,7 +85,7 @@ func TestSecretNamesHostSeesEveryName(t *testing.T) {
 	apply(t, s, catalog("a"))
 	for _, kind := range []protocol.CallerKind{protocol.CallerCLI, protocol.CallerHost, protocol.CallerInput} {
 		infos, err := s.Names(Caller{Kind: kind})
-		if err != nil || len(infos) != 2 {
+		if err != nil || len(infos.Secrets) != 2 {
 			t.Fatalf("%s names = %+v, %v", kind, infos, err)
 		}
 	}
@@ -118,13 +124,12 @@ func TestInvalidCallersDeniedEverywhere(t *testing.T) {
 			"settings.schema":   func() error { _, e := set.SchemaFor(k, ""); return e },
 			"theme.check":       func() error { _, e := th.Check(ctx, k, input(`{}`)); return e },
 			"config.reload":     func() error { _, e := co.ReloadFor(ctx, k); return e },
-			"secrets.get":       func() error { _, e := sec.Read(k, "x.y"); return e },
+			"secrets.get":       func() error { _, e := sec.Read(context.Background(), k, "x.y"); return e },
 			"secrets.names":     func() error { _, e := sec.Names(k); return e },
-			"secrets.grants":    func() error { _, e := sec.Grants(k); return e },
-			"secrets.reveal":    func() error { _, e := sec.Reveal(k, "x.y"); return e },
-			"secrets.set":       func() error { return sec.Set(k, "x.y", nil) },
-			"secrets.grant":     func() error { return sec.Grant(k, "a", "x.y") },
-			"secrets.revoke":    func() error { return sec.Revoke(k, "a", "x.y") },
+			"secrets.reveal":    func() error { _, e := sec.Reveal(context.Background(), k, "x.y"); return e },
+			"secrets.set":       func() error { return sec.Set(k, "x.y", "") },
+			"secrets.grant":     func() error { return sec.Grant(context.Background(), k, "a", "x.y") },
+			"secrets.revoke":    func() error { return sec.Revoke(context.Background(), k, "a", "x.y") },
 			"keys.list":         func() error { _, e := kb.ListFor(k); return e },
 			"theme.get":         func() error { _, e := th.Get(k); return e },
 			"settings.validate": func() error { _, e := set.Validate(ctx, k, input(`{}`)); return e },

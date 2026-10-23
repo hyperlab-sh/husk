@@ -18,6 +18,7 @@ import (
 
 	"github.com/hyperlab-sh/husk/internal/host"
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
+	"github.com/hyperlab-sh/husk/internal/services/secrets"
 	"github.com/hyperlab-sh/husk/internal/substrate/state"
 	"github.com/hyperlab-sh/husk/internal/substrate/state/surfaces"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
@@ -204,6 +205,7 @@ type WorkbenchModel struct {
 	stageMode      string // "plugin" or "hotspots"
 	hotspotCursor  int
 	showPalette    bool
+	secretPrompt   *secretPromptState // the Secrets confirm dialog, when one is up
 	paletteQuery   string
 	paletteCursor  int
 	paletteTop     int // first result row drawn; follows the cursor (movePaletteCursor)
@@ -502,6 +504,19 @@ func (m *WorkbenchModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, waitForModifierTick(m.modifierTickInterval(now))
+
+	case secretPromptOpenMsg:
+		if old := m.secretPrompt; old != nil && old.id != msg.id {
+			m.answerSecretPrompt(secrets.Dismissed)
+		}
+		m.secretPrompt = &secretPromptState{id: msg.id, prompt: msg.prompt, reply: msg.reply}
+		return m, nil
+
+	case secretPromptCloseMsg:
+		if m.secretPrompt != nil && m.secretPrompt.id == msg.id {
+			m.secretPrompt = nil
+		}
+		return m, nil
 
 	case toastExpireMsg:
 		if msg.id == m.toastSeq && !m.engineToast {

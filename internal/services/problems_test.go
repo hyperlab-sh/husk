@@ -138,7 +138,7 @@ func TestSecretDeclarationProblemsAreWarnings(t *testing.T) {
 			t.Errorf("%s = %+v", code, got[code])
 		}
 	}
-	if names, _ := s.Names(Caller{Kind: protocol.CallerCLI}); len(names) != 1 {
+	if names, _ := s.Names(Caller{Kind: protocol.CallerCLI}); len(names.Secrets) != 1 {
 		t.Fatalf("names = %+v", names)
 	}
 }

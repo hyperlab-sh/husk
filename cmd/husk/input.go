@@ -258,6 +258,11 @@ func (m *WorkbenchModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// The secret confirm dialog is modal and private: no plugin sees its keys.
+	if m.secretPrompt != nil {
+		return m.secretPromptKey(key)
+	}
+
 	if msg.Mod.Contains(tea.ModAlt) && !m.modifiers.Alt {
 		next := m.modifiers
 		next.Alt = true
@@ -555,7 +560,7 @@ func (m *WorkbenchModel) applyDragAt(x, y int) bool {
 }
 
 func (m *WorkbenchModel) handleMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
-	if m.showPalette || m.tooSmall() {
+	if m.showPalette || m.secretPrompt != nil || m.tooSmall() {
 		return m, nil
 	}
 	msg := event.Mouse()

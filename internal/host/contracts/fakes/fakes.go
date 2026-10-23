@@ -348,28 +348,28 @@ func (f *Settings) Validate(_ context.Context, c contracts.Caller) (contracts.Va
 // Secrets fakes contracts.SecretsPort.
 type Secrets struct {
 	callLog
-	Value []byte
-	Infos []contracts.SecretInfo
-	Err   error
+	Value  string
+	Result contracts.SecretNames
+	Err    error
 }
 
 // NewSecrets returns a Secrets logging to rec.
 func NewSecrets(rec *Recorder) *Secrets { return &Secrets{callLog: callLog{r: orNew(rec)}} }
 
 // Get implements contracts.SecretsPort.
-func (f *Secrets) Get(_ context.Context, c contracts.Caller, name string) ([]byte, error) {
+func (f *Secrets) Get(_ context.Context, c contracts.Caller, name string) (string, error) {
 	f.RecordCaller("Secrets.Get", c, name)
 	return f.Value, f.Err
 }
 
 // Names implements contracts.SecretsPort.
-func (f *Secrets) Names(_ context.Context, c contracts.Caller) ([]contracts.SecretInfo, error) {
+func (f *Secrets) Names(_ context.Context, c contracts.Caller) (contracts.SecretNames, error) {
 	f.RecordCaller("Secrets.Names", c)
-	return f.Infos, f.Err
+	return f.Result, f.Err
 }
 
 // Set implements contracts.SecretsPort.
-func (f *Secrets) Set(_ context.Context, c contracts.Caller, name string, _ []byte) error {
+func (f *Secrets) Set(_ context.Context, c contracts.Caller, name, _ string) error {
 	f.RecordCaller("Secrets.Set", c, name)
 	return f.Err
 }
@@ -387,7 +387,7 @@ func (f *Secrets) Revoke(_ context.Context, c contracts.Caller, plugin, name str
 }
 
 // Reveal implements contracts.SecretsPort.
-func (f *Secrets) Reveal(_ context.Context, c contracts.Caller, name string) ([]byte, error) {
+func (f *Secrets) Reveal(_ context.Context, c contracts.Caller, name string) (string, error) {
 	f.RecordCaller("Secrets.Reveal", c, name)
 	return f.Value, f.Err
 }

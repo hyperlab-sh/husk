@@ -62,6 +62,9 @@ func (m *WorkbenchModel) View() tea.View {
 	if m.showPalette {
 		c.castShadow(m.drawCommandPalette(c), ink, canvasBg)
 	}
+	if m.secretPrompt != nil {
+		c.castShadow(m.drawSecretPrompt(c), ink, canvasBg)
+	}
 	// The app background: every cell still on the default background (the
 	// gutter, cells no surface owns) takes Canvas, so the slot shade derived
 	// from Canvas is lighter than what the user sees on every terminal.
