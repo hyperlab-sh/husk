@@ -14,9 +14,9 @@ var captureCtx = keybinding.KeyContext{FocusSurface: "stage", FocusOwner: "a", C
 // layer; modified keys, function keys, esc and surface-scoped entries stay.
 func TestCaptureRemovesGlobalTextKeyCandidates(t *testing.T) {
 	kb := rankKeys(t, map[store.Layer]string{
-		store.LayerDistribution: bind(`{"key":"d","action":"d.letter"}`, `{"key":"f2","action":"d.f2"}`),
+		store.LayerDistribution: bind(`{"key":"d","action":"d.letter"}`, `{"key":"f2","action":"d.f2"}`, `{"key":"enter","action":"d.enter"}`),
 		store.LayerUser:         bind(`{"key":"u","action":"u.letter"}`, `{"key":"alt+u","action":"u.alt"}`, `{"key":"left","action":"u.left"}`),
-		store.LayerProfile:      bind(`{"key":"p","action":"p.letter"}`, `{"key":" ","action":"p.space"}`, `{"key":"s","focus":"stage","action":"p.surface"}`),
+		store.LayerProfile:      bind(`{"key":"p","action":"p.letter"}`, `{"key":" ","action":"p.space"}`, `{"key":"up","action":"p.up"}`, `{"key":"s","focus":"stage","action":"p.surface"}`),
 	}, bind(`{"key":"l","focus":"stage","action":"a.local"}`))
 	for _, tc := range []struct {
 		key  string
@@ -28,9 +28,9 @@ func TestCaptureRemovesGlobalTextKeyCandidates(t *testing.T) {
 		{"u", "<none>", "u.letter"},
 		{"p", "<none>", "p.letter"},
 		{" ", "<none>", "p.space"},
-		{"enter", "<none>", "<none>"},
+		{"enter", "<none>", "d.enter"},
 		{"tab", "<none>", "husk.focus.next"},
-		{"up", "<none>", "<none>"},
+		{"up", "<none>", "p.up"},
 		{"left", "<none>", "u.left"},
 		{"?", "<none>", "husk.modifiers.toggle_alt_latch"},
 		{"ctrl+c", "husk.quit", "husk.quit"},
@@ -107,8 +107,15 @@ func TestCaptureKeepsTombstones(t *testing.T) {
 	if got := resolved(kb, modal, "n"); got != "<none>" {
 		t.Errorf("tombstone on the modal's own key = %s, want none", got)
 	}
-	if got := resolved(kb, captureCtx, "n"); got != "<none>" {
-		t.Errorf("tombstone on a text key = %s, want none", got)
+	// A user tombstone on n over a distribution n -> husk.modal.close: the
+	// close binding is exempt from the filter, so a tombstone the filter
+	// dropped would let it match. It survives and vetoes the key.
+	tomb := rankKeys(t, map[store.Layer]string{
+		store.LayerDistribution: bind(`{"key":"n","action":"husk.modal.close"}`),
+		store.LayerUser:         bind(`{"key":"n","disable":true}`),
+	}, "")
+	if got := resolved(tomb, modal, "n"); got != "<none>" {
+		t.Errorf("tombstone over the exempt close binding = %s, want none", got)
 	}
 }
 

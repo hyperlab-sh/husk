@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -248,14 +249,15 @@ func TestPaletteClosesOnItsOpenersAndEsc(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			m := goldenModel()
 			m.keys = tc.keys
+			m.setFocus(protocol.SurfaceMainStage) // a scoped opener matches under this focus
 			m.openPalette()
 			m.paletteQuery = ""
 			m.Update(keyMsg(tc.press))
 			if closed := !m.showPalette; closed != tc.want {
 				t.Fatalf("palette closed = %v after %q, want %v", closed, tc.press, tc.want)
 			}
-			if !tc.want && tc.press == ":" && m.paletteQuery != ":" {
-				t.Errorf("query = %q, want the typed colon", m.paletteQuery)
+			if !tc.want && utf8.RuneCountInString(tc.press) == 1 && m.paletteQuery != tc.press {
+				t.Errorf("query = %q, want the typed %q", m.paletteQuery, tc.press)
 			}
 		})
 	}
