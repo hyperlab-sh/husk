@@ -39,7 +39,7 @@ func (m *WorkbenchModel) View() tea.View {
 	for i := len(order) - 1; i >= 0; i-- {
 		h := order[i]
 		switch {
-		case h.ID == protocol.SurfaceActivityRail:
+		case h.ID == protocol.SurfaceActivityRail && m.terminalView(h.ID) == nil:
 			c.blitBlock(h.Rect.X, h.Rect.Y, m.renderActivityRailBox())
 		case h.ID == protocol.SurfaceMainStage && m.stageMode == "hotspots":
 			m.drawHotspotArchitectureStage(c)
@@ -60,7 +60,9 @@ func (m *WorkbenchModel) View() tea.View {
 		c.castShadow(uv.Rect(r.X, r.Y, r.Width, r.Height), ink, canvasBg)
 	}
 	if m.surfaceOwner(protocol.SurfaceAppOverlay) != "" {
-		c.blitOverlay(m.publishedContent(protocol.SurfaceAppOverlay, m.width, m.height))
+		if !m.drawTerminal(c, protocol.SurfaceAppOverlay, m.slotRects[protocol.SurfaceAppOverlay]) {
+			c.blitOverlay(m.publishedContent(protocol.SurfaceAppOverlay, m.width, m.height))
+		}
 	}
 	if m.activeToast != nil {
 		m.drawToast(c) // a toast is not a popup: no shadow
@@ -82,6 +84,7 @@ func (m *WorkbenchModel) View() tea.View {
 	out := c.render()
 	c.release()
 	view := tea.NewView(out)
+	view.Cursor = m.terminalCursor()
 	// Terminals that support OSC 11 also get their own background set, so
 	// cells outside the grid (resize flashes, scrollback edges) match; Bubble
 	// Tea resets it on exit. An index canvas leaves the terminal's choice alone.
@@ -189,7 +192,9 @@ func (m *WorkbenchModel) drawModal(c *canvas) {
 
 	su := m.slotUpdates[protocol.SurfaceModal]
 	// A declared region composes over the blank canvas before slot_update too.
-	m.publishedContent(protocol.SurfaceModal, innerW, innerH).draw(c, rect.InnerX, rect.InnerY)
+	if !m.drawTerminal(c, protocol.SurfaceModal, rect) {
+		m.publishedContent(protocol.SurfaceModal, innerW, innerH).draw(c, rect.InnerX, rect.InnerY)
+	}
 
 	spec := m.frameFor(protocol.SurfaceModal)
 	label := ""
@@ -198,6 +203,9 @@ func (m *WorkbenchModel) drawModal(c *canvas) {
 		if su != nil && su.Title != "" {
 			label = su.Title
 		}
+	}
+	if spec.Label != "" {
+		label = m.terminalLabel(protocol.SurfaceModal, label)
 	}
 	m.drawChrome(c, protocol.SurfaceModal, rect, spec, label)
 	m.fillSlotBg(c, rect)
@@ -362,7 +370,7 @@ func (m *WorkbenchModel) drawSurface(c *canvas, slotID protocol.SurfaceID, callo
 			style := lipgloss.NewStyle().Foreground(m.palette.InkSubtle).Background(m.palette.Slot)
 			c.draw(uv.Rect(x, y, ansi.StringWidth(name), 1), style.Render(name))
 		}
-	} else {
+	} else if !m.drawTerminal(c, slotID, rect) {
 		m.publishedContent(slotID, rect.InnerW, rect.InnerH).draw(c, rect.InnerX, rect.InnerY)
 	}
 	if m.showHotspots && rect.InnerW > 0 && rect.InnerH > 0 {
@@ -372,6 +380,9 @@ func (m *WorkbenchModel) drawSurface(c *canvas, slotID protocol.SurfaceID, callo
 			Bold(true).
 			Render(calloutNum + " " + slotName)
 		c.draw(uv.Rect(rect.InnerX, rect.InnerY, min(ansi.StringWidth(hot), rect.InnerW), 1), hot)
+	}
+	if spec.Label != "" {
+		label = m.terminalLabel(slotID, label)
 	}
 	m.drawChrome(c, slotID, rect, spec, label)
 	m.fillSlotBg(c, rect)
