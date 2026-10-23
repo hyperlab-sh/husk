@@ -96,7 +96,7 @@ func TestDocsSurfaceListMatchesRegistry(t *testing.T) {
 func TestDocsRepoPathsExist(t *testing.T) {
 	re := regexp.MustCompile("`((?:cmd|pkg|plugins)/[A-Za-z0-9_./-]+)`")
 	// Build output that is git-ignored, so absent from a clean checkout.
-	generated := map[string]bool{"plugins/reference/reference": true}
+	generated := map[string]bool{"plugins/reference/reference": true, "plugins/guide/guide": true}
 	root := filepath.Join("..", "..")
 	for name, text := range docFiles(t) {
 		for _, m := range re.FindAllStringSubmatch(text, -1) {
