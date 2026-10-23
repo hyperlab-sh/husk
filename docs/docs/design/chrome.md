@@ -6,8 +6,9 @@ description: "What the frontend draws around plugin content: every surface laid 
 # Workbench chrome: empty surfaces, rail, bars
 
 Status: landed for layout, empty surfaces, rail geometry, bar composition and
-colour discipline. The built-in theme layer and `charm` default name are landed;
-frontend ANSI index drawing remains specified, not landed. Scope: `cmd/husk` layout and rendering (the frontend). No wire,
+colour discipline. The built-in theme layer and `charm` default name are
+landed; frontend ANSI index drawing remains specified, not landed. Scope:
+`cmd/husk` layout and rendering (the frontend). No wire,
 manifest or plugin-visible change; `husk.surfaces.visible` and
 `husk.geometry.rects` change content, not shape.
 

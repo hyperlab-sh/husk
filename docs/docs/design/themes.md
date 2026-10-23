@@ -5,10 +5,10 @@ description: "The nine themes Husk ships as a built-in layer, the rules that map
 
 # Built-in themes
 
-Status: the nine-theme built-in layer, `charm` default and ANSI index resolution
-are landed. The minor 2.4 `ansi` wire field and frontend index drawing,
-index-aware popup shadows and terminal-background handling remain specified,
-not landed. Scope: `pkg/theme` (the built-in `themes`
+Status: the nine-theme built-in layer, `charm` default and ANSI index
+resolution are landed. The minor 2.4 `ansi` wire field and frontend index
+drawing, index-aware popup shadows and terminal-background handling remain
+specified, not landed. Scope: `pkg/theme` (the built-in `themes`
 layer, its tests), the Theme Service ([Services](services.md), "Named
 themes": the layer and the default), and the name the frontend shows
 ([Workbench chrome](chrome.md), "The bottom bar"). The rules for which role
