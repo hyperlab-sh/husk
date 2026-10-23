@@ -45,7 +45,7 @@ func TestGenericRendering(t *testing.T) {
 		{"cell: newline and tab are shown escaped", `{"k":"a\nb\tc","z":"y"}`, "k  \"a\\nb\\tc\"\nz  y\n"},
 		{"array element with a newline stays on one line", `["a\nb","c"]`, "\"a\\nb\"\nc\n"},
 		{"wide glyph key aligns by columns", `{"日本":"x","ab":"y"}`, "ab    y\n日本  x\n"},
-		{"emoji and combining marks align", `{"😀":"x","e\u0301":"y"}`, "e\u0301  y\n😀  x\n"},
+		{"emoji and combining marks align", `{"😀":"x","e\u0301":"y"}`, "e\u0301   y\n😀  x\n"},
 		{"trailing column is not padded", `[{"a":"x","b":""},{"a":"yyyy","b":"z"}]`, "a     b\nx\nyyyy  z\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
