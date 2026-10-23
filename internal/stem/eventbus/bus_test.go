@@ -660,3 +660,70 @@ func newBus(t *testing.T) *eventbus.Bus {
 	}
 	return b
 }
+
+// A plugin id may be a dotted prefix of another ("a" and "a.b"). Each is its
+// own subscriber: the parent leaving, by exit or by losing its table row, must
+// not touch the child's subscriptions, and the child's own removal must end
+// them without affecting the parent.
+func TestParentCleanupKeepsChildSubscriptions(t *testing.T) {
+	const parent, child = "a", "a.b"
+	subs := map[string][]string{parent: {"shared.saved"}, child: {"shared.saved", "a.b.*"}}
+	publish := func(r *rig, names ...string) {
+		for _, n := range names {
+			r.bus.Publish(eventbus.Event{Name: n, Key: n})
+		}
+		r.bus.Flush()
+	}
+
+	t.Run("parent exits", func(t *testing.T) {
+		r := newRig(t, subs)
+		r.live[parent] = false
+		publish(r, "shared.saved", "a.b.done")
+		if got := r.sink[parent].names(t); len(got) != 0 {
+			t.Fatalf("exited parent received %v", got)
+		}
+		if got := r.sink[child].names(t); !slices.Equal(got, []string{"shared.saved", "a.b.done"}) {
+			t.Fatalf("child received %v", got)
+		}
+	})
+
+	t.Run("parent row removed from the table", func(t *testing.T) {
+		r := newRig(t, subs)
+		if p := r.bus.SetTable(eventbus.Table{Subscribe: map[string][]string{child: subs[child]}}); len(p) != 0 {
+			t.Fatal(p)
+		}
+		publish(r, "shared.saved", "a.b.done")
+		if got := r.sink[parent].names(t); len(got) != 0 {
+			t.Fatalf("removed parent received %v", got)
+		}
+		if got := r.sink[child].names(t); !slices.Equal(got, []string{"shared.saved", "a.b.done"}) {
+			t.Fatalf("child received %v", got)
+		}
+	})
+
+	t.Run("child cleanup leaves the parent", func(t *testing.T) {
+		r := newRig(t, subs)
+		if p := r.bus.SetTable(eventbus.Table{Subscribe: map[string][]string{parent: subs[parent]}}); len(p) != 0 {
+			t.Fatal(p)
+		}
+		publish(r, "shared.saved", "a.b.done")
+		if got := r.sink[child].names(t); len(got) != 0 {
+			t.Fatalf("removed child received %v", got)
+		}
+		if got := r.sink[parent].names(t); !slices.Equal(got, []string{"shared.saved"}) {
+			t.Fatalf("parent received %v", got)
+		}
+	})
+
+	t.Run("child exit leaves the parent", func(t *testing.T) {
+		r := newRig(t, subs)
+		r.live[child] = false
+		publish(r, "shared.saved", "a.b.done")
+		if got := r.sink[child].names(t); len(got) != 0 {
+			t.Fatalf("exited child received %v", got)
+		}
+		if got := r.sink[parent].names(t); !slices.Equal(got, []string{"shared.saved"}) {
+			t.Fatalf("parent received %v", got)
+		}
+	})
+}
