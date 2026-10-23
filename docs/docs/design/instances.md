@@ -166,7 +166,7 @@ A leaf package (`internal/instance`, D72; whether a public client package joins 
 | Responsibility | Exported surface |
 |---|---|
 | Id validation | `ValidName(s) error` (names only), `ValidID(s) error` (pid id or name). |
-| Runtime directory rule | `RuntimeDir() (string, error)` resolves the cleaned path, creates it and checks it (start mode); `LookupRuntimeDir() (string, bool, error)` resolves and checks without creating, reporting absence (the CLI); `CheckRuntimeDir(dir) error` checks a given directory without fallback. |
+| Runtime directory rule | `RuntimeDir() (string, error)` resolves the cleaned path, creates it and checks it (start mode); `LookupRuntimeDir() (string, bool, error)` resolves and checks without creating, reporting absence (the CLI); `CheckRuntimeDir(dir) error` creates a given directory if absent and checks it, without fallback (start mode, after the bundle stage). |
 | Paths | `SocketPath(dir, id)`, `EntryPath(dir, id)`, `CheckSocketPath(path) error`. |
 | The shared type | `Entry` as in the table above. |
 | Socket identity | `SocketIdentity(path) (Identity, error)`: the `(dev, ino)` of `<id>.sock`, taken after `bind`. |

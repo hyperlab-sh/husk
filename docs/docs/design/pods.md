@@ -81,7 +81,7 @@ type Notifier interface {
 
 type Config struct {
     InstanceID string        // pid by default, or the --instance name
-    RuntimeDir string        // from instance.RuntimeDir(), see "Runtime directory"
+    RuntimeDir string        // checked by instance.CheckRuntimeDir, see "Runtime directory"
     Entry      instance.Entry // what Start registers once the socket listens
     Tokens     TokenResolver // Pods' token table
     Post       func(any) bool // posts a host notice to the loop; false after shutdown
