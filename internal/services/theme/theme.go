@@ -41,7 +41,12 @@ func (s *Service) Wire() protocol.Palette { return protocol.Palette(s.Palette())
 func (s *Service) Overrides() map[string]string { return c.Clone(s.current.Load().overrides) }
 
 // Get implements theme.get for every authenticated caller.
-func (s *Service) Get(caller c.Caller) protocol.Palette { return s.Wire() }
+func (s *Service) Get(caller c.Caller) (protocol.Palette, error) {
+	if err := c.CheckCaller(caller); err != nil {
+		return protocol.Palette{}, err
+	}
+	return s.Wire(), nil
+}
 
 // Check performs a user-only dry build for theme.check.
 func (s *Service) Check(ctx context.Context, caller c.Caller, in c.ReloadInput) (c.Report, error) {

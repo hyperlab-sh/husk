@@ -42,21 +42,13 @@ func NewCalls(d *dispatcher.Dispatcher, post Post) *Calls {
 
 func coded(code protocol.Code, msg string) error { return contracts.NewError(code, msg, nil) }
 
-// callerOf maps the port's Caller to the Dispatcher's. CallerHost is a Host
-// caller: only Input keeps its own focus snapshot, so a Stem caller gets
-// State's.
-func callerOf(c contracts.Caller) (dispatcher.Caller, bool) {
-	switch c.Kind {
-	case contracts.CallerCLI:
-		return dispatcher.Caller{Kind: dispatcher.CallerCLI}, true
-	case contracts.CallerHost:
-		return dispatcher.Caller{Kind: dispatcher.CallerHost}, true
-	case contracts.CallerPlugin:
-		if c.PluginID != "" {
-			return dispatcher.Caller{Kind: dispatcher.CallerPlugin, PluginID: c.PluginID}, true
-		}
-	}
-	return dispatcher.Caller{}, false
+// validCaller reports whether c may use the Calls port: the CLI, the host,
+// or an authenticated plugin. CallerHost is a Host caller: only Input keeps
+// its own focus snapshot, so it gets State's. Input arrives through
+// Frontend.InvokeAction, not this port.
+func validCaller(c contracts.Caller) bool {
+	return c.Kind == contracts.CallerCLI || c.Kind == contracts.CallerHost ||
+		(c.Kind == contracts.CallerPlugin && c.PluginID != "")
 }
 
 // parseArgs decodes args as a JSON object. Absent, empty and null are nil.
@@ -86,7 +78,7 @@ func parseObject(raw json.RawMessage, what string) (map[string]any, error) {
 // reply, a refusal, or ctx ends; an ended ctx abandons the wait only, the
 // request stays pending in Calls until its own deadline.
 func (p *Calls) ActionInvoke(ctx context.Context, c contracts.Caller, action string, args json.RawMessage) (json.RawMessage, error) {
-	caller, ok := callerOf(c)
+	caller, ok := c, validCaller(c)
 	if !ok {
 		return nil, coded(protocol.CodeDenied, "unknown caller")
 	}
@@ -139,7 +131,7 @@ func ctxError(ctx context.Context) error {
 // ActionList implements contracts.CallsPort: the catalog entries the caller
 // may invoke, with owner liveness, sorted by id.
 func (p *Calls) ActionList(ctx context.Context, c contracts.Caller) ([]contracts.ActionInfo, error) {
-	caller, ok := callerOf(c)
+	caller, ok := c, validCaller(c)
 	if !ok {
 		return nil, coded(protocol.CodeDenied, "unknown caller")
 	}

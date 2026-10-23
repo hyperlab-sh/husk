@@ -39,7 +39,7 @@ func TestCodeOf(t *testing.T) {
 }
 
 func TestCallerKindUser(t *testing.T) {
-	if !contracts.IsUser(contracts.CallerCLI) || !contracts.IsUser(contracts.CallerHost) || !contracts.IsUser(contracts.CallerInput) || contracts.IsUser(contracts.CallerPlugin) || contracts.IsUser("") {
+	if !contracts.IsUserKind(contracts.CallerCLI) || !contracts.IsUserKind(contracts.CallerHost) || !contracts.IsUserKind(contracts.CallerInput) || contracts.IsUserKind(contracts.CallerPlugin) || contracts.IsUserKind("") {
 		t.Fatal("only plugins are not the user")
 	}
 }

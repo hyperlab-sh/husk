@@ -23,9 +23,9 @@ const (
 // the one shared identity type; PluginID is set only for CallerPlugin.
 type Caller = protocol.Caller
 
-// IsUser reports whether k acts as the user: the CLI and the in-process
+// IsUserKind reports whether k acts as the user: the CLI and the in-process
 // callers (input and host). A plugin never does, whatever it claims in params.
-func IsUser(k CallerKind) bool {
+func IsUserKind(k CallerKind) bool {
 	return k == CallerCLI || k == CallerInput || k == CallerHost
 }
 

@@ -317,14 +317,14 @@ func (s *Service) KeysFor(action string) []string {
 func (s *Service) Listing() Listing { return c.Clone(s.current.Load().listing) }
 
 // ListFor filters keys.list to a plugin's own actions/declarations when needed.
-func (s *Service) ListFor(caller c.Caller) Listing {
+func (s *Service) ListFor(caller c.Caller) (Listing, error) {
+	if err := c.CheckCaller(caller); err != nil {
+		return Listing{}, err
+	}
 	snap := s.current.Load()
 	out := c.Clone(snap.listing)
 	if c.IsUser(caller) {
-		return out
-	}
-	if caller.PluginID == "" {
-		return Listing{}
+		return out, nil
 	}
 	var entries []Entry
 	for _, e := range out.Entries {
@@ -340,7 +340,7 @@ func (s *Service) ListFor(caller c.Caller) Listing {
 		}
 	}
 	out.Problems = ps
-	return out
+	return out, nil
 }
 func validVersion(value any) bool {
 	switch v := value.(type) {

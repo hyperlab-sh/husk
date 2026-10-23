@@ -218,13 +218,33 @@ func reloadProblems(reports []services.Report, err error) (bool, []protocol.Prob
 			problems = append(problems, withService(p, report.Service))
 		}
 		if !report.Applied && len(report.Problems) == 0 {
-			problems = append(problems, protocol.Problem{Severity: "error", Code: "not_applied", Layer: "services", Message: report.Service + ": not applied"})
+			problems = append(problems, protocol.Problem{Severity: "error", Code: "candidate_superseded", Layer: "services", Message: report.Service + ": not applied"})
 		}
 	}
 	if err != nil {
-		problems = append(problems, protocol.Problem{Severity: "error", Code: "reload_failed", Layer: "services", Message: err.Error()})
+		problems = append(problems, protocol.Problem{Severity: "error", Code: aggregateCode(reports, err), Layer: "services", Message: err.Error()})
 	}
 	return applied, problems
+}
+
+// aggregateCode names the coordinator's aggregate failure with a code the
+// reports already use: cancelled or timed_out for a context end, otherwise
+// the first error code a report carries, otherwise candidate_superseded.
+func aggregateCode(reports []services.Report, err error) string {
+	switch {
+	case errors.Is(err, context.Canceled):
+		return "cancelled"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timed_out"
+	}
+	for _, r := range reports {
+		for _, p := range r.Problems {
+			if p.Severity == "error" && p.Code != "" {
+				return p.Code
+			}
+		}
+	}
+	return "candidate_superseded"
 }
 
 // withService prefixes a problem's message with the service that reported it.

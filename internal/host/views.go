@@ -31,7 +31,7 @@ import (
 const servicesReasonPlugin = services.ReasonPlugin
 
 // hostCaller is the Services identity of the host acting for itself.
-var hostCaller = services.Caller{Kind: "host"}
+var hostCaller = services.Caller{Kind: protocol.CallerHost}
 
 // log writes a host notice to the injected logger.
 func (r *Root) log(m pods.LogMsg) {

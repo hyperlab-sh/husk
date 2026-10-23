@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	c "github.com/hyperlab-sh/husk/internal/services/contracts"
+	"github.com/hyperlab-sh/husk/internal/services/keybinding"
 	"github.com/hyperlab-sh/husk/internal/services/profile"
 	"github.com/hyperlab-sh/husk/internal/services/secrets"
 	"github.com/hyperlab-sh/husk/internal/services/settings"
@@ -94,6 +95,7 @@ func TestInvalidCallersDeniedEverywhere(t *testing.T) {
 	defer sec.Close()
 	set := settings.New(settings.Options{})
 	th := stheme.New()
+	kb := keybinding.New()
 	co, _ := NewCoordinator(Options{Store: &fakeStore{}, Services: fakeServices(), Clock: clock()})
 	defer co.Close()
 	ctx := context.Background()
@@ -109,18 +111,23 @@ func TestInvalidCallersDeniedEverywhere(t *testing.T) {
 	}
 	for name, k := range bad {
 		calls := map[string]func() error{
-			"profile.list":    func() error { _, e := p.ListFor(k); return e },
-			"profile.use":     func() error { return p.Use(k, "") },
-			"settings.get":    func() error { _, _, e := set.Get(k, "husk.x"); return e },
-			"settings.list":   func() error { _, e := set.List(k); return e },
-			"settings.schema": func() error { _, e := set.SchemaFor(k, ""); return e },
-			"theme.check":     func() error { _, e := th.Check(ctx, k, input(`{}`)); return e },
-			"config.reload":   func() error { _, e := co.ReloadFor(ctx, k); return e },
-			"secrets.get":     func() error { _, e := sec.Read(k, "x.y"); return e },
-			"secrets.names":   func() error { _, e := sec.Names(k); return e },
-			"secrets.grants":  func() error { _, e := sec.Grants(k); return e },
-			"secrets.reveal":  func() error { _, e := sec.Reveal(k, "x.y"); return e },
-			"secrets.set":     func() error { return sec.Set(k, "x.y", nil) },
+			"profile.list":      func() error { _, e := p.ListFor(k); return e },
+			"profile.use":       func() error { return p.Use(k, "") },
+			"settings.get":      func() error { _, _, e := set.Get(k, "husk.x"); return e },
+			"settings.list":     func() error { _, e := set.List(k); return e },
+			"settings.schema":   func() error { _, e := set.SchemaFor(k, ""); return e },
+			"theme.check":       func() error { _, e := th.Check(ctx, k, input(`{}`)); return e },
+			"config.reload":     func() error { _, e := co.ReloadFor(ctx, k); return e },
+			"secrets.get":       func() error { _, e := sec.Read(k, "x.y"); return e },
+			"secrets.names":     func() error { _, e := sec.Names(k); return e },
+			"secrets.grants":    func() error { _, e := sec.Grants(k); return e },
+			"secrets.reveal":    func() error { _, e := sec.Reveal(k, "x.y"); return e },
+			"secrets.set":       func() error { return sec.Set(k, "x.y", nil) },
+			"secrets.grant":     func() error { return sec.Grant(k, "a", "x.y") },
+			"secrets.revoke":    func() error { return sec.Revoke(k, "a", "x.y") },
+			"keys.list":         func() error { _, e := kb.ListFor(k); return e },
+			"theme.get":         func() error { _, e := th.Get(k); return e },
+			"settings.validate": func() error { _, e := set.Validate(ctx, k, input(`{}`)); return e },
 		}
 		for method, call := range calls {
 			t.Run(name+"/"+method, func(t *testing.T) {
@@ -148,5 +155,32 @@ func TestCallerHelpers(t *testing.T) {
 		if got := c.RequireCLI(caller) == nil; got != want.cli {
 			t.Errorf("RequireCLI(%q) = %v", kind, got)
 		}
+	}
+}
+
+// SnapshotFor never serves a plugin's view to an invalid caller, even one
+// that carries a plugin id.
+func TestSnapshotForInvalidCallerIsEmpty(t *testing.T) {
+	s := settings.New(settings.Options{Schema: []settings.Entry{{Key: "husk.theme", Type: "string", Default: "Public", Owner: "husk", Apply: "live"}}})
+	apply(t, s, catalog("a"))
+	for name, k := range map[string]Caller{"bogus with id": {Kind: "bogus", PluginID: "a"}, "cli with id": {Kind: protocol.CallerCLI, PluginID: "a"}, "zero": {}} {
+		view := s.SnapshotFor(k)
+		if _, ok := view.Raw("plugins.a.enabled"); ok || view.String("husk.theme") != "" {
+			t.Errorf("%s got a filtered view", name)
+		}
+	}
+	if _, ok := s.SnapshotFor(Caller{Kind: protocol.CallerPlugin, PluginID: "a"}).Raw("plugins.a.enabled"); !ok {
+		t.Fatal("valid plugin lost its own key")
+	}
+}
+
+// A plugin caller carrying a foreign id never sees another plugin's keys.list
+// entries through an invalid kind.
+func TestKeysListInvalidKindWithIDGetsNoEntries(t *testing.T) {
+	kb := keybinding.New()
+	apply(t, kb, catalog("a"))
+	listing, err := kb.ListFor(Caller{Kind: "bogus", PluginID: "a"})
+	if reason(t, err) != "denied/invalid_caller" || len(listing.Entries) != 0 || len(listing.Problems) != 0 {
+		t.Fatalf("listing=%+v err=%v", listing, err)
 	}
 }

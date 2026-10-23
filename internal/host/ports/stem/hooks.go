@@ -41,13 +41,11 @@ func NewHooks(runner *hooks.Runner, post Post) *Hooks {
 // over 1 MiB (compact JSON, measured on the raw bytes) is invalid_params and
 // nothing is posted.
 func (p *Hooks) HookCall(ctx context.Context, c contracts.Caller, hook string, data json.RawMessage) (contracts.HookOutcome, error) {
-	d, ok := callerOf(c)
+	d, ok := c, validCaller(c)
 	if !ok {
 		return contracts.HookOutcome{}, coded(protocol.CodeDenied, "unknown caller")
 	}
-	// The mapping rules stay callerOf's (Stem is a Host caller); the kind
-	// itself is translated explicitly so nothing assumes the two enums'
-	// layouts match.
+	// Only the kinds validCaller admits and the hook runner knows pass.
 	var caller hooks.Caller
 	switch d.Kind {
 	case dispatcher.CallerCLI:
