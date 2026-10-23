@@ -27,7 +27,7 @@ The host never writes to a plugin from its event loop. Each plugin's stdin and e
 | One write takes longer than 5 seconds | `stopped reading: protocol: write timed out after 5s` |
 | The plugin exits | `exited`, or `crashed` with the status |
 
-The host drops the connection rather than individual messages, so a plugin never sees a stream with holes in it. The reason becomes the plugin's `last_error` and is shown as a warning toast. A socket client that stops reading its replies is disconnected the same way. A plugin that goes away loses its surfaces, rail items, subscriptions and contributions, as described under [Events and lifetime](#events-and-lifetime). A bad input line does not disconnect; see [Errors](#errors).
+The host drops the connection rather than individual messages, so a plugin never sees a stream with holes in it. A failure reason becomes the plugin's `last_error` and is shown as a warning toast prefixed with the plugin id (`<id>: stopped reading: ...`); a clean `exited` sets no `last_error` and is only logged. A socket client that stops reading its replies is disconnected the same way. A plugin that goes away loses its surfaces, rail items, subscriptions and contributions, as described under [Events and lifetime](#events-and-lifetime). A bad input line does not disconnect; see [Errors](#errors).
 
 ### Plugin processes
 
