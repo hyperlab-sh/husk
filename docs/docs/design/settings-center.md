@@ -180,6 +180,8 @@ A `services.reloaded` event while the center is open re-reads the sources that t
 
 ### The catalog document
 
+**Landed:** the layered reader and off-loop host cache, exposed by `Frontend.Catalog()`. The Store tab UI remains specified, not landed.
+
 The catalog is a layered Store document named **`catalog`**, file `catalog.json` in each layer ([Store](store.md): the distribution's root, `catalog.json` in the user layer, `profiles/<name>/catalog.json`, a named instance's file), read **unmerged** through `Store.Layers("catalog", profile)` so that every entry has one source layer, exactly as `themes` is read. Store knows nothing of its meaning.
 
 ```json
@@ -328,7 +330,7 @@ Nothing of the center exists; the theme selector it absorbs is itself specified 
 
 1. **huh compatibility check**, as "huh" says, deciding huh v2 or the fallback. One commit, no behaviour.
 2. **Seams.** `contracts.Frontend` gains `SettingsSchema`, `Setting`, `KeyListing`, `Profiles`, `UseProfile`, `RemovePlugin`, `Catalog` and `ConfigDir`; the root implements them over the Services ports and Pods, with the `keys.list` join moved into a shared function. `plugin.remove` admits a `host` caller ("Changes to other specs"). `husk.pods` entries and `plugin.list` gain `dir`.
-3. **The catalog reader**, a small package beside Services (`internal/services/catalog`), with the rules of "The catalog document", importing `pkg/protocol`, Store's layer types and the shared Store-to-Problem conversion in `services/settings`, and nothing else; tested on fixtures. The host warms its cache on a worker at startup and after each `services.reloaded` and posts the result to the loop.
+3. **The catalog reader — landed**, a small package beside Services (`internal/services/catalog`), with the rules of "The catalog document", importing `pkg/protocol`, Store's layer types and the shared Store-to-Problem conversion in `services/settings`, and nothing else; tested on fixtures. The host warms its cache on a worker after the startup flight and after each `services.reloaded` and posts the result to the loop. Construction drains the initial worker's post before handing ownership to the frontend; later reloads never wait for the cache. Late workers cannot replace a newer refresh. The cache uses the serving Profile snapshot's active name.
 4. **The center** in `cmd/husk`: the modal, the tab list, the five tabs, the profile corner, the host actions `husk.settings.open` and `husk.theme.select`, the State write, the bottom-bar click, the goldens. The theme selector is implemented **as the Theme tab**, never as a standalone modal.
 
 The specs this one amends, each with the minimal consistent edit: [Services](services.md) ("The theme selector" becomes the Theme tab's contract; the toast rule names the center), [State](state.md) (`overlays.settings_center` replaces `overlays.theme_selector`; `husk.pods` gains `dir`), [Keybindings](keybindings.md) (`husk.settings.open` joins the host actions; the context filter row), [Store](store.md) (the `catalog` document in the document list and the directory tree), [Protocol](protocol.md) (`plugin.remove` admits the host; `plugin.list` gains `dir` in minor 2.3), [Pods](pods.md) (the same, and the seams), [Workbench chrome](chrome.md) (the theme pill's click runs `husk.settings.open` with `tab: theme`), [Bundles](bundles.md) (`themes` and `catalog` join the document names a bundle may ship).
