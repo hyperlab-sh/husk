@@ -1,7 +1,9 @@
 # Cell-buffer compositor
 
-Status: implemented (see "Implementation notes"). Scope: `cmd/husk` rendering only. No wire, manifest or
-plugin-visible change.
+Status: implemented (see "Implementation notes"), except the "Overlay layer"
+section, which is planned. Scope: `cmd/husk` rendering only. No wire, manifest or
+plugin-visible change, except that the overlay layer makes an `app-overlay`
+occupant's content visible under the rules stated there.
 
 ## Problem
 
@@ -296,6 +298,72 @@ off-screen; it is not flipped).
 - The canvas remembers which popup rects already cast in the frame; casting
   the same rect twice does not darken twice. A different rect (a palette over a
   modal) stacks and darkens the overlap further.
+
+## Overlay layer
+
+Status: planned (architecture v2). Scope: how the occupant of the
+`app-overlay` surface is drawn. Wire, manifest and State changes are
+named here and owned by [State](state.md) ("Frontend-owned slices").
+
+`app-overlay` is the one surface whose purpose is to lie over the others, yet
+today `placeSlots` gives it no rect, so a plugin that claims it is never
+drawn and never told a size. The rules below make it a drawable layer for any
+plugin that annotates, tours or debugs the layout, with one transparency rule
+so that such a plugin covers only the cells it paints. No plugin kind is named
+here.
+
+- **Rect.** The overlay surface's rect is the whole frame: `(0, 0, width,
+  height)`, the top bar and footer included, whenever the terminal is not too
+  small. It has no chrome: a `frame` declared for it is ignored (logged as a
+  conversion warning), its inner rect equals its rect, and `surface.resized`
+  for its occupant carries the terminal size with `focused: false` and
+  `visible: true`. The frontend writes the rect to `husk.geometry.rects` and
+  lists `app-overlay` in `husk.surfaces.visible` like every placed surface.
+- **Z order.** The overlay is blitted after the bars, every layout and
+  placement surface and the modal (its shadow included), and before the
+  toast and the command palette. The host's own popups stay reachable above
+  any plugin; the modal, a plugin surface, can be annotated.
+- **Transparency.** The occupant's `lines` are parsed cell by cell like any
+  surface's (`blitLines`, one line at a time from a zero pen, clipped to the
+  frame). A cell is **transparent** when its glyph is a plain space (U+0020)
+  and it carries no style: no SGR attribute, no foreground, no background, no
+  link. A transparent cell leaves the cell beneath untouched. Every other
+  cell is **opaque** and replaces the glyph, width, attributes, foreground
+  and link of the cell beneath. An opaque cell with no background of its own
+  takes the background of the cell it replaces, so a label drawn over a slot
+  keeps the slot's shade; an opaque cell with a background paints it. Cells
+  past the end of a line and rows past the last line are transparent. A space
+  that must cover what is beneath carries an explicit background (the
+  palette's `slot_background`, say).
+- **Wide glyphs.** The clip rule is unchanged: a wide glyph crossing the frame
+  edge is blanked. A wide overlay glyph replaces both cells beneath; a
+  transparent cell over the second half of a wide glyph beneath leaves that
+  glyph whole.
+- **No slot background, no shadow.** The overlay gets no `fillSlotBg`
+  pass and casts no shadow. The final `fillDefaultBg` pass still runs after
+  it, so an opaque cell that inherited a default background from a cell no
+  surface owned takes the canvas colour like that cell would have.
+- **Not focusable, not hit-tested.** `app-overlay` is in no focus cycle, is
+  never `husk.focus.surface`, and `hitOrder` excludes it, so mouse clicks,
+  wheel events and divider drags reach whatever is beneath. Its occupant never
+  receives `input.key` or `input.mouse`, and `capture` on it has no effect; its
+  keys are the actions it declares, bound in a keymap layer or run from the
+  palette. The occupant is still told `input.key_state` and `theme.changed`
+  like every plugin.
+- **Published content.** Region slots the occupant declares on `app-overlay`
+  clear and fill their rect as on every surface; the transparency rule applies
+  to the occupant's own lines, not to region contributions.
+- **Too small.** Nothing is drawn, like every surface; the occupant gets no
+  `surface.resized` until the layout returns.
+
+Implementation sketch, `cmd/husk`: `placeSlots` adds `app-overlay` to
+`slotRects` at the full frame; `hitOrder` and `focusNext` skip it; `View`
+draws it after the modal with a `blitOverlay` that writes only opaque cells
+and merges backgrounds as above; `drawSurface` is not used for it (no
+chrome, no slot background). A golden frame with an overlay fixture that
+paints a box and a label over an occupied stage pins the rules: ring and
+label cells carry the overlay's foreground and the stage's background, every
+other cell is byte-identical to the frame without the overlay.
 
 ## Out of scope
 
