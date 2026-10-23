@@ -81,7 +81,7 @@ func convert(src Source, modern bool) (*Spec, []Warning, error) {
 	if fields == nil {
 		return nil, nil, errors.New("manifest must be an object")
 	}
-	s := &Spec{WorkDir: src.Dir, Dir: src.Dir, Protocol: protocol.Major}
+	s := &Spec{WorkDir: src.Dir, Protocol: protocol.Major}
 	for _, f := range []struct {
 		key  string
 		dest any

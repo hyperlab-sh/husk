@@ -216,7 +216,7 @@ func (s Spec) CatalogJSON() ([]byte, error) {
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return nil, err
 	}
-	for _, key := range []string{"protocol", "command", "work_dir", "binding_problems", "subscription_problems", "suggestions"} {
+	for _, key := range []string{"protocol", "command", "work_dir", "dir", "binding_problems", "subscription_problems", "suggestions"} {
 		delete(doc, key)
 	}
 	return json.Marshal(doc)
