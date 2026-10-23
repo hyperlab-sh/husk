@@ -89,9 +89,9 @@ func runHookList(ctx context.Context, inv *Invocation, args []string) error {
 			if !s.Live {
 				state = "not live"
 			}
-			subs = append(subs, fmt.Sprintf("%s (priority %d, %s)", s.Plugin, s.Priority, state))
+			subs = append(subs, fmt.Sprintf("%s (priority %d, %s)", output.Text(s.Plugin), s.Priority, state))
 		}
-		table = append(table, []string{r.info.ID, r.info.Owner, r.info.Kind,
+		table = append(table, []string{output.Text(r.info.ID), output.Text(r.info.Owner), output.Text(r.info.Kind),
 			(time.Duration(r.info.TimeoutMS) * time.Millisecond).String(), strings.Join(subs, ", ")})
 	}
 	return output.WriteTable(inv.out.Stdout, []string{"HOOK", "OWNER", "KIND", "TIMEOUT", "SUBSCRIBERS"}, table)

@@ -141,6 +141,16 @@ func recordRows(items []any) (headers []string, rows [][]string, ok bool) {
 	return shown, rows, true
 }
 
+// Text returns s safe to print on one terminal line: a string holding a
+// control character (a newline, an escape sequence) is shown as its JSON
+// form, any other string as it is.
+func Text(s string) string {
+	if strings.IndexFunc(s, unicode.IsControl) >= 0 {
+		return compactJSON(s)
+	}
+	return s
+}
+
 // cell renders one value: strings bare unless they hold a control character
 // (then their JSON form, quoted and escaped), numbers as written, everything
 // else (booleans, null, nested objects and arrays) as compact JSON. Object
@@ -148,12 +158,7 @@ func recordRows(items []any) (headers []string, rows [][]string, ok bool) {
 func cell(v any) string {
 	switch t := v.(type) {
 	case string:
-		// A control character would break the row: show such a string as
-		// its JSON form.
-		if strings.IndexFunc(t, unicode.IsControl) >= 0 {
-			return compactJSON(t)
-		}
-		return t
+		return Text(t)
 	case json.Number:
 		return t.String()
 	default:
