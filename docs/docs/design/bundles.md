@@ -124,7 +124,7 @@ Codes follow the `snake_case` vocabulary of the other specs and are what tests m
 | `bundle_manifest_invalid` | fatal | The manifest is not a JSON object, is over 64 KiB, or a known field has the wrong type or exceeds its limit. The message names the field. |
 | `bundle_manifest_version` | fatal | `manifest_version` absent or not `1`. The message names the value found. |
 | `bundle_id_invalid` | fatal | `id` absent, empty or outside the id rule. |
-| `bundle_path_relative` | fatal | `husk.bundle` set in a layer file to a path that is neither absolute nor `~/`-prefixed. The message names the layer. |
+| `bundle_path_relative` | fatal | `husk.bundle` set in a layer file to a path that is neither absolute nor `~/`-prefixed, or set in the user or instance layer to a value that is not a string. The message names the layer. |
 | `bundle_plugins_not_a_directory` | fatal | `<dir>/plugins` exists and is not a directory. |
 | `bundle_no_plugins` | warning | `<dir>/plugins` is absent or empty. |
 | `bundle_setting_ignored` | warning (Settings) | `husk.bundle` appears in a layer that cannot set it (`profile`, or the bundle's own config in `distribution`). |
@@ -219,6 +219,7 @@ The scaffolded application therefore has exactly two configuration inputs, both 
 | `manifest_version` is not 1 | bundle package | Start stops | `husk: bundle <dir>: manifest_version 2 is not supported by this husk (want 1)`, exit 1 |
 | `id` invalid | bundle package | Start stops | `husk: bundle <dir>: id "My Bundle" is invalid: use [A-Za-z0-9][A-Za-z0-9._-]{0,63}`, exit 1 |
 | `husk.bundle` set to a relative path in a layer file | bootstrap read | Start stops | `husk: bundle: husk.bundle in the user layer must be an absolute path: "./notes"`, exit 1 |
+| `husk.bundle` set to a non-string value in the user or instance layer | bootstrap read | Start stops | `husk: bundle: husk.bundle in the user layer must be a string`, exit 1 |
 | `husk.bundle` set in a profile or bundle config | Settings, first reload | Ignored | `warning` `bundle_setting_ignored` in the reload report; startup toast only if other errors exist |
 | `plugins/` absent or empty | bundle package | Bundle loads with its config only | Log line `bundle <id>: no plugins` |
 | `plugins` is a file | bundle package | Start stops | `husk: bundle <dir>: plugins is not a directory`, exit 1 |

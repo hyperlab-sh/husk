@@ -619,7 +619,9 @@ Every directory Store creates is checked after creation with `Lstat`: it must
 not be a symlink, must be owned by the current uid, and must have mode 0700.
 The runtime directory is resolved and checked by the `instance` package
 ([Instances](instances.md)) and handed to Store by its opener as
-`Options.RuntimeDir`: start mode passes `instance.RuntimeDir()` (creates), the
+`Options.RuntimeDir`: start mode resolves it with the non-creating
+`instance.LookupRuntimeDir()`, and the composition root creates and checks it
+with `instance.CheckRuntimeDir` after the bundle stage, then passes it; the
 store commands pass what `instance.LookupRuntimeDir()` found, or `""` when the
 directory is absent, which Store treats as "no instance registered" for its
 liveness probes. Store never creates the runtime directory.
