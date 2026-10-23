@@ -13,8 +13,12 @@ import (
 // catalogCache is published only on the loop and read from any goroutine.
 type catalogCache struct {
 	value      atomic.Pointer[contracts.CatalogResult]
+	revision   atomic.Uint64
 	generation uint64 // loop-only; discards late workers after a newer reload
 }
+
+// CatalogRevision is an any-goroutine cache-publication token; it never does I/O.
+func (r *Root) CatalogRevision() uint64 { return r.pluginCatalog.revision.Load() }
 
 // Catalog implements contracts.Frontend without calling Store.
 func (r *Root) Catalog() contracts.CatalogResult {
@@ -61,6 +65,7 @@ func (r *Root) warmCatalog() <-chan struct{} {
 		r.post(func() {
 			if generation == r.pluginCatalog.generation {
 				r.pluginCatalog.value.Store(&out)
+				r.pluginCatalog.revision.Add(1)
 			}
 		})
 		return nil

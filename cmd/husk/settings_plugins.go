@@ -6,7 +6,6 @@ import (
 	"image"
 	"maps"
 	"path/filepath"
-	"reflect"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -16,6 +15,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
+	"github.com/hyperlab-sh/husk/internal/substrate/state"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
@@ -24,35 +24,54 @@ type settingsPluginRow struct {
 	Claims                     []string
 }
 
+type settingsPluginWidgetKey struct {
+	width, height int
+	palette       protocol.Palette
+	ansiRevision  uint64
+}
+type settingsPluginRenderKey struct {
+	widget              settingsPluginWidgetKey
+	tab, query, surface string
+	focus, cursor, top  int
+}
+
 type settingsPlugins struct {
-	inputs         map[string]string
-	rows           []settingsPluginRow
-	held           map[string]string
-	catalog        contracts.CatalogResult
-	configDir      string
-	filtered       []contracts.CatalogEntry
-	query, surface string
-	cursor, top    int
-	selectedID     string
-	removing       map[string]bool
-	problem        string
-	confirm        *huh.Confirm
-	confirmID      string
-	confirmed      bool
-	confirmView    string
-	filter         *huh.Select[string]
-	filterView     string
-	lines          []string
-	hits           []string
-	renderKey      string
-	widgetKey      string
-	lastTab        string
-	positions      map[string][2]int
-	dirty          bool
+	inputs             map[string]uint64
+	catalogRead        bool
+	catalogRevision    uint64
+	servicesRevision   uint64
+	indices            map[string]int
+	ansiRevision       uint64
+	removeX0, removeX1 int
+	surfaceBefore      string
+	rows               []settingsPluginRow
+	held               map[string]string
+	catalog            contracts.CatalogResult
+	configDir          string
+	filtered           []contracts.CatalogEntry
+	query, surface     string
+	cursor, top        int
+	selectedID         string
+	removing           map[string]bool
+	problem            string
+	confirm            *huh.Confirm
+	confirmID          string
+	confirmed          bool
+	confirmView        string
+	filter             *huh.Select[string]
+	filterView         string
+	lines              []string
+	hits               []string
+	renderKey          settingsPluginRenderKey
+	widgetKey          settingsPluginWidgetKey
+	lastTab            string
+	positions          map[string][2]int
+	dirty              bool
 }
 
 func (m *WorkbenchModel) refreshSettingsPlugins() {
 	s := m.settings
+	s.discardHiddenPluginDialogs()
 	if s.tab != "installed" && s.tab != "store" {
 		return
 	}
@@ -70,7 +89,11 @@ func (m *WorkbenchModel) refreshSettingsPlugins() {
 		p.lastTab = s.tab
 		p.dirty = true
 	}
-	widgetKey := fmt.Sprintf("%d/%d/%v/%v", m.width, m.height, m.served, m.ansi)
+	if !maps.Equal(p.indices, m.ansi) {
+		p.indices = maps.Clone(m.ansi)
+		p.ansiRevision++
+	}
+	widgetKey := settingsPluginWidgetKey{m.width, m.height, protocol.Palette(m.served), p.ansiRevision}
 	if widgetKey != p.widgetKey {
 		p.widgetKey = widgetKey
 		if p.confirm != nil {
@@ -80,17 +103,19 @@ func (m *WorkbenchModel) refreshSettingsPlugins() {
 			p.confirmView = p.confirm.View()
 		}
 		if p.filter != nil {
+			before := p.surfaceBefore
 			m.openSettingsSurfaceFilter()
+			p.surfaceBefore = before
 		}
 	}
-	inputs := map[string]string{}
+	inputs := map[string]uint64{}
+	var entries map[string]state.Entry
 	if m.fe != nil {
 		if snap := m.fe.Snapshot(); snap != nil {
-			inputs["husk.pods"] = string(snap.Slices["husk.pods"].Value)
-			inputs["husk.surfaces"] = string(snap.Slices["husk.surfaces"].Value)
-			for ns, entry := range snap.Slices {
-				if strings.HasSuffix(ns, ".occupants") {
-					inputs[ns] = string(entry.Value)
+			entries = snap.Slices
+			for ns, entry := range entries {
+				if ns == "husk.pods" || ns == "husk.surfaces" || strings.HasSuffix(ns, ".occupants") {
+					inputs[ns] = entry.Revision
 				}
 			}
 		}
@@ -103,11 +128,11 @@ func (m *WorkbenchModel) refreshSettingsPlugins() {
 				LastError   string `json:"last_error"`
 			}
 		}
-		_ = json.Unmarshal([]byte(inputs["husk.pods"]), &pods)
+		_ = json.Unmarshal(entries["husk.pods"].Value, &pods)
 		var res struct {
 			Occupants map[string]struct{ Plugin string }
 		}
-		_ = json.Unmarshal([]byte(inputs["husk.surfaces"]), &res)
+		_ = json.Unmarshal(entries["husk.surfaces"].Value, &res)
 		p.held = map[string]string{}
 		for surface, occ := range res.Occupants {
 			p.held[surface] = occ.Plugin
@@ -120,7 +145,7 @@ func (m *WorkbenchModel) refreshSettingsPlugins() {
 		for id, pod := range pods.Plugins {
 			row := settingsPluginRow{ID: id, Status: pod.Status, Dir: pod.Dir, LastError: pod.LastError}
 			var claims map[string]json.RawMessage
-			_ = json.Unmarshal([]byte(inputs[id+".occupants"]), &claims)
+			_ = json.Unmarshal(entries[id+".occupants"].Value, &claims)
 			for surface := range claims {
 				row.Claims = append(row.Claims, surface)
 			}
@@ -145,18 +170,21 @@ func (m *WorkbenchModel) refreshSettingsPlugins() {
 		p.dirty = true
 	}
 	if s.tab == "store" && m.fe != nil {
-		// Catalog warming posts independently of services.reloaded. Compare the
-		// cache itself so the later worker result is visible without another reload.
-		catalog := m.fe.Catalog()
-		if !reflect.DeepEqual(catalog, p.catalog) || p.configDir != m.fe.ConfigDir() {
-			p.catalog, p.configDir = catalog, m.fe.ConfigDir()
+		// Publications may arrive after the reload event. Tokens avoid copying
+		// the detached catalog until a reload or cache publication changes it.
+		revision, servicesRevision := m.fe.CatalogRevision(), m.fe.ServicesRevision()
+		if !p.catalogRead || revision != p.catalogRevision || servicesRevision != p.servicesRevision {
+			p.catalog, p.configDir = m.fe.Catalog(), m.fe.ConfigDir()
+			p.catalogRead, p.catalogRevision, p.servicesRevision = true, revision, servicesRevision
 			p.dirty = true
 		}
 	}
-	key := fmt.Sprintf("%s/%d/%d/%d/%d/%d/%s/%s/%v/%v", s.tab, m.width, m.height, s.focus, p.cursor, p.top, p.query, p.surface, m.served, m.ansi)
+	key := settingsPluginRenderKey{widgetKey, s.tab, p.query, p.surface, s.focus, p.cursor, p.top}
 	if p.dirty || key != p.renderKey {
-		p.renderKey, p.dirty = key, false
+		p.dirty = false
 		m.cacheSettingsPlugins()
+		// Rendering can clamp the cursor and scroll position.
+		p.renderKey = settingsPluginRenderKey{widgetKey, s.tab, p.query, p.surface, s.focus, p.cursor, p.top}
 	}
 }
 
@@ -188,6 +216,7 @@ func (m *WorkbenchModel) settingsPluginKey(msg tea.KeyPressMsg) tea.Cmd {
 	if p.filter != nil {
 		switch key {
 		case "esc":
+			p.surface = p.surfaceBefore
 			p.filter = nil
 		case "enter":
 			p.filter.Update(msg)
@@ -265,7 +294,7 @@ func (m *WorkbenchModel) confirmSettingsRemoval() {
 	}
 	id := p.rows[p.cursor].ID
 	p.confirmID, p.confirmed = id, false
-	p.confirm = huh.NewConfirm().Title("Remove " + plainText(id) + " from this instance?").Description("It is unloaded, not uninstalled: its files, settings and saved state stay, and the next start loads it again.").Value(&p.confirmed).Affirmative("yes").Negative("no")
+	p.confirm = huh.NewConfirm().Title("Remove " + plainText(id) + " from this instance?").Description("It is unloaded, not uninstalled: its files, settings and saved state stay, and the next start loads it again.").Value(&p.confirmed).Affirmative(" yes ").Negative(" no ")
 	p.confirm.WithKeyMap(huh.NewDefaultKeyMap())
 	p.confirm.WithTheme(settingsHuhTheme(m.palette))
 	p.confirm.WithWidth(m.settingsContentRect().Dx())
@@ -291,6 +320,7 @@ func (m *WorkbenchModel) removeSettingsPlugin(id string) {
 }
 func (m *WorkbenchModel) openSettingsSurfaceFilter() {
 	p := m.settings.plugins
+	p.surfaceBefore = p.surface
 	options := []huh.Option[string]{huh.NewOption("any surface", "")}
 	for _, meta := range allSurfaces {
 		options = append(options, huh.NewOption(string(meta.ID), string(meta.ID)))
@@ -323,6 +353,7 @@ func (m *WorkbenchModel) cacheSettingsPlugins() {
 	p.lines, p.hits = nil, nil
 	add := func(line, id string) { p.lines = append(p.lines, line); p.hits = append(p.hits, id) }
 	if s.tab == "installed" {
+		p.cursor = max(0, min(p.cursor, len(p.rows)-1))
 		cells := [][]string{{"ID", "STATUS", "CLAIMED", "SOURCE", "REMOVE"}}
 		for _, row := range p.rows {
 			dir := row.Dir
@@ -340,6 +371,11 @@ func (m *WorkbenchModel) cacheSettingsPlugins() {
 			cells = append(cells, []string{row.ID, status, claims, dir, "Remove"})
 		}
 		widths := settingsKeyWidths(cells, width)
+		p.removeX0 = 2 * 4
+		for _, w := range widths[:4] {
+			p.removeX0 += w
+		}
+		p.removeX1 = p.removeX0 + widths[4]
 		for i, values := range cells {
 			st := base
 			if i == 0 {
@@ -387,7 +423,7 @@ func (m *WorkbenchModel) cacheSettingsPlugins() {
 			}
 			add(strings.Join(parts, st.Render("  ")), id)
 			if i > 0 && p.rows[i-1].Status == "failed" && p.rows[i-1].LastError != "" {
-				add(m.statusMark("danger", "✕")+" "+base.Render(plainText(p.rows[i-1].LastError)), id)
+				add(m.statusMark("danger", "✕")+" "+base.Render(plainText(p.rows[i-1].LastError)), "")
 			}
 		}
 		if len(p.rows) == 0 {
@@ -397,8 +433,10 @@ func (m *WorkbenchModel) cacheSettingsPlugins() {
 			add(m.statusMark("danger", "✕")+" "+base.Render(plainText(p.problem)), "")
 		}
 		add("", "")
-		add(base.Render("husk plugin add <path>"), "")
-		add(base.Render("husk plugin add --dir <dir>"), "")
+		box := base.Border(lipgloss.RoundedBorder()).BorderForeground(m.palette.Border).Padding(0, 1).Render("husk plugin add <path>\nhusk plugin add --dir <dir>")
+		for _, line := range strings.Split(box, "\n") {
+			add(line, "")
+		}
 		at := 0
 		for i, id := range p.hits {
 			if p.cursor < len(p.rows) && id == p.rows[p.cursor].ID {
@@ -434,6 +472,10 @@ func (m *WorkbenchModel) cacheSettingsPlugins() {
 			}
 		}
 		p.cursor = max(0, min(p.cursor, len(p.filtered)-1))
+		p.selectedID = ""
+		if len(p.filtered) > 0 {
+			p.selectedID = p.filtered[p.cursor].ID
+		}
 		surface := p.surface
 		if surface == "" {
 			surface = "any surface"
@@ -477,7 +519,7 @@ func (m *WorkbenchModel) cacheSettingsPlugins() {
 			var claims []string
 			for _, surface := range e.Surfaces {
 				text := muted.Render(string(surface))
-				if p.held[string(surface)] != "" {
+				if p.held[string(surface)] != "" && p.held[string(surface)] != e.ID {
 					text += " " + m.statusMark("warning", "taken")
 				}
 				claims = append(claims, text)
@@ -522,7 +564,7 @@ func (m *WorkbenchModel) settingsPluginsMouse(point image.Point) {
 				break
 			}
 		}
-		if point.X >= r.Max.X-6 {
+		if x := point.X - r.Min.X; x >= p.removeX0 && x < p.removeX1 {
 			m.confirmSettingsRemoval()
 		}
 	} else {
@@ -536,6 +578,48 @@ func (m *WorkbenchModel) settingsPluginsMouse(point image.Point) {
 		}
 	}
 	p.dirty = true
+}
+
+// settingsPluginConfirmLayout is shared by drawing and button hit-testing.
+// It is pure: View must not publish mouse geometry or mutate the dialog.
+func (m *WorkbenchModel) settingsPluginConfirmLayout() ([]string, image.Rectangle) {
+	p := m.settings.plugins
+	content := m.settingsContentRect()
+	lines := strings.Split(p.confirmView, "\n")
+	keep := min(len(p.lines)-min(p.top, len(p.lines)), max(1, content.Dy()-len(lines)-1))
+	y := content.Min.Y + keep + 1
+	return lines, image.Rect(content.Min.X, y, content.Max.X, min(content.Max.Y, y+len(lines)))
+}
+func (m *WorkbenchModel) settingsPluginDialogMouse(point image.Point) {
+	p := m.settings.plugins
+	if p.confirm == nil {
+		m.settings.dismissPluginDialogs()
+		return
+	}
+	lines, r := m.settingsPluginConfirmLayout()
+	if !point.In(r) {
+		m.settings.dismissPluginDialogs()
+		return
+	}
+	// huh renders the buttons on its final line. Description words such as
+	// "not" must never count as a click on the negative button.
+	if point.Y-r.Min.Y != len(lines)-1 {
+		return
+	}
+	line := ansi.Strip(lines[len(lines)-1])
+	for _, button := range []struct {
+		text string
+		yes  bool
+	}{{"yes", true}, {"no", false}} {
+		if at := strings.Index(line, button.text); at >= 0 {
+			x := r.Min.X + ansi.StringWidth(line[:at])
+			if point.X >= x && point.X < x+len(button.text) {
+				p.confirmed = button.yes
+				m.settingsPluginKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+				return
+			}
+		}
+	}
 }
 
 const settingsCatalogExample = `{"version": 1, "entries": {

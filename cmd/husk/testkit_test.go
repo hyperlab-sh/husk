@@ -64,6 +64,7 @@ type fakeFE struct {
 	Snap         *state.Snapshot
 	CatalogRows  contracts.CatalogResult
 	CatalogReads int
+	CatalogRev   uint64
 	ConfigPath   string
 	Rails        []contracts.RailItem
 	PubSlots     []contracts.PublishedSlot
@@ -182,6 +183,7 @@ type invoked struct {
 
 func (f *fakeFE) Snapshot() *state.Snapshot                { return f.Snap }
 func (f *fakeFE) StartupReports() []contracts.ReloadReport { return nil }
+func (f *fakeFE) CatalogRevision() uint64                  { return f.CatalogRev }
 func (f *fakeFE) Catalog() contracts.CatalogResult {
 	f.CatalogReads++
 	raw, _ := json.Marshal(f.CatalogRows)

@@ -49,11 +49,15 @@ func TestSlowCatalogNeverDelaysReloadOrOverwritesNewerCache(t *testing.T) {
 	<-fresh
 	h.loop(func() {})
 	before := h.root.Catalog()
+	revision := h.root.CatalogRevision()
 	close(reader.release)
 	<-slow
 	h.root.wg.Wait()
 	h.loop(func() {})
 	after := h.root.Catalog()
+	if h.root.CatalogRevision() != revision {
+		t.Fatal("rejected stale worker advanced catalog revision")
+	}
 	if len(before.Entries) != 1 || len(after.Entries) != 1 || before.Entries[0].ID != after.Entries[0].ID {
 		t.Fatalf("late worker replaced fresh cache: %v -> %v", before, after)
 	}

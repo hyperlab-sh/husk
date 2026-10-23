@@ -134,8 +134,8 @@ func (m *WorkbenchModel) drawSettings(c *canvas) uv.Rectangle {
 		p := s.plugins
 		lines := p.lines[min(p.top, len(p.lines)):]
 		if p.confirm != nil {
-			confirm := strings.Split(p.confirmView, "\n")
-			keep := min(len(lines), max(1, content.Dy()-len(confirm)-1))
+			confirm, rect := m.settingsPluginConfirmLayout()
+			keep := rect.Min.Y - content.Min.Y - 1
 			lines = append(slices.Clone(lines[:keep]), "")
 			lines = append(lines, confirm...)
 		}

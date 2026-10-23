@@ -82,6 +82,11 @@ type Frontend interface {
 	// every services.reloaded event, then published on the loop.
 	Catalog() CatalogResult
 
+	// CatalogRevision advances after each accepted catalog cache publication,
+	// including a worker completing after services.reloaded. Any goroutine;
+	// atomic read, never I/O. Use it to avoid copying Catalog on idle ticks.
+	CatalogRevision() uint64
+
 	// Resolve resolves the typed key sequence against the effective keymap.
 	// It is pure and lock-free. Any goroutine.
 	Resolve(ctx KeyContext, keys []string) KeyResolution
