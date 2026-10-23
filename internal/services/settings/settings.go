@@ -64,11 +64,12 @@ type Service struct {
 	reloader Reloader
 }
 type snapshot struct {
-	gen         c.Generation
-	values, raw map[string]any
-	sources     map[string]string
-	schema      map[string]Entry
-	warn        func(string)
+	gen               c.Generation
+	pluginPathsFrozen bool
+	values, raw       map[string]any
+	sources           map[string]string
+	schema            map[string]Entry
+	warn              func(string)
 }
 
 // Builtins returns the complete host/Theme/Profile schema. Frame-dump/demo flags
@@ -193,6 +194,23 @@ func (s *Service) warning(key string) {
 
 // Snapshot loads an immutable reader without locking.
 func (s *Service) Snapshot() Snapshot { return s.current.Load() }
+
+// FreezePluginPaths fixes the plugin arrays to the snapshot startup used,
+// including defaults when an unrelated validation error prevented publication.
+// The host calls it after accepting the startup flight, before loading plugins.
+func (s *Service) FreezePluginPaths() {
+	for {
+		old := s.current.Load()
+		if old.pluginPathsFrozen {
+			return
+		}
+		next := *old
+		next.pluginPathsFrozen = true
+		if s.current.CompareAndSwap(old, &next) {
+			return
+		}
+	}
+}
 
 // visible reports whether a plugin may read the entry: its own declaration,
 // or a host or distribution entry marked public. A key prefix is never
@@ -361,6 +379,7 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 	}
 	next := defaults(schema, s.warning)
 	next.gen = old.gen + 1
+	next.pluginPathsFrozen = old.pluginPathsFrozen
 	layerFiles := map[string]string{}
 	for _, l := range in.ConfigLayers {
 		layerFiles[string(l.Layer)] = l.File
@@ -434,21 +453,20 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 		next.sources[key] = layer
 		next.values[key] = v
 	}
-	// The value in force for a restart key is what the first successful load
-	// produced; later loads keep it and say what is pending. Removing the key
-	// counts as a change back to the default.
-	if old.gen > 0 {
-		for key, e := range schema {
-			prev, initialized := old.values[key]
-			if e.Apply != "restart" || !initialized || reflect.DeepEqual(next.values[key], prev) {
-				continue
-			}
-			wanted := next.raw[key]
-			r.Problems = append(r.Problems, c.Problem{Severity: "warning", Code: "restart_required", Layer: next.sources[key], Key: key, Message: fmt.Sprintf("%s: restart required; in force %s, configured %s", key, jsonText(old.raw[key]), jsonText(wanted)), Source: sourceOf(next.sources[key], layerFiles)})
-			next.values[key] = cloneTyped(prev)
-			next.raw[key] = c.Clone(old.raw[key])
-			next.sources[key] = old.sources[key]
+	// Most restart keys take effect on the first successful load. Plugin
+	// arrays are fixed when startup consumes its snapshot, even at generation
+	// zero. Removing a key counts as a change back to the default.
+	for key, e := range schema {
+		prev, present := old.values[key]
+		initialized := old.gen > 0 || old.pluginPathsFrozen && (key == "husk.plugins.paths" || key == "husk.plugins.dirs")
+		if e.Apply != "restart" || !present || !initialized || reflect.DeepEqual(next.values[key], prev) {
+			continue
 		}
+		wanted := next.raw[key]
+		r.Problems = append(r.Problems, c.Problem{Severity: "warning", Code: "restart_required", Layer: next.sources[key], Key: key, Message: fmt.Sprintf("%s: restart required; in force %s, configured %s", key, jsonText(old.raw[key]), jsonText(wanted)), Source: sourceOf(next.sources[key], layerFiles)})
+		next.values[key] = cloneTyped(prev)
+		next.raw[key] = c.Clone(old.raw[key])
+		next.sources[key] = old.sources[key]
 	}
 	sort.SliceStable(r.Problems, func(i, j int) bool { return r.Problems[i].Key < r.Problems[j].Key })
 	if err := c.Invalid(r.Problems); err != nil {

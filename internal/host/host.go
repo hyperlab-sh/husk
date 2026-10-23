@@ -432,6 +432,7 @@ func (r *Root) startup() error {
 	if startupFatal(reports, err) {
 		return startupError(reports, err)
 	}
+	r.rt.Settings.FreezePluginPaths()
 	if problems > 0 {
 		r.log(pods.LogMsg{Level: "warn", Message: fmt.Sprintf("services: startup reload: %d problems", problems)})
 	}
