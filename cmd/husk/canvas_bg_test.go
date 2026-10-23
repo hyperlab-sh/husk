@@ -15,10 +15,10 @@ import (
 // direction.
 func TestViewPaintsAppBackground(t *testing.T) {
 	m := pureViewModel("plugin", false)
-	canvas := lipgloss.Color(m.palette.Canvas)
+	canvas := m.palette.Canvas
 	view := m.View()
 	if !sameColor(view.BackgroundColor, canvas) {
-		t.Fatalf("view background = %v, want canvas %s", view.BackgroundColor, m.palette.Canvas)
+		t.Fatalf("view background = %v, want canvas %v", view.BackgroundColor, m.palette.Canvas)
 	}
 	rows := frameCells(view.Content)
 	for y, row := range rows {
@@ -30,9 +30,9 @@ func TestViewPaintsAppBackground(t *testing.T) {
 	}
 	// the slot content area is the derived shade, not the canvas
 	rect := m.slotRects["main-stage"]
-	slot := lipgloss.Color(m.palette.Slot)
+	slot := m.palette.Slot
 	if got := rows[rect.InnerY+rect.InnerH-1][rect.InnerX+rect.InnerW-1].Style.Bg; !sameColor(got, slot) || sameColor(got, canvas) {
-		t.Errorf("blank stage cell bg = %v, want slot %s distinct from canvas", got, m.palette.Slot)
+		t.Errorf("blank stage cell bg = %v, want slot %v distinct from canvas", got, m.palette.Slot)
 	}
 }
 
@@ -42,7 +42,7 @@ func TestViewTooSmallKeepsAppBackground(t *testing.T) {
 	if !m.tooSmall() {
 		t.Fatal("model should be too small")
 	}
-	if got := m.View().BackgroundColor; !sameColor(got, lipgloss.Color(m.palette.Canvas)) {
+	if got := m.View().BackgroundColor; !sameColor(got, m.palette.Canvas) {
 		t.Errorf("too-small view background = %v, want canvas", got)
 	}
 }
@@ -65,7 +65,7 @@ func TestViewPaintsModalSlotBackground(t *testing.T) {
 	if rect.InnerW < 10 || rect.InnerH < 3 {
 		t.Fatalf("modal inner rect too small: %+v", rect)
 	}
-	slot := lipgloss.Color(m.palette.Slot)
+	slot := m.palette.Slot
 	rows := frameCells(m.View().Content)
 	if got := rows[rect.InnerY][rect.InnerX].Style.Bg; !sameColor(got, lipgloss.Color("2")) {
 		t.Errorf("plugin green background replaced: %v", got)
@@ -83,7 +83,7 @@ func TestViewPaintsExplorerSlotBackground(t *testing.T) {
 	m := pureViewModel("hotspots", false)
 	m.showHotspots = false
 	rect := m.slotRects["main-stage"]
-	slot := lipgloss.Color(m.palette.Slot)
+	slot := m.palette.Slot
 	rows := frameCells(m.View().Content)
 	x, y := rect.X+rect.Width-2, rect.Y+rect.Height-2 // last cell inside the explorer's own border
 	if got := rows[y][x].Style.Bg; !sameColor(got, slot) {

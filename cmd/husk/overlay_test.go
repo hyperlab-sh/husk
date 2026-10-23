@@ -217,7 +217,7 @@ func TestGoldenFrameOverlay(t *testing.T) {
 	stage := m.slotRects[protocol.SurfaceMainStage]
 	x0, y0 := stage.InnerX, stage.InnerY
 	rows := make([]string, m.height)
-	style := lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.Accent))
+	style := lipgloss.NewStyle().Foreground(m.palette.Accent)
 	// Paint the label row over the occupied stage's first content row.
 	rows[y0] = strings.Repeat(" ", x0) + style.Render("┌ Overlay ───────┐")
 	rows[y0+1] = strings.Repeat(" ", x0) + style.Render("│") + strings.Repeat(" ", 16) + style.Render("│")
@@ -235,7 +235,7 @@ func TestGoldenFrameOverlay(t *testing.T) {
 			t.Fatalf("stage content missing beneath label at %d,%d", x0+i, y0)
 		}
 	}
-	stageBg := lipgloss.Color(m.palette.Slot)
+	stageBg := m.palette.Slot
 	scratch := newCanvas(m.width, m.height)
 	defer scratch.release()
 	scratch.blitLines(0, 0, m.width, m.height, rows)

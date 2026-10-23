@@ -33,6 +33,10 @@ type Frontend interface {
 	// Palette returns the active theme palette. Any goroutine.
 	Palette() protocol.Palette
 
+	// PaletteANSI returns the palette plus a detached role-to-index map from
+	// one Theme snapshot read (empty for hex themes). Any goroutine.
+	PaletteANSI() (protocol.Palette, map[string]int)
+
 	// Catalog returns a detached view of the optional catalog cache. Any
 	// goroutine; never performs Store I/O. Warmed off-loop after startup and
 	// every services.reloaded event, then published on the loop.

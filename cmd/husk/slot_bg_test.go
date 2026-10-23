@@ -75,9 +75,9 @@ func TestViewPaintsSlotBackgroundUnderPluginContent(t *testing.T) {
 	if rect.InnerW < 20 || rect.InnerH < 3 {
 		t.Fatalf("main stage inner rect too small: %+v", rect)
 	}
-	slot := lipgloss.Color(m.palette.Slot)
-	if m.palette.Slot != theme.Default().Slot || m.palette.Slot == "" {
-		t.Fatalf("model palette slot = %q", m.palette.Slot)
+	slot := m.palette.Slot
+	if !sameColor(m.palette.Slot, lipgloss.Color(theme.Default().Slot)) || m.palette.Slot == nil {
+		t.Fatalf("model palette slot = %v", m.palette.Slot)
 	}
 	frame := m.View().Content
 	requireFrameGeometry(t, frame)
@@ -101,7 +101,7 @@ func TestViewPaintsSlotBackgroundUnderPluginContent(t *testing.T) {
 		}
 	}
 	// the bottom keybinding bar keeps its Surface background
-	if got := at(1, goldenH-1).Style.Bg; !sameColor(got, lipgloss.Color(m.palette.Surface)) {
+	if got := at(1, goldenH-1).Style.Bg; !sameColor(got, m.palette.Surface) {
 		t.Errorf("bottom bar bg = %v, want surface", got)
 	}
 	// the serialized frame must not leak the slot colour as an open style past
@@ -116,7 +116,7 @@ func TestViewPaintsSlotBackgroundUnderPluginContent(t *testing.T) {
 // A bordered frame keeps its ring styling: only the content area is painted.
 func TestViewSlotBackgroundSkipsBorderRing(t *testing.T) {
 	m := goldenModel()
-	m.palette.Slot = "#102030"
+	m.palette.Slot = lipgloss.Color("#102030")
 	goldenPlugin(m, "p.one", map[protocol.SurfaceID][]string{protocol.SurfaceMainStage: {"x"}})
 	m.catalog.Frames["p.one"] = map[protocol.SurfaceID]protocol.FrameSpec{
 		protocol.SurfaceMainStage: {Border: true, Label: "Stage"},

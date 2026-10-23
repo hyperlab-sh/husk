@@ -239,7 +239,8 @@ func (c *canvas) castShadow(popup uv.Rectangle, ink, canvas color.Color) {
 }
 
 // darken blends a cell's resolved foreground and background (and underline
-// colour, when it has one) toward black.
+// colour, when it has one) toward black. If any resolved colour is indexed,
+// the whole cell is left untouched: only the terminal knows its actual colour.
 func darken(cell *uv.Cell, ink, canvas color.Color) {
 	fg, bg := cell.Style.Fg, cell.Style.Bg
 	if fg == nil {
@@ -248,10 +249,22 @@ func darken(cell *uv.Cell, ink, canvas color.Color) {
 	if bg == nil {
 		bg = canvas
 	}
+	if indexedColor(fg) || indexedColor(bg) || indexedColor(cell.Style.UnderlineColor) {
+		return
+	}
 	cell.Style.Fg = towardBlack(fg)
 	cell.Style.Bg = towardBlack(bg)
 	if cell.Style.UnderlineColor != nil {
 		cell.Style.UnderlineColor = towardBlack(cell.Style.UnderlineColor)
+	}
+}
+
+func indexedColor(c color.Color) bool {
+	switch c.(type) {
+	case ansi.BasicColor, ansi.IndexedColor:
+		return true
+	default:
+		return false
 	}
 }
 

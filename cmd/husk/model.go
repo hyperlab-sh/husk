@@ -151,7 +151,9 @@ type WorkbenchModel struct {
 
 	width        int
 	height       int
-	palette      theme.Palette
+	palette      drawPalette
+	served       theme.Palette
+	ansi         map[string]int
 	focusedSlot  protocol.SurfaceID
 	showSidebar  bool
 	sidebarWidth int
@@ -237,7 +239,8 @@ func newWorkbenchModel() *WorkbenchModel {
 		slotRects:    make(map[protocol.SurfaceID]SlotRect),
 		width:        144,
 		height:       40,
-		palette:      theme.Default(),
+		palette:      newDrawPalette(theme.Default(), nil),
+		served:       theme.Default(),
 		focusedSlot:  protocol.SurfaceSidebarList,
 		showSidebar:  true,
 		sidebarWidth: 38,
@@ -820,8 +823,10 @@ func (m *WorkbenchModel) refresh() bool {
 		return false
 	}
 	changed := false
-	if pal := theme.Palette(m.fe.Palette()); pal != m.palette {
-		m.palette = pal
+	pal, idx := m.fe.PaletteANSI()
+	if served := theme.Palette(pal); served != m.served || !maps.Equal(idx, m.ansi) {
+		m.served, m.ansi = served, idx
+		m.palette = newDrawPalette(served, idx)
 		changed = true
 	}
 	snap := m.fe.Snapshot()

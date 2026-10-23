@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
@@ -32,7 +31,7 @@ func TestEmptySurfaceNameClipsAndHides(t *testing.T) {
 			}
 			if tc.want != "" {
 				cell := c.buf.CellAt(tc.x, tc.y)
-				if cell.Content != "M" || !sameColor(cell.Style.Fg, lipgloss.Color(m.palette.InkSubtle)) || !sameColor(cell.Style.Bg, lipgloss.Color(m.palette.Slot)) || cell.Style.Attrs&uv.AttrBold != 0 {
+				if cell.Content != "M" || !sameColor(cell.Style.Fg, m.palette.InkSubtle) || !sameColor(cell.Style.Bg, m.palette.Slot) || cell.Style.Attrs&uv.AttrBold != 0 {
 					t.Fatalf("wrong name position/style: %+v", cell)
 				}
 			}

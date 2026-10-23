@@ -36,6 +36,9 @@ func (r *Root) StartupReports() []contracts.ReloadReport {
 // Palette implements contracts.Frontend.
 func (r *Root) Palette() protocol.Palette { return r.rt.Theme.Wire() }
 
+// PaletteANSI implements contracts.Frontend.
+func (r *Root) PaletteANSI() (protocol.Palette, map[string]int) { return r.rt.Theme.WireANSI() }
+
 func (r *Root) keys() portsservices.Keys { return portsservices.Keys{Svc: r.rt.Keybinding} }
 
 // Resolve implements contracts.Frontend.

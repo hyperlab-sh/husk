@@ -11,7 +11,6 @@ import (
 	"strings"
 	"testing"
 
-	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
 	"github.com/hyperlab-sh/husk/pkg/frame"
@@ -164,7 +163,7 @@ func TestChromeColourDiscipline(t *testing.T) {
 		m := goldenModel()
 		rail := m.slotRects[protocol.SurfaceActivityRail]
 		cells := frameCells(m.View().Content)
-		acc := lipgloss.Color(m.palette.Accent)
+		acc := m.palette.Accent
 		active := 0
 		for _, b := range m.railButtons() {
 			if b.active {
@@ -195,7 +194,8 @@ func TestChromeManipulationRoles(t *testing.T) {
 			m := goldenModel()
 			c := newCanvas(m.width, m.height)
 			defer c.release()
-			text, fg, bg, bold := "", m.palette.Ink, "", true
+			text, fg, bold := "", m.palette.Ink, true
+			var bg color.Color
 			slot := protocol.SurfaceMainStage
 			r := m.slotRects[slot]
 			switch name {
@@ -241,10 +241,10 @@ func TestChromeManipulationRoles(t *testing.T) {
 			}
 			cells := frameCells(c.render())
 			var background []color.Color
-			if bg != "" {
-				background = append(background, lipgloss.Color(bg))
+			if bg != nil {
+				background = append(background, bg)
 			}
-			requireChromeText(t, cells, text, lipgloss.Color(fg), bold, background...)
+			requireChromeText(t, cells, text, fg, bold, background...)
 		})
 	}
 }
@@ -264,9 +264,9 @@ func TestSelectedChromeNeverUsesSubtleInk(t *testing.T) {
 			selected := 0
 			for y, row := range frameCells(m.View().Content) {
 				for x, cell := range row {
-					if sameColor(cell.Style.Bg, lipgloss.Color(m.palette.SurfaceSelected)) {
+					if sameColor(cell.Style.Bg, m.palette.SurfaceSelected) {
 						selected++
-						if sameColor(cell.Style.Fg, lipgloss.Color(m.palette.InkSubtle)) {
+						if sameColor(cell.Style.Fg, m.palette.InkSubtle) {
 							t.Errorf("subtle ink on selected surface at %d,%d", x, y)
 						}
 					}
@@ -306,7 +306,10 @@ func requireChromeText(t *testing.T, cells uv.Lines, text string, fg color.Color
 
 func TestToastBorderNeutralAndTitleStatus(t *testing.T) {
 	m := goldenModel()
-	for _, tc := range []struct{ level, role string }{
+	for _, tc := range []struct {
+		level string
+		role  color.Color
+	}{
 		{"info", m.palette.Info}, {"success", m.palette.Success}, {"warn", m.palette.Warning}, {"error", m.palette.Danger},
 	} {
 		t.Run(tc.level, func(t *testing.T) {
@@ -315,20 +318,20 @@ func TestToastBorderNeutralAndTitleStatus(t *testing.T) {
 			defer c.release()
 			m.drawToast(c)
 			cells := frameCells(c.render())
-			requireChromeText(t, cells, "● Toast title", lipgloss.Color(tc.role), true)
-			requireChromeText(t, cells, "Toast message", lipgloss.Color(m.palette.Ink), false)
+			requireChromeText(t, cells, "● Toast title", tc.role, true)
+			requireChromeText(t, cells, "Toast message", m.palette.Ink, false)
 			borders, backgrounds := 0, 0
 			for _, row := range cells {
 				for _, cell := range row {
 					if strings.ContainsAny(cell.Content, "╭╮╰╯─│") {
 						borders++
-						if !sameColor(cell.Style.Fg, lipgloss.Color(m.palette.Border)) {
+						if !sameColor(cell.Style.Fg, m.palette.Border) {
 							t.Errorf("toast border is not border: %+v", cell.Style)
 						}
 					}
 					if cell.Style.Bg != nil {
 						backgrounds++
-						if !sameColor(cell.Style.Bg, lipgloss.Color(m.palette.SurfaceElevated)) {
+						if !sameColor(cell.Style.Bg, m.palette.SurfaceElevated) {
 							t.Errorf("toast background is not elevated: %+v", cell.Style)
 						}
 					}
@@ -349,9 +352,9 @@ func TestSecretPromptChromeRoles(t *testing.T) {
 	defer c.release()
 	r := m.drawSecretPrompt(c)
 	cells := frameCells(c.render())
-	requireChromeText(t, cells, "⚠", lipgloss.Color(m.palette.Warning), false)
+	requireChromeText(t, cells, "⚠", m.palette.Warning, false)
 	for _, text := range []string{"SECRET ACCESS REQUEST", askPrompt.Plugin} {
-		requireChromeText(t, cells, text, lipgloss.Color(m.palette.Ink), true)
+		requireChromeText(t, cells, text, m.palette.Ink, true)
 	}
 	foundHints := false
 	for _, row := range cells {
@@ -362,19 +365,19 @@ func TestSecretPromptChromeRoles(t *testing.T) {
 		if strings.Contains(plain.String(), "ask again later") {
 			foundHints = true
 			for _, key := range []string{"y", "n", "esc"} {
-				requireChromeText(t, uv.Lines{row}, key, lipgloss.Color(m.palette.Ink), true)
+				requireChromeText(t, uv.Lines{row}, key, m.palette.Ink, true)
 			}
 		}
 	}
 	if !foundHints {
 		t.Fatal("secret prompt hints missing")
 	}
-	if !sameColor(c.buf.CellAt(r.Min.X, r.Min.Y).Style.Fg, lipgloss.Color(m.palette.BorderFocused)) {
+	if !sameColor(c.buf.CellAt(r.Min.X, r.Min.Y).Style.Fg, m.palette.BorderFocused) {
 		t.Fatal("secret prompt border not focused border")
 	}
 	for y := r.Min.Y + 1; y < r.Max.Y-1; y++ {
 		for x := r.Min.X + 1; x < r.Max.X-1; x++ {
-			if !sameColor(c.buf.CellAt(x, y).Style.Bg, lipgloss.Color(m.palette.SurfaceElevated)) {
+			if !sameColor(c.buf.CellAt(x, y).Style.Bg, m.palette.SurfaceElevated) {
 				t.Fatalf("secret prompt background not elevated at %d,%d", x, y)
 			}
 		}
@@ -383,11 +386,14 @@ func TestSecretPromptChromeRoles(t *testing.T) {
 
 func TestStatusMarkLevels(t *testing.T) {
 	m := goldenModel()
-	for _, tc := range []struct{ level, role string }{
+	for _, tc := range []struct {
+		level string
+		role  color.Color
+	}{
 		{"info", m.palette.Info}, {"success", m.palette.Success}, {"warning", m.palette.Warning}, {"danger", m.palette.Danger},
 	} {
 		t.Run(tc.level, func(t *testing.T) {
-			requireChromeText(t, frameCells(m.statusMark(tc.level, "●")), "●", lipgloss.Color(tc.role), false)
+			requireChromeText(t, frameCells(m.statusMark(tc.level, "●")), "●", tc.role, false)
 		})
 	}
 }
