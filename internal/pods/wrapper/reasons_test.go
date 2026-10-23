@@ -28,11 +28,9 @@ func closedReason(t *testing.T, f *fixture) string {
 	return reasons[0]
 }
 
-const stdinTextQuestion = "QUESTION host-test-gaps: pods.md row 500 says \"stopped reading: send queue full (1024 messages)\" / \"write timed out after 5s\", the code prefixes \"protocol: \"; pin after the ruling"
-
 // The exact ClosedMsg reason, LastError and status of the exits no other test
 // pins by equality (clean, crash, signal and EOF live in process_test.go): host
-// stop, and the two stdin failures, which wait on the stdinTextQuestion ruling.
+// stop and the two stdin failures (pods.md row "Plugin stops reading stdin").
 func TestExitReasonAndLastErrorTextsAreExact(t *testing.T) {
 	big := protocol.Message{Method: "sample.frame", Params: json.RawMessage(`{"padding":"` + strings.Repeat("x", 2<<20) + `"}`)}
 	// stalled drives the stdin queue of a plugin that ignores SIGTERM until it
@@ -50,7 +48,6 @@ func TestExitReasonAndLastErrorTextsAreExact(t *testing.T) {
 		reason     string
 		lastError  string
 		wantStatus Liveness
-		skip       string
 	}{
 		{
 			name: "stdin queue overflow", mode: "ignore", alter: func(o *Options) { o.QueueCapacity = 1 },
@@ -65,7 +62,7 @@ func TestExitReasonAndLastErrorTextsAreExact(t *testing.T) {
 				}
 				stalled(t, f)
 			},
-			reason: "stopped reading: protocol: send queue full (1 messages)", lastError: "stopped reading: protocol: send queue full (1 messages)", wantStatus: Failed, skip: stdinTextQuestion,
+			reason: "stopped reading: protocol: send queue full (1 messages)", lastError: "stopped reading: protocol: send queue full (1 messages)", wantStatus: Failed,
 		},
 		{
 			name: "stdin write timeout", mode: "ignore", alter: func(o *Options) { o.QueueCapacity = 1 },
@@ -78,7 +75,7 @@ func TestExitReasonAndLastErrorTextsAreExact(t *testing.T) {
 				f.clock.Advance(WriteTimeout)
 				stalled(t, f)
 			},
-			reason: "stopped reading: protocol: write timed out after 5s", lastError: "stopped reading: protocol: write timed out after 5s", wantStatus: Failed, skip: stdinTextQuestion,
+			reason: "stopped reading: protocol: write timed out after 5s", lastError: "stopped reading: protocol: write timed out after 5s", wantStatus: Failed,
 		},
 		{
 			name: "host stop", mode: "ignore",
@@ -97,9 +94,6 @@ func TestExitReasonAndLastErrorTextsAreExact(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.skip != "" {
-				t.Skip(tc.skip)
-			}
 			f := newFixture(t, tc.mode, tc.alter)
 			if tc.alter != nil {
 				if err := f.w.Start(nil); err != nil {

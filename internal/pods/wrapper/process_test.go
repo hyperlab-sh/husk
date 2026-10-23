@@ -500,7 +500,7 @@ func TestStdinOverflowAndTimeoutAreFatal(t *testing.T) {
 			if mode == "timeout" {
 				want = "write timed out"
 			}
-			// The exact text waits on the ruling pinned in reasons_test.go.
+			// The exact texts are pinned in reasons_test.go.
 			if !strings.HasPrefix(exit.Info.LastError, "stopped reading: ") || !strings.Contains(exit.Info.LastError, want) {
 				t.Fatal(exit.Info.LastError)
 			}
