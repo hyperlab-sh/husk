@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,11 +31,30 @@ func (b *hookOutbox) Send(p calls.PluginID, m protocol.Message) error {
 	return nil
 }
 
+// hookSubs maps a declared hook id to its subscribers. Each hook is a gate
+// owned by the first segment of its id, with the Calls default timeout.
 type hookSubs map[string][]string
 
-func (s hookSubs) Subscribers(hook string) ([]string, bool) {
-	list, ok := s[hook]
-	return list, ok
+func (s hookSubs) Lookup(hook string) (hooks.HookDef, bool) {
+	if _, ok := s[hook]; !ok {
+		return hooks.HookDef{}, false
+	}
+	return hooks.HookDef{ID: hook, Owner: strings.SplitN(hook, ".", 2)[0], Kind: hooks.Gate, Timeout: calls.DefaultTimeout}, true
+}
+
+func (s hookSubs) Subscribers(hook string) []hooks.Subscription {
+	var out []hooks.Subscription
+	for _, p := range s[hook] {
+		out = append(out, hooks.Subscription{Plugin: p, Priority: 10})
+	}
+	return out
+}
+
+func (s hookSubs) List() []hooks.HookDef { return nil }
+
+// ownerOf is the caller that owns hook under hookSubs' rule.
+func ownerOf(hook string) contracts.Caller {
+	return contracts.Caller{Kind: contracts.CallerPlugin, PluginID: strings.SplitN(hook, ".", 2)[0]}
 }
 
 // hookRig wires the port over a real runner on a real call table, driven by
@@ -57,7 +77,7 @@ func newHookRig(t *testing.T, subs hookSubs, alive live) *hookRig {
 		sent: make(chan hookSend, 16),
 	}
 	r.table = calls.New(&hookOutbox{sent: r.sent}, calls.TableOptions{Clock: r.clk})
-	runner, err := hooks.New(hooks.Options{Subscriptions: subs, Liveness: alive, Calls: r.table})
+	runner, err := hooks.New(hooks.Options{Catalog: subs, Liveness: alive, Calls: r.table})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +127,7 @@ type hookOutcome struct {
 func hookInvoke(ctx context.Context, p *stemports.Hooks, hook string, data json.RawMessage) chan hookOutcome {
 	out := make(chan hookOutcome, 1)
 	go func() {
-		results, err := p.HookCall(ctx, contracts.Caller{Kind: contracts.CallerCLI}, hook, data)
+		results, err := p.HookCall(ctx, ownerOf(hook), hook, data)
 		out <- hookOutcome{results: results, err: err}
 	}()
 	return out
@@ -147,8 +167,8 @@ func TestHookCallAggregatesThroughThePort(t *testing.T) {
 	if bID.String() == cID.String() {
 		t.Fatal("legs share one request id")
 	}
-	// b answers with a payload; c stays silent until its deadline.
-	r.resolve(t, "b", bID, json.RawMessage(`{"data":{"ready":true}}`))
+	// b allows; c stays silent until its deadline.
+	r.resolve(t, "b", bID, json.RawMessage(`{}`))
 	if n := r.sweep(); n != 1 {
 		t.Fatalf("expiry resolved %d legs", n)
 	}
@@ -161,16 +181,11 @@ func TestHookCallAggregatesThroughThePort(t *testing.T) {
 			t.Fatalf("want 2 results, got %d", len(got.results))
 		}
 		first, second := got.results[0], got.results[1]
-		if first.Plugin != "b" || first.Err != nil || string(first.Data) != `{"ready":true}` {
+		if first.Plugin != "b" || first.Err != nil {
 			t.Fatalf("first result %#v", first)
 		}
 		if second.Plugin != "c" || second.Err == nil || second.Err.Code() != "timeout" {
 			t.Fatalf("second result %#v", second.Err)
-		}
-		// The entries marshal with the wire's plugin_id tag.
-		blob, err := json.Marshal(first)
-		if err != nil || string(blob) != `{"plugin_id":"b","data":{"ready":true}}` {
-			t.Fatalf("entry JSON %s (%v)", blob, err)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("HookCall never returned")
@@ -182,7 +197,7 @@ func TestHookCallAggregatesThroughThePort(t *testing.T) {
 
 func TestHookCallWithoutSubscribersReturnsEmptyReply(t *testing.T) {
 	r := newHookRig(t, hookSubs{"a.h": nil}, live{})
-	results, err := r.port.HookCall(context.Background(), contracts.Caller{Kind: contracts.CallerCLI}, "a.h", json.RawMessage(`{"x":1}`))
+	results, err := r.port.HookCall(context.Background(), ownerOf("a.h"), "a.h", json.RawMessage(`{"x":1}`))
 	if err != nil {
 		t.Fatalf("HookCall: %v", err)
 	}
@@ -191,18 +206,27 @@ func TestHookCallWithoutSubscribersReturnsEmptyReply(t *testing.T) {
 	}
 }
 
-func TestHookCallUnknownHookIsNotFound(t *testing.T) {
+func TestHookCallUnknownHookIsNotFoundForTheHostAndDeniedForOthers(t *testing.T) {
 	r := newHookRig(t, hookSubs{"a.h": nil}, live{})
-	_, err := r.port.HookCall(context.Background(), contracts.Caller{Kind: contracts.CallerCLI}, "nope.h", nil)
+	ctx := context.Background()
+	_, err := r.port.HookCall(ctx, contracts.Caller{Kind: contracts.CallerStem}, "husk.nope", nil)
 	if code := hookCodeOf(t, err); code != "not_found" {
-		t.Fatalf("want not_found, got %s", code)
+		t.Fatalf("host: want not_found, got %s", code)
+	}
+	_, err = r.port.HookCall(ctx, ownerOf("nope.h"), "nope.h", nil)
+	if code := hookCodeOf(t, err); code != "denied" {
+		t.Fatalf("plugin: want denied, got %s", code)
+	}
+	_, err = r.port.HookCall(ctx, contracts.Caller{Kind: contracts.CallerCLI}, "a.h", nil)
+	if code := hookCodeOf(t, err); code != "denied" {
+		t.Fatalf("cli: want denied, got %s", code)
 	}
 }
 
 func TestHookCallWhenTheLoopIsDown(t *testing.T) {
 	r := newHookRig(t, hookSubs{"a.h": {"b"}}, live{"b": true})
 	r.port = stemports.NewHooks(r.runner, func(fn func()) bool { return false })
-	_, err := r.port.HookCall(context.Background(), contracts.Caller{Kind: contracts.CallerCLI}, "a.h", nil)
+	_, err := r.port.HookCall(context.Background(), ownerOf("a.h"), "a.h", nil)
 	if code := hookCodeOf(t, err); code != "unavailable" {
 		t.Fatalf("want unavailable, got %s", code)
 	}
@@ -227,7 +251,7 @@ func TestHookCallValidatesData(t *testing.T) {
 		{"null", json.RawMessage(`null`), ""},
 		{"object", json.RawMessage(`{"why":"manual"}`), ""},
 	} {
-		_, err := r.port.HookCall(context.Background(), contracts.Caller{Kind: contracts.CallerCLI}, "a.h", tc.data)
+		_, err := r.port.HookCall(context.Background(), ownerOf("a.h"), "a.h", tc.data)
 		if tc.code == "" {
 			if err != nil {
 				t.Fatalf("%s: unexpected error %v", tc.name, err)
@@ -286,7 +310,7 @@ func TestHookCallCallerDeadlineIsTimeout(t *testing.T) {
 	// is exercised without a real timer.
 	ctx, cancel := context.WithDeadline(context.Background(), time.Unix(1, 0))
 	defer cancel()
-	_, err := r.port.HookCall(ctx, contracts.Caller{Kind: contracts.CallerCLI}, "a.h", nil)
+	_, err := r.port.HookCall(ctx, ownerOf("a.h"), "a.h", nil)
 	if code := hookCodeOf(t, err); code != "timeout" {
 		t.Fatalf("want timeout, got %s (%v)", code, err)
 	}
@@ -303,8 +327,8 @@ func TestHookCallCallerDeadlineIsTimeout(t *testing.T) {
 
 func TestHookCallerMapping(t *testing.T) {
 	// CallerStem is a Host caller for the runner, as the Calls port maps it.
-	r := newHookRig(t, hookSubs{"a.h": nil}, live{})
-	results, err := r.port.HookCall(context.Background(), contracts.Caller{Kind: contracts.CallerStem}, "a.h", nil)
+	r := newHookRig(t, hookSubs{"husk.h": nil}, live{})
+	results, err := r.port.HookCall(context.Background(), contracts.Caller{Kind: contracts.CallerStem}, "husk.h", nil)
 	if err != nil || len(results) != 0 {
 		t.Fatalf("stem caller refused: %v (%d results)", err, len(results))
 	}

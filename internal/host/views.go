@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
@@ -17,6 +18,7 @@ import (
 	"github.com/hyperlab-sh/husk/internal/services/secrets"
 	"github.com/hyperlab-sh/husk/internal/stem/calls"
 	"github.com/hyperlab-sh/husk/internal/stem/eventbus"
+	"github.com/hyperlab-sh/husk/internal/stem/hooks"
 	"github.com/hyperlab-sh/husk/internal/stem/surfaces"
 	"github.com/hyperlab-sh/husk/internal/substrate/state"
 	sstate "github.com/hyperlab-sh/husk/internal/substrate/state/surfaces"
@@ -169,17 +171,17 @@ func (n podNotifier) Notify(m protocol.Message) error {
 
 // catalogView is the loop-confined read model of the declared plugin
 // documents: who publishes which slot, which hooks exist and who subscribes.
-// It implements surfaces.Publications and hooks.Subscriptions.
+// It implements surfaces.Publications and hooks.Catalog.
 type catalogView struct {
 	store          *store.Store
 	slotOwner      map[string]string
-	hookDeclared   map[string]bool
+	hookOwner      map[string]string
 	hookSubs       map[string][]string
 	onSlotsChanged func()
 }
 
 func newCatalogView(s *store.Store) *catalogView {
-	return &catalogView{store: s, slotOwner: map[string]string{}, hookDeclared: map[string]bool{}, hookSubs: map[string][]string{}}
+	return &catalogView{store: s, slotOwner: map[string]string{}, hookOwner: map[string]string{}, hookSubs: map[string][]string{}}
 }
 
 var _ surfaces.Publications = (*catalogView)(nil)
@@ -190,12 +192,40 @@ func (c *catalogView) Owner(slot string) (string, bool) {
 	return p, ok
 }
 
-// Subscribers implements hooks.Subscriptions.
-func (c *catalogView) Subscribers(hook string) ([]string, bool) {
-	if !c.hookDeclared[hook] {
-		return nil, false
+var _ hooks.Catalog = (*catalogView)(nil)
+
+// Lookup implements hooks.Catalog. Until the declared documents carry kind,
+// timeout and priority, every declared hook is a gate with the Calls default
+// timeout, owned by the first plugin (in id order) that declares it.
+func (c *catalogView) Lookup(hook string) (hooks.HookDef, bool) {
+	owner, ok := c.hookOwner[hook]
+	if !ok {
+		return hooks.HookDef{}, false
 	}
-	return slices.Clone(c.hookSubs[hook]), true
+	return hooks.HookDef{ID: hook, Owner: owner, Kind: hooks.Gate, Timeout: calls.DefaultTimeout}, true
+}
+
+// Subscribers implements hooks.Catalog: every registration at the default
+// priority, so the order is the plugin id.
+func (c *catalogView) Subscribers(hook string) []hooks.Subscription {
+	ids := slices.Clone(c.hookSubs[hook])
+	slices.Sort(ids)
+	out := make([]hooks.Subscription, len(ids))
+	for i, id := range ids {
+		out[i] = hooks.Subscription{Plugin: id, Priority: 10}
+	}
+	return out
+}
+
+// List implements hooks.Catalog.
+func (c *catalogView) List() []hooks.HookDef {
+	out := make([]hooks.HookDef, 0, len(c.hookOwner))
+	for id := range c.hookOwner {
+		def, _ := c.Lookup(id)
+		out = append(out, def)
+	}
+	slices.SortFunc(out, func(a, b hooks.HookDef) int { return strings.Compare(a.ID, b.ID) })
+	return out
 }
 
 type idDecl struct {
@@ -223,7 +253,7 @@ func (c *catalogView) refresh() eventbus.Table {
 	}
 	sort.Strings(ids)
 	owners := map[string]string{}
-	declared := map[string]bool{}
+	hookOwners := map[string]string{}
 	subs := map[string][]string{}
 	table := eventbus.Table{Subscribe: map[string][]string{}}
 	for _, id := range ids {
@@ -241,7 +271,9 @@ func (c *catalogView) refresh() eventbus.Table {
 			}
 		}
 		for _, h := range d.HooksDeclared {
-			declared[h.ID] = true
+			if _, taken := hookOwners[h.ID]; !taken {
+				hookOwners[h.ID] = id
+			}
 		}
 		for _, h := range d.HookRegistrations {
 			subs[h.ID] = append(subs[h.ID], id)
@@ -261,7 +293,7 @@ func (c *catalogView) refresh() eventbus.Table {
 			changed = true
 		}
 	}
-	c.slotOwner, c.hookDeclared, c.hookSubs = owners, declared, subs
+	c.slotOwner, c.hookOwner, c.hookSubs = owners, hookOwners, subs
 	if changed && c.onSlotsChanged != nil {
 		c.onSlotsChanged()
 	}
