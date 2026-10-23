@@ -521,6 +521,9 @@
       "properties": {
         "surface": {
           "type": "string"
+        },
+        "yield": {
+          "type": "boolean"
         }
       },
       "required": [

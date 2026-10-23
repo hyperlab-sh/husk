@@ -50,9 +50,8 @@ type Declarations interface {
 	Contribute(plugin, slot string, entry Contribution) error
 
 	// Release removes surface from plugin's <plugin_id>.occupants
-	// declaration. surface.close and the host's force-close retract the
-	// claim at its source, so a freed surface cannot be re-occupied by its
-	// own stale declaration.
+	// declaration. Non-yielding surface.close and the host's force-close
+	// retract the claim at its source so stale declarations cannot reclaim it.
 	Release(plugin string, surface protocol.SurfaceID) error
 }
 
@@ -130,6 +129,12 @@ type pluginDecl struct {
 	contributions Contributions
 }
 
+// claimKey identifies one plugin's claim on one layout surface.
+type claimKey struct {
+	surface protocol.SurfaceID
+	plugin  string
+}
+
 // watcher is one registered notification target. plugin is the watcher's
 // plugin id, or "" for a watcher that is not a plugin.
 type watcher struct {
@@ -164,6 +169,9 @@ type Engine struct {
 	// freed tracks surfaces released since the last pass (surface.close,
 	// host force-close): a freed surface re-resolves standing claims.
 	freed map[protocol.SurfaceID]bool
+	// yielded ranks retained claims behind ordinary claims until they regain
+	// occupancy. It is loop-local: husk.surfaces lists occupants, not claimants.
+	yielded map[claimKey]bool
 
 	slotWatchers   map[string]map[*watcher]struct{}
 	pluginWatchers map[string]map[*watcher]struct{}
@@ -219,6 +227,7 @@ func New(st *state.State, opts Options) (*Engine, error) {
 		log:            opts.Logger,
 		declsCache:     map[string]*pluginDecl{},
 		freed:          map[protocol.SurfaceID]bool{},
+		yielded:        map[claimKey]bool{},
 		slotWatchers:   map[string]map[*watcher]struct{}{},
 		pluginWatchers: map[string]map[*watcher]struct{}{},
 	}
@@ -327,6 +336,13 @@ func (e *Engine) Flush() {
 		}
 	}
 
+	// A Pod teardown or declaration withdrawal drops its yielded ranks too.
+	for key := range e.yielded {
+		if d := next[key.plugin]; d == nil || d.claims[key.surface].Plugin != key.plugin {
+			delete(e.yielded, key)
+		}
+	}
+
 	res := e.slice.Get()
 	if res.Occupants == nil {
 		res.Occupants = Occupants{}
@@ -403,33 +419,21 @@ func (e *Engine) Flush() {
 	e.freed = map[protocol.SurfaceID]bool{}
 	sort.Slice(freed, func(i, j int) bool { return freed[i] < freed[j] })
 	for _, surface := range freed {
-		for _, plugin := range plugins {
-			d, ok := next[plugin]
-			if !ok || d.claims[surface].Plugin != plugin || !e.live.Live(plugin) {
-				continue
-			}
-			res.Occupants[surface] = Occupant{Surface: surface, Plugin: plugin}
-			e.log.Printf("surfaces: %s freed; standing claim by %s resolves", surface, plugin)
-			break
-		}
+		e.resolveStanding(surface, plugins, next, &res)
 	}
 
 	// A claim declared before its Pod went live took nothing; when liveness
 	// moves, every surface still free goes to its first live claimant in
 	// declaration order. An occupant that is live stays: a later claimant
 	// never preempts it.
-	if liveDirty {
+	if liveDirty || len(e.yielded) > 0 {
 		for _, plugin := range plugins {
-			d, ok := next[plugin]
-			if !ok || !e.live.Live(plugin) {
-				continue
-			}
-			for _, surface := range sortedClaims(d.claims) {
-				if d.claims[surface].Plugin != plugin || res.Occupants[surface].Plugin != "" {
-					continue
+			if d := next[plugin]; d != nil {
+				for _, surface := range sortedClaims(d.claims) {
+					if res.Occupants[surface].Plugin == "" {
+						e.resolveStanding(surface, plugins, next, &res)
+					}
 				}
-				res.Occupants[surface] = Occupant{Surface: surface, Plugin: plugin}
-				e.log.Printf("surfaces: %s free; live claim by %s resolves", surface, plugin)
 			}
 		}
 	}
@@ -476,6 +480,24 @@ func (e *Engine) Flush() {
 	}
 }
 
+// resolveStanding awards a free surface to an ordinary live claim first,
+// then a yielded live claim, preserving namespace order within each rank.
+func (e *Engine) resolveStanding(surface protocol.SurfaceID, plugins []string, next map[string]*pluginDecl, res *Surfaces) {
+	for _, yielded := range []bool{false, true} {
+		for _, plugin := range plugins {
+			d := next[plugin]
+			key := claimKey{surface, plugin}
+			if d == nil || d.claims[surface].Plugin != plugin || !e.live.Live(plugin) || e.yielded[key] != yielded {
+				continue
+			}
+			res.Occupants[surface] = Occupant{Surface: surface, Plugin: plugin}
+			delete(e.yielded, key)
+			e.log.Printf("surfaces: %s free; standing claim by %s resolves", surface, plugin)
+			return
+		}
+	}
+}
+
 // resolvePlugin folds one plugin's declaration change into res. old or cur
 // may be nil: nil old is a first arrival, nil cur is a full removal.
 func (e *Engine) resolvePlugin(plugin string, old, cur *pluginDecl, res *Surfaces, changedSlots map[string]bool) {
@@ -503,7 +525,7 @@ func (e *Engine) resolvePlugin(plugin string, old, cur *pluginDecl, res *Surface
 		case "":
 			// First live claim wins; a claim from a Pod that is not live
 			// stands in its declaration and resolves when the Pod goes live.
-			if e.live.Live(plugin) {
+			if e.live.Live(plugin) && !e.yielded[claimKey{surface, plugin}] {
 				res.Occupants[surface] = Occupant{Surface: surface, Plugin: plugin}
 			}
 		case plugin:
@@ -786,16 +808,23 @@ func (e *Engine) SurfaceUpdate(plugin string, p protocol.SurfaceUpdateParams) er
 }
 
 // SurfaceClose serves surface.close from the surface's occupant: it
-// releases the occupancy and retracts the claim declaration at its source.
-// The released surface is free for the next claim to arrive or resolve.
+// releases occupancy and, by default, retracts the claim declaration. Yield
+// retains an occupied claim behind all ordinary live claims until it wins again.
 func (e *Engine) SurfaceClose(plugin string, p protocol.SurfaceCloseParams) error {
 	if plugin == "" {
 		return errf(protocol.CodeDenied, "surface.close requires a plugin caller")
 	}
+	if p.Yield {
+		entry, ok := e.st.Snapshot().Slices[plugin+"."+occupantsSuffix]
+		claims, err := decodeOccupants(entry.Value)
+		if !p.Surface.Valid() || !ok || entry.Owner != plugin || err != nil || claims[p.Surface].Plugin != plugin || e.slice.Get().Occupants[p.Surface].Plugin != plugin {
+			return errf(protocol.CodeInvalidParams, "yield requires an occupied layout claim on surface %q", p.Surface)
+		}
+	}
 	if !p.Surface.Valid() {
 		return errf(protocol.CodeInvalidParams, "surface %q is not a host layout surface", p.Surface)
 	}
-	return e.release(p.Surface, plugin)
+	return e.release(p.Surface, plugin, p.Yield)
 }
 
 // CloseSurface is the documented close path the host (Stem caller) uses to
@@ -804,10 +833,10 @@ func (e *Engine) CloseSurface(surface protocol.SurfaceID) error {
 	if !surface.Valid() {
 		return errf(protocol.CodeInvalidParams, "surface %q is not a host layout surface", surface)
 	}
-	return e.release(surface, "")
+	return e.release(surface, "", false)
 }
 
-func (e *Engine) release(surface protocol.SurfaceID, only string) error {
+func (e *Engine) release(surface protocol.SurfaceID, only string, yield bool) error {
 	occupant := e.slice.Get().Occupants[surface].Plugin
 	if only != "" && occupant != only {
 		if occupant == "" {
@@ -827,6 +856,13 @@ func (e *Engine) release(surface protocol.SurfaceID, only string) error {
 	if occupant == "" {
 		return nil
 	}
+	if yield {
+		e.yielded[claimKey{surface, occupant}] = true
+		e.freed[surface] = true
+		e.dirty = true
+		return nil
+	}
+	delete(e.yielded, claimKey{surface, occupant})
 	// Retract the claim at its source: the occupant's own declaration no
 	// longer names the surface, so a later full pass cannot re-resolve the
 	// released occupancy from the stale declaration. The write runs on
