@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
+	"github.com/hyperlab-sh/husk/internal/keyspelling"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
@@ -39,7 +40,7 @@ var defaultBindings = []defaultBinding{
 	{"=", "husk.layout.reset", ""},
 	{"<", "husk.sidebar.narrower", ""}, {",", "husk.sidebar.narrower", ""},
 	{">", "husk.sidebar.wider", ""}, {".", "husk.sidebar.wider", ""},
-	{"tab", "husk.focus.next", ""}, {"?", "husk.modifiers.toggle_alt_latch", ""},
+	{"tab", "husk.focus.next", ""}, {"shift+tab", "husk.focus.next", ""}, {"?", "husk.modifiers.toggle_alt_latch", ""},
 	{"esc", "husk.modal.close", string(protocol.SurfaceModal)},
 }
 
@@ -70,6 +71,10 @@ func (d defaultKeys) Resolve(ctx contracts.KeyContext, keys []string) contracts.
 			continue
 		}
 		if ctx.Frozen && b.action != "husk.quit" {
+			continue
+		}
+		modalClose := b.action == "husk.modal.close" || ctx.ModalAction != "" && b.action == ctx.ModalAction
+		if ctx.Capture && b.focus == "" && keyspelling.IsTextKey(b.key) && !(ctx.ModalOpen && modalClose) {
 			continue
 		}
 		if ctx.ModalOpen && b.focus == "" && b.action != "husk.modal.close" && (ctx.ModalAction == "" || b.action != ctx.ModalAction) {
