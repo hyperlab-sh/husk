@@ -41,6 +41,11 @@ func TestGenericRendering(t *testing.T) {
 		{"array of arrays", `[[1],[2,3]]`, "[1]\n[2,3]\n"},
 		{"empty array prints nothing", `[]`, ""},
 		{"unicode columns align by rune", `{"é":"x","ab":"y"}`, "ab  y\né   x\n"},
+		{"lone multi-line string stays bare", `"a\nb"`, "a\nb\n"},
+		{"cell: newline and tab are shown escaped", `{"k":"a\nb\tc","z":"y"}`, "k  \"a\\nb\\tc\"\nz  y\n"},
+		{"array element with a newline stays on one line", `["a\nb","c"]`, "\"a\\nb\"\nc\n"},
+		{"wide glyph key aligns by columns", `{"日本":"x","ab":"y"}`, "ab    y\n日本  x\n"},
+		{"emoji and combining marks align", `{"😀":"x","e\u0301":"y"}`, "e\u0301  y\n😀  x\n"},
 		{"trailing column is not padded", `[{"a":"x","b":""},{"a":"yyyy","b":"z"}]`, "a     b\nx\nyyyy  z\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 	"io"
 	"sort"
 	"strings"
-	"unicode/utf8"
+	"unicode"
 )
 
 // WriteTable prints a header row and rows in aligned columns: columns are
@@ -26,7 +26,7 @@ func writeAligned(w io.Writer, rows [][]string) error {
 			if i == len(widths) {
 				widths = append(widths, 0)
 			}
-			widths[i] = max(widths[i], utf8.RuneCountInString(c))
+			widths[i] = max(widths[i], displayWidth(c))
 		}
 	}
 	var b strings.Builder
@@ -38,7 +38,7 @@ func writeAligned(w io.Writer, rows [][]string) error {
 		for i, c := range r[:last+1] {
 			b.WriteString(c)
 			if i < last {
-				b.WriteString(strings.Repeat(" ", widths[i]-utf8.RuneCountInString(c)+2))
+				b.WriteString(strings.Repeat(" ", widths[i]-displayWidth(c)+2))
 			}
 		}
 		b.WriteByte('\n')
@@ -93,6 +93,9 @@ func Generic(w io.Writer, raw json.RawMessage) error {
 			}
 		}
 		return nil
+	case string:
+		_, err := fmt.Fprintln(w, t) // a lone string is the result itself, bare as sent
+		return err
 	default:
 		_, err := fmt.Fprintln(w, cell(v))
 		return err
@@ -138,14 +141,52 @@ func recordRows(items []any) (headers []string, rows [][]string, ok bool) {
 func cell(v any) string {
 	switch t := v.(type) {
 	case string:
+		// A control character would break the row: show such a string as
+		// its JSON form.
+		if strings.IndexFunc(t, unicode.IsControl) >= 0 {
+			return compactJSON(t)
+		}
 		return t
 	case json.Number:
 		return t.String()
 	default:
-		var b bytes.Buffer
-		enc := json.NewEncoder(&b)
-		enc.SetEscapeHTML(false)
-		_ = enc.Encode(t)
-		return strings.TrimSuffix(b.String(), "\n")
+		return compactJSON(t)
 	}
+}
+
+func compactJSON(v any) string {
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(v)
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
+// displayWidth is the number of terminal columns s occupies: combining and
+// format marks take none, East Asian wide and fullwidth characters and emoji
+// take two. The package stays standard-library only, so this is a compact
+// range check rather than a full Unicode width table.
+func displayWidth(s string) int {
+	n := 0
+	for _, r := range s {
+		switch {
+		case unicode.In(r, unicode.Mn, unicode.Me, unicode.Cf):
+		case isWide(r):
+			n += 2
+		default:
+			n++
+		}
+	}
+	return n
+}
+
+func isWide(r rune) bool {
+	return r >= 0x1100 && (r <= 0x115F || // Hangul Jamo
+		r >= 0x2E80 && r <= 0xA4CF && r != 0x303F || // CJK radicals .. Yi
+		r >= 0xAC00 && r <= 0xD7A3 || // Hangul syllables
+		r >= 0xF900 && r <= 0xFAFF || // CJK compatibility ideographs
+		r >= 0xFE30 && r <= 0xFE6F || // CJK compatibility forms
+		r >= 0xFF00 && r <= 0xFF60 || r >= 0xFFE0 && r <= 0xFFE6 || // fullwidth forms
+		r >= 0x1F300 && r <= 0x1F64F || r >= 0x1F900 && r <= 0x1F9FF || // emoji
+		r >= 0x20000 && r <= 0x3FFFD) // CJK extensions
 }

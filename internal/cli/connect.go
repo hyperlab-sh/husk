@@ -125,7 +125,9 @@ func (inv *Invocation) dialFailure(err error, res instance.Resolved) error {
 	}
 	if res.Entry != nil {
 		msg := fmt.Sprintf("instance %q is not running", res.Entry.ID)
-		if instance.RemoveIfStale(inv.dir, *res.Entry) == nil {
+		// Removal is silent for a target found by discovery; only an
+		// explicit target is told its stale entry was removed.
+		if instance.RemoveIfStale(inv.dir, *res.Entry) == nil && res.Source != instance.SourceDiscovery {
 			msg += " (stale entry removed)"
 		}
 		return output.NoInstance(err, "%s", msg)
