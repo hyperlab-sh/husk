@@ -446,7 +446,7 @@ func (r *Root) startup() error {
 // startupFatal rejects failed flights and invalid plugin launch settings.
 // Other service validation remains nonfatal; a flight may fail after earlier
 // services have already applied their snapshots.
-func startupFatal(reports []services.Report, err error, additions ...map[string][]string) bool {
+func startupFatal(reports []services.Report, err error, additions map[string][]string) bool {
 	if len(reports) == 0 && err != nil {
 		return true
 	}
@@ -458,7 +458,7 @@ func startupFatal(reports []services.Report, err error, additions ...map[string]
 			case "invalid_value":
 				// Additive flags replace an invalid lower array with their own
 				// valid instance array, while retaining the original diagnostic.
-				if len(additions) > 0 && len(additions[0][strings.TrimPrefix(p.Key, "husk.plugins.")]) > 0 && p.Layer != "instance" {
+				if report.Service == "settings" && strings.HasPrefix(p.Key, "husk.plugins.") && p.Layer != "instance" && len(additions[strings.TrimPrefix(p.Key, "husk.plugins.")]) > 0 {
 					continue
 				}
 				if report.Service == "settings" && settings.IsStartConsumed(p.Key) {

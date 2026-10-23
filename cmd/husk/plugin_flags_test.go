@@ -7,11 +7,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
+	"testing"
 
 	"github.com/hyperlab-sh/husk/internal/host"
-	"reflect"
-	"testing"
 )
 
 func pluginFlags(t *testing.T, args ...string) *flag.FlagSet {
@@ -86,6 +86,7 @@ func TestAddPluginPreservesConfiguredPaths(t *testing.T) {
 		{"cross array", []string{a, b}, []string{a}, []string{"--plugin-dir", b, "--add-plugin", c}, []string{a, b, c}, []string{b}, false},
 		{"invalid paths", 42, []string{}, []string{"--add-plugin", c}, []string{c}, []string{}, true},
 		{"invalid dirs", []string{}, 42, []string{"--add-plugin-dir", c}, []string{}, []string{c}, true},
+		{"invalid paths with directory addition", 42, []string{}, []string{"--add-plugin-dir", c}, nil, nil, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			config := map[string]any{"husk": map[string]any{"plugins": map[string]any{"paths": tc.basePaths, "dirs": tc.baseDirs}}, "theme": map[string]any{"allow_low_contrast": "invalid"}}
@@ -103,6 +104,16 @@ func TestAddPluginPreservesConfiguredPaths(t *testing.T) {
 			}
 			prog := newProgramRef()
 			h, err := newHost(prog, goldenModel(), "add-flags", shortRuntimeDir(t, "add-flags"), pluginInstanceDocs(fs), nil, host.WithPluginAdditions(additions))
+			if tc.wantPaths == nil {
+				prog.closeGate()
+				if h != nil {
+					_ = h.Close()
+				}
+				if err == nil || !strings.Contains(err.Error(), "husk.plugins.paths") {
+					t.Fatalf("cross-array addition: error=%v, want invalid husk.plugins.paths", err)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
