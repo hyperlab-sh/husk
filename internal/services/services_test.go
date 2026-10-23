@@ -314,7 +314,11 @@ func (s *fakeStore) call(name string) {
 	}
 }
 func (s *fakeStore) Invalidate() { s.note("invalidate"); s.call("invalidate") }
-func (s *fakeStore) Resolve(store.DocName, string) (store.Resolved, error) {
+func (s *fakeStore) Resolve(name store.DocName, _ string) (store.Resolved, error) {
+	if name == "themes" {
+		s.call("resolve:themes")
+		return store.Resolved{}, nil
+	}
 	s.mu.Lock()
 	once := s.blockOnce
 	s.blockOnce = nil

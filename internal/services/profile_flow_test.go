@@ -35,6 +35,9 @@ func (s *recStore) Invalidate() {
 	}
 }
 func (s *recStore) Resolve(n store.DocName, profile string) (store.Resolved, error) {
+	if n == "themes" {
+		return store.Resolved{}, nil
+	}
 	s.mu.Lock()
 	s.resolves = append(s.resolves, profile)
 	hook, resolved, err := s.onResolve, s.resolved, s.err

@@ -633,6 +633,23 @@ func (co *Coordinator) loadInput(ctx context.Context, f *flight) inputResult {
 	if err := storeProblemFailure(resolved.Problems); err != nil {
 		return inputResult{err: err}
 	}
+	themesResolved, err := co.opts.Store.Resolve("themes", selected)
+	if ended := ctx.Err(); ended != nil {
+		return inputResult{err: ended}
+	}
+	if err != nil {
+		return inputResult{err: err}
+	}
+	if err := storeProblemFailure(themesResolved.Problems); err != nil {
+		return inputResult{err: err}
+	}
+	themes, err := co.opts.Store.Layers("themes", selected)
+	if ended := ctx.Err(); ended != nil {
+		return inputResult{err: ended}
+	}
+	if err != nil {
+		return inputResult{err: err}
+	}
 	layers, err := co.opts.Store.Layers("keymap", selected)
 	if ended := ctx.Err(); ended != nil {
 		return inputResult{err: ended}
@@ -654,7 +671,7 @@ func (co *Coordinator) loadInput(ctx context.Context, f *flight) inputResult {
 			return inputResult{err: err}
 		}
 	}
-	return inputResult{in: ReloadInput{Doc: resolved, Layers: layers, ConfigLayers: configLayers, Declared: declared, Profile: &selected, ProfileNames: profileNames, ProfileProblems: selectionProblems, ProfileWrite: profileWrite}}
+	return inputResult{in: ReloadInput{Doc: resolved, Layers: layers, ConfigLayers: configLayers, Themes: themes, Declared: declared, Profile: &selected, ProfileNames: profileNames, ProfileProblems: selectionProblems, ProfileWrite: profileWrite}}
 }
 
 // Inputs collects fresh user-authorized disk input for a dry run

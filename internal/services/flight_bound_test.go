@@ -198,7 +198,7 @@ func TestTimedOutRebuildReleasesTurnAndCancelsLateWork(t *testing.T) {
 // interface has no context; it observes cancellation through the context the
 // test passed to loadInput, exactly as an uninterruptible call would on return.
 func TestGatherStopsBetweenStoreCalls(t *testing.T) {
-	calls := []string{"invalidate", "profiles", "layers:config:", "resolve", "layers:keymap:", "layers:config:", "declared:plugins", "declared:keymap"}
+	calls := []string{"invalidate", "profiles", "layers:config:", "resolve", "resolve:themes", "layers:themes:", "layers:keymap:", "layers:config:", "declared:plugins", "declared:keymap"}
 	for stop := range calls {
 		t.Run(strings.ReplaceAll(calls[stop], ":", "-")+string(rune('0'+stop)), func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())

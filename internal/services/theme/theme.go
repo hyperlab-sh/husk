@@ -16,6 +16,7 @@ type snapshot struct {
 	gen       c.Generation
 	palette   palette.Palette
 	overrides map[string]string
+	themes    map[string]definition
 }
 
 // Service publishes a palette only after format and contrast checks succeed.
@@ -67,7 +68,20 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 	if in.Settings == nil {
 		return nil, r, c.Failure("unavailable", "settings_missing")
 	}
-	overrides := map[string]string{}
+	themes := resolveThemes(in.Themes, &r.Problems)
+	name := in.Settings.String("theme.name")
+	selected, exists := themes[name]
+	if name == "" || name == palette.Default().Name {
+		name = palette.Default().Name
+	} else if !exists {
+		layer := in.Settings.Source("theme.name")
+		r.Problems = append(r.Problems, c.Problem{Severity: "warning", Code: "unknown_theme", Layer: layer, Key: "theme.name", Message: fmt.Sprintf("theme %s does not exist; using %s", name, palette.Default().Name), Source: &protocol.Source{Layer: layer, File: configFile(in, layer)}})
+		name = palette.Default().Name
+	}
+	overrides := c.Clone(selected.roles)
+	if overrides == nil {
+		overrides = map[string]string{}
+	}
 	for role := range palette.Roles(palette.Default()) {
 		if role == "name" {
 			continue
@@ -81,7 +95,7 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 			overrides[role] = strings.ToLower(hex)
 		}
 	}
-	overrides["name"] = in.Settings.String("theme.name")
+	overrides["name"] = name
 	if err := c.Invalid(r.Problems); err != nil {
 		return nil, r, err
 	}
@@ -111,9 +125,9 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 		if allow && (source == "user" || source == "profile" || source == "instance") {
 			severity = "warning"
 		}
-		key, layer := attribute(in, v.Foreground, v.Background)
+		key, layer, file := attribute(in, selected, name, v.Foreground, v.Background)
 		problem := c.Problem{Severity: severity, Code: "low_contrast", Layer: layer, Key: key, Message: fmt.Sprintf("%s on %s is %.2f:1, need %.1f:1", v.Foreground, v.Background, v.Ratio, v.Minimum)}
-		problem.Source = &protocol.Source{Layer: layer, File: configFile(in, layer)}
+		problem.Source = &protocol.Source{Layer: layer, File: file}
 		r.Problems = append(r.Problems, problem)
 	}
 	if err = c.Invalid(r.Problems); err != nil {
@@ -122,7 +136,7 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 	if ctx.Err() != nil {
 		return c.ContextError(ctx, r)
 	}
-	next := &snapshot{old.gen + 1, p, overrides}
+	next := &snapshot{gen: old.gen + 1, palette: p, overrides: overrides, themes: themes}
 	return c.Prepare(ctx, r, old.palette != p, func() bool { return s.current.CompareAndSwap(old, next) }, s.Generation), r, nil
 }
 
@@ -130,22 +144,33 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 // its layer overrode it, else the background's override; the built-in palette
 // passes, so one of them is overridden. An unset slot_background follows the
 // canvas it is derived from.
-func attribute(in c.ReloadInput, fg, bg string) (key, layer string) {
-	override := func(role string) (string, string, bool) {
-		if role == "slot_background" && in.Settings.Source("theme.palette.slot_background") == "default" {
-			role = "canvas"
-		}
+func attribute(in c.ReloadInput, selected definition, name, fg, bg string) (key, layer, file string) {
+	origin := func(role string) (string, string, string, bool) {
 		key := "theme.palette." + role
-		layer := in.Settings.Source(key)
-		return key, layer, layer != "default"
+		if layer := in.Settings.Source(key); layer != "default" {
+			return key, layer, configFile(in, layer), true
+		}
+		if _, ok := selected.roles[role]; ok {
+			return "themes." + name + "." + role, selected.layer, selected.file, true
+		}
+		if role == "slot_background" {
+			key = "theme.palette.canvas"
+			if layer := in.Settings.Source(key); layer != "default" {
+				return key, layer, configFile(in, layer), true
+			}
+			if _, ok := selected.roles["canvas"]; ok {
+				return "themes." + name + ".canvas", selected.layer, selected.file, true
+			}
+		}
+		return "", "", "", false
 	}
-	if k, l, ok := override(fg); ok {
-		return k, l
+	if k, l, f, ok := origin(fg); ok {
+		return k, l, f
 	}
-	if k, l, ok := override(bg); ok {
-		return k, l
+	if k, l, f, ok := origin(bg); ok {
+		return k, l, f
 	}
-	return "theme.palette." + fg, "default"
+	return "theme.palette." + fg, "default", ""
 }
 
 // configFile is the config-relative file of a layer's config document, from
@@ -159,6 +184,9 @@ func configFile(in c.ReloadInput, layer string) string {
 			continue
 		}
 		path := strings.ReplaceAll(l.File, "\\", "/")
+		if !strings.HasPrefix(path, "/") && !strings.Contains(path, ":") {
+			return path
+		}
 		marker := map[string]string{"profile": "/profiles/", "instance": "/instances/"}[layer]
 		switch {
 		case marker != "":
