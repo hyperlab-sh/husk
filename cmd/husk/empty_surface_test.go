@@ -40,7 +40,7 @@ func TestEmptySurfaceNameClipsAndHides(t *testing.T) {
 		want       string
 	}{
 		{20, 5, 5, 2, "Main stage"}, {10, 1, 0, 0, "Main stage"}, {9, 1, 0, 0, "Main sta…"},
-		{2, 1, 0, 0, ""}, {10, 0, 0, 0, ""}, {13, 4, 1, 1, "Main stage"},
+		{3, 1, 0, 0, "Ma…"}, {2, 1, 0, 0, ""}, {10, 0, 0, 0, ""}, {13, 4, 1, 1, "Main stage"},
 	} {
 		t.Run(fmt.Sprintf("%dx%d", tc.w, tc.h), func(t *testing.T) {
 			m := goldenModel()
@@ -208,14 +208,31 @@ func (k noDockKeys) KeysFor(action string) []string {
 }
 
 func TestEmptySurfaceInputAndFocus(t *testing.T) {
-	m := goldenModel()
-	fe := withFE(m)
-	r := m.slotRects[protocol.SurfaceSidebarList]
-	m.Update(tea.MouseClickMsg{X: r.X, Y: r.Y, Button: tea.MouseLeft})
-	press(m, "x")
-	if len(fe.Keys) != 0 || len(fe.Mice) != 0 || m.activeDrag != "" {
-		t.Fatal("empty surface forwarded input or started drag")
+	for _, position := range []string{"corner", "center"} {
+		t.Run(position, func(t *testing.T) {
+			m := goldenModel()
+			hostPlugin(m, "p.stage", protocol.SurfaceMainStage)
+			fe := withFE(m)
+			m.focusedSlot = protocol.SurfaceSidebarList
+			r := m.slotRects[protocol.SurfaceSidebarList]
+			x, y := r.X, r.Y
+			if position == "center" {
+				x, y = r.InnerX+r.InnerW/2, r.InnerY+r.InnerH/2
+			}
+			m.Update(tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
+			if len(fe.Mice) != 0 {
+				t.Fatalf("empty sidebar sent mouse to a live occupant: %+v", fe.Mice)
+			}
+			press(m, "x")
+			if len(fe.Keys) != 0 {
+				t.Fatalf("empty sidebar sent key to a live occupant: %+v", fe.Keys)
+			}
+			if m.focusedSlot != protocol.SurfaceSidebarList || m.activeDrag != "" {
+				t.Fatalf("empty sidebar focus %q drag %q", m.focusedSlot, m.activeDrag)
+			}
+		})
 	}
+	m := goldenModel()
 	for _, want := range []protocol.SurfaceID{protocol.SurfaceMainStage, protocol.SurfaceSidePanel, protocol.SurfaceSidebarList} {
 		press(m, "tab")
 		if m.focusedSlot != want {

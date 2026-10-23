@@ -363,6 +363,8 @@ func humanName(id protocol.SurfaceID) string {
 	return string(runes)
 }
 
+// regionSlot includes the rail for completeness; View draws its host buttons
+// directly rather than calling drawSurface, so it never shows an empty name.
 func regionSlot(id protocol.SurfaceID) bool {
 	switch id {
 	case protocol.SurfaceActivityRail, protocol.SurfaceSidebarNavigation,
