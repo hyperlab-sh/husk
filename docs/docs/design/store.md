@@ -290,8 +290,8 @@ Example. Distribution `config.json`, user `config.json`, result:
 
 ```json
 {"theme": {"name": "Evening", "palette": {"canvas": "#101018", "accent": "#8fa8ff"}}, "husk": {"plugins": {"dirs": ["./plugins"]}}}
-{"theme": {"palette": {"accent": null, "ink": "#f0f0f0"}}, "husk": {"plugins": {"dirs": ["~/plugins"]}}}
-{"theme": {"name": "Evening", "palette": {"canvas": "#101018", "ink": "#f0f0f0"}}, "husk": {"plugins": {"dirs": ["~/plugins"]}}}
+{"theme": {"palette": {"accent": null, "ink": "#f0f0f0"}}, "husk": {"plugins": {"dirs": ["./my-plugins"]}}}
+{"theme": {"name": "Evening", "palette": {"canvas": "#101018", "ink": "#f0f0f0"}}, "husk": {"plugins": {"dirs": ["./my-plugins"]}}}
 ```
 
 Instance layer: two parts merged in order, the named instance's file under the
@@ -706,23 +706,24 @@ secrets. Explicit `GC` and `ResetSecrets` still do what they say.
    `husk.store` slice and the `Listener`.
 3. Services register their slices; each persistent one is hydrated inside
    `Register`.
-3a. The composition root runs the synchronous `startup` flight, reading no
+4. The composition root runs the synchronous `startup` flight, reading no
    declared plugin documents ([Services](services.md), "Reload").
-4. The root reads `husk.plugins.*` from that flight's Settings snapshot and
-   converts manifests, then builds Stem and Pods. Pods `Declare` the plugin
-   documents, register each plugin's slices and request one `plugin` flight
-   for the batch. Only after it completes do the Wrappers launch the
-   processes (the launch gate, [Pods](pods.md)).
-5. GC runs once in the background (start mode only; a passive `Open`
+5. The root reads `husk.plugins.*` from that flight's Settings snapshot and
+   converts manifests, then builds Stem and Pods, which register their slices
+   (hydrated the same way). Pods `Declare` the plugin documents, register each
+   plugin's slices and request one `plugin` flight for the batch. Only after
+   it completes do the Wrappers launch the processes (the launch gate,
+   [Pods](pods.md)).
+6. GC runs once in the background (start mode only; a passive `Open`
    schedules no GC).
-6. Exit: the Calls table closes ([Calls](calls.md)), the Server stops
+7. Exit: the Calls table closes ([Calls](calls.md)), the Server stops
    accepting and unregisters the instance (entry and socket,
    [Instances](instances.md)), Pods stop plugins (2 s grace), then
    `Store.Close` flushes (2 s).
 
 ## Level 2: Migration from today
 
-D101 plugin settings: landed. The root passes explicit flag documents to Store,
+Plugin settings: landed. The root passes explicit flag documents to Store,
 loads Services before manifest conversion, and reads plugin arguments from the
 startup snapshot. Configured arrays survive when their flag is absent.
 
@@ -748,9 +749,9 @@ startup snapshot. Configured arrays survive when their flag is absent.
   `--rail` and `--hold-alt` stay process flags, not config. New flags:
   `--instance <name>`, `--bundle <dir>` (folded into `husk.bundle`; the
   directory form of the distribution layer is a bundle, [Bundles](bundles.md),
-  so no separate `--distribution <dir>` flag is added),
-  `--profile <name>` ([Services](services.md)). `main`
-  opens Store before the listener and closes it after `model.cleanup`.
+  so no separate `--distribution <dir>` flag is added), `--profile <name>`
+  ([Services](services.md)). `main` opens Store before the listener and closes
+  it after `model.cleanup`.
 - `pkg/manifest`: deleted in the retirement; `internal/pods/manifest` reads
   `husk-plugin.json` read-only, and the catalog it yields reaches Store through
   `Declare`, called by Pods.
@@ -827,7 +828,8 @@ startup snapshot. Configured arrays survive when their flag is absent.
    also forbid creating a new identity, even when the provider reports absence.
    Existing fallback use is
    diagnosed at Open, without waiting for the first secret request.
-5. **Resolved (D101):** delete `husk.layout.rail` and `husk.input.hold_alt`; `--rail` and `--hold-alt` remain process flags.
+5. **Resolved:** `husk.layout.rail` and `husk.input.hold_alt` are deleted;
+   `--rail` and `--hold-alt` remain process flags.
 6. Should plugin paths resolve relative to their layer file? Today every entry
    resolves against the process cwd, without `~` expansion, like the flags.
    Layer-relative resolution is deferred.
