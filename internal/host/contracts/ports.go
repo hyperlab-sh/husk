@@ -222,10 +222,19 @@ type ValidationResult struct {
 // ThemeCheckResult is what theme.check reports: every violated pair.
 type ThemeCheckResult = ValidationResult
 
-// ThemePort serves theme.get and theme.check.
+// ThemeEntry is one theme resolved by the serving Theme snapshot.
+type ThemeEntry struct {
+	Name    string `json:"name"`
+	Source  string `json:"source"`
+	Current bool   `json:"current"`
+}
+
+// ThemePort serves theme.get, theme.list and theme.check.
 type ThemePort interface {
 	// Get serves theme.get for every authenticated caller.
 	Get(ctx context.Context, c Caller) (protocol.Palette, error)
+	// List returns the serving themes, built-in first then sorted by name.
+	List(ctx context.Context, c Caller) ([]ThemeEntry, error)
 	// Check serves theme.check (user only).
 	Check(ctx context.Context, c Caller) (ThemeCheckResult, error)
 }

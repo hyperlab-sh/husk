@@ -38,6 +38,20 @@ func (h Theme) Serve(ctx context.Context, c contracts.Caller, req protocol.Messa
 			return handlers.ErrorReply(req, err)
 		}
 		return handlers.Reply(req, themeGetResult{Palette: pal})
+	case protocol.MethodThemeList:
+		if deny := admitRateLimited(req, c, h.Limiter); deny != nil {
+			return *deny
+		}
+		rows, err := h.Port.List(ctx, c)
+		if err != nil {
+			return handlers.ErrorReply(req, err)
+		}
+		if rows == nil {
+			rows = []contracts.ThemeEntry{}
+		}
+		return handlers.Reply(req, struct {
+			Themes []contracts.ThemeEntry `json:"themes"`
+		}{rows})
 	case protocol.MethodThemeCheck:
 		res, err := h.Port.Check(ctx, c)
 		if err != nil {

@@ -419,6 +419,7 @@ func (f *Profile) Use(_ context.Context, c contracts.Caller, name string) (contr
 type Theme struct {
 	callLog
 	Palette     protocol.Palette
+	Themes      []contracts.ThemeEntry
 	CheckResult contracts.ThemeCheckResult
 	Err         error
 }
@@ -430,6 +431,12 @@ func NewTheme(rec *Recorder) *Theme { return &Theme{callLog: callLog{r: orNew(re
 func (f *Theme) Get(_ context.Context, c contracts.Caller) (protocol.Palette, error) {
 	f.RecordCaller("Theme.Get", c)
 	return f.Palette, f.Err
+}
+
+// List implements contracts.ThemePort.
+func (f *Theme) List(_ context.Context, c contracts.Caller) ([]contracts.ThemeEntry, error) {
+	f.RecordCaller("Theme.List", c)
+	return f.Themes, f.Err
 }
 
 // Check implements contracts.ThemePort.

@@ -77,6 +77,7 @@ func MethodHomes() map[string]MethodHome {
 
 		protocol.MethodThemeChanged: {Port: Outbound},
 		protocol.MethodThemeGet:     home("ThemePort", "Get", anyCaller),
+		protocol.MethodThemeList:    home("ThemePort", "List", anyCaller),
 		protocol.MethodThemeCheck:   home("ThemePort", "Check", cliOnly),
 
 		protocol.MethodSlotContribute:    home("SurfacePort", "SlotContribute", pluginOnly),

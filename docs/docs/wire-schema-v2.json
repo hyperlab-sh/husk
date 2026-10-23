@@ -1018,6 +1018,13 @@
     "theme.get.result": {
       "description": "Result owned by design/services.md; no additional field constraints specified here."
     },
+    "theme.list.params": {
+      "description": "Payload owned by design/services.md; no additional field constraints specified here.",
+      "type": "object"
+    },
+    "theme.list.result": {
+      "description": "Result owned by design/services.md; no additional field constraints specified here."
+    },
     "toast.show.params": {
       "$ref": "#/$defs/ToastShowParams"
     },
@@ -1434,6 +1441,15 @@
       },
       "result": {
         "$ref": "#/$defs/theme.get.result"
+      }
+    },
+    "theme.list": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/theme.list.params"
+      },
+      "result": {
+        "$ref": "#/$defs/theme.list.result"
       }
     },
     "toast.show": {
