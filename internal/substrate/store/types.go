@@ -37,8 +37,10 @@ const (
 	// DeclaredPlugins holds per-plugin catalogs, separate from config layers.
 	DeclaredPlugins DocName = "plugins"
 	// DeclaredKeymap holds manifest focus-local bindings (D64), never user
-	// keymaps. The layered user keymap (D90) is the "keymap" layer files read
-	// by Layers/Resolve and consumed by internal/services/keybinding; declared
+	// keymaps. Its documents are manifest.Keymap values, written by
+	// Spec.KeymapJSON through launch.CatalogDeclarer. The layered
+	// (distribution/user) keymap (D90) is the "keymap" layer files read by
+	// Layers/Resolve and consumed by internal/services/keybinding; declared
 	// documents are a separate namespace (see Declared) and never enter layers.
 	DeclaredKeymap DocName = "keymap"
 	// ConflictLastWriterWins is the reserved multi-source reconciliation policy.

@@ -105,12 +105,12 @@ func TestNormalizedCatalogFocusProblemsAndExactCaseSettings(t *testing.T) {
 	if !bytes.Contains(data, []byte(`"plugins.Case.Owner.show_hidden"`)) || !bytes.Contains(data, []byte(`"default":false`)) || !bytes.Contains(data, []byte(`"default":null`)) || !bytes.Contains(data, []byte(`"required":true`)) {
 		t.Fatal("schema normalization lost presence/case")
 	}
-	focus, err := s.KeymapJSON()
+	keymapJSON, err := s.KeymapJSON()
 	if err != nil {
 		t.Fatal(err)
 	}
 	var doc Keymap
-	if err := json.Unmarshal(focus, &doc); err != nil {
+	if err := json.Unmarshal(keymapJSON, &doc); err != nil {
 		t.Fatal(err)
 	}
 	if doc.Version != 1 || len(doc.Bind) != 2 || len(doc.Problems) != 2 {
