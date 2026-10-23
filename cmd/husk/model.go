@@ -70,13 +70,17 @@ type modifierTickMsg struct{}
 // tests set it directly.
 type surfaceCatalog struct {
 	Occupants map[protocol.SurfaceID]string
-	Slots     map[string]*publishedSlot
-	Frames    map[string]map[protocol.SurfaceID]protocol.FrameSpec
+	// Capture holds the surfaces whose occupant said it is taking text
+	// input (husk.surfaces.capture); Input reads it and never writes it.
+	Capture map[protocol.SurfaceID]bool
+	Slots   map[string]*publishedSlot
+	Frames  map[string]map[protocol.SurfaceID]protocol.FrameSpec
 }
 
 func newSurfaceCatalog() *surfaceCatalog {
 	return &surfaceCatalog{
 		Occupants: map[protocol.SurfaceID]string{},
+		Capture:   map[protocol.SurfaceID]bool{},
 		Slots:     map[string]*publishedSlot{},
 		Frames:    map[string]map[protocol.SurfaceID]protocol.FrameSpec{},
 	}
@@ -765,6 +769,11 @@ func (m *WorkbenchModel) refresh() bool {
 	cat := newSurfaceCatalog()
 	for id, occ := range res.Occupants {
 		cat.Occupants[id] = occ.Plugin
+	}
+	for id, on := range res.Capture {
+		if on {
+			cat.Capture[id] = true
+		}
 	}
 	for plugin, frames := range m.fe.SurfaceFrames() {
 		if live[plugin] {

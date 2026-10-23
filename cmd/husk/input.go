@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
+	"github.com/hyperlab-sh/husk/internal/keyspelling"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
@@ -169,10 +170,12 @@ func (m *WorkbenchModel) keyContext() contracts.KeyContext {
 		ctx.ModalAction = m.modalOwner().RailID
 		ctx.FocusSurface = string(protocol.SurfaceModal)
 		ctx.FocusOwner = m.modalOwner().PluginID
+		ctx.Capture = m.catalog.Capture[protocol.SurfaceModal]
 		return ctx
 	}
 	ctx.FocusSurface = string(m.focusedSlot)
 	ctx.FocusOwner = m.keyOwner(m.focusedSlot)
+	ctx.Capture = m.catalog.Capture[m.focusedSlot]
 	return ctx
 }
 
@@ -204,6 +207,23 @@ func (m *WorkbenchModel) resolveKey(key string) bool {
 	return false
 }
 
+// paletteClosesOn reports whether key closes the open palette: esc, ctrl+c
+// (which closes rather than quits), and every single-key, global, non-text-key
+// spelling of the palette's opener, so a rebind keeps its own key closing it
+// and a text-key opener such as ":" is typed into the query. An empty context
+// admits only global candidates, and the winner is the effective global entry,
+// so a Match on the opener is exactly that set.
+func (m *WorkbenchModel) paletteClosesOn(key string) bool {
+	if key == "esc" || key == "ctrl+c" {
+		return true
+	}
+	if keyspelling.IsTextKey(key) {
+		return false
+	}
+	res := m.keys.Resolve(contracts.KeyContext{}, []string{key})
+	return res.Outcome == contracts.KeyMatch && res.Binding != nil && res.Binding.Action == "husk.palette.open"
+}
+
 func (m *WorkbenchModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := legacyKeyString(msg)
 
@@ -229,11 +249,12 @@ func (m *WorkbenchModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	m.broadcastKeyState(phase, key, true)
 
 	if m.showPalette {
-		switch key {
-		case "esc", "ctrl+p", "ctrl+c":
+		if m.paletteClosesOn(key) {
 			m.showPalette = false
 			m.paletteQuery = ""
 			return m, nil
+		}
+		switch key {
 		case "up", "ctrl+k":
 			cmds := m.filteredCommands()
 			if len(cmds) > 0 {

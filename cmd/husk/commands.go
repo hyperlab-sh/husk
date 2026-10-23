@@ -200,6 +200,54 @@ func (m *WorkbenchModel) builtinCommands() []paletteCommand {
 			Category:    "Workbench",
 			Description: "Cycles left sidebar and right side-panel visibility",
 		},
+		{
+			ID:          "husk.quit",
+			Title:       "Husk Workbench: Quit",
+			Category:    "Workbench",
+			Description: "Closes the workbench and stops its plugins",
+		},
+		{
+			ID:          "husk.palette.open",
+			Title:       "Husk Workbench: Open Command Palette",
+			Category:    "Workbench",
+			Description: "Opens the command palette",
+		},
+		{
+			ID:          "husk.layout.reset",
+			Title:       "Husk Workbench: Reset Layout Sizes",
+			Category:    "Workbench",
+			Description: "Restores the default slot dimensions",
+		},
+		{
+			ID:          "husk.sidebar.narrower",
+			Title:       "Husk Workbench: Make Left Sidebar Narrower",
+			Category:    "Workbench",
+			Description: "Shrinks the left sidebar column",
+		},
+		{
+			ID:          "husk.sidebar.wider",
+			Title:       "Husk Workbench: Make Left Sidebar Wider",
+			Category:    "Workbench",
+			Description: "Widens the left sidebar column",
+		},
+		{
+			ID:          "husk.focus.next",
+			Title:       "Husk Workbench: Focus Next Surface",
+			Category:    "Workbench",
+			Description: "Moves focus to the next focusable surface",
+		},
+		{
+			ID:          "husk.modifiers.toggle_alt_latch",
+			Title:       "Husk Workbench: Toggle Alt Latch",
+			Category:    "Workbench",
+			Description: "Latches Alt on or off, so chord shortcuts can be tried without holding it",
+		},
+		{
+			ID:          "husk.modal.close",
+			Title:       "Husk Workbench: Close Modal",
+			Category:    "Workbench",
+			Description: "Closes the open modal",
+		},
 	}
 	for i := range rows {
 		rows[i].PluginID = "husk.core"
