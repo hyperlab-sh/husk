@@ -39,6 +39,9 @@ func newDrawPalette(p theme.Palette, indices map[string]int) drawPalette {
 		if n, ok := indices[name]; ok {
 			return ansi.BasicColor(n)
 		}
+		if hex == "" {
+			return nil
+		}
 		return lipgloss.Color(hex)
 	}
 	return drawPalette{

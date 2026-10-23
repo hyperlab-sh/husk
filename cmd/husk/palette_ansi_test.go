@@ -99,10 +99,15 @@ func TestBase16FrameUsesBasicColours(t *testing.T) {
 	check("rail background", rows[rail.Y][rail.X].Style.Bg, 0)
 	check("bar background", rows[0][m.width-1].Style.Bg, 0)
 	check("brand ink", rows[0][1].Style.Fg, 15)
+	active := 0
 	for _, b := range m.railButtons() {
 		if b.active {
+			active++
 			check("active icon accent", rows[rail.Y+b.startY+1][rail.X+3].Style.Fg, 5)
 		}
+	}
+	if active != 1 {
+		t.Fatalf("active tiles = %d, want 1", active)
 	}
 	r := m.slotRects[protocol.SurfaceMainStage]
 	check("border", rows[r.Y][r.X].Style.Fg, 8)
