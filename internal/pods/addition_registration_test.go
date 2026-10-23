@@ -3,6 +3,7 @@ package pods
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
@@ -145,6 +146,10 @@ func TestAddInternalRegistryFailureSettlesEarlierAdmissions(t *testing.T) {
 	gate.release <- Preparation{Reports: addReports()}
 	got := testclock.Receive(t, reply)
 	wantAddError(t, got.err, protocol.CodeInternal, "")
+	data, ok := got.err.(contracts.DataError)
+	if !ok || !reflect.DeepEqual(data.Data()["added"], []string{"alpha"}) {
+		t.Fatalf("internal error omitted admitted ids: %v", got.err)
+	}
 	f.onLoop(func() {
 		if f.h.pods["alpha"].info.Status != wrapper.Live || f.h.pods["beta"] != nil || len(f.h.adding) != 0 {
 			t.Error("partial admission did not settle")

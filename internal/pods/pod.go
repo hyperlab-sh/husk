@@ -14,6 +14,9 @@ type Pod struct {
 	spec    manifest.Spec
 	process wrapper.Process
 	info    wrapper.Info
+	// openingFailed keeps the first terminal fact when a spawned child never
+	// becomes live; its eventual ExitMsg only enriches process metadata.
+	openingFailed bool
 	// Decoration defaults to the pass-through boundary; no renderer is chosen.
 	Decoration decoration.Function
 }

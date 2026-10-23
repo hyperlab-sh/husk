@@ -58,16 +58,30 @@ func TestAddNilStartWithoutLiveFailsOnce(t *testing.T) {
 					t.Error("failed opening retained credential")
 				}
 				f.h.Handle(LaunchFailedMsg{PluginID: "alpha", Err: errors.New(wantError)})
-				failed, live, added := 0, 0, 0
+				tail := []string{"late stderr"}
+				late := ExitMsg{Info: wrapper.Info{PluginID: "alpha", Status: wrapper.Failed, LastError: "stopped reading: broken pipe", PID: 42, ExitStatus: "exit status 1", StderrTail: tail, LogPath: "/logs/alpha.final.log"}}
+				f.h.Handle(late)
+				f.h.Handle(late) // identical reap metadata must not write State twice
+				tail[0] = "mutated after delivery"
+				if p.info.Status != wrapper.Failed || p.info.LastError != wantError || p.info.PID != 42 || p.info.ExitStatus != "exit status 1" || p.info.LogPath != "/logs/alpha.final.log" || !reflect.DeepEqual(p.info.StderrTail, []string{"late stderr"}) {
+					t.Errorf("late exit replaced failure or lost metadata: %+v", p.info)
+				}
+				failed, live, added, exited, errorLogs := 0, 0, 0, 0, 0
 				for _, change := range f.loop.statuses {
 					if change.Info.Status == wrapper.Failed {
 						failed++
+						if change.Info.LastError != wantError {
+							t.Errorf("failed write changed error: %+v", change.Info)
+						}
 					}
 					if change.Info.Status == wrapper.Live {
 						live++
 					}
 				}
 				for _, event := range pub.events {
+					if event.name == PluginExitedEvent {
+						exited++
+					}
 					if event.name == PluginAddedEvent {
 						added++
 						if !reflect.DeepEqual(event.data, map[string]any{"plugin_id": "alpha", "status": "failed"}) {
@@ -75,8 +89,13 @@ func TestAddNilStartWithoutLiveFailsOnce(t *testing.T) {
 						}
 					}
 				}
-				if failed != 1 || live != 0 || added != 1 {
-					t.Errorf("failed writes=%d live writes=%d added events=%d", failed, live, added)
+				for _, log := range f.loop.logs {
+					if log.Level == "error" {
+						errorLogs++
+					}
+				}
+				if failed != 2 || live != 0 || added != 1 || exited != 1 || errorLogs != 1 {
+					t.Errorf("failed writes=%d live writes=%d added=%d exited=%d error logs=%d", failed, live, added, exited, errorLogs)
 				}
 			})
 		})
@@ -106,6 +125,17 @@ func TestFinishAdditionNormalizesUnexpectedPodStatus(t *testing.T) {
 			}
 			if added != 1 {
 				t.Fatalf("added events=%d", added)
+			}
+			firstError := p.info.LastError
+			h.Handle(ExitMsg{Info: wrapper.Info{PluginID: "alpha", Status: wrapper.Exited, LastError: "different reap error"}})
+			exited := 0
+			for _, event := range pub.events {
+				if event.name == PluginExitedEvent {
+					exited++
+				}
+			}
+			if exited != 1 || p.info.Status != wrapper.Failed || p.info.LastError != firstError {
+				t.Fatalf("late exit after normalization: info=%+v exited=%d", p.info, exited)
 			}
 		})
 	}

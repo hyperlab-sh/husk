@@ -103,7 +103,9 @@ func (h *Host) Add(ctx context.Context, c contracts.Caller, source contracts.Plu
 			if reason == "" {
 				if _, err := h.AddPod(*item.spec); err != nil {
 					if contracts.CodeOf(err) != string(protocol.CodeConflict) {
-						refusal = contracts.NewError(protocol.CodeInternal, "register plugin "+id+": "+err.Error(), nil)
+						admitted := append([]string{}, ids...)
+						slices.Sort(admitted)
+						refusal = contracts.NewError(protocol.CodeInternal, "register plugin "+id+": "+err.Error(), map[string]any{"added": admitted})
 						break
 					}
 					reason, message = "duplicate_plugin_id", err.Error()
@@ -245,6 +247,7 @@ func (h *Host) finishAddition(gate uint64, reports []contracts.ReloadReport) {
 		added.Status = "removed"
 		if p := h.pods[added.Plugin]; p != nil {
 			if p.info.Status != wrapper.Live && p.info.Status != wrapper.Failed {
+				p.openingFailed = true
 				h.Handle(LaunchFailedMsg{PluginID: added.Plugin, Err: openingFailure(p.info)})
 			}
 			added.Status, added.Log = string(p.info.Status), p.info.LogPath
