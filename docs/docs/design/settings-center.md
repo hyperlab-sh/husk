@@ -234,11 +234,11 @@ Forms are built with **`charm.land/huh/v2`** (the canonical vanity path, like `c
 
 Scope: huh is used **only inside the center**. Nothing else in core imports it; the palette, the slot explorer and the bars stay as they are. A test pins that `cmd/husk` imports huh only from the center's files.
 
-Styling: a `huh.Theme` is built from the served `Palette` once per palette change (`Palette()` seam), mapping `accent` to the focused field, `ink` and `ink_muted` to text and descriptions, `danger` to the validation error indicator and `ink` to its message, `surface_elevated` to the field background. A role the served palette carries in its `ansi` map ([Built-in themes](themes.md), "Role values") maps to the ANSI basic colour of its index, not to its hex, as everywhere else in the frontend. huh's own key hints are hidden; the center's footer shows the keys.
+Styling: a `huh.Theme` is built from the served `Palette` and its index map (`PaletteANSI()` seam, one read) once per change of either, mapping `accent` to the focused field, `ink` and `ink_muted` to text and descriptions, `danger` to the validation error indicator and `ink` to its message, `surface_elevated` to the field background. A role the served palette carries in its `ansi` map ([Built-in themes](themes.md), "Role values") maps to the ANSI basic colour of its index, not to its hex, as everywhere else in the frontend. huh's own key hints are hidden; the center's footer shows the keys.
 
 ### Frontend seams
 
-The center drives the host through `contracts.Frontend` ([Pods](pods.md), "Frontend seams") and nothing else. It uses the existing `Snapshot`, `Palette`, `Themes` and `SetSetting`, and adds, all with a `host` caller and the authorization that caller has in [Services](services.md) and [Pods](pods.md):
+The center drives the host through `contracts.Frontend` ([Pods](pods.md), "Frontend seams") and nothing else. It uses the existing `Snapshot`, `Palette`, `Themes` and `SetSetting`, the `PaletteANSI` seam [Built-in themes](themes.md) adds, and adds, all with a `host` caller and the authorization that caller has in [Services](services.md) and [Pods](pods.md):
 
 | Seam | Backing method | Goroutine |
 | :--- | :--- | :--- |
