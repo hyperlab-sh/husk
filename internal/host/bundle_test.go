@@ -203,10 +203,12 @@ func TestBundlePrecedenceActuallyLaunchesSelectedPlugins(t *testing.T) {
 	}
 }
 
-func TestBundlePluginRefusalExplicitPriorityAndKeysList(t *testing.T) {
+func TestBundlePluginRefusalAndExplicitPriority(t *testing.T) {
 	dir := hostBundle(t, "alpha")
 	putBundleFile(t, dir, "plugins/bad/husk-plugin.json", `{`)
-	putBundleFile(t, dir, "keymap.json", `{"version":1,"bind":[{"key":"f2","action":"husk.home","hint":"bundle"}]}`)
+	if err := os.Symlink(writePlugin(t, "beta", false), filepath.Join(dir, "plugins", "beta")); err != nil {
+		t.Fatal(err)
+	}
 	explicit := writePlugin(t, "alpha", false)
 	f := newFakes()
 	hook, ready := readyHook("")
@@ -219,7 +221,7 @@ func TestBundlePluginRefusalExplicitPriorityAndKeysList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if h.root.Planned() != 1 || h.root.specs[0].WorkDir != explicit {
+	if h.root.Planned() != 2 || h.root.specs[0].WorkDir != explicit {
 		t.Fatalf("explicit did not win: %+v", h.root.specs)
 	}
 	refusals := h.root.Frontend().Refusals()
@@ -237,9 +239,26 @@ func TestBundlePluginRefusalExplicitPriorityAndKeysList(t *testing.T) {
 	// Do not retain a loop-written log slice once Run begins.
 	h.root.opts.logger = nil
 	runHost(t, ready, h)
-	if got := <-f.started; got != "alpha" {
-		t.Fatalf("good plugin not live: %s", got)
+	started := map[string]bool{}
+	for range 2 {
+		started[<-f.started] = true
 	}
+	if !started["alpha"] || !started["beta"] {
+		t.Fatalf("good plugins not live: %v", started)
+	}
+}
+
+func TestBundleKeymapReachesKeysList(t *testing.T) {
+	dir := hostBundle(t, "alpha")
+	putBundleFile(t, dir, "keymap.json", `{"version":1,"bind":[{"key":"f2","action":"husk.home","hint":"bundle"}]}`)
+	f := newFakes()
+	hook, ready := readyHook("")
+	h, err := boot(t, func(c *contracts.Config) { bundleFlagDoc(c, dir) }, withHook(hook), WithFactory(f.factory))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runHost(t, ready, h)
+	<-f.started
 	reply := rpc(t, h, "", protocol.MethodKeysList, map[string]any{})
 	if reply.Error != nil {
 		t.Fatalf("keys.list: %+v", reply.Error)
