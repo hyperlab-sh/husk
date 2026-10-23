@@ -102,7 +102,7 @@ Dispatcher or Event bus depends on it.
 
 - **Hook id**: `<owner>.<name>`, where the owner is a plugin id or `husk`.
   Well-formed means: at least two non-empty dot-separated segments, no
-  whitespace, `;`, `=`, backslash or `*`, at most 256 bytes: the Dispatcher's
+  whitespace or control characters, `;`, `=`, backslash or `*`, at most 256 bytes: the Dispatcher's
   action-id rule ([Message kinds](message-kinds.md)) plus the `*` ban, which
   the Dispatcher does not have (hooks are stricter on purpose). Resolution step 1, the
   publish validation and the subscribe validation all apply this one rule.
