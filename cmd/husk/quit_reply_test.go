@@ -62,15 +62,21 @@ func TestQuitActionRepliesBeforeTheInstanceStops(t *testing.T) {
 		return code, out.String(), errb.String()
 	}
 
-	// The socket appears once Run listens; ping until the instance answers.
+	// The host is listening once its entry is registered: wait on a loop round
+	// trip between checks instead of spinning on connections.
 	deadline := time.Now().Add(20 * time.Second)
 	for {
-		if code, _, _ := run("ping", "--instance", id); code == 0 {
-			break
+		if _, err := os.Stat(instance.SocketPath(dir, id)); err == nil {
+			if entries, err := instance.List(dir); err == nil && len(entries) == 1 {
+				break
+			}
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("the instance never answered a ping")
+			t.Fatal("the instance never registered")
 		}
+		pm := probeMsg{fn: func(*WorkbenchModel) {}, done: make(chan struct{})}
+		p.Send(pm)
+		<-pm.done
 	}
 
 	code, stdout, stderr := run("rpc", "action.invoke", `{"action":"husk.quit"}`, "--instance", id, "--format", "json")

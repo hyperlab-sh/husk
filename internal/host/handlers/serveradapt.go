@@ -17,10 +17,20 @@ import (
 // need.
 type ServerHandler struct {
 	Handler contracts.Handler
+	// Closing, when set, ends every request's context once it is done (the
+	// host is shutting down), so a port waiting on a loop that no longer
+	// answers returns a cancelled error at once.
+	Closing context.Context
 }
 
 // Serve implements server.Handler.
 func (a ServerHandler) Serve(ctx context.Context, c server.Caller, req protocol.Message, n server.Notifier) protocol.Message {
+	if a.Closing != nil {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(ctx)
+		defer cancel()
+		defer context.AfterFunc(a.Closing, cancel)()
+	}
 	return a.Handler.Serve(ctx, FromServerCaller(c), req, n)
 }
 

@@ -92,7 +92,11 @@ type Root struct {
 	workers   atomic.Int32 // host workers not yet finished (for the shutdown error)
 	closeOnce sync.Once
 	closeErr  error
-	done      chan struct{} // closed when Close finishes
+	// closingCtx ends when shutdown reaches the Server: socket requests still
+	// waiting on the loop fail fast instead of holding the Server's drain.
+	closingCtx    context.Context
+	endClosingCtx context.CancelFunc
+	done          chan struct{} // closed when Close finishes
 }
 
 var (
@@ -155,6 +159,7 @@ func build(cfg contracts.Config, optFns []Option) (_ *Root, err error) {
 	cfg.Clock = clock
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &Root{cfg: cfg, opts: o, clock: clock, ctx: ctx, cancel: cancel, done: make(chan struct{}), instStart: clock.Now()}
+	r.closingCtx, r.endClosingCtx = context.WithCancel(context.Background())
 	r.loopSeam = loopSeam{r}
 	defer func() {
 		if err != nil {
@@ -568,6 +573,12 @@ func (r *Root) shutdown() error {
 			errs = append(errs, fmt.Errorf("calls and pods not stopped: %w", err))
 		}
 		note("calls")
+	}
+	if r.endClosingCtx != nil {
+		// Requests posted to a loop that is busy closing the host will never
+		// be answered: end their waits so the Server's drain only waits for
+		// replies that exist.
+		r.endClosingCtx()
 	}
 	if r.srv != nil {
 		if err := r.srv.Close(); err != nil {
