@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
 )
 
 func TestSettingsInstalledRemovedConfirmationCannotRetarget(t *testing.T) {
@@ -77,14 +79,13 @@ func TestSettingsStoreScrolledFirstRowDoesNotOpenFilter(t *testing.T) {
 	fe.CatalogRows.Entries[1].Description = strings.Repeat("long detail text ", 200)
 	fe.CatalogRev++
 	m.settle()
-	// Seed a body offset to exercise hit geometry independently of list keys.
-	m.settings.plugins.top = 3
-	m.settings.plugins.dirty = true
-	m.settle()
-	if m.settings.plugins.top == 0 {
-		t.Fatal("fixture did not scroll past filter")
-	}
 	r := m.settingsContentRect()
+	for range 3 {
+		m.Update(tea.MouseWheelMsg{X: r.Min.X, Y: r.Min.Y, Button: tea.MouseWheelDown})
+	}
+	if m.settings.plugins.top == 0 {
+		t.Fatal("wheel did not scroll past filter")
+	}
 	settingsClick(m, r.Min.X, r.Min.Y)
 	if m.settings.plugins.filter != nil {
 		t.Fatal("scrolled detail click opened hidden surface filter")
