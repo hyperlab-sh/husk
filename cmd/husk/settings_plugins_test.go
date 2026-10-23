@@ -23,6 +23,10 @@ func pluginsFixture(t testing.TB, tab string) (*WorkbenchModel, *fakeFE) {
 		"husk.surfaces":   {Value: json.RawMessage(`{"occupants":{"main-stage":{"plugin":"alpha"},"sidebar-list":{"plugin":"other"}}}`)},
 		"alpha.occupants": {Value: json.RawMessage(`{"main-stage":{},"sidebar-list":{}}`)},
 	}}
+	for ns, entry := range fe.Snap.Slices {
+		entry.Revision = 1
+		fe.Snap.Slices[ns] = entry
+	}
 	fe.CatalogRows = contracts.CatalogResult{Entries: []contracts.CatalogEntry{
 		{ID: "web", Name: "Web", Description: "A remote plugin.", Source: "https://example.invalid/web", Surfaces: []protocol.SurfaceID{protocol.SurfaceSidePanel}, Tags: []string{"remote"}, SourceLayer: "user"},
 		{ID: "alpha", Name: "Alpha", Description: "A local plugin.", Source: "~/plugins/alpha", Surfaces: []protocol.SurfaceID{protocol.SurfaceMainStage}, SourceLayer: "user"},
@@ -60,7 +64,7 @@ func TestSettingsInstalledListsClaimsHeldDirAndStateRefresh(t *testing.T) {
 	}
 	for status, colour := range map[string]string{"live": "success", "starting": "ink", "exited": "ink_muted", "failed": "danger"} {
 		t.Run(status, func(t *testing.T) {
-			fe.Snap.Slices["husk.pods"] = state.Entry{Value: json.RawMessage(fmt.Sprintf(`{"plugins":{"alpha":{"status":%q}}}`, status))}
+			setSettingsSlice(fe, "husk.pods", fmt.Sprintf(`{"plugins":{"alpha":{"status":%q}}}`, status))
 			m.settle()
 			if !strings.Contains(pluginText(m), "(command line)") {
 				t.Fatal("implicit source missing")
@@ -81,7 +85,7 @@ func TestSettingsInstalledListsClaimsHeldDirAndStateRefresh(t *testing.T) {
 			}
 		})
 	}
-	fe.Snap.Slices["husk.pods"] = state.Entry{Value: json.RawMessage(`{"plugins":{}}`)}
+	setSettingsSlice(fe, "husk.pods", `{"plugins":{}}`)
 	m.settle()
 	if len(m.settings.plugins.rows) != 0 || strings.Contains(pluginText(m), "alpha") {
 		t.Fatal("removed row stayed")
@@ -135,12 +139,18 @@ func TestSettingsInstalledRemoveYesNoPendingErrorAndLateReply(t *testing.T) {
 func TestSettingsStoreEmptyCatalogFiltersCommandsInstalledTakenAndProblems(t *testing.T) {
 	m, fe := pluginsFixture(t, "store")
 	text := pluginText(m)
-	for _, want := range []string{"Alpha", "Web", "installed", "already loaded", "taken"} {
+	for _, want := range []string{"Alpha", "Web", "installed", "already loaded"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("missing %q", want)
 		}
 	}
+	if strings.Contains(text, "taken") {
+		t.Fatal("own held surface marked taken")
+	}
 	settingsPress(m, "down")
+	if !strings.Contains(pluginText(m), "taken") {
+		t.Fatal("other plugin's surface not marked taken")
+	}
 	if !strings.Contains(pluginText(m), "husk plugin add /opt/plugins/beta") {
 		t.Fatal("path command missing")
 	}
@@ -175,6 +185,7 @@ func TestSettingsStoreEmptyCatalogFiltersCommandsInstalledTakenAndProblems(t *te
 	p.selectedID = ""
 	p.dirty = true
 	fe.CatalogRows = contracts.CatalogResult{}
+	fe.CatalogRev++
 	for i := range 12 {
 		fe.CatalogRows.Problems = append(fe.CatalogRows.Problems, protocol.Problem{Code: fmt.Sprintf("invalid%02d", i), Message: "catalog.json (user): invalid entry", Severity: "warning"})
 	}
@@ -196,7 +207,13 @@ func TestSettingsPluginsCacheReloadSelectPasteMouseAndViewPurity(t *testing.T) {
 	m, fe := pluginsFixture(t, "store")
 	p := m.settings.plugins
 	before := &p.lines[0]
-	m.settle()
+	reads := fe.CatalogReads
+	for range 10 {
+		m.settle()
+	}
+	if fe.CatalogReads != reads {
+		t.Fatal("idle tick copied catalog")
+	}
 	if before != &p.lines[0] {
 		t.Fatal("idle tick recomputed content")
 	}
@@ -222,11 +239,15 @@ func TestSettingsPluginsCacheReloadSelectPasteMouseAndViewPurity(t *testing.T) {
 	if p.query != "re mote " {
 		t.Fatal("paste did not use palette sanitation")
 	}
-	p.query = ""
-	p.selectedID = "beta"
-	p.dirty = true
-	m.settle()
-	fe.CatalogRows.Entries[0].Name = "Aardvark"
+	for p.query != "" {
+		settingsPress(m, "backspace")
+	}
+	settingsPress(m, "down")
+	if p.filtered[p.cursor].ID != "beta" {
+		t.Fatal("navigation did not highlight beta")
+	}
+	fe.CatalogRows.Entries = append(fe.CatalogRows.Entries, contracts.CatalogEntry{ID: "first", Name: "Aardvark", Source: "~/plugins/first"})
+	fe.CatalogRev++
 	fe.ServiceRev++
 	m.settle()
 	if p.filtered[p.cursor].ID != "beta" {
@@ -234,14 +255,15 @@ func TestSettingsPluginsCacheReloadSelectPasteMouseAndViewPurity(t *testing.T) {
 	}
 	// Worker completion after the reload is also visible.
 	fe.CatalogRows.Entries = append(slicesCopy(fe.CatalogRows.Entries), contracts.CatalogEntry{ID: "later", Name: "Later", Source: "~/plugins/later"})
+	fe.CatalogRev++
 	m.settle()
-	if len(p.filtered) != 4 {
+	if len(p.filtered) != 5 {
 		t.Fatal("late warmed catalog invisible")
 	}
 	r := m.settingsContentRect()
 	m.settingsMouse(tea.MouseClickMsg{X: r.Min.X, Y: r.Min.Y + 2, Button: tea.MouseLeft})
 	m.settle()
-	if p.filtered[p.cursor].ID != "web" {
+	if p.filtered[p.cursor].ID != "first" {
 		t.Fatal("list mouse selection")
 	}
 	if len(fe.SettingWrites)+len(fe.PluginRemovals)+len(fe.ProfileUses)+len(fe.Invoked) != 0 {
@@ -250,6 +272,11 @@ func TestSettingsPluginsCacheReloadSelectPasteMouseAndViewPurity(t *testing.T) {
 	if !reflect.DeepEqual(p.catalog, fe.CatalogRows) {
 		t.Fatal("cached source differs")
 	}
+}
+func setSettingsSlice(fe *fakeFE, namespace, value string) {
+	old := fe.Snap.Slices[namespace]
+	fe.Snap.Slices[namespace] = state.Entry{Descriptor: state.Descriptor{Revision: old.Revision + 1}, Value: json.RawMessage(value)}
+	fe.Snap.Seq++
 }
 func slicesCopy(in []contracts.CatalogEntry) []contracts.CatalogEntry {
 	return append([]contracts.CatalogEntry(nil), in...)

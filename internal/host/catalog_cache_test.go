@@ -47,6 +47,10 @@ func TestCatalogCacheWarmsOffLoopAtStartupAndAfterReload(t *testing.T) {
 	settle := func() { h.root.wg.Wait(); h.loop(func() {}) }
 	settle()
 	original := h.root.Frontend().Catalog()
+	revision := h.root.Frontend().CatalogRevision()
+	if revision == 0 {
+		t.Fatal("startup catalog publication has no revision")
+	}
 	if len(original.Entries) != 1 || len(original.Problems) != 1 {
 		t.Fatalf("startup cache: %+v", original)
 	}
@@ -73,6 +77,9 @@ func TestCatalogCacheWarmsOffLoopAtStartupAndAfterReload(t *testing.T) {
 		}
 	})
 	settle()
+	if h.root.CatalogRevision() <= revision {
+		t.Fatal("catalog publication did not advance revision")
+	}
 	spy.mu.Lock()
 	defer spy.mu.Unlock()
 	if len(spy.calls) != 4 {

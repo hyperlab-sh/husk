@@ -123,12 +123,14 @@ var goldenFrames = map[string]func(t *testing.T) string{
 	"TestGoldenFrameSettingsStoreEmpty": func(t *testing.T) string {
 		m, fe := pluginsFixture(t, "store")
 		fe.CatalogRows = contracts.CatalogResult{}
+		fe.CatalogRev++
 		m.settle()
 		return runGolden(t, m)
 	},
 	"TestGoldenFrameSettingsStoreCatalog": func(t *testing.T) string {
 		m, fe := pluginsFixture(t, "store")
 		fe.CatalogRows.Entries = fe.CatalogRows.Entries[1:]
+		fe.CatalogRev++
 		m.settings.plugins.selectedID = "beta"
 		m.settings.plugins.dirty = true
 		m.settle()

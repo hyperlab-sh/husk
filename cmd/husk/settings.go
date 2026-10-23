@@ -56,6 +56,21 @@ type settingsCenter struct {
 	plugins          *settingsPlugins
 }
 
+func (s *settingsCenter) dismissPluginDialogs() {
+	if p := s.plugins; p != nil {
+		if p.filter != nil {
+			p.surface = p.surfaceBefore
+		}
+		p.confirm, p.filter = nil, nil
+		p.dirty = true
+	}
+}
+func (s *settingsCenter) discardHiddenPluginDialogs() {
+	if p := s.plugins; p != nil && (p.confirm != nil && s.tab != "installed" || p.filter != nil && s.tab != "store") {
+		s.dismissPluginDialogs()
+	}
+}
+
 func (s *settingsCenter) dirty() bool {
 	if s.general != nil {
 		for _, f := range s.general.fields {
@@ -88,6 +103,9 @@ func (m *WorkbenchModel) openSettings(args map[string]any) (map[string]any, erro
 	}
 	if m.settings != nil {
 		if tab != "" {
+			if tab != m.settings.tab {
+				m.settings.dismissPluginDialogs()
+			}
 			m.settings.tab = tab
 			if tab == "theme" {
 				m.settings.focus = settingsContentFocus
@@ -223,6 +241,7 @@ func settingsListTop(top, cursor, count, height int) int {
 
 func (m *WorkbenchModel) settingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	s := m.settings
+	s.discardHiddenPluginDialogs()
 	key := legacyKeyString(msg)
 	s.profileError = ""
 	if s.plugins != nil {
@@ -237,7 +256,7 @@ func (m *WorkbenchModel) settingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if key != "tab" && key != "shift+tab" {
 			return m, m.settingsPluginKey(msg)
 		}
-		s.plugins.confirm, s.plugins.filter = nil, nil
+		s.dismissPluginDialogs()
 	}
 	if s.profileForm != nil && (key == "tab" || key == "shift+tab") {
 		s.profileForm = nil
@@ -508,8 +527,7 @@ func (m *WorkbenchModel) settingsMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) 
 	}
 	if s.plugins != nil && (s.plugins.confirm != nil || s.plugins.filter != nil) {
 		if left {
-			s.plugins.confirm, s.plugins.filter = nil, nil
-			s.plugins.dirty = true
+			m.settingsPluginDialogMouse(point)
 		}
 		if _, wheel := event.(tea.MouseWheelMsg); wheel {
 			if mouse.Button == tea.MouseWheelUp {
