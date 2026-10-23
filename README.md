@@ -132,6 +132,8 @@ A plugin directory contains a `husk-plugin.json` manifest:
 - The host starts the plugin with `HUSK_SOCKET_PATH` and `HUSK_PLUGIN_TOKEN`; the plugin sends its requests and notifications on the socket with the token in each message.
 - `--plugin <path>` accepts an executable, a plugin directory, or a `husk-plugin.json` path, and may be repeated. `--plugin-dir <dir>` loads every immediate subdirectory of `<dir>` that contains a `husk-plugin.json`, and may also be repeated.
 
+- `--bundle <dir>` loads a directory with `husk-bundle.json`, optional configuration defaults and a `plugins/` directory. The equivalent `husk.bundle` setting is read from user and named-instance config; the flag wins, and `--bundle ""` disables it. Explicit plugins win over bundle copies with the same id. See [Bundles](docs/docs/design/bundles.md).
+
 ## Keys
 
 | Input | Action |
