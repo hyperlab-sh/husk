@@ -136,11 +136,13 @@ const PluginExitedEvent = "pods.plugin-exited"
 // undeclared the plugin; its payload is {plugin_id, status}.
 const PluginRemovedEvent = "pods.plugin-removed"
 
-// Remover is the composition root's half of plugin.remove: what the teardown
+// Workers is the composition root's lifecycle seam: what the teardown
 // tick needs beyond Pods' own state, and the workers that follow it. Without
 // one, teardown undeclares nothing, workers are plain goroutines posting
 // through Loop.Post, and the reload reports are empty.
-type Remover interface {
+type Workers interface {
+	// Added attaches loop-side delivery bookkeeping to a newly registered Pod.
+	Added(pluginID string)
 	// Undeclare runs on the loop inside the teardown tick, after the Pod's
 	// slices are unregistered: it removes the plugin's declared documents
 	// (Store.Undeclare) and refreshes every reader derived from them.
@@ -174,8 +176,8 @@ type Options struct {
 	// Publisher receives `pods.plugin-exited` and `pods.plugin-removed` from
 	// Handle.
 	Publisher Publisher
-	// Remover supplies the composition root's half of plugin.remove.
-	Remover Remover
+	// Workers supplies tracked lifecycle workers and loop-side bookkeeping.
+	Workers Workers
 }
 
 var _ contracts.WrapperStarter = (*Host)(nil)

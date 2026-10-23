@@ -155,8 +155,8 @@ func (h *Host) teardown(id string, unreaped bool) {
 		h.opts.Registry.Release(h.ctx, id)
 	}
 	h.loop.Log(LogMsg{PluginID: id, Level: "info", Message: "removed plugin " + id + ": slices unregistered, documents undeclared"})
-	if h.opts.Remover != nil {
-		h.opts.Remover.Undeclare(id)
+	if h.opts.Workers != nil {
+		h.opts.Workers.Undeclare(id)
 	}
 	if h.opts.Publisher != nil {
 		h.opts.Publisher.Publish(PluginRemovedEvent, map[string]any{"plugin_id": id, "status": string(rm.status)})
@@ -188,10 +188,10 @@ func (h *Host) dropFromGates(id string) {
 func (h *Host) reloadOne(id string) tea.Cmd {
 	return func() tea.Msg {
 		msg := RemoveDoneMsg{PluginID: id, Reports: []contracts.ReloadReport{}}
-		if h.opts.Remover == nil {
+		if h.opts.Workers == nil {
 			return msg
 		}
-		reports, err := h.opts.Remover.Reload(h.ctx)
+		reports, err := h.opts.Workers.Reload(h.ctx)
 		if len(reports) > 0 {
 			msg.Reports = reports
 		} else if err != nil {
@@ -227,8 +227,8 @@ func (h *Host) cancelRemovals() {
 // spawn starts a worker command: through the composition root's tracked
 // workers when wired, else a plain goroutine posting through the Loop.
 func (h *Host) spawn(cmd tea.Cmd) {
-	if h.opts.Remover != nil {
-		h.opts.Remover.Go(cmd)
+	if h.opts.Workers != nil {
+		h.opts.Workers.Go(cmd)
 		return
 	}
 	go func() {
