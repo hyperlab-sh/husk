@@ -309,37 +309,54 @@ func TestLaunchEnvironmentProcessGroupAndOpeningOrder(t *testing.T) {
 
 // TestLaunchEnvironmentCarriesInstanceIdentityAndBinary pins the values, not
 // just the names: the plugin sees this instance's id, the absolute path of the
-// husk binary it was configured with and its socket, and an inherited value
-// from another instance is replaced (pods.md, Environment).
+// husk binary and its socket, and an inherited value from another instance is
+// replaced (pods.md, Environment). Without a configured binary the wrapper
+// defaults to the running executable.
 func TestLaunchEnvironmentCarriesInstanceIdentityAndBinary(t *testing.T) {
-	bin, err := filepath.Abs(os.Args[0])
+	running, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := newFixture(t, "env", func(o *Options) {
-		o.InstanceID = "notes-42"
-		o.BinPath = bin
-		o.BaseEnv = append(o.BaseEnv, "HUSK_INSTANCE=other", "HUSK_BIN_PATH=/elsewhere/husk", "HUSK_SOCKET_PATH=/elsewhere.sock")
-	})
-	f.start(t)
-	var v struct {
-		Env map[string]string `json:"env"`
-	}
-	if err := json.Unmarshal(awaitReply(t, f, "9000").Result, &v); err != nil {
-		t.Fatal(err)
-	}
-	for name, want := range map[string]string{
-		"HUSK_INSTANCE":    "notes-42",
-		"HUSK_BIN_PATH":    bin,
-		"HUSK_SOCKET_PATH": f.w.opts.SocketPath,
-		"HUSK_PLUGIN_ID":   "fake",
+	configured := filepath.Join(t.TempDir(), "husk")
+	for _, tc := range []struct{ name, binPath, want string }{
+		{"configured", configured, configured},
+		{"default is the running executable", "", running},
 	} {
-		if v.Env[name] != want {
-			t.Errorf("%s = %q, want %q", name, v.Env[name], want)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t, "env", func(o *Options) {
+				o.InstanceID = "notes-42"
+				o.BinPath = tc.binPath
+				o.BaseEnv = append(o.BaseEnv, "HUSK_INSTANCE=other", "HUSK_BIN_PATH=/elsewhere/husk", "HUSK_SOCKET_PATH=/elsewhere.sock")
+			})
+			f.start(t)
+			var v struct {
+				Env map[string]string `json:"env"`
+			}
+			if err := json.Unmarshal(awaitReply(t, f, "9000").Result, &v); err != nil {
+				t.Fatal(err)
+			}
+			for name, want := range map[string]string{
+				"HUSK_INSTANCE":    "notes-42",
+				"HUSK_BIN_PATH":    tc.want,
+				"HUSK_SOCKET_PATH": f.w.opts.SocketPath,
+				"HUSK_PLUGIN_ID":   "fake",
+			} {
+				if v.Env[name] != want {
+					t.Errorf("%s = %q, want %q", name, v.Env[name], want)
+				}
+			}
+			if !filepath.IsAbs(v.Env["HUSK_BIN_PATH"]) {
+				t.Errorf("HUSK_BIN_PATH %q is not absolute", v.Env["HUSK_BIN_PATH"])
+			}
+		})
 	}
-	if !filepath.IsAbs(v.Env["HUSK_BIN_PATH"]) {
-		t.Errorf("HUSK_BIN_PATH %q is not absolute", v.Env["HUSK_BIN_PATH"])
+}
+
+func TestRelativeBinaryPathIsRefused(t *testing.T) {
+	_, err := New(manifest.Spec{ID: "fake", Protocol: protocol.Major, Command: []string{os.Args[0]}, WorkDir: t.TempDir()},
+		Options{LogPath: func(string) (string, error) { return "", nil }, BinPath: "rel/husk", Post: func(tea.Msg) {}})
+	if err == nil || !strings.Contains(err.Error(), "binary path must be absolute") {
+		t.Fatalf("err = %v", err)
 	}
 }
 
