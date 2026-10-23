@@ -72,7 +72,7 @@ func (p publisher) Publish(name string, data any) {
 	// Coalescing is by name alone unless a key says otherwise: two plugins
 	// that exit, or are removed, in one tick are two events, not one.
 	var key string
-	if name == pods.PluginExitedEvent || name == pods.PluginRemovedEvent {
+	if name == pods.PluginExitedEvent || name == pods.PluginRemovedEvent || name == pods.PluginAddedEvent {
 		key, _ = obj["plugin_id"].(string)
 	}
 	if name == servicesReloadedEvent {
@@ -94,6 +94,10 @@ func (p publisher) Publish(name string, data any) {
 	// Pods publish pods.plugin-exited from inside Update, where a blocking
 	// Post would wait on the loop it runs on; publish inline there.
 	if p.r.onLoop() {
+		if name == pods.PluginAddedEvent {
+			p.r.afterState = append(p.r.afterState, publish)
+			return
+		}
 		publish()
 		return
 	}

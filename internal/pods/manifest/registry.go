@@ -37,11 +37,13 @@ type Converter interface {
 type Registry interface {
 	Register(Converter)
 	Load(string) (*Spec, []Warning, error)
+	LoadPath(string) (*Spec, []Warning, error)
 	LoadDir(string) ([]Result, error)
 }
 
 // Result isolates one directory's conversion failure from its siblings.
 type Result struct {
+	Dir      string // claimed immediate subdirectory
 	Spec     *Spec
 	Warnings []Warning
 	Err      error
@@ -84,27 +86,9 @@ func (r *Loader) detect(dir string) (*Spec, []Warning, error, bool) {
 
 // Load resolves a directory, manifest path, bare executable or quoted command.
 func (r *Loader) Load(arg string) (*Spec, []Warning, error) {
-	st, err := os.Stat(arg)
+	_, err := os.Stat(arg)
 	if err == nil {
-		abs, err := filepath.Abs(arg)
-		if err != nil {
-			return nil, nil, err
-		}
-		if st.IsDir() {
-			s, w, e, ok := r.detect(abs)
-			if !ok {
-				return nil, nil, fmt.Errorf("no supported manifest in %s", arg)
-			}
-			return s, w, e
-		}
-		if filepath.Base(abs) == FileName {
-			s, w, e, ok := r.detect(filepath.Dir(abs))
-			if !ok {
-				return nil, nil, errors.New("unsupported manifest")
-			}
-			return s, w, e
-		}
-		return r.implicit(Source{Dir: filepath.Dir(abs), Command: []string{abs}})
+		return r.LoadPath(arg)
 	}
 	if !os.IsNotExist(err) {
 		return nil, nil, err
@@ -122,6 +106,37 @@ func (r *Loader) Load(arg string) (*Spec, []Warning, error) {
 	}
 	return r.implicit(Source{Dir: dir, Command: argv})
 }
+
+// LoadPath loads an existing path only; missing paths never become command lines.
+func (r *Loader) LoadPath(path string) (*Spec, []Warning, error) {
+	st, err := os.Stat(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	if st.IsDir() {
+		s, w, e, ok := r.detect(abs)
+		if !ok {
+			return nil, nil, fmt.Errorf("no supported manifest in %s", path)
+		}
+		return s, w, e
+	}
+	if filepath.Base(abs) == FileName {
+		s, w, e, ok := r.detect(filepath.Dir(abs))
+		if !ok {
+			return nil, nil, errors.New("unsupported manifest")
+		}
+		return s, w, e
+	}
+	if !st.Mode().IsRegular() || st.Mode().Perm()&0111 == 0 {
+		return nil, nil, fmt.Errorf("no converter claims %s: not an executable", path)
+	}
+	return r.implicit(Source{Dir: filepath.Dir(abs), Command: []string{abs}})
+}
+
 func (r *Loader) implicit(src Source) (*Spec, []Warning, error) {
 	for _, c := range r.converters {
 		if c.Format() == "husk-plugin.json/v1" {
@@ -153,7 +168,7 @@ func (r *Loader) LoadDir(dir string) ([]Result, error) {
 		}
 		s, w, e, ok := r.detect(filepath.Join(abs, entry.Name()))
 		if ok {
-			out = append(out, Result{s, w, e})
+			out = append(out, Result{Dir: filepath.Join(abs, entry.Name()), Spec: s, Warnings: w, Err: e})
 		}
 	}
 	return out, nil

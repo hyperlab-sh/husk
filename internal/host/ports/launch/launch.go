@@ -16,6 +16,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
+	portsservices "github.com/hyperlab-sh/husk/internal/host/ports/services"
 	"github.com/hyperlab-sh/husk/internal/pods"
 	"github.com/hyperlab-sh/husk/internal/pods/manifest"
 	"github.com/hyperlab-sh/husk/internal/services"
@@ -199,8 +200,10 @@ var _ contracts.Reloader = Reloader{}
 
 // Reload blocks until the reload has completed (failed and timed-out reloads
 // included) and translates reports into host problems.
-func (r Reloader) Reload(ctx context.Context) (bool, []protocol.Problem) {
-	return reloadProblems(r.Coordinator.Reload(ctx, services.ReasonPlugin))
+func (r Reloader) Reload(ctx context.Context) (bool, []protocol.Problem, []contracts.ReloadReport) {
+	reports, err := r.Coordinator.Reload(ctx, services.ReasonPlugin)
+	applied, problems := reloadProblems(reports, err)
+	return applied, problems, portsservices.Reports(reports)
 }
 
 // reloadProblems translates the Coordinator's reports into host problems. A
@@ -332,13 +335,16 @@ func (p Preparer) Prepare(ctx context.Context, gate uint64, specs []manifest.Spe
 		}
 	}
 	var reloadErr error
+	var reports []contracts.ReloadReport
 	if p.Reload != nil {
-		applied, problems := p.Reload.Reload(ctx)
+		var applied bool
+		var problems []protocol.Problem
+		applied, problems, reports = p.Reload.Reload(ctx)
 		if !applied || len(problems) > 0 {
 			reloadErr = reloadError{applied: applied, problems: problems}
 		}
 	}
-	return pods.Preparation{Failed: failed, ReloadError: reloadErr}
+	return pods.Preparation{Failed: failed, ReloadError: reloadErr, Reports: reports}
 }
 
 // reloadError is the non-blocking launch-gate error carried by Preparation.

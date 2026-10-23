@@ -44,6 +44,7 @@ type LivenessMsg = wrapper.LivenessMsg
 type Preparation struct {
 	Failed      map[string]error
 	ReloadError error
+	Reports     []contracts.ReloadReport
 }
 
 // RegisterSlicesMsg carries the batch's slice registrations to the loop. The
@@ -157,6 +158,16 @@ type Workers interface {
 	Go(cmd tea.Cmd)
 }
 
+// Converter is the handler-side, path-only conversion seam shared with startup.
+// Implementations are configured once before use and safe for concurrent reads.
+type Converter interface {
+	LoadPath(string) (*manifest.Spec, []manifest.Warning, error)
+	LoadDir(string) ([]manifest.Result, error)
+}
+
+// PluginAddedEvent announces a live or failed runtime addition after its gate.
+const PluginAddedEvent = "pods.plugin-added"
+
 // Factory constructs real or fake process wrappers before token registration.
 type Factory func(manifest.Spec, wrapper.Options) (wrapper.Process, error)
 
@@ -165,8 +176,10 @@ type Factory func(manifest.Spec, wrapper.Options) (wrapper.Process, error)
 // Registry is launch step 1 (duplicate id check) and Starter overrides launch
 // step 6's built-in Wrapper start; both default to the built-in behaviour.
 type Options struct {
-	Wrapper wrapper.Options
-	Factory Factory
+	// Converter reads plugin inputs without mutating instance state.
+	Converter Converter
+	Wrapper   wrapper.Options
+	Factory   Factory
 	// Registry, when set, replaces the local duplicate-id check: Add calls
 	// Reserve and accepts its conflict as the duplicate answer.
 	Registry contracts.PodRegistry

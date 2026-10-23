@@ -35,7 +35,7 @@ func TestAddReservesThroughPodRegistry(t *testing.T) {
 	h.opts.Registry = fakes.NewPods(rec)
 
 	addPod(t, h, "files")
-	if _, err := h.Add(manifestSpec("files")); err == nil {
+	if _, err := h.AddPod(manifestSpec("files")); err == nil {
 		t.Fatal("duplicate id accepted")
 	}
 	if methods := rec.Methods(); !reflect.DeepEqual(methods, []string{"Pods.Reserve"}) {
@@ -56,7 +56,7 @@ func TestAddDuplicateHoldsEvenWhenRegistryForgets(t *testing.T) {
 	h.opts.Registry = forgetfulRegistry{}
 
 	addPod(t, h, "files")
-	if _, err := h.Add(manifestSpec("files")); err == nil {
+	if _, err := h.AddPod(manifestSpec("files")); err == nil {
 		t.Fatal("duplicate id accepted through a forgetful registry")
 	}
 	if len(h.pods) != 1 {
@@ -81,7 +81,7 @@ func TestAddValidatesBeforeReserve(t *testing.T) {
 
 	bad := manifestSpec("files")
 	bad.Protocol = 0
-	if _, err := h.Add(bad); err == nil {
+	if _, err := h.AddPod(bad); err == nil {
 		t.Fatal("invalid spec accepted")
 	}
 	if methods := rec.Methods(); len(methods) != 0 {
@@ -203,7 +203,7 @@ func (f *fakeHandle) Unregister() { f.unregistered = true }
 func prepareGate(t *testing.T, h *Host) uint64 {
 	t.Helper()
 	before := h.nextGate
-	if h.Prepare() == nil {
+	if prepareAll(h) == nil {
 		t.Fatal("no pending preparation for the gate")
 	}
 	return before + 1
@@ -475,7 +475,7 @@ func TestTeardownWhileGatePendingSkipsRemoved(t *testing.T) {
 	addPod(t, h, "files")
 	addPod(t, h, "other")
 
-	cmd := h.Prepare()
+	cmd := prepareAll(h)
 	msg := cmd()
 	markRemoving(h, "files")
 	h.Handle(TeardownMsg{PluginID: "files"})
@@ -516,7 +516,7 @@ func TestRegisterSlicesAfterTeardownRefused(t *testing.T) {
 	h, _, _, _ := hostFixture(t)
 	addPod(t, h, "files")
 	gate := h.nextGate + 1
-	h.Prepare()
+	prepareAll(h)
 	called := false
 	register := map[string]func() (contracts.SliceHandle, error){
 		"files": func() (contracts.SliceHandle, error) {
@@ -543,7 +543,7 @@ func TestRegisterSlicesAfterTeardownRefused(t *testing.T) {
 	// launch's gate accepts it.
 	addPod(t, h, "files")
 	gate2 := h.nextGate + 1
-	h.Prepare()
+	prepareAll(h)
 	done2 := make(chan Registered, 1)
 	h.Handle(RegisterSlicesMsg{Gate: gate2, Register: register, Done: done2})
 	if reg := testclock.Receive(t, done2); reg.Failed != nil || reg.Handles["files"] == nil {
@@ -553,7 +553,7 @@ func TestRegisterSlicesAfterTeardownRefused(t *testing.T) {
 	// Shutdown refuses late registrations too, without State writes.
 	addPod(t, h, "late")
 	gate3 := h.nextGate + 1
-	h.Prepare()
+	prepareAll(h)
 	h.closing = true
 	calledLate := false
 	done3 := make(chan Registered, 1)
@@ -578,13 +578,13 @@ func TestStaleRegistrationFromPriorLaunchRefused(t *testing.T) {
 	h, _, _, _ := hostFixture(t)
 	addPod(t, h, "files")
 	gate1 := h.nextGate + 1
-	h.Prepare() // launch 1: worker1 goes off-loop with gate1
+	prepareAll(h) // launch 1: worker1 goes off-loop with gate1
 	markRemoving(h, "files")
 	h.Handle(TeardownMsg{PluginID: "files"})
 
 	addPod(t, h, "files") // same id, new Pod
 	gate2 := h.nextGate + 1
-	h.Prepare() // launch 2: worker2 pending with gate2
+	prepareAll(h) // launch 2: worker2 pending with gate2
 
 	staleCalled, freshCalled := false, false
 	staleDone := make(chan Registered, 1)

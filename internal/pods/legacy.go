@@ -23,7 +23,7 @@ func (h *Host) FailLegacy(pluginID string) { h.loop.Post(LegacyHelloMsg{PluginID
 //
 // The process is failed on a worker: the Wrapper reports its closing through
 // Loop.Post, which may block for backpressure, and a loop that posts to itself
-// from Update deadlocks. It runs through the Remover's tracked workers when
+// from Update deadlocks. It runs through the lifecycle seam's tracked workers when
 // wired, so Host shutdown waits for it.
 func (h *Host) failLegacy(id string) {
 	p := h.pods[id]

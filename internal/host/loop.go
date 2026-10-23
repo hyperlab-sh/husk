@@ -16,6 +16,7 @@ import (
 	"github.com/hyperlab-sh/husk/internal/pods"
 	"github.com/hyperlab-sh/husk/internal/pods/server"
 	"github.com/hyperlab-sh/husk/internal/stem/calls"
+	"github.com/hyperlab-sh/husk/internal/stem/eventbus"
 	"github.com/hyperlab-sh/husk/internal/substrate/state"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
@@ -200,6 +201,11 @@ func (r *Root) tick() {
 	if r.st != nil {
 		r.st.Flush()
 	}
+	announcements := r.afterState
+	r.afterState = nil
+	for _, publish := range announcements {
+		publish()
+	}
 	if r.rt != nil {
 		// A flight the State listener or a profile.use requested in this tick
 		// launches now, so every request of the tick joined it.
@@ -224,6 +230,18 @@ func (r *Root) tick() {
 		if delay, ok := r.table.NextSweep(); ok {
 			r.clock.AfterFunc(delay, func() { r.cfg.Post(calls.SweepMsg{}) })
 		}
+	}
+}
+
+// publishStateChanges connects State's tick-end facts to the Event bus. Values
+// stay on state.watch; event subscribers receive only revision metadata.
+func (r *Root) publishStateChanges(changes []state.Change, _ *state.Snapshot) {
+	for _, change := range changes {
+		data := map[string]any{"slice": change.Namespace, "owner": change.Owner, "revision": change.Revision}
+		if change.Removed {
+			data["removed"] = true
+		}
+		r.bus.Publish(eventbus.Event{Name: "state.changed", Key: change.Namespace, Source: eventbus.SourceHost, Data: data})
 	}
 }
 

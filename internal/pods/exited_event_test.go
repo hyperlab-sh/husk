@@ -78,7 +78,7 @@ func TestLaunchFailurePublishesPluginExitedOnce(t *testing.T) {
 func TestStartFailurePublishesPluginExited(t *testing.T) {
 	h, pub, procs := publisherFixture(t)
 	addPod(t, h, "p")
-	cmd := h.Prepare()
+	cmd := prepareAll(h)
 	// The process refuses to start; the gate reports the failure.
 	h.opts.Factory = func(s manifest.Spec, o wrapper.Options) (wrapper.Process, error) {
 		p := &fakeProcess{id: s.ID, info: wrapper.Info{PluginID: s.ID, Status: wrapper.Starting}, opts: o, done: make(chan struct{}), term: make(chan struct{}), startErr: errors.New("spawn refused")}
