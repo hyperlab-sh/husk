@@ -252,6 +252,10 @@ func runDumpFrame(m *WorkbenchModel, opt dumpFrameOptions) (string, error) {
 		return frame, fmt.Errorf("host stopped: %w", m.hostErr)
 	case d.failed:
 		return frame, fmt.Errorf("no plugin went live: %s", failedPods(m.podStatus))
+	case opt.Launched == 0 && len(m.podStatus) == 0 && m.fe != nil && len(m.fe.Refusals()) > 0:
+		// Discovery refusals never enter the launch plan or create Pods. Do
+		// not mistake an entirely refused plan for an intentional empty run.
+		return frame, errors.New("no plugin went live: all plugins were refused before a Pod existed (the host log names why)")
 	case errors.Is(err, tea.ErrProgramPanic):
 		return frame, err
 	case d.noRailItem != "":
