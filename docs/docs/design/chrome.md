@@ -40,8 +40,8 @@ This spec fixes five things:
 5. **The frame is drawn with surfaces, borders and inks only.** The accent
    marks exactly the focused or selected element and the status colours
    appear only on status glyphs, badges and toasts; see "Colour discipline".
-   Today's chrome uses `warning` in ten places and `accent` in seven, and
-   the frame reads as loud whatever palette it is given.
+   Today's chrome (`cmd/husk`) uses `warning` in twelve places and `accent`
+   in eight, and the frame reads as loud whatever palette it is given.
 
 Husk has no normal/insert modes and this spec introduces none. Where this
 spec's requirements say "mode", they mean the layout label defined under "The
@@ -345,28 +345,37 @@ included: the rule, not the palette, is what keeps it so.
    `border_focused`, `ink`, `ink_muted` and `ink_subtle`. Weight (bold) is
    not colour and stays where it is.
 2. **`accent` marks exactly the focused or selected element, nowhere else.**
-   The complete list: the active rail tile's icon; the palette prompt glyph
-   `❯` (the palette is the focused element while it is open); the divider
-   under drag; the marker on the current theme in the theme selector. The
-   focused surface's border is `border_focused`, a role of its own. No key,
-   hint, brand, label, title or badge is accent-coloured.
+   The principle decides, not a list: an element takes `accent` only while
+   it is the one the user's input goes to (focused) or the one the user has
+   chosen among its siblings (selected). Examples: the active rail tile's
+   icon; the palette prompt glyph `❯` (the palette is the focused element
+   while it is open); the divider under drag; the marker on the current theme
+   in the Settings center's Theme tab; the Settings center's focused tab
+   label and its focused form field. The focused surface's border is
+   `border_focused`, a role of its own. No key, hint, brand, label, title or
+   badge is accent-coloured for being one.
 3. **`accent_secondary` and `accent_soft` are for plugins.** The chrome never
    draws them.
 4. **`success`, `warning`, `danger` and `info` appear only on status glyphs,
    badges and toasts** whose meaning is that status: a toast's `●` glyph and
-   title in the toast's level colour; a status badge a later spec defines.
-   Never as decoration, never as a border (a toast's border is `border`, its
-   background `surface_elevated`), never on keys, hints, callouts or dev
-   overlays. Today's chrome breaks this in ten places.
+   title in the toast's level colour; the secret prompt's `⚠` glyph; a
+   **status badge**, which includes a one-word status cell in a table or
+   form (`live`, `installed`, `restart required`, `taken`, as the Settings
+   center draws them). Never as decoration, never as a border (a toast's
+   border is `border`, its background `surface_elevated`), never on keys,
+   hints, titles, callouts or dev overlays. Today's chrome breaks this in
+   sixteen elements (the audit below).
 5. The rule governs **roles drawn, not hex values**. Two roles may hold the
    same colour in a theme (`charm`'s `border_focused` and `accent_soft` are
    both its indigo); drawing `border_focused` is allowed where drawing
    `accent_soft` is not.
-6. A host modal (the theme selector, any later one) follows the same rules:
-   rows on `surface`, the cursor row on `surface_selected`, text in `ink`
-   and `ink_muted`, the frame in `border_focused`.
+6. A host modal (the Settings center, the secret prompt, any later one)
+   follows the same rules: rows on `surface_elevated`, the cursor row on
+   `surface_selected`, text in `ink` and `ink_muted`, the frame in
+   `border_focused`.
 
-**Audit of today's `cmd/husk/render.go`**, every use that breaks a rule and
+**Audit of today's `cmd/husk`** (`render.go` and `secretprompt.go`, the only
+files that draw a status or accent role), every use that breaks a rule and
 where it moves. Uses not listed (rail and bar backgrounds, idle icons, frame
 borders and `border_focused` on the focused surface, close glyphs, palette
 rows, the shadow's resolution colours, the slot fill) already comply.
@@ -394,16 +403,26 @@ rows, the shadow's resolution colours, the slot fill) already comply.
 | Palette header (`drawCommandPalette`) | `warning` bold | `ink_muted` bold |
 | Palette row tag (`paletteRow`) | `accent_secondary` | `ink_subtle` |
 | Palette row shortcut (`paletteRow`) | `warning` | `ink_muted` |
+| Secret prompt title `SECRET ACCESS REQUEST` (`drawSecretPrompt`) | `warning` bold | `ink` bold, preceded by a `⚠` glyph in `warning` (a status glyph, rule 4) |
+| Secret prompt plugin id | `accent` bold | `ink` bold |
+| Secret prompt keys `y`, `n`, `esc` | `accent` bold | `ink` bold (keys, rule 2) |
+| Secret prompt border | `warning` | `border_focused` (rule 6) |
+| Secret prompt background | `surface` | `surface_elevated` (rule 6) |
 
-After the migration the chrome draws `accent` in four places (rule 2),
-`warning` in none, `success`/`danger`/`info` only inside `drawToast`, and
-`accent_secondary`/`accent_soft` nowhere. `TestChromeColourDiscipline` pins
-it: a source-level test over `cmd/husk/*.go` (excluding tests) that counts
+After the migration the frame (rail, bars, surfaces, palette, prompts)
+draws `accent` in three places: the active rail icon, the palette prompt and
+the dragged divider. The Settings center adds its own rule-2 uses (the Theme
+tab's current-theme marker, the focused tab label, the focused form field).
+Status roles appear only inside `drawToast`, as the secret prompt's `⚠`
+glyph, and in the Settings center's status-badge helper; `accent_secondary`
+and `accent_soft` appear nowhere. `TestChromeColourDiscipline` pins it: a
+source-level test over `cmd/husk/*.go` (excluding tests) that counts
 `m.palette.<Role>` references per role and fails when `AccentSecondary` or
-`AccentSoft` appears, when `Warning` appears outside `drawToast`, or when
-`Success`/`Danger`/`Info` appears outside `drawToast`; and a rendering test
-that the empty workbench's frame contains the accent colour's escape sequence
-only on the active rail tile. Every golden changes with these moves and is
+`AccentSoft` appears, or when `Success`, `Warning`, `Danger` or `Info`
+appears outside `drawToast`, the secret prompt's glyph line and the Settings
+center's one status-badge helper (the function that colours a one-word
+status cell); and a rendering test that the empty workbench's frame contains
+the accent colour's escape sequence only on the active rail tile. Every golden changes with these moves and is
 regenerated once with the layout change ("Tests and goldens").
 
 ### Failure modes
@@ -551,6 +570,20 @@ size", "Input routing"), [Services](services.md) ("Settings", `theme.name`),
 16. **Dev overlays (hotspot badges, the slot explorer) are inks**, not status
     colours: a callout number is not a warning. They are developer tools and
     read fine in `ink` bold on a raised surface.
+17. **Rule 2 is a principle with examples, not a closed list.** A list had to
+    be edited for every new focused or selected element (the Settings
+    center's tabs and fields were missing from it); the principle (focused or
+    selected, nothing else) decides new cases the same way every time.
+18. **Host modals draw their rows on `surface_elevated`.** A popup is a
+    raised layer; rows on `surface` would sink back to the frame's level
+    inside a raised border. The secret prompt moves with it.
+19. **A one-word status cell is a badge.** A plugin's `live` or a key's
+    `restart required` is the status it names, which is what rule 4 allows;
+    colouring it is the badge case, not decoration. Titles stay inks: the
+    secret prompt says "warning" with its glyph, not with a yellow headline.
+20. **The audit covers all of `cmd/husk`**, not one file: the secret prompt in
+    `secretprompt.go` broke the same rules (`warning` title and border,
+    `accent` id and keys) and is migrated with the rest.
 
 ## Open questions
 
@@ -561,7 +594,16 @@ size", "Input routing"), [Services](services.md) ("Settings", `theme.name`),
    opens the Settings center on its Theme tab, the theme selector
    ([Settings center](settings-center.md); [Services](services.md), "The theme
    selector").
-3. Status badges. Rule 4 of "Colour discipline" allows status colours on
-   badges, but after the plugin-count badge goes the chrome has none; whether
-   a later spec adds one (a plugin-crashed count in `danger`, say) and where it
-   sits is open. Nothing in this spec needs it.
+3. Status badges in the frame. Rule 4 of "Colour discipline" allows status
+   colours on badges; the Settings center's status cells are badges (decision
+   19), but after the plugin-count badge goes the frame itself has none.
+   Whether a later spec adds one (a plugin-crashed count in `danger`, say) and
+   where it sits is open.
+4. Problem lines in host modals. The Settings center and the Theme tab show
+   a failed write as a line `<code>: <message>` and say they draw problems in
+   `danger` and warnings in `warning`. Such a line is neither a glyph, a badge
+   nor a toast, so rule 4 does not yet cover it: either the line becomes
+   `ink` behind a status glyph in the level colour (the secret prompt's
+   pattern), or rule 4 names modal problem lines as a fourth place. It must
+   be decided before the Settings center lands; `TestChromeColourDiscipline`'s
+   allowance follows the decision.

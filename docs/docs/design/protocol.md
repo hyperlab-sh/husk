@@ -237,6 +237,8 @@ Minor 2.2 ([Pods](pods.md), "Adding a plugin"): `plugin.add` and the `pods.plugi
 
 Minor 2.3 ([Services](services.md), "Theme" and "Settings"; [Settings center](settings-center.md)): `theme.list` and `settings.set`, plus the `settings` reload reason in `services.reloaded`, plus the `dir` field of each `plugin.list` entry and `husk.pods` entry (additive; the plugin's directory as the converter resolved it, `""` for an implicit command line; [Pods](pods.md), "plugin.* wire shapes"). `protocol.Version` moves to `2.3` when both `theme.list` and `settings.set` are served (rule 5 above: the minor is "specified, not landed" until all of it is); `dir` is an additive field and does not move the version, whenever it lands. `plugin.remove` admitting a `host` caller at its port is a port rule, not a wire change, and is not part of any minor. The two methods are specified below under "Theme selection and the settings write (minor 2.3)" and land together with their handlers: the constants, the schema entries and the rows of the method table are added in the change that serves them, so `pkg/protocol` never names a method the host answers `unknown_method` to.
 
+Minor 2.4 ([Built-in themes](themes.md), "Role values"; [Services](services.md), "Theme"): the optional `ansi` object beside `palette` in the `theme.get` result and the `theme.changed` params, mapping each palette role a theme set as an ANSI index to that index (`0`–`15`). No method is added and no existing field changes: `palette` values stay `#rrggbb`. `protocol.Version` moves to `2.4` when the host serves `ansi` and minor 2.3 has landed (rule 5). The field and its payload type are added to `pkg/protocol`, and so to the generated schema, in the change that serves it; the shape is under "ANSI palette roles (minor 2.4)" below.
+
 Where the version is checked, since there is no handshake:
 
 - A plugin states its protocol major in its manifest (`"protocol": 2`). Manifest conversion ([Pods](pods.md)) refuses a plugin whose major differs before it is launched. The Wrapper tells the plugin the host's full version in `HUSK_PROTOCOL_VERSION`.
@@ -387,7 +389,7 @@ Why the host emulates: the host owns the cell canvas and the key encoder, so a t
 | `slot_mouse` | `input.mouse` | notification | |
 | `key_state` | `input.key_state` | notification | `KeyPhase` values unchanged |
 | `command_invoke` | `action.invoke` | request | gains a reply; `command_id` becomes `action` |
-| `theme_changed` | `theme.changed` | notification | palette values stay `#rrggbb` strings, except that while the built-in `base16` theme is selected a value is an ANSI index `"0"`–`"15"`; a plugin treats a value that does not start with `#` as an index ([Built-in themes](themes.md), "Role values"). Field types are unchanged |
+| `theme_changed` | `theme.changed` | notification | palette values stay `#rrggbb` strings for every theme; from minor 2.4 an optional `ansi` object beside `palette` maps the roles a theme set as ANSI indices to their index ("ANSI palette roles (minor 2.4)"). Field types are unchanged |
 | `workspace_context` | `state.set` on the application's workspace slice; subscribers get the `state.changed` event | request | no dedicated message |
 | `toast` | `toast.show` | notification | |
 | `close_modal` | `surface.close` with `{"surface":"modal-surface"}` | notification | |
@@ -448,6 +450,16 @@ Done in the cutover and retirement: `pkg/huskipc` and `pkg/manifest` are deleted
 - `docs/docs/architecture.md`: the Protocol, Versioning and Errors sections were rewritten from this spec.
 - Major-1 `hello` on a socket connection: the Server tests the first line of each connection with the predicate the Wrapper uses on stdout (`protocol.IsLegacyHello`), answers it with the major-1 line, closes the connection and asks Pods to fail the live pod named by `hello.plugin_id` with `version_mismatch`. This rejects a foreign protocol; it is not a handshake.
 
+### ANSI palette roles (minor 2.4)
+
+**Level 1: specified, not landed.** A theme in the `themes` document may set a role to an ANSI index, "the terminal's colour N" (the built-in `base16` sets every role that way). The wire keeps one grammar for colours: every value in `palette` is a lowercase `#rrggbb`, and an index role carries the index's xterm default there (`0` is `#000000`, `4` is `#000080`, `15` is `#ffffff`; the full table is in [Built-in themes](themes.md), "Role values"). Beside `palette`, the `theme.get` result and the `theme.changed` params carry an optional **`ansi`** object: each key a role name (a JSON tag of `Palette`, never `name`), each value an integer `0`–`15`. It lists exactly the roles that are indices in the serving palette and is **absent** when there are none, so a hex theme's payload is unchanged.
+
+A receiver that knows `ansi` draws each listed role as the terminal's basic colour N and ignores that role's hex; one that does not ignores the field (Versioning rule 2) and draws the xterm defaults, an approximation that is always a valid colour. A plugin must not infer an index from a hex value: `#000080` in `palette` is an index only when `ansi` says so.
+
+```json
+{"method":"theme.changed","params":{"palette":{"name":"base16","canvas":"#000000","surface":"#000000","surface_elevated":"#000000","surface_selected":"#808080","surface_hover":"#808080","slot_background":"#000000","border":"#808080","border_subtle":"#808080","border_focused":"#800080","ink":"#ffffff","ink_muted":"#c0c0c0","ink_subtle":"#808080","accent":"#800080","accent_secondary":"#008080","accent_soft":"#000080","success":"#008000","warning":"#808000","danger":"#800000","info":"#000080"},"ansi":{"canvas":0,"surface":0,"surface_elevated":0,"surface_selected":8,"surface_hover":8,"slot_background":0,"border":8,"border_subtle":8,"border_focused":5,"ink":15,"ink_muted":7,"ink_subtle":8,"accent":5,"accent_secondary":6,"accent_soft":4,"success":2,"warning":3,"danger":1,"info":4}}}
+```
+
 ## Decisions made here
 
 1. The protocol is JSON-RPC shaped but not JSON-RPC 2.0: no `jsonrpc` member (ignored if sent), string error codes instead of integers, no batches. String codes are readable in logs and in shell plugins; integer codes buy nothing without JSON-RPC library interop, which the CLI already replaces.
@@ -466,6 +478,7 @@ Done in the cutover and retirement: `pkg/huskipc` and `pkg/manifest` are deleted
 14. The Go package is a new `pkg/protocol`; `pkg/huskipc` is deleted after migration rather than kept as a frozen v1.
 15. The CLI exposes `husk rpc <method> [params-json]`.
 16. Line limit stays 4 MiB.
+17. ANSI palette roles travel in a separate optional `ansi` object (minor 2.4), never as index strings inside `palette`. Every `palette` value stays `#rrggbb`, so a receiver that parses colours as hex keeps working and draws the xterm default; the object is absent for hex themes, so their payload does not change.
 
 ## Open questions
 

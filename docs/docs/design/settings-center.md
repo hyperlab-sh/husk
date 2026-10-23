@@ -78,9 +78,9 @@ The modal follows the placement rules of the frontend layout for a host modal (c
 - **Title row.** The word `Settings` at the left of the top border; the **profile corner** at the right: `profile: <name> ▾`, where `<name>` is the entry of `profile.list` with `active: true`, or `default` when none is active (an empty active profile is what [Services](services.md) calls "no profile"; the corner shows `default` because that is what a user reads it as). The corner is always drawn, on every tab, clipped to 24 cells with a `…` tail.
 - **Tab list.** 13 cells wide (one cell of margin, the marker, a space, the longest name `Installed` at 9, then its divider), one row per tab: `General`, `Keys`, `Theme`, `Plugins`, then `Store` and `Installed` indented under it. `Plugins` is a heading, not a tab: moving onto it lands on `Store`. The active tab is drawn with `surface_selected` and a `▸` marker; the list has focus when its row text is `accent`.
 - **Content.** The rest of the width, the tab's pane ("Tabs"). It scrolls when taller than the modal; the scroll position is per tab and resets on close.
-- **Footer.** The last inner row: the key hints for the focused part, in the palette's style (key in `accent`, description in `ink_muted`).
+- **Footer.** The last inner row: the key hints for the focused part, key in `ink` bold, description in `ink_muted` (keys are never accent-coloured: [Workbench chrome](chrome.md), "Colour discipline", rule 2).
 
-Colours are palette roles ([Protocol](protocol.md) `Palette`): the modal is `surface_elevated` with `border_focused`, text `ink`, muted text `ink_muted`, the selected row `surface_selected`, problems `danger`, warnings `warning`. huh fields take a huh theme built from the same roles ("huh"), so a theme change recolours the center with the rest of the frame.
+Colours are palette roles ([Protocol](protocol.md) `Palette`): the modal is `surface_elevated` with `border_focused`, rows on `surface_elevated`, text `ink`, muted text `ink_muted`, the cursor row `surface_selected`, problems `danger`, warnings `warning` (how a problem line may use a status colour is open: [Workbench chrome](chrome.md), open question 4). One-word status cells (`live`, `installed`, `restart required`, `taken`) are status badges and are coloured by one helper; `accent` marks only the focused tab label, the focused form field and the Theme tab's current-theme marker. huh fields take a huh theme built from the same roles ("huh"), so a theme change recolours the center with the rest of the frame.
 
 ### Focus and keys
 
@@ -142,6 +142,7 @@ The theme selector of [Services](services.md) ("The theme selector"), as a tab. 
 - It opens as the center on `tab: theme`, by `husk.theme.select`, by the bottom-bar click and by `husk.settings.open` with the argument. There is one modal, not two.
 - Its keys are the content keys of this center while the Theme tab is active: `up`, `down`, `ctrl+k`, `ctrl+j`, `pgup`, `pgdown`, `home`, `end` move, `enter` selects; `esc` and `ctrl+c` close the whole center, as "Focus and keys" says, and `tab` moves focus to the profile corner rather than being ignored.
 - A successful selection (the Theme report `applied: true`, no `unknown_theme`) **closes the center**, as it closed the selector: the user came to change the theme and is done. A refused or unapplied write, or one a higher layer shadows (`set in <layer> layer, which wins`), keeps the center open on the Theme tab with the selector's lines.
+- The rows: the cursor row is drawn on `surface_selected`; the **current theme** (the entry `theme.list` marks `current`) carries a `●` marker in `accent` before its name, as the selected item among its siblings, whether or not the cursor is on it. Other rows carry a blank cell in the marker's place so names align.
 - `overlays.theme_selector` no longer exists; `overlays.settings_center` is `theme` while this tab is active ([State](state.md)).
 
 #### Plugins → Installed
@@ -233,7 +234,7 @@ Forms are built with **`charm.land/huh/v2`** (the canonical vanity path, like `c
 
 Scope: huh is used **only inside the center**. Nothing else in core imports it; the palette, the slot explorer and the bars stay as they are. A test pins that `cmd/husk` imports huh only from the center's files.
 
-Styling: a `huh.Theme` is built from the served `Palette` once per palette change (`Palette()` seam), mapping `accent` to the focused field, `ink` and `ink_muted` to text and descriptions, `danger` to validation errors, `surface_elevated` to the field background. huh's own key hints are hidden; the center's footer shows the keys.
+Styling: a `huh.Theme` is built from the served `Palette` once per palette change (`Palette()` seam), mapping `accent` to the focused field, `ink` and `ink_muted` to text and descriptions, `danger` to validation errors, `surface_elevated` to the field background. A role the served palette carries in its `ansi` map ([Built-in themes](themes.md), "Role values") maps to the ANSI basic colour of its index, not to its hex, as everywhere else in the frontend. huh's own key hints are hidden; the center's footer shows the keys.
 
 ### Frontend seams
 
