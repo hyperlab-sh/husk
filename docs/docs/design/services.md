@@ -211,7 +211,7 @@ Selection runs in the coordinator's step 2, before the one `Store.Resolve`, so t
 
 A name that `Store.Profiles()` does not list is not activated: Profile reports a `warning` problem `unknown_profile` (message `profile <name> does not exist; using no profile`) and the active profile is `""`.
 
-The slice follows the selection. When the selected value differs from the slice (the `startup` flight with `--profile` or `profile.default`, or a later flight whose active profile's directory is gone), Profile posts a write of `{"active":"<selected>"}` to the loop before step 5. The coordinator's slice listener ignores a change whose value equals the profile the flight that is running or just ran selected, so this write never triggers a second flight; any other value (a `profile.use`, a hydration from another instance's file) does. A `--profile` name that does not exist is therefore not persisted: the slice gets `""`.
+The slice records choices, not defaults. Profile posts a write of `{"active":"<selected>"}` to the loop before step 5 in exactly two cases: the `startup` flight with `--profile`, and a later flight whose present slice names a profile whose directory is gone (the slice gets `""`). A selection made by `profile.default`, or no selection at all, writes nothing: the slice stays absent and the default keeps being consulted. The coordinator's slice listener ignores a change whose value equals the profile the flight that is running or just ran selected, so this write never triggers a second flight; any other value (a `profile.use`, a hydration from another instance's file) does. A `--profile` name that does not exist is therefore not persisted: the slice gets `""`.
 
 Methods:
 
