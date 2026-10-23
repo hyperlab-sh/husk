@@ -141,18 +141,40 @@ func recordRows(items []any) (headers []string, rows [][]string, ok bool) {
 	return shown, rows, true
 }
 
-// Text returns s safe to print on one terminal line: a string holding a
-// control character (a newline, an escape sequence) is shown as its JSON
-// form, any other string as it is.
+// Text returns s safe to print on one terminal line: a string holding an
+// unsafe rune (see unsafeRune) is shown as its JSON form, any other string as
+// it is.
 func Text(s string) string {
-	if strings.IndexFunc(s, unicode.IsControl) >= 0 {
-		return compactJSON(s)
+	if strings.IndexFunc(s, unsafeRune) >= 0 {
+		return quoted(s)
 	}
 	return s
 }
 
-// cell renders one value: strings bare unless they hold a control character
-// (then their JSON form, quoted and escaped), numbers as written, everything
+// unsafeRune reports whether r must not reach a terminal raw: a control
+// character (Cc: a newline, the escape that starts a sequence) or a bidi
+// control (Bidi_Control, a Cf that takes no column but reorders what follows).
+func unsafeRune(r rune) bool {
+	return unicode.IsControl(r) || unicode.Is(unicode.Bidi_Control, r)
+}
+
+// quoted is s as a JSON string literal in which every unsafe rune is a
+// lowercase \uXXXX escape. encoding/json leaves bidi controls, C1 controls and
+// DEL raw inside the quotes, so the literal is post-processed.
+func quoted(s string) string {
+	var b strings.Builder
+	for _, r := range compactJSON(s) {
+		if unsafeRune(r) {
+			fmt.Fprintf(&b, `\u%04x`, r)
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// cell renders one value: strings bare unless they hold a control or bidi
+// control character (unsafeRune; then their quoted JSON form), numbers as written, everything
 // else (booleans, null, nested objects and arrays) as compact JSON. Object
 // keys go through it too.
 func cell(v any) string {
