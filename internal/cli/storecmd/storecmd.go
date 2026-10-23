@@ -69,7 +69,10 @@ func run(ctx context.Context, d deps, args []string, o output.Options) error {
 			return err
 		}
 	}
-	s, err := store.Open(store.Options{RuntimeDir: dir, Env: d.env, Keyring: d.keyring, NoBackgroundGC: verb != "gc", InstanceDeps: d.instance})
+	// NoBackgroundGC for every verb: a worker GC would run before (or race
+	// with) the command's own work; `gc` calls GC itself, so its report is the
+	// whole truth.
+	s, err := store.Open(store.Options{RuntimeDir: dir, Env: d.env, Keyring: d.keyring, NoBackgroundGC: true, InstanceDeps: d.instance})
 	if err != nil {
 		return output.Store(err, "%v", err)
 	}
@@ -105,14 +108,16 @@ func run(ctx context.Context, d deps, args []string, o output.Options) error {
 
 // refuseWhileRunning is exit 1 `store` naming every live or unresponsive
 // instance: a reset under a running instance would strand its open secrets.
-// An absent runtime directory means nothing runs.
+// An absent runtime directory means nothing runs. The check is a point in
+// time: an instance that starts between this survey and ResetSecrets is not
+// seen; the spec asks for the refusal only.
 func refuseWhileRunning(dir string, d deps, o output.Options) error {
 	if dir == "" {
 		return nil
 	}
 	statuses, err := instance.Survey(dir, d.instance)
 	if err != nil {
-		return output.Store(err, "read runtime dir: %v", err)
+		return output.Environment(err, "read runtime dir: %v", err)
 	}
 	var ids []string
 	for _, st := range statuses {

@@ -421,3 +421,28 @@ func TestStoreAcceptsFormatTableForReset(t *testing.T) {
 		t.Fatalf("%v %q", err, f.out.String())
 	}
 }
+
+// TestResetSecretsSurveyFailureIsExit7: a runtime directory the survey cannot
+// read is the environment failure (instances.md rule 9), and nothing is deleted.
+func TestResetSecretsSurveyFailureIsExit7(t *testing.T) {
+	f := newFx(t)
+	sealed, bystanders := f.sealOne()
+	notADir := filepath.Join(f.root, "not-a-dir")
+	if err := os.WriteFile(notADir, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	d := f.deps()
+	d.runtimeDir = func() (string, bool, error) { return notADir, true, nil }
+	err := command(d).Run(context.Background(), []string{"reset-secrets"}, output.Options{Format: output.JSON, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	if e := asErr(t, err); e.Exit != output.ExitEnvironment || e.Code != output.CodeEnvironment {
+		t.Fatalf("%+v", e)
+	}
+	for _, p := range append(bystanders, sealed) {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("failed survey still touched %s: %v", p, err)
+		}
+	}
+	if f.ring.value == "" {
+		t.Error("failed survey deleted the keyring identity")
+	}
+}

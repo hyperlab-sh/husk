@@ -420,7 +420,10 @@ func (s *Store) ResetSecrets() error {
 			return fmt.Errorf("store: read secrets directory: %w", err)
 		}
 		for _, e := range entries {
-			if e.Type().IsRegular() && strings.HasSuffix(e.Name(), ".age") {
+			// Sealed namespaces and the crash temps of their writes
+			// (.<ns>.age.tmp-*); lock files stay.
+			name := e.Name()
+			if e.Type().IsRegular() && (strings.HasSuffix(name, ".age") || strings.HasPrefix(name, ".") && strings.Contains(name, ".age.tmp-")) {
 				if err := os.Remove(filepath.Join(dir, e.Name())); err != nil && !errors.Is(err, fs.ErrNotExist) {
 					return fmt.Errorf("store: remove sealed namespace: %w", err)
 				}
