@@ -16,9 +16,8 @@ Background and trade-offs behind decisions in the host.
   adopted.
 - [Workbench chrome](chrome.md): every surface laid out whether occupied or
   not, with its name when empty; the rail tiles; what the top and bottom bars
-  show, including the layout label and the theme name. Landed. The colour
-  discipline (which palette role each piece may use) remains specified, not
-  landed.
+  show, including the layout label and the theme name. Landed, including the
+  colour discipline (which palette role each piece may use).
 - [Built-in themes](themes.md): the nine themes Husk ships as a built-in
   `themes` layer (`charm` default, `charm-light`, `dracula`, `base16`,
   `catppuccin-mocha`, `catppuccin-latte`, `rose-pine`, `rose-pine-moon`,

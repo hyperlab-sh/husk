@@ -7,9 +7,9 @@ description: "What the frontend draws around plugin content: every surface laid 
 
 Status: landed for layout, empty surfaces, rail geometry, bar composition and
 colour discipline. The built-in theme migration remains specified, not landed;
-until it lands the frontend keeps the `CharmTone` default name.
-Scope: `cmd/husk` layout and rendering (the frontend). No wire, manifest or
-plugin-visible change; `husk.surfaces.visible` and
+until it lands the frontend keeps the `CharmTone`
+default name. Scope: `cmd/husk` layout and rendering (the frontend). No wire,
+manifest or plugin-visible change; `husk.surfaces.visible` and
 `husk.geometry.rects` change content, not shape.
 
 ## Level 0: What and why
@@ -436,7 +436,10 @@ source-level test over `cmd/husk/*.go` (excluding tests) that counts
 including package initializers, and rejects palette aliases. It fails when
 `AccentSecondary` or `AccentSoft` appears, or when `Success`, `Warning`,
 `Danger` or `Info` appears outside `WorkbenchModel`'s `drawToast` and shared
-status helper. A rendering test checks that the empty workbench's frame uses
+status helper, or when `Accent` appears other than once in each of
+`renderActivityRailBox`, `drawCommandPalette` and `dividerEdgeStyles` (the
+three places above).
+A rendering test checks that the empty workbench's frame uses
 the accent colour only on the active rail tile, in its foreground, never
 its background or elsewhere (including underline colours). Every golden was
 regenerated for these moves ("Tests and goldens").
