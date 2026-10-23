@@ -143,7 +143,7 @@ type FocusContext struct {
 
 ### Problem
 
-`Problem` lives here for the same reason as `Caller`: it crosses the wire as is (the `problems` array of `keys.list`, `settings.validate` and `theme.check`, and every report in `config.reload`, `profile.use` and `services.reloaded`), and the host contracts that carry those results must not import Services. It is the one diagnostic type every Service, the coordinator and the Keybinding listing use ([Services](services.md), "Snapshots, rebuilds and reports"; [Keybindings](keybindings.md), "What `keys.list` reports"); no module defines its own copy. The codes themselves are owned by the spec that raises them: [Services](services.md) for the Service and coordinator tables, [Keybindings](keybindings.md) for the loader table. Store's `Resolved.Problems` entry ([Store](store.md), "Layers": a code, a message and the file, path and layers involved, with no severity) is a different type for a different reader: Services import it into one of these.
+`Problem` lives here for the same reason as `Caller`: it crosses the wire as is (the `problems` array of `keys.list`, `settings.validate` and `theme.check`, and every report in `config.reload`, `profile.use`, `settings.set` and `services.reloaded`), and the host contracts that carry those results must not import Services. It is the one diagnostic type every Service, the coordinator and the Keybinding listing use ([Services](services.md), "Snapshots, rebuilds and reports"; [Keybindings](keybindings.md), "What `keys.list` reports"); no module defines its own copy. The codes themselves are owned by the spec that raises them: [Services](services.md) for the Service and coordinator tables, [Keybindings](keybindings.md) for the loader table. Store's `Resolved.Problems` entry ([Store](store.md), "Layers": a code, a message and the file, path and layers involved, with no severity) is a different type for a different reader: Services import it into one of these.
 
 ```go
 // Problem is one diagnostic: a stable code, where it came from, and prose.
@@ -233,6 +233,8 @@ What changes: this envelope is a breaking change, so the target major is **2** (
 Minor 2.1 ([Hooks](hooks.md), [Keybindings](keybindings.md), [Pods](pods.md)): `hook.list`; `hook.call` outcome fields `kind`, `data`, `allowed`, `vetoes` and the per-entry `items`, `veto`, `reason`; subscriber params `kind`; the optional `capture` field of `surface.update`; `plugin.remove` and the `pods.plugin-removed` event name. Owner-only firing (the CLI included) tightens 2.0 without a major bump because no shipped plugin fires a hook it does not own and no CLI exists yet.
 
 Minor 2.2 ([Pods](pods.md), "Adding a plugin"): `plugin.add` and the `pods.plugin-added` event name. `protocol.Version` moves to `2.2` when the handler lands; until then the method name is reserved vocabulary (the constant, the schema entry and the reserved event name exist) that the host answers `unknown_method`.
+
+Minor 2.3 ([Services](services.md), "Theme" and "Settings"): `theme.list` and `settings.set`, plus the `settings` reload reason in `services.reloaded`. Both are specified below under "Theme selection and the settings write (minor 2.3)" and land together with their handlers: the constants, the schema entries and the method-table rows above are added in the change that serves them, so `pkg/protocol` never names a method the host answers `unknown_method` to.
 
 Where the version is checked, since there is no handshake:
 
@@ -353,6 +355,24 @@ Two capabilities a manifest cannot express motivate the minor: a plugin that dec
 Limits owned here: `terminal.write` 64 KiB decoded per notification; runtime surfaces 8 per plugin; `surface.open` `name` 32 bytes; `title` 80 runes; scrollback 20,000 lines.
 
 Why the host emulates: the host owns the cell canvas and the key encoder, so a terminal that lives in the host renders into the canvas like every other surface, keeps its cursor, colours and modes, and encodes keys the way the application asked; a plugin-side emulator would have to send a screen as `lines` every frame and could not learn the application's keyboard mode. Why the plugin owns the process: the host executes nothing on a plugin's behalf; the bytes are the whole contract, so a plugin may attach a PTY, a network stream or a recording.
+
+### Theme selection and the settings write (minor 2.3)
+
+**Level 1: specified, not landed.** As with minor 2.2: nothing below exists in `pkg/protocol`, and the method table above, `pkg/protocol/methods.go` and the generated schema gain these rows, constants and payload types in the change that serves the first of them. This section owns only the names, forms and directions; params, results and errors are [Services](services.md)'s ("Theme", "Settings").
+
+| Namespace | Method | Form | Direction |
+| :--- | :--- | :--- | :--- |
+| `theme` | `theme.list` | request | plugin or CLI to Husk |
+| `settings` | `settings.set` | request | CLI to Husk; a plugin caller gets `denied` |
+
+`theme.list` names every theme the Theme Service can resolve, with its source layer and whether it is the one the serving palette was built from. `settings.set` writes **one** settings key with **one** value into the **user** configuration layer through Store's ordinary write, then waits for the reload that write causes and returns its reports, so the write is observed exactly as a hand edit of the file followed by `config.reload` would be. It is the first method that writes configuration; the `theme.name` key is its first user (the frontend's theme selector, [Services](services.md) "The theme selector"), `profile.use --save` is its next. The reason string `settings` is added to the `services.reloaded` payload's `reason` enum.
+
+```json
+{"id":3,"method":"theme.list","params":{}}
+{"id":3,"result":{"themes":[{"name":"CharmTone","source":"built-in","current":false},{"name":"evening","source":"user","current":true}]}}
+{"id":4,"method":"settings.set","params":{"key":"theme.name","value":"evening"}}
+{"id":4,"result":{"key":"theme.name","value":"evening","reports":[{"service":"profile","gen":5,"applied":true,"changed":false},{"service":"settings","gen":5,"applied":true,"changed":true},{"service":"theme","gen":4,"applied":true,"changed":true},{"service":"keybinding","gen":5,"applied":true,"changed":false},{"service":"secrets","gen":5,"applied":true,"changed":false}]}}
+```
 
 ### Mapping from today's message types
 
