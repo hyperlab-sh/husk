@@ -86,7 +86,6 @@ func TestSettingsGeneralFieldTypesAndValues(t *testing.T) {
 			switch tc.kind {
 			case "bool":
 				_, good = f.widget.(*huh.Confirm)
-				f.boolean = true
 			case "enum":
 				_, good = f.widget.(*huh.Select[string])
 			case "strings":
@@ -103,10 +102,17 @@ func TestSettingsGeneralFieldTypesAndValues(t *testing.T) {
 			if tc.kind == "duration" && f.text != "1" {
 				t.Fatalf("duration not truncated to integral ms: %q", f.text)
 			}
-			if tc.kind != "bool" {
-				editGeneral(m, f.entry.Key, tc.edit)
-			}
 			m.settings.focus = settingsContentFocus
+			m.cacheSettingsGeneral()
+			switch tc.kind {
+			case "bool":
+				settingsPress(m, "right")
+			case "enum":
+				settingsPress(m, "end")
+			default:
+				editGeneral(m, f.entry.Key, "")
+				m.Update(tea.PasteMsg{Content: tc.edit})
+			}
 			settingsPress(m, "ctrl+s")
 			if len(fe.SettingWrites) != 1 || !reflect.DeepEqual(fe.SettingWrites[0].Value, tc.want) {
 				t.Fatalf("write %+v want %#v", fe.SettingWrites, tc.want)
