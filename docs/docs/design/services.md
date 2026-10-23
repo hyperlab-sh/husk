@@ -77,7 +77,7 @@ The Server authenticates every socket request and produces the caller ([Pods](po
 | `plugin` | A socket request carries a valid per-launch token. | the exact plugin id, never case-folded |
 | `host`, `input` | In-process code of the Stem or frontend calls a Service directly (the renderer, Input, the palette). | empty |
 
-A zero-value caller, an unknown kind, a `plugin` kind with an empty id, or any other kind with a non-empty id is **invalid**: every method answers `denied` with `data.reason` `invalid_caller`. The table below is the complete authorization matrix (`host` stands for `host` and `input`). "own" means the caller's exact plugin id, by declaration ownership, never by prefix.
+A zero-value caller, an unknown kind, a `plugin` kind with an empty id, or any other kind with a non-empty id is **invalid**: every method answers `denied` with `data.reason` `invalid_caller`. The table below is the complete authorization matrix (`host` stands for `host` and `input`, except in the `settings.set` row, where an `input` caller is `denied` `invalid_caller`). "own" means the caller's exact plugin id, by declaration ownership, never by prefix.
 
 | Operation | `cli` | `host` | `plugin` |
 | :--- | :--- | :--- | :--- |
