@@ -124,6 +124,7 @@ type snapshot struct {
 	index        map[string][]Binding
 	documents    map[string]store.Doc
 	actionOwners map[string]string
+	railItems    map[string]bool
 }
 
 // Service swaps a complete key index at publication.
@@ -327,7 +328,8 @@ func (s *Service) KeysFor(action string) []string {
 // Listing returns a deep copy for CLI adapters to join with liveness/catalog data.
 func (s *Service) Listing() Listing { return c.Clone(s.current.Load().listing) }
 
-// ListFor filters keys.list to a plugin's own actions/declarations when needed.
+// ListFor gives plugins their own entries and problems plus effective host and
+// declared rail-item bindings. User callers receive the full listing.
 func (s *Service) ListFor(caller c.Caller) (Listing, error) {
 	if err := c.CheckCaller(caller); err != nil {
 		return Listing{}, err
@@ -339,7 +341,8 @@ func (s *Service) ListFor(caller c.Caller) (Listing, error) {
 	}
 	var entries []Entry
 	for _, e := range out.Entries {
-		if e.Plugin == caller.PluginID || snap.actionOwners[e.Action] == caller.PluginID {
+		if e.Plugin == caller.PluginID || snap.actionOwners[e.Action] == caller.PluginID ||
+			e.State == "effective" && (strings.HasPrefix(e.Action, "husk.") || snap.railItems[e.Action]) {
 			entries = append(entries, e)
 		}
 	}
@@ -482,7 +485,7 @@ func invalidKeyDetail(raw map[string]any) (string, string) {
 func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c.Report, error) {
 	old := s.current.Load()
 	r := c.Report{Service: "keybinding", Gen: old.gen}
-	next := &snapshot{gen: old.gen + 1, index: map[string][]Binding{}, documents: map[string]store.Doc{}, actionOwners: map[string]string{}}
+	next := &snapshot{gen: old.gen + 1, index: map[string][]Binding{}, documents: map[string]store.Doc{}, actionOwners: map[string]string{}, railItems: map[string]bool{}}
 	issue := func(code string, src Source, key string) {
 		layer := src.Layer
 		if src.Plugin != "" {
@@ -495,6 +498,9 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 	catalog, catalogProblems := c.Catalogs(in)
 	r.Problems = append(r.Problems, catalogProblems...)
 	for owner, plugin := range catalog {
+		for _, id := range plugin.RailItems {
+			next.railItems[id] = true
+		}
 		for _, action := range plugin.Actions {
 			if previous, exists := next.actionOwners[action.ID]; exists && previous != owner {
 				next.actionOwners[action.ID] = ""

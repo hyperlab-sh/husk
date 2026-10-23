@@ -339,6 +339,27 @@ func (m *WorkbenchModel) showLocalToast(level, title, message string) tea.Cmd {
 	})
 }
 
+// liveHint keeps public host and declared rail keys, but advertises plugin
+// actions only while their catalog owner is live. Called after the hints cap.
+func (m *WorkbenchModel) liveHint(action string) bool {
+	if strings.HasPrefix(action, "husk.") {
+		return true
+	}
+	for _, ri := range m.declared {
+		if ri.ID == action {
+			return true
+		}
+	}
+	if m.fe != nil {
+		for _, a := range m.fe.Actions() {
+			if a.ID == action && m.plugins[a.Plugin] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 type footerHint struct{ key, desc string }
 
 // maxPluginFooterHints caps how many plugin-declared bindings the footer
@@ -361,7 +382,9 @@ func (m *WorkbenchModel) footerHints() []footerHint {
 		if i == maxPluginFooterHints || len(h.Keys) == 0 {
 			break
 		}
-		hints = append(hints, footerHint{keyLabel(strings.Join(h.Keys, " ")), h.Text})
+		if m.liveHint(h.Action) {
+			hints = append(hints, footerHint{keyLabel(strings.Join(h.Keys, " ")), h.Text})
+		}
 	}
 	resize := "drag "
 	if k := m.firstKey("husk.layout.reset"); k != "" {

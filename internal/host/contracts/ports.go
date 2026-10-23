@@ -250,8 +250,9 @@ type KeyListing struct {
 	Problems []protocol.Problem `json:"problems,omitempty"`
 }
 
-// KeybindingPort serves keys.list. A plugin caller sees only its own
-// resolved bindings and their layer.
+// KeybindingPort serves keys.list. A plugin caller sees its own entries and
+// problems plus effective husk.* and declared rail-item bindings. Users see
+// the full listing.
 type KeybindingPort interface {
 	// List serves keys.list.
 	List(ctx context.Context, c Caller) (KeyListing, error)

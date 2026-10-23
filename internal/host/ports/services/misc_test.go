@@ -161,10 +161,16 @@ func TestKeysListScopesThePluginView(t *testing.T) {
 	if !ownAction || !hostAction {
 		t.Fatalf("user listing misses entries: own=%v host=%v", ownAction, hostAction)
 	}
-	// A plugin sees only its own entries; the Stem engine sees everything.
+	// This fixture contains only own entries and effective host bindings, so
+	// the plugin and the Stem both see every row.
 	own, err := port.List(ctx, filesCaller)
-	if err != nil || len(own.Entries) != 1 || own.Entries[0].Action != "files.tree" || own.Entries[0].Plugin != "files" {
+	if err != nil || len(own.Entries) != len(full.Entries) {
 		t.Fatalf("plugin list = %+v err=%v", own, err)
+	}
+	for i, e := range own.Entries {
+		if e.Action != full.Entries[i].Action || e.State != full.Entries[i].State {
+			t.Fatalf("plugin entry %d = %+v, want %+v", i, e, full.Entries[i])
+		}
 	}
 	stem, err := port.List(ctx, stemHost)
 	if err != nil || len(stem.Entries) != len(full.Entries) {

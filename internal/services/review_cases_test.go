@@ -76,13 +76,16 @@ func TestReviewKeyListingExactCatalogOwnership(t *testing.T) {
 	}
 	for _, id := range []string{"a", "a.b"} {
 		view, _ := kb.ListFor(Caller{Kind: "plugin", PluginID: id})
-		if len(view.Entries) != 2 {
-			t.Fatalf("wrong listing for %s: %+v", id, view.Entries)
-		}
+		own := 0
 		for _, e := range view.Entries {
-			if e.Action != id+".run" {
+			if e.Action == id+".run" {
+				own++
+			} else if !strings.HasPrefix(e.Action, "husk.") || e.State != "effective" {
 				t.Fatal("foreign action exposed", id, e.Action)
 			}
+		}
+		if own != 2 {
+			t.Fatalf("wrong own entry count for %s: %+v", id, view.Entries)
 		}
 		for _, problem := range view.Problems {
 			if problem.Source.Plugin != id {

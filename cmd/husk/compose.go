@@ -125,6 +125,56 @@ func (c *canvas) blitLines(x, y, w, h int, lines []string) {
 	}
 }
 
+// blitOverlay composites a whole-frame layer. Only unstyled, unlinked spaces
+// in the occupant's own rows are transparent; published regions are opaque.
+// Opaque cells inherit the background below unless they supply their own.
+func (c *canvas) blitOverlay(l publishedLayout) {
+	scratch := newCanvas(c.w, c.h)
+	defer scratch.release()
+	l.draw(scratch, 0, 0)
+	for y := 0; y < c.h; y++ {
+		for x := 0; x < c.w; x++ {
+			cell := scratch.buf.CellAt(x, y)
+			if cell.Width == 0 {
+				continue // continuation of a wide overlay glyph already copied
+			}
+			region := false
+			for _, r := range l.Regions {
+				if x >= r.X && x < r.X+r.W && y >= r.Y && y < r.Y+r.H {
+					region = true
+					break
+				}
+			}
+			if !region && cell.Content == " " && cell.Style.IsZero() && cell.Link.IsZero() {
+				continue
+			}
+			next := *cell
+			// Blank each underlying wide glyph before replacing any of its cells.
+			// Keep only its background on the uncovered half, not the old
+			// foreground, attributes or link. Also handle the far end of an
+			// overlay-wide glyph crossing a second underlying wide glyph.
+			for i := x; i < x+next.Width; i++ {
+				lead := i
+				for lead > 0 && c.buf.CellAt(lead, y).Width == 0 {
+					lead--
+				}
+				under := *c.buf.CellAt(lead, y)
+				if i == x && next.Style.Bg == nil {
+					next.Style.Bg = under.Style.Bg
+				}
+				if under.Width > 1 {
+					blank := uv.EmptyCell
+					blank.Style.Bg = under.Style.Bg
+					for j := lead; j < lead+under.Width; j++ {
+						c.buf.SetCell(j, y, &blank)
+					}
+				}
+			}
+			c.buf.SetCell(x, y, &next)
+		}
+	}
+}
+
 // render serializes every cell: each line is exactly the canvas width and
 // the frame is exactly its height. Unlike lipgloss.Canvas it does not trim
 // trailing blanks.

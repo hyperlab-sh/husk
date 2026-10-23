@@ -124,6 +124,12 @@ func convert(src Source, modern bool) (*Spec, []Warning, error) {
 			}
 		}
 		s.Subscriptions = dropCLIOnly(s, "subscriptions", s.Subscriptions)
+		for i := range s.Surfaces {
+			if s.Surfaces[i].ID == protocol.SurfaceAppOverlay && s.Surfaces[i].Frame != nil {
+				s.Surfaces[i].Frame = nil
+				warnings = append(warnings, Warning{Code: "ignored_field", Field: "surfaces", Index: i, Message: "app-overlay has no frame; draw decorations in its content"})
+			}
+		}
 		// The catalog-form members take the same entry parsers as "hooks".
 		var rawDecls, rawRegs []json.RawMessage
 		if err := decodeField(fields, "hooks_declared", &rawDecls); err != nil {
