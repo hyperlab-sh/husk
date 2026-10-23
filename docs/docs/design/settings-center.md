@@ -59,18 +59,18 @@ The modal follows the placement rules of the frontend layout for a host modal (c
 ```
 ┌ Settings ─────────────────────────────────────── profile: work ▾ ┐
 │ General    │ husk                                                │
-│ Keys       │   bundle               [                            ]│
+│ Keys       │   bundle               [                           ]│
 │ Theme      │ husk.plugins                                        │
-│ Plugins    │   paths                [/home/u/plugins/alpha       ]│
+│ Plugins    │   paths                [/home/u/plugins/alpha      ]│
 │   Store    │                        restart required             │
-│ ▸ Installed│   dirs                 [                            ]│
+│ ▸ Installed│   dirs                 [                           ]│
 │            │                        restart required             │
 │            │ profile                                             │
-│            │   default              [work                        ]│
+│            │   default              [work                       ]│
 │            │ theme                                               │
-│            │   name                 [evening                     ]│
+│            │   name                 [evening                    ]│
 │            │   allow_low_contrast   [ ] no                       │
-│            │   palette.accent       [#7d56f4                     ]│
+│            │   palette.accent       [#7d56f4                    ]│
 │ tab/shift+tab focus · 1-5 tabs · ctrl+s save · esc close         │
 └──────────────────────────────────────────────────────────────────┘
 ```
