@@ -37,6 +37,41 @@ type Frontend interface {
 	// one Theme snapshot read (empty for hex themes). Any goroutine.
 	PaletteANSI() (protocol.Palette, map[string]int)
 
+	// Themes returns the serving theme.list entries. Any goroutine.
+	Themes() []ThemeEntry
+
+	// SettingsSchema returns every registered schema entry. Any goroutine.
+	SettingsSchema() []SettingEntry
+
+	// Setting returns a setting's effective value and source, or a CodedError
+	// for an unknown key. Any goroutine.
+	Setting(key string) (value any, source string, err error)
+
+	// KeyListing returns the full CLI keys.list view, including states and
+	// shadowed entries, through the shared listing port. Any goroutine.
+	KeyListing() KeyListing
+
+	// Profiles returns the serving profile.list entries. Any goroutine.
+	Profiles() []ProfileInfo
+
+	// ConfigDir returns the resolved user configuration directory. Any goroutine.
+	ConfigDir() string
+
+	// SetSetting writes one user-layer setting off-loop. Call on the loop;
+	// reply runs exactly once on the loop, never synchronously, with the
+	// result or a CodedError. During shutdown reply may never arrive.
+	SetSetting(key string, value any, reply func(SettingSetResult, error))
+
+	// UseProfile switches the instance profile off-loop. Call on the loop;
+	// reply runs exactly once on the loop, never synchronously, with the
+	// result or a CodedError. During shutdown reply may never arrive.
+	UseProfile(name string, reply func(ProfileUseResult, error))
+
+	// RemovePlugin unloads a plugin off-loop without uninstalling it. Call on
+	// the loop; reply runs exactly once on the loop, never synchronously,
+	// with the result or a CodedError. During shutdown reply may never arrive.
+	RemovePlugin(id string, reply func(PluginRemoval, error))
+
 	// Catalog returns a detached view of the optional catalog cache. Any
 	// goroutine; never performs Store I/O. Warmed off-loop after startup and
 	// every services.reloaded event, then published on the loop.
