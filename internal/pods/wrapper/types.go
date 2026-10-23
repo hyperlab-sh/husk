@@ -108,9 +108,6 @@ type LogMsg struct {
 	Message  string
 }
 
-// LivenessMsg is applied by the parent Host only on the loop.
-type LivenessMsg struct{ Info Info }
-
 // Options supplies instance context and process seams. Post must be safe from
 // workers and must return during shutdown; it may block for loop backpressure.
 // LogPath runs on Start's caller and returns a fresh path owned by Store's rule.

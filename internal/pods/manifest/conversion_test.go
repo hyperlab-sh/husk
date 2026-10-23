@@ -85,6 +85,8 @@ func TestNormalizedCatalogFocusProblemsAndExactCaseSettings(t *testing.T) {
 	if s.BindingProblems[0].Index != 2 || s.BindingProblems[0].Code != "foreign_action" || s.BindingProblems[1].Code != "global_not_allowed" {
 		t.Fatal(s.BindingProblems)
 	}
+	// Loader-owned source metadata must never enter declared documents.
+	s.Dir = t.TempDir()
 	data, err := s.CatalogJSON()
 	if err != nil {
 		t.Fatal(err)
@@ -98,7 +100,7 @@ func TestNormalizedCatalogFocusProblemsAndExactCaseSettings(t *testing.T) {
 			t.Fatal("catalog missing", key)
 		}
 	}
-	for _, key := range []string{"protocol", "command", "work_dir", "binding_problems", "focus_bindings"} {
+	for _, key := range []string{"protocol", "command", "work_dir", "dir", "binding_problems", "focus_bindings"} {
 		if catalog[key] != nil {
 			t.Fatal("process metadata leaked", key)
 		}
