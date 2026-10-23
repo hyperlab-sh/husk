@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"strings"
 	"sync"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/hyperlab-sh/husk/internal/bundle"
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
 	"github.com/hyperlab-sh/husk/internal/host/handlers"
 	"github.com/hyperlab-sh/husk/internal/host/ports/launch"
@@ -52,22 +54,24 @@ type Root struct {
 	wg     sync.WaitGroup // workers the host started (commands, reloads)
 
 	// Stages, in dependency order. Each is nil until built.
-	store     *store.Store
-	st        *state.State
-	rt        *services.Runtime
-	table     *calls.Table
-	disp      *dispatcher.Dispatcher
-	runner    *hooks.Runner
-	bus       *eventbus.Bus
-	engine    *surfaces.Engine
-	pods      *pods.Host
-	srv       server.Server
-	mux       *handlers.Mux
-	catalog   *catalogView
-	decl      *declarations
-	specs     []manifest.Spec
-	loopSeam  loopSeam
-	instStart time.Time
+	bundle         *bundle.Bundle
+	bundleWarnings []bundle.Warning
+	store          *store.Store
+	st             *state.State
+	rt             *services.Runtime
+	table          *calls.Table
+	disp           *dispatcher.Dispatcher
+	runner         *hooks.Runner
+	bus            *eventbus.Bus
+	engine         *surfaces.Engine
+	pods           *pods.Host
+	srv            server.Server
+	mux            *handlers.Mux
+	catalog        *catalogView
+	decl           *declarations
+	specs          []manifest.Spec
+	loopSeam       loopSeam
+	instStart      time.Time
 
 	// Frontend support.
 	pluginCatalog  catalogCache
@@ -183,6 +187,9 @@ func build(cfg contracts.Config, optFns []Option) (_ *Root, err error) {
 		}
 	}()
 
+	if err = r.stage("bundle", r.buildBundle); err != nil {
+		return nil, err
+	}
 	if err = r.stage("store", r.buildStore); err != nil {
 		return nil, err
 	}
@@ -219,6 +226,10 @@ func build(cfg contracts.Config, optFns []Option) (_ *Root, err error) {
 // stage after it succeeded to prove everything already built is closed).
 func (r *Root) stage(name string, fn func() error) error {
 	if err := fn(); err != nil {
+		var launch *bundleStartError
+		if errors.As(err, &launch) {
+			return err
+		}
 		return fmt.Errorf("host: %s: %w", name, err)
 	}
 	if r.opts.afterStage != nil {
@@ -234,6 +245,9 @@ func (r *Root) stage(name string, fn func() error) error {
 // and Services exist; New's failure defer closes them. A bad plugin inside a
 // directory fails only itself (logged), like the converter's LoadDir contract.
 func (r *Root) loadSpecs() error {
+	for _, w := range r.bundleWarnings {
+		r.log(pods.LogMsg{Level: "warn", Message: w.Message})
+	}
 	reg := manifest.NewRegistry()
 	seen := map[string]bool{}
 	add := func(spec *manifest.Spec, warns []manifest.Warning) {
@@ -258,7 +272,11 @@ func (r *Root) loadSpecs() error {
 		}
 		add(spec, warns)
 	}
-	for i, dir := range snap.Strings("husk.plugins.dirs") {
+	dirs := snap.Strings("husk.plugins.dirs")
+	if r.bundle != nil && r.bundle.PluginsDir != "" {
+		dirs = append(dirs, r.bundle.PluginsDir)
+	}
+	for i, dir := range dirs {
 		results, err := reg.LoadDir(dir)
 		if err != nil {
 			return fmt.Errorf("husk.plugins.dirs[%d] %q (layer %s): not a readable directory: %w", i, dir, snap.Source("husk.plugins.dirs"), err)
@@ -282,12 +300,55 @@ func specID(s *manifest.Spec) string {
 	return s.ID
 }
 
-func (r *Root) buildStore() error {
+type bundleStartError struct {
+	dir string
+	err error
+}
+
+func (e *bundleStartError) Error() string {
+	if e.dir == "" {
+		return e.err.Error()
+	}
+	return fmt.Sprintf("bundle %s: %v", e.dir, e.err)
+}
+func (e *bundleStartError) Unwrap() error { return e.err }
+
+func (r *Root) instanceDocs() map[store.DocName]store.Doc {
 	docs := make(map[store.DocName]store.Doc, len(r.cfg.InstanceDocs))
 	for name, doc := range r.cfg.InstanceDocs {
 		docs[store.DocName(name)] = doc
 	}
+	return docs
+}
+
+func (r *Root) buildBundle() error {
+	bootstrap, err := store.ReadBootstrap(store.Env{}, store.InstanceRef{ID: r.cfg.InstanceID}, r.instanceDocs())
+	if err != nil {
+		return &bundleStartError{err: err}
+	}
+	if bootstrap.Bundle == "" {
+		return nil
+	}
+	r.bundle, r.bundleWarnings, err = bundle.Load(bootstrap.Bundle)
+	if err != nil {
+		return &bundleStartError{dir: bootstrap.Bundle, err: err}
+	}
+	return nil
+}
+
+func (r *Root) buildStore() error {
+	// This is deliberately after bundle validation, including in CLI start
+	// mode, so fatal bundle errors leave the user's directory tree untouched.
+	if err := instance.CheckRuntimeDir(r.cfg.RuntimeDir); err != nil {
+		return err
+	}
+	var config fs.FS
+	if r.bundle != nil {
+		config = r.bundle.Config
+	}
+	docs := r.instanceDocs()
 	s, err := store.Open(store.Options{
+		Bundle:       config,
 		InstanceDocs: docs,
 		Instance:     store.InstanceRef{ID: r.cfg.InstanceID},
 		RuntimeDir:   r.cfg.RuntimeDir,
