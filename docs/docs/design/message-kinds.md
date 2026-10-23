@@ -192,8 +192,9 @@ type ActionRequest struct {
 }
 
 type ActionReply struct {
-    Result map[string]any // nil on error
-    Err    *ActionError   // nil on success
+    Result   map[string]any // nil on error
+    Err      *ActionError   // nil on success
+    Declined bool           // host handlers only: the action had nothing to do; never serialized (see Keybindings)
 }
 
 type ActionError struct {
@@ -207,11 +208,12 @@ type Dispatcher interface {
     // Invoke returns (immediate failures and host actions).
     Invoke(req ActionRequest)
     // RegisterHost binds an in-process handler for a husk.* action id or a
-    // rail item id. Host handlers run synchronously on the loop. A handler
-    // may answer with ErrDeclined, a host-only sentinel that never crosses
-    // the wire: the Dispatcher returns it unchanged to an in-process caller
-    // (Input treats it as an unbound key, see Keybindings) and maps it to a
-    // successful empty reply for every other caller.
+    // rail item id. Host handlers run inline on the loop, so for a host
+    // action Reply is called before Invoke returns. A handler may answer
+    // with Declined: true, a host-only flag that never crosses the wire: the
+    // Dispatcher passes it unchanged to an in-process caller (Input treats it
+    // as an unbound key, see Keybindings) and answers every other caller
+    // with a successful empty reply.
     RegisterHost(action string, h func(ActionRequest) ActionReply)
     // Complete turns Calls results (Resolve, Expire, DropPlugin, Close) into
     // the pending Replies. Results of other requesters are ignored.
