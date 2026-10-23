@@ -85,7 +85,8 @@ type Resolved struct {
 type LayerDoc struct {
 	// Layer identifies precedence.
 	Layer Layer
-	// File names a local source; distribution sources use an empty path.
+	// File is config-relative and slash-separated; distribution files are relative
+	// to their root. It is empty for a layer with no single file (flag-folded instance).
 	File string
 	// Doc is an independent unmerged object.
 	Doc Doc

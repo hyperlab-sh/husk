@@ -146,7 +146,7 @@ func TestProfileSelectionAtStartup(t *testing.T) {
 		{"no input", []string{"work"}, nil, nil, "", "", false},
 		{"unknown default", []string{"work"}, []store.LayerDoc{userLayer(`{"profile":{"default":"missing"}}`)}, nil, "", "unknown_profile", false},
 		{"unknown flag persists none", []string{"work"}, nil, str("missing"), "", "unknown_profile", true},
-		{"default in another layer", []string{"work"}, []store.LayerDoc{{Layer: store.LayerProfile, File: "/cfg/p.json", Doc: doc(`{"profile":{"default":"work"}}`)}}, nil, "", "profile_default_ignored", false},
+		{"default in another layer", []string{"work"}, []store.LayerDoc{{Layer: store.LayerProfile, File: "profiles/work/config.json", Doc: doc(`{"profile":{"default":"work"}}`)}}, nil, "", "profile_default_ignored", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -162,6 +162,12 @@ func TestProfileSelectionAtStartup(t *testing.T) {
 			if tc.code != "" {
 				if _, ok := findProblem(problemsOf(reports), tc.code); !ok {
 					t.Fatalf("missing %s in %+v", tc.code, problemsOf(reports))
+				}
+			}
+			if tc.code == "profile_default_ignored" {
+				p, _ := findProblem(problemsOf(reports), tc.code)
+				if p.Source == nil || p.Source.Layer != "profile" || p.Source.File != "profiles/work/config.json" {
+					t.Fatalf("profile default source = %+v", p.Source)
 				}
 			}
 			if tc.code == "unknown_profile" {
