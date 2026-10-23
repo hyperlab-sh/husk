@@ -618,8 +618,18 @@ func TestTimedOutFlightKeepsTheTurnUntilItsGatherReturns(t *testing.T) {
 	}
 	second := make(chan error, 1)
 	go func() { _, err := co.Reload(context.Background(), ReasonPlugin); second <- err }()
-	waitQueued(co, 1)
+	// Parked behind the abandoned gather, or (the bug) already capturing.
+	for len(st.trace()) < 2 {
+		co.mu.Lock()
+		queued := len(co.queue)
+		co.mu.Unlock()
+		if queued >= 1 {
+			break
+		}
+		runtime.Gosched()
+	}
 	if got := st.trace(); len(got) != 1 {
+		close(gate)
 		t.Fatalf("store trace while the abandoned gather reads = %v, want its single invalidate", got)
 	}
 	close(gate)
