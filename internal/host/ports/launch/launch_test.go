@@ -184,7 +184,8 @@ func TestLaunchSequenceOrder(t *testing.T) {
 		"Pods.SetStatus",       // step 2: notes starting
 		"Catalog.Declare",      // step 3: files (worker)
 		"Catalog.Declare",      // step 3: notes (worker)
-		"Slices.RegisterSlice", // step 4: on the loop, acknowledged, BEFORE the reload (D56)
+		"Slices.RegisterSlice", // step 4: declared slice, on the loop before reload
+		"Slices.RegisterSlice", // step 4: default slice, also acknowledged before reload
 		"Reloader.Reload",      // step 3/5: one reload for the batch, requested after the ack
 		"Wrapper.Start",        // step 6: files after the gate
 		"Pods.SetStatus",       // live
@@ -194,19 +195,81 @@ func TestLaunchSequenceOrder(t *testing.T) {
 	if got := rec.Methods(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("launch order\n got %v\nwant %v", got, want)
 	}
-	// Only the slice-declaring plugin registers a slice, under its own id.
+	// Every plugin registers its own slice, with or without a declaration.
+	var registered []string
 	for _, call := range rec.Calls() {
 		if call.Method == "Slices.RegisterSlice" {
-			if len(call.Args) != 1 || call.Args[0] != "files.state" {
+			if len(call.Args) != 1 {
 				t.Fatalf("slice registration %v", call.Args)
 			}
+			registered = append(registered, call.Args[0].(string))
 		}
+	}
+	if want := []string{"files.state", "notes.state"}; !reflect.DeepEqual(registered, want) {
+		t.Fatalf("registered %v, want %v", registered, want)
 	}
 	// Each starter call carried the opening queue.
 	for _, call := range rec.Calls() {
 		if call.Method == "Wrapper.Start" && call.Args[1] != len(opening) {
 			t.Fatalf("start without opening: %v", call.Args)
 		}
+	}
+}
+
+// TestLaunchSliceDefaults covers the implicit plugin slice and preserves the
+// explicitly declared scope, persistence, retention and cap.
+func TestLaunchSliceDefaults(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		declaration *manifest.SliceDecl
+		scope       state.Scope
+		persistent  bool
+		cap         int
+		retention   state.Retention
+	}{
+		{name: "no state block", scope: state.ScopeInstance, cap: state.PluginMaxBytes},
+		{name: "explicit state block", declaration: &manifest.SliceDecl{Scope: "user", Persistent: true, MaxBytes: 65536, Retention: &manifest.RetentionDecl{Policy: "keep-latest"}}, scope: state.ScopeUser, persistent: true, cap: 65536, retention: state.Retention{Policy: state.KeepLatest}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tree := state.New(state.Options{})
+			posted := make(chan tea.Msg, 1)
+			done := make(chan pods.Preparation, 1)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			p := launch.Preparer{Slices: launch.SliceRegistrar{State: tree}, Post: func(m tea.Msg) { posted <- m }}
+			plugin := spec("sample")
+			plugin.Slice = tc.declaration
+			go func() { done <- p.Prepare(ctx, 1, []manifest.Spec{plugin}) }()
+			var registration pods.RegisterSlicesMsg
+			select {
+			case m := <-posted:
+				var ok bool
+				registration, ok = m.(pods.RegisterSlicesMsg)
+				if !ok {
+					t.Fatalf("unexpected post %T", m)
+				}
+			case result := <-done:
+				t.Fatalf("preparation returned without registering a slice: %+v", result)
+			}
+			if len(registration.Register) != 1 || registration.Register[plugin.ID] == nil {
+				t.Fatalf("registration map %v", registration.Register)
+			}
+			handle, err := registration.Register[plugin.ID]()
+			if err != nil {
+				t.Fatal(err)
+			}
+			registration.Done <- pods.Registered{Handles: map[string]contracts.SliceHandle{plugin.ID: handle}}
+			if result := <-done; len(result.Failed) != 0 {
+				t.Fatalf("preparation failed: %+v", result)
+			}
+			entry, ok := tree.Snapshot().Slices[plugin.ID+".state"]
+			if !ok {
+				t.Fatal("plugin state slice not registered")
+			}
+			if entry.Owner != plugin.ID || entry.Scope != tc.scope || entry.Persistent != tc.persistent || entry.MaxBytes != tc.cap || entry.Retention != tc.retention || string(entry.Value) != "{}" {
+				t.Fatalf("registered slice %+v", entry)
+			}
+		})
 	}
 }
 
@@ -258,8 +321,13 @@ func TestFailedReloadStillOpensGate(t *testing.T) {
 // once — one failed status write, one error log (round-1 finding 3).
 func TestRegisterFailureFailsOnlyThatPlugin(t *testing.T) {
 	rec := fakes.NewRecorder()
-	slices := fakes.NewSlices(rec)
-	slices.Err = contracts.NewError(protocol.CodeConflict, "slice already registered", nil)
+	successful := fakes.NewSlices(rec)
+	slices := sliceRegistrarFunc(func(spec state.Spec) (contracts.SliceHandle, error) {
+		if spec.Namespace == "files.state" {
+			return nil, contracts.NewError(protocol.CodeConflict, "slice already registered", nil)
+		}
+		return successful.RegisterSlice(spec)
+	})
 	reload := fakes.NewReloader(rec)
 	reload.Applied = true
 	starter := fakes.NewWrapper(rec)
@@ -301,6 +369,14 @@ func TestRegisterFailureFailsOnlyThatPlugin(t *testing.T) {
 	if n := countLogs(loop, "files", "error"); n != 1 {
 		t.Fatal("error logs", n)
 	}
+}
+
+// sliceRegistrarFunc selects per-plugin registration outcomes without making
+// a failed slice registration fail the defaults of the whole launch batch.
+type sliceRegistrarFunc func(state.Spec) (contracts.SliceHandle, error)
+
+func (f sliceRegistrarFunc) RegisterSlice(spec state.Spec) (contracts.SliceHandle, error) {
+	return f(spec)
 }
 
 // catalogFunc adapts a function to the CatalogDeclarer seam for tests that

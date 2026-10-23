@@ -307,7 +307,7 @@ func (p Preparer) Prepare(ctx context.Context, gate uint64, specs []manifest.Spe
 				continue
 			}
 		}
-		if spec.Slice != nil && p.Slices != nil {
+		if p.Slices != nil {
 			slice := sliceSpec(spec.ID, spec.Slice)
 			register[spec.ID] = func() (contracts.SliceHandle, error) {
 				return p.Slices.RegisterSlice(slice)
@@ -366,7 +366,12 @@ func (e reloadError) Error() string {
 
 // sliceSpec converts the manifest's slice declaration into the State
 // registration the Pod owns: namespace <plugin_id>.state, owner the plugin.
+// An absent declaration selects an instance-scoped, non-persistent slice;
+// zero MaxBytes lets State apply the plugin class default.
 func sliceSpec(pluginID string, decl *manifest.SliceDecl) state.Spec {
+	if decl == nil {
+		decl = &manifest.SliceDecl{Scope: string(state.ScopeInstance)}
+	}
 	spec := state.Spec{
 		Namespace:  pluginID + ".state",
 		Owner:      pluginID,
