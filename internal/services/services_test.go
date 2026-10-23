@@ -112,7 +112,7 @@ func TestSettingsRestartSchemaRawAndSecretRejection(t *testing.T) {
 	}
 }
 func TestThemeContrastAllPairsAndHex(t *testing.T) {
-	if got := palette.CheckContrast(palette.Default()); len(got) != 0 {
+	if got := palette.CheckContrast(palette.Default(), nil); len(got) != 0 {
 		t.Fatal(got)
 	}
 	if len(palette.ContrastPairs()) != 75 {

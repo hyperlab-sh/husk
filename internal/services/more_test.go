@@ -51,11 +51,11 @@ func TestSettingsTypesBoundsSnapshotIsolationAndWarnings(t *testing.T) {
 		t.Fatal("dry validation applied")
 	}
 }
-func TestThemeOverlayDerivationEveryFormatAndHiddenDistributionHatch(t *testing.T) {
+func TestThemeOverlayPreservesSlotEveryFormatAndHiddenDistributionHatch(t *testing.T) {
 	base := palette.Default()
 	p, err := palette.Overlay(base, map[string]string{"canvas": "#101018"})
-	if err != nil || p.Slot != palette.SlotBackground(p.Canvas) {
-		t.Fatal("slot not derived", err)
+	if err != nil || p.Slot != base.Slot {
+		t.Fatal("Overlay derived a slot", err)
 	}
 	p, err = palette.Overlay(base, map[string]string{"canvas": "#101018", "slot_background": "#ABCDEF"})
 	if err != nil || p.Slot != "#abcdef" {
@@ -69,7 +69,7 @@ func TestThemeOverlayDerivationEveryFormatAndHiddenDistributionHatch(t *testing.
 		var changed palette.Palette
 		json.Unmarshal(b, &changed)
 		found := false
-		for _, v := range palette.CheckContrast(changed) {
+		for _, v := range palette.CheckContrast(changed, nil) {
 			found = found || v.Foreground == pair.Foreground && v.Background == pair.Background
 		}
 		if !found {

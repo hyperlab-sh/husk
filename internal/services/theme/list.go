@@ -9,18 +9,26 @@ import (
 )
 
 // List returns a detached serving-snapshot view without Store I/O. The built-in
-// theme comes first, followed by named themes sorted by their exact names.
+// themes come first in document order, followed by other themes by exact name.
 func (s *Service) List(caller c.Caller) ([]host.ThemeEntry, error) {
 	if err := c.CheckCaller(caller); err != nil {
 		return nil, err
 	}
 	snap := s.current.Load()
-	out := []host.ThemeEntry{{Name: palette.Default().Name, Source: "built-in", Current: snap.palette.Name == palette.Default().Name}}
-	names := make([]string, 0, len(snap.themes))
-	for name := range snap.themes {
-		names = append(names, name)
+	names := palette.BuiltInNames()
+	builtIn := make(map[string]bool, len(names))
+	for _, name := range names {
+		builtIn[name] = true
 	}
-	sort.Strings(names)
+	var extra []string
+	for name := range snap.themes {
+		if !builtIn[name] {
+			extra = append(extra, name)
+		}
+	}
+	sort.Strings(extra)
+	names = append(names, extra...)
+	out := make([]host.ThemeEntry, 0, len(names))
 	for _, name := range names {
 		out = append(out, host.ThemeEntry{Name: name, Source: snap.themes[name].layer, Current: snap.palette.Name == name})
 	}

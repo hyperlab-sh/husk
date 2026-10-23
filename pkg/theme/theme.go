@@ -1,11 +1,11 @@
 package theme
 
-import "github.com/charmbracelet/x/exp/charmtone"
+import "encoding/json"
 
 // Palette is a flat colour token set shared by the workbench and its plugins.
-// Values are "#RRGGBB" strings taken from the CharmTone palette, so Husk looks
-// the same in every terminal that supports truecolor (lipgloss downsamples on
-// terminals that do not). It carries only generic roles; a plugin that needs
+// Values are lowercase "#rrggbb" strings resolved from the built-in themes
+// layer or user configuration. ANSI indices are kept beside this comparable
+// value, never inside it. It carries only generic roles; a plugin that needs
 // application-specific colours defines its own.
 type Palette struct {
 	Name            string `json:"name"`
@@ -30,35 +30,13 @@ type Palette struct {
 	Info            string `json:"info"`
 }
 
-// Default is Husk's single palette. Every text and border pairing the chrome
-// draws is contrast-checked by TestDefaultPaletteContrast (text 4.5:1,
-// borders and other non-text 3:1); change a role only with that test green.
+// Default returns charm from the built-in themes layer. Every text and border
+// pairing is contrast-checked (text 4.5:1, borders and other non-text 3:1).
 func Default() Palette {
-	// The ladder is Canvas < Slot < Elevated/Hover < Selected, each step at
-	// least TestSurfaceLadderSeparation's ratio apart so pills, hover rows and
-	// selections stay visible on the slot background. Elevated cannot move up:
-	// Danger, Info and InkSubtle are held to 4.5:1 on it and BBQ is already at
-	// their limit, so SlotShift is sized to fit between Canvas and BBQ.
-	return Palette{
-		Name:            "CharmTone",
-		Canvas:          charmtone.Pepper.Hex(),
-		Surface:         charmtone.Pepper.Hex(),
-		SurfaceElevated: charmtone.BBQ.Hex(),
-		SurfaceSelected: charmtone.Char.Hex(),
-		SurfaceHover:    charmtone.BBQ.Hex(),
-		Slot:            SlotBackground(charmtone.Pepper.Hex()),
-		Border:          charmtone.Squid.Hex(),
-		BorderSubtle:    charmtone.Iron.Hex(),
-		BorderFocused:   charmtone.Hazy.Hex(),
-		Ink:             charmtone.Sash.Hex(),
-		InkMuted:        charmtone.Smoke.Hex(),
-		InkSubtle:       charmtone.Steam.Hex(),
-		Accent:          charmtone.Lilac.Hex(),
-		AccentSecondary: charmtone.Sardine.Hex(),
-		AccentSoft:      charmtone.Hazy.Hex(),
-		Success:         charmtone.Julep.Hex(),
-		Warning:         charmtone.Mustard.Hex(),
-		Danger:          charmtone.Coral.Hex(),
-		Info:            charmtone.Malibu.Hex(),
-	}
+	entry := BuiltIn()["themes"].(map[string]any)["charm"].(map[string]any)["palette"]
+	b, _ := json.Marshal(entry)
+	var p Palette
+	json.Unmarshal(b, &p)
+	p.Name = "charm"
+	return p
 }

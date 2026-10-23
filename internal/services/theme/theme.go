@@ -4,6 +4,7 @@ package theme
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 
 	c "github.com/hyperlab-sh/husk/internal/services/contracts"
@@ -15,6 +16,7 @@ import (
 type snapshot struct {
 	gen       c.Generation
 	palette   palette.Palette
+	indices   map[string]int
 	overrides map[string]string
 	themes    map[string]definition
 }
@@ -25,7 +27,7 @@ type Service struct{ current atomic.Pointer[snapshot] }
 // New serves the built-in palette even if first configuration fails.
 func New() *Service {
 	s := &Service{}
-	s.current.Store(&snapshot{palette: palette.Default(), overrides: map[string]string{}})
+	s.current.Store(&snapshot{palette: palette.Default(), overrides: map[string]string{}, themes: resolveThemes(nil, new([]c.Problem))})
 	return s
 }
 
@@ -37,6 +39,13 @@ func (s *Service) Palette() palette.Palette { return s.current.Load().palette }
 
 // Wire returns the same roles for protocol.theme.get/theme.changed.
 func (s *Service) Wire() protocol.Palette { return protocol.Palette(s.Palette()) }
+
+// WireANSI returns the palette and a detached role-to-index map (empty for hex
+// themes) from one snapshot read. It is safe from any goroutine.
+func (s *Service) WireANSI() (protocol.Palette, map[string]int) {
+	snap := s.current.Load()
+	return protocol.Palette(snap.palette), maps.Clone(snap.indices)
+}
 
 // Overrides returns the detached roles applied over the built-in: the selected
 // theme's roles, then theme.palette overrides, and the resolved theme name.
@@ -71,17 +80,26 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 	}
 	themes := resolveThemes(in.Themes, &r.Problems)
 	name := in.Settings.String("theme.name")
-	selected, exists := themes[name]
-	if name == "" || name == palette.Default().Name {
+	if name == "" {
 		name = palette.Default().Name
-	} else if !exists {
+	}
+	if _, exists := themes[name]; !exists {
 		layer := in.Settings.Source("theme.name")
 		r.Problems = append(r.Problems, c.Problem{Severity: "warning", Code: "unknown_theme", Layer: layer, Key: "theme.name", Message: fmt.Sprintf("theme %s does not exist; using %s", name, palette.Default().Name), Source: &protocol.Source{Layer: layer, File: configFile(in, layer)}})
 		name = palette.Default().Name
 	}
-	overrides := c.Clone(selected.roles)
-	if overrides == nil {
-		overrides = map[string]string{}
+	selected := themes[name]
+	base := themes[palette.Default().Name]
+	// A higher-layer charm replaces the inheritance base too. Definitions are
+	// still whole units: missing roles fall back to the embedded charm.
+	overrides := c.Clone(base.roles)
+	indices := maps.Clone(base.indices)
+	for role, hex := range selected.roles {
+		overrides[role] = hex
+		delete(indices, role)
+		if index, ok := selected.indices[role]; ok {
+			indices[role] = index
+		}
 	}
 	for role := range palette.Roles(palette.Default()) {
 		if role == "name" {
@@ -94,6 +112,7 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 				c.Issue(&r.Problems, "error", "invalid_color", in.Settings.Source(key), key, "role "+role+": want #RRGGBB")
 			}
 			overrides[role] = strings.ToLower(hex)
+			delete(indices, role)
 		}
 	}
 	overrides["name"] = name
@@ -104,6 +123,16 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 	if err != nil {
 		c.Issue(&r.Problems, "error", "invalid_color", "user", "theme.palette", err.Error())
 		return nil, r, c.Invalid(r.Problems)
+	}
+	_, themeSlot := selected.roles["slot_background"]
+	if !themeSlot && in.Settings.Source("theme.palette.slot_background") == "default" {
+		delete(indices, "slot_background")
+		if index, ok := indices["canvas"]; ok {
+			p.Slot = p.Canvas
+			indices["slot_background"] = index
+		} else {
+			p.Slot = palette.SlotBackground(p.Canvas)
+		}
 	}
 	allow := in.Settings.Bool("theme.allow_low_contrast")
 	source := in.Settings.Source("theme.allow_low_contrast")
@@ -121,12 +150,12 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 		c.Issue(&r.Problems, "error", "distribution_opt_out", "distribution", "theme.allow_low_contrast", "distribution cannot opt out of contrast")
 		allow = false
 	}
-	for _, v := range palette.CheckContrast(p) {
+	for _, v := range palette.CheckContrast(p, indices) {
 		severity := "error"
 		if allow && (source == "user" || source == "profile" || source == "instance") {
 			severity = "warning"
 		}
-		key, layer, file := attribute(in, selected, name, v.Foreground, v.Background)
+		key, layer, file := attribute(in, selected, base, name, v.Foreground, v.Background)
 		problem := c.Problem{Severity: severity, Code: "low_contrast", Layer: layer, Key: key, Message: fmt.Sprintf("%s on %s is %.2f:1, need %.1f:1", v.Foreground, v.Background, v.Ratio, v.Minimum)}
 		problem.Source = &protocol.Source{Layer: layer, File: file}
 		r.Problems = append(r.Problems, problem)
@@ -137,22 +166,25 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 	if ctx.Err() != nil {
 		return c.ContextError(ctx, r)
 	}
-	next := &snapshot{gen: old.gen + 1, palette: p, overrides: overrides, themes: themes}
-	return c.Prepare(ctx, r, old.palette != p, func() bool { return s.current.CompareAndSwap(old, next) }, s.Generation), r, nil
+	next := &snapshot{gen: old.gen + 1, palette: p, indices: indices, overrides: overrides, themes: themes}
+	return c.Prepare(ctx, r, old.palette != p || !maps.Equal(old.indices, indices), func() bool { return s.current.CompareAndSwap(old, next) }, s.Generation), r, nil
 }
 
 // attribute names the role a failing pair is charged to: the foreground when
 // its layer overrode it, else the background's override; the built-in palette
 // passes, so one of them is overridden. An unset slot_background follows the
 // canvas it is derived from.
-func attribute(in c.ReloadInput, selected definition, name, fg, bg string) (key, layer, file string) {
+func attribute(in c.ReloadInput, selected, base definition, name, fg, bg string) (key, layer, file string) {
 	origin := func(role string) (string, string, string, bool) {
 		key := "theme.palette." + role
 		if layer := in.Settings.Source(key); layer != "default" {
 			return key, layer, configFile(in, layer), true
 		}
 		if _, ok := selected.roles[role]; ok {
-			return "themes." + name + "." + role, selected.layer, selected.file, true
+			if selected.layer != layerBuiltIn {
+				return "themes." + name + "." + role, selected.layer, selected.file, true
+			}
+			return "", "", "", false
 		}
 		if role == "slot_background" {
 			key = "theme.palette.canvas"
@@ -162,6 +194,9 @@ func attribute(in c.ReloadInput, selected definition, name, fg, bg string) (key,
 			if _, ok := selected.roles["canvas"]; ok {
 				return "themes." + name + ".canvas", selected.layer, selected.file, true
 			}
+		}
+		if _, ok := base.roles[role]; ok && base.layer != layerBuiltIn {
+			return "themes.charm." + role, base.layer, base.file, true
 		}
 		return "", "", "", false
 	}

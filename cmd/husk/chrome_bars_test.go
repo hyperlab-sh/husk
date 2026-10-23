@@ -157,7 +157,7 @@ func TestBottomBarLabelHintsAndThemeFit(t *testing.T) {
 			m.recomputeLayout()
 			bar := ansi.Strip(m.renderBottomKeybindBar())
 			label := " " + m.layoutLabel() + " "
-			pill := " ✦ CharmTone "
+			pill := " ✦ charm "
 			if ansi.StringWidth(bar) != w || !strings.HasPrefix(bar, label) || !strings.HasSuffix(bar, pill) {
 				t.Fatalf("bar %q", bar)
 			}
@@ -184,7 +184,7 @@ func TestBottomBarLabelHintsAndThemeFit(t *testing.T) {
 
 func TestThemePillName(t *testing.T) {
 	for _, tc := range []struct{ in, want string }{
-		{"CharmTone", "CharmTone"}, {"evening", "evening"}, {"", "theme"}, {strings.Repeat("界", 15), strings.Repeat("界", 11) + "…"}, {strings.Repeat("a", 30), strings.Repeat("a", 23) + "…"},
+		{"charm", "charm"}, {"evening", "evening"}, {"", "theme"}, {strings.Repeat("界", 15), strings.Repeat("界", 11) + "…"}, {strings.Repeat("a", 30), strings.Repeat("a", 23) + "…"},
 	} {
 		t.Run(tc.in, func(t *testing.T) {
 			m := goldenModel()

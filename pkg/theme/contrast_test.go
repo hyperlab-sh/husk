@@ -50,7 +50,7 @@ const (
 // TestDefaultPaletteContrast checks every foreground/background pairing the
 // host chrome draws (see cmd/husk/render.go) against its WCAG threshold.
 func TestDefaultPaletteContrast(t *testing.T) {
-	for _, violation := range CheckContrast(Default()) {
+	for _, violation := range CheckContrast(Default(), nil) {
 		t.Errorf("%s on %s = %.2f:1, need %.1f:1", violation.Foreground, violation.Background, violation.Ratio, violation.Minimum)
 	}
 }

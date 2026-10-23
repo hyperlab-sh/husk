@@ -213,7 +213,7 @@ func TestConfigReloadRunsTheCoordinator(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer secSvc.Close()
-	storeReader := &fakeStoreReader{resolved: store.Resolved{Doc: doc(t, `{"theme":{"name":"CharmTone"}}`), Origins: map[string]store.Layer{}}}
+	storeReader := &fakeStoreReader{resolved: store.Resolved{Doc: doc(t, `{"theme":{"name":"charm"}}`), Origins: map[string]store.Layer{}}}
 	co, err := services.NewCoordinator(services.Options{
 		Store: storeReader,
 		Services: map[string]services.Reloadable{
