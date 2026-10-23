@@ -373,7 +373,7 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 		if known || kept {
 			key = p.Path
 		}
-		problem := StoreProblem(p, layerFiles)
+		problem := StoreProblem(p, layerFiles, "")
 		problem.Key = key
 		problem.Source = sourceOf(string(p.Layer), layerFiles)
 		r.Problems = append(r.Problems, problem)

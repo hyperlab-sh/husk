@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"errors"
 	"fmt"
 	"go/parser"
 	"go/token"
@@ -15,18 +16,20 @@ import (
 )
 
 type reader struct {
-	layers   []store.LayerDoc
-	problems []store.Problem
-	calls    []string
+	layers     []store.LayerDoc
+	problems   []store.Problem
+	calls      []string
+	resolveErr error
+	layersErr  error
 }
 
 func (r *reader) Resolve(n store.DocName, p string) (store.Resolved, error) {
 	r.calls = append(r.calls, "resolve:"+string(n)+":"+p)
-	return store.Resolved{Problems: r.problems}, nil
+	return store.Resolved{Problems: r.problems}, r.resolveErr
 }
 func (r *reader) Layers(n store.DocName, p string) ([]store.LayerDoc, error) {
 	r.calls = append(r.calls, "layers:"+string(n)+":"+p)
-	return r.layers, nil
+	return r.layers, r.layersErr
 }
 func entry() map[string]any { return map[string]any{"source": "~/plugins/alpha"} }
 func layer(entries map[string]any) store.LayerDoc {
@@ -93,7 +96,7 @@ func TestCatalogFieldRulesAndLimits(t *testing.T) {
 				value = tc.value
 			}
 			r := &reader{layers: []store.LayerDoc{layer(map[string]any{tc.id: value})}}
-			got := Read(r, "work")
+			got := Read(r, "work", "/config")
 			if tc.valid {
 				if len(got.Entries) != 1 || len(got.Problems) != 0 {
 					t.Fatalf("%+v", got)
@@ -129,6 +132,22 @@ func tags(n int) []any {
 }
 
 func TestCatalogWholeEntryReplacementAndIsolatedLayers(t *testing.T) {
+	t.Run("invalid higher entry retains lower definition", func(t *testing.T) {
+		lower := layer(map[string]any{"alpha": map[string]any{"source": "/opt/alpha", "name": "Distribution"}})
+		lower.Layer = store.LayerDistribution
+		higher := layer(map[string]any{"alpha": map[string]any{"source": "relative"}})
+		got := Read(&reader{layers: []store.LayerDoc{lower, higher}}, "", "/config")
+		if len(got.Entries) != 1 || got.Entries[0].SourceLayer != "distribution" || got.Entries[0].Name != "Distribution" || got.Entries[0].Source != "/opt/alpha" {
+			t.Fatal(got)
+		}
+		if len(got.Problems) != 1 {
+			t.Fatal(got)
+		}
+		p := got.Problems[0]
+		if p.Code != "invalid_value" || p.Key != "catalog.alpha.source" || p.Layer != "user" || p.Source.File != "catalog.json" {
+			t.Fatal(p)
+		}
+	})
 	for _, version := range []any{nil, float64(2), "1", true} {
 		t.Run(fmt.Sprint(version), func(t *testing.T) {
 			lower := layer(map[string]any{"alpha": map[string]any{"source": "/opt/alpha", "name": "Old", "tags": []any{"old"}}, "other": entry()})
@@ -138,7 +157,7 @@ func TestCatalogWholeEntryReplacementAndIsolatedLayers(t *testing.T) {
 			bad.Layer = store.LayerProfile
 			bad.File = "profiles/dev/catalog.json"
 			bad.Doc["version"] = version
-			got := Read(&reader{layers: []store.LayerDoc{lower, higher, bad}}, "")
+			got := Read(&reader{layers: []store.LayerDoc{lower, higher, bad}}, "", "/config")
 			if len(got.Entries) != 2 || got.Entries[0].Name != "alpha" || len(got.Entries[0].Tags) != 0 || got.Entries[0].SourceLayer != "user" || got.Entries[1].SourceLayer != "distribution" {
 				t.Fatal(got)
 			}
@@ -150,10 +169,32 @@ func TestCatalogWholeEntryReplacementAndIsolatedLayers(t *testing.T) {
 	for _, entries := range []any{nil, []any{}, true} {
 		l := layer(nil)
 		l.Doc["entries"] = entries
-		got := Read(&reader{layers: []store.LayerDoc{l}}, "")
+		got := Read(&reader{layers: []store.LayerDoc{l}}, "", "/config")
 		if len(got.Problems) != 1 || got.Problems[0].Key != "catalog.entries" {
 			t.Fatal(got)
 		}
+	}
+}
+
+func TestCatalogReadErrorsDoNotExposePaths(t *testing.T) {
+	for _, stage := range []string{"resolve", "layers"} {
+		t.Run(stage, func(t *testing.T) {
+			r := &reader{}
+			failure := errors.New("open /home/private/catalog.json: permission denied")
+			if stage == "resolve" {
+				r.resolveErr = failure
+			} else {
+				r.layersErr = failure
+			}
+			got := Read(r, "", "/config")
+			if len(got.Problems) != 1 {
+				t.Fatal(got)
+			}
+			p := got.Problems[0]
+			if p.Code != "store_error" || p.Severity != "warning" || p.Layer != "" || p.Message != "catalog.json: configuration could not be loaded" || p.Source.File != "catalog.json" {
+				t.Fatal(p)
+			}
+		})
 	}
 }
 
@@ -167,7 +208,7 @@ func TestCatalogEntryLimitUsesDocumentOrder(t *testing.T) {
 	}
 	l := layer(entries)
 	l.MemberOrder = map[string][]string{"/entries": order}
-	got := Read(&reader{layers: []store.LayerDoc{l}}, "")
+	got := Read(&reader{layers: []store.LayerDoc{l}}, "", "/config")
 	if len(got.Entries) != 256 || len(got.Problems) != 1 || got.Problems[0].Key != "catalog.entries" || got.Problems[0].Message != "more than 256 entries; the rest ignored" {
 		t.Fatal(got)
 	}
@@ -179,12 +220,12 @@ func TestCatalogEntryLimitUsesDocumentOrder(t *testing.T) {
 }
 
 func TestCatalogLoadProblemsAndEmptyBuiltin(t *testing.T) {
-	empty := Read(&reader{}, "")
+	empty := Read(&reader{}, "", "/config")
 	if len(empty.Entries) != 0 || len(empty.Problems) != 0 {
 		t.Fatal(empty)
 	}
 	r := &reader{problems: []store.Problem{{Code: "invalid_document", Layer: store.LayerProfile, File: "/config/profiles/dev/catalog.json", Message: "parse failure", Line: 4}, {Code: "type_clash"}}, layers: []store.LayerDoc{layer(map[string]any{"alpha": entry()})}}
-	got := Read(r, "")
+	got := Read(r, "", "/config")
 	if len(got.Entries) != 1 || len(got.Problems) != 1 {
 		t.Fatal(got)
 	}

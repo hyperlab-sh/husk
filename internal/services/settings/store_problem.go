@@ -10,19 +10,19 @@ import (
 )
 
 // StoreProblem converts a Store diagnostic to a warning with config-relative
-// provenance. files supplies the known layer files, when available. Consumers
-// that do not interpret merge clashes should ignore type_clash diagnostics.
-func StoreProblem(p store.Problem, files map[string]string) protocol.Problem {
+// provenance. files supplies known layer files; configDir is Store's actual
+// config root for absolute file names. Files outside that root use their base
+// name only. Consumers that do not interpret merge clashes should ignore them.
+func StoreProblem(p store.Problem, files map[string]string, configDir string) protocol.Problem {
 	layer := string(p.Layer)
 	file := files[layer]
 	if file == "" && p.File != "" {
 		file = filepath.ToSlash(p.File)
 		if filepath.IsAbs(p.File) {
 			file = filepath.Base(p.File)
-			for _, prefix := range []string{"/profiles/", "/instances/"} {
-				if i := strings.LastIndex(filepath.ToSlash(p.File), prefix); i >= 0 {
-					file = filepath.ToSlash(p.File)[i+1:]
-					break
+			if filepath.IsAbs(configDir) {
+				if relative, err := filepath.Rel(configDir, p.File); err == nil && relative != "." && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+					file = filepath.ToSlash(relative)
 				}
 			}
 		}
@@ -32,7 +32,11 @@ func StoreProblem(p store.Problem, files map[string]string) protocol.Problem {
 		out.Code = "type_clash"
 		out.Message = fmt.Sprintf("%s: the %s layer replaces a value of a different type from the %s layer", p.Path, p.Layer, p.LowerLayer)
 	} else {
-		out.Message = fmt.Sprintf("%s (%s): %s", file, layer, p.Message)
+		where := file
+		if layer != "" {
+			where += " (" + layer + ")"
+		}
+		out.Message = where + ": " + p.Message
 	}
 	return out
 }

@@ -16,6 +16,11 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
+var (
+	idRule  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+	tagRule = regexp.MustCompile(`^[a-z0-9_-]{1,32}$`)
+)
+
 // Entry is a validated winning catalog declaration.
 type Entry struct {
 	ID          string               `json:"id"`
@@ -41,20 +46,21 @@ type Reader interface {
 
 // Read gathers load diagnostics before validating unmerged layers. A broken
 // layer cannot hide valid declarations in another layer or fail a reload.
-func Read(s Reader, profile string) Result {
+// configDir is Store.Paths().Config, used to relativize load diagnostics.
+func Read(s Reader, profile, configDir string) Result {
 	out := Result{Entries: []Entry{}, Problems: []protocol.Problem{}}
 	resolved, err := s.Resolve("catalog", profile)
 	if err != nil {
-		out.Problems = append(out.Problems, settings.StoreProblem(store.Problem{Layer: "", File: "catalog.json", Message: err.Error()}, nil))
+		out.Problems = append(out.Problems, settings.StoreProblem(store.Problem{File: "catalog.json", Message: "configuration could not be loaded"}, nil, configDir))
 	}
 	for _, p := range resolved.Problems {
 		if p.Code != "type_clash" {
-			out.Problems = append(out.Problems, settings.StoreProblem(p, nil))
+			out.Problems = append(out.Problems, settings.StoreProblem(p, nil, configDir))
 		}
 	}
 	layers, err := s.Layers("catalog", profile)
 	if err != nil {
-		out.Problems = append(out.Problems, settings.StoreProblem(store.Problem{File: "catalog.json", Message: err.Error()}, nil))
+		out.Problems = append(out.Problems, settings.StoreProblem(store.Problem{File: "catalog.json", Message: "configuration could not be loaded"}, nil, configDir))
 		return out
 	}
 	winners := map[string]Entry{}
@@ -73,8 +79,7 @@ func Read(s Reader, profile string) Result {
 		}
 		for i, id := range l.OrderedMembers("/entries", entries) {
 			if i == 256 {
-				problem("catalog.entries", "more than 256 entries; the rest ignored")
-				out.Problems[len(out.Problems)-1].Message = "more than 256 entries; the rest ignored"
+				out.Problems = append(out.Problems, protocol.Problem{Severity: "warning", Code: "invalid_value", Layer: string(l.Layer), Key: "catalog.entries", Message: "more than 256 entries; the rest ignored", Source: &protocol.Source{Layer: string(l.Layer), File: l.File}})
 				break
 			}
 			entry, field, reason := validate(id, entries[id])
@@ -105,7 +110,7 @@ func Read(s Reader, profile string) Result {
 
 func validate(id string, raw any) (Entry, string, string) {
 	e := Entry{ID: id, Name: id, Surfaces: []protocol.SurfaceID{}, Tags: []string{}}
-	if !regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`).MatchString(id) {
+	if !idRule.MatchString(id) {
 		return e, "", "invalid plugin id"
 	}
 	obj, ok := raw.(map[string]any)
@@ -172,7 +177,7 @@ func validate(id string, raw any) (Entry, string, string) {
 				seen[s] = true
 				e.Surfaces = append(e.Surfaces, surface)
 			} else {
-				if !regexp.MustCompile(`^[a-z0-9_-]{1,32}$`).MatchString(s) {
+				if !tagRule.MatchString(s) {
 					return e, f, "invalid tag"
 				}
 				e.Tags = append(e.Tags, s)
