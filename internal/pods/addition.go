@@ -10,6 +10,7 @@ import (
 
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
 	"github.com/hyperlab-sh/husk/internal/pods/manifest"
+	"github.com/hyperlab-sh/husk/internal/pods/wrapper"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
@@ -101,6 +102,10 @@ func (h *Host) Add(ctx context.Context, c contracts.Caller, source contracts.Plu
 			}
 			if reason == "" {
 				if _, err := h.AddPod(*item.spec); err != nil {
+					if contracts.CodeOf(err) != string(protocol.CodeConflict) {
+						refusal = contracts.NewError(protocol.CodeInternal, "register plugin "+id+": "+err.Error(), nil)
+						break
+					}
 					reason, message = "duplicate_plugin_id", err.Error()
 				}
 			}
@@ -130,13 +135,18 @@ func (h *Host) Add(ctx context.Context, c contracts.Caller, source contracts.Plu
 		if len(ids) == 0 {
 			return
 		}
-		cmd := h.Prepare(ids...)
-		entry = &addition{done: make(chan struct{}), result: result}
+		gate, cmd := h.prepare(ids...)
+		if cmd == nil {
+			return
+		}
+		// A later registry failure must not strand earlier admitted Pods:
+		// settle their gate before answering the batch with that error.
+		entry = &addition{done: make(chan struct{}), result: result, err: refusal}
 		slices.Sort(ids)
 		for _, id := range ids {
 			entry.result.Added = append(entry.result.Added, contracts.PluginAdded{Plugin: id, Warnings: warnings[id]})
 		}
-		h.adding[h.nextGate] = entry
+		h.adding[gate] = entry
 		h.spawn(cmd)
 	})
 	if err != nil {
@@ -145,7 +155,7 @@ func (h *Host) Add(ctx context.Context, c contracts.Caller, source contracts.Plu
 		}
 		return contracts.PluginAddition{}, contracts.NewError(protocol.CodeUnavailable, "the host loop no longer runs", nil)
 	}
-	if refusal != nil {
+	if refusal != nil && entry == nil {
 		return contracts.PluginAddition{}, refusal
 	}
 	if entry == nil {
@@ -234,6 +244,9 @@ func (h *Host) finishAddition(gate uint64, reports []contracts.ReloadReport) {
 		added := &entry.result.Added[i]
 		added.Status = "removed"
 		if p := h.pods[added.Plugin]; p != nil {
+			if p.info.Status != wrapper.Live && p.info.Status != wrapper.Failed {
+				h.Handle(LaunchFailedMsg{PluginID: added.Plugin, Err: openingFailure(p.info)})
+			}
 			added.Status, added.Log = string(p.info.Status), p.info.LogPath
 			if h.opts.Publisher != nil {
 				h.opts.Publisher.Publish(PluginAddedEvent, map[string]any{"plugin_id": added.Plugin, "status": added.Status})
