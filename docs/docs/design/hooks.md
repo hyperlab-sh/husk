@@ -671,10 +671,14 @@ subscriber reads State if it wants one.
 
 `state.clear` waits for the outcome under the request's context. The wait is
 bounded by one 2 s leg timeout, because a `gate` asks every subscriber at
-once, so the CLI's 5 s default is enough. If the context ends before the
-outcome (a disconnect), `Clear` answers `cancelled` and deletes nothing; the
-legs drain on their own deadlines. It never proceeds after the context ended,
-so a user told the command failed never finds the slice gone.
+once, so the CLI's 5 s default is enough. Until the Store delete starts,
+`Clear` never proceeds after the context ended: a context ended because the
+host is closing answers `unavailable`; any other ended context answers
+`cancelled`. Nothing is deleted in either case, including when the context
+ends between an allowed outcome and the delete, or when `force` skips the
+hook. Pending hook legs drain on their own deadlines. From the delete on,
+the clear completes and answers its real outcome, regardless of caller
+cancellation.
 
 The handler's branches on what `Fire` returns, checked top to bottom (an
 outcome can hold both a veto and a shutdown leg; the Store is closing either
@@ -690,20 +694,29 @@ way, so shutdown wins):
 | `cancelled` (the request context ended first) | answers `cancelled`; deletes nothing; the legs drain |
 | `denied`, `not_found` or `invalid_params` | a host bug (the hook list or the data the handler built is wrong): logs at error, answers `internal`, deletes nothing |
 
-An outcome with no live subscriber is allowed and proceeds. A slice that is
-not registered has no owner to name, so the hook is not fired and the clear
-answers `not_found`; a subscriber skipped for timeout, error or exit is
-logged by the handler. The table covers the hook wait only: there, a request
-context that ended because the host is closing answers `unavailable`, like
-the shutdown row, and any other ended context answers `cancelled`. Once the
-gate has allowed (or `force` skipped it, so no row applied), the clear is a
-Store delete followed by a reset posted to the loop, and that phase answers
-like every other `state.*` write: a failed delete is `internal`; a loop that
-no longer runs is `unavailable`; a context ended because the host is closing
-is `cancelled` with reason `shutdown` ([Protocol](protocol.md)); a context
-ended by the caller is `cancelled` with no reason. By then the persisted
-copies are gone and the posted reset may still run, so only a refusal from
-the hook wait promises that the slice is intact.
+An outcome with no live subscriber is allowed and proceeds. A nil
+`HookFirer` means no hooks are wired: the gate passes and the clear proceeds
+as if allowed. A slice that is not registered has no owner to name, so the
+hook is not fired and the clear answers `not_found`; a subscriber skipped
+for timeout, error or exit is logged by the handler. The table covers the
+hook wait; shutdown-caused context cancellation there answers `unavailable`
+rather than `cancelled`. The handler checks the context again immediately
+before starting the delete, including with `force`.
+
+Once started, the Store delete is not interrupted by the request context.
+A failed delete answers `internal`. Once deletion succeeds, the apply phase
+resets the slice on the loop and answers the real reset outcome, including
+`not_found` if the slice was unregistered. Caller cancellation cannot abandon
+the reset or turn a deleted slice into a `cancelled` reply. The reset uses
+claimed loop execution: on shutdown, a reset not yet started is guaranteed
+never to run, while a running reset is waited for. A reset skipped because
+the host is closing still answers success, with no result body, and logs one
+warning naming the slice and explaining that the in-memory reset was skipped
+because the host is closing and the persisted copies are deleted. Store has
+dropped the slice's dirty entries and advanced its epoch, so the final flush
+cannot resurrect the deleted value; the live value dies with the process,
+and the slice starts at `Initial` on the next start. Before shutdown, a
+wedged loop holds the handler like every other loop-bound port.
 
 Rationale: `state.changed` already tells an owner that its slice was reset,
 after the fact; the only thing a hook adds is a chance to act before, which
@@ -808,8 +821,9 @@ socket client. Rejected: palette entries that fire hooks, and a
 | Manifest declares a hook with a malformed id, outside the plugin's namespace, no or bad `kind`, a duplicate publish or subscribe, a malformed subscribe id, bad `timeout_ms` or `priority` | Manifest conversion | Plugin refused | User sees the launch failure |
 | `state.clear` gate not allowed | `state.clear` handler | Nothing deleted | `denied`, `data.reason` `vetoed`, `vetoes` |
 | `state.clear` fire refused `busy` (either cap) | `state.clear` handler | Logged; clear proceeds (fail-open) | the clear's result |
-| `state.clear` during shutdown (`Fire` `unavailable`, or a leg `cancelled`/`shutdown`) | `state.clear` handler | Nothing deleted | `unavailable` |
-| `state.clear` request context ends mid-hook | `state.clear` handler | Nothing deleted; legs drain | `cancelled` |
+| `state.clear` before deletion during shutdown (`Fire` `unavailable`, a leg `cancelled`/`shutdown`, or shutdown-caused request cancellation) | `state.clear` handler | Nothing deleted | `unavailable` |
+| `state.clear` request context ends before deletion for any other cause, including with `force` | `state.clear` handler | Nothing deleted; pending legs drain | `cancelled` |
+| `state.clear` reset cannot start because the host is closing, after deletion succeeded | `state.clear` handler | Reset abandoned; persisted copies remain deleted; warning logged | success, no result body |
 | `Fire` refused `denied`, `not_found` or `invalid_params` | `state.clear` handler | Host bug logged at error; nothing deleted | `internal` |
 
 ### Dependency directions
@@ -943,8 +957,12 @@ or priority. It is the starting point; the changes below extend it.
     the asked subscribers.
 11. **`husk.before-state-clear` is the first host-fired hook**, a `gate`, 2 s
     per leg, any subscriber's veto counts, with `force` on `state.clear` as
-    the user's override. `state.clear` waits under its request context; a
-    context that ends first answers `cancelled` and deletes nothing. Rejected:
+    the user's override. Until deletion starts, an ended request context
+    deletes nothing and answers `unavailable` for shutdown, `cancelled`
+    otherwise. From deletion on, the clear completes with its real outcome;
+    a reset skipped because the host is closing still succeeds because the
+    persisted copies are gone. A nil firer means no hooks wired and the gate
+    passes. Rejected:
     counting only the slice owner's veto (a second rule for one hook, when
     `force` already bounds the cost of a wrong veto).
 12. **`hook.list` is added** (protocol minor 2.1) for introspection; hooks
