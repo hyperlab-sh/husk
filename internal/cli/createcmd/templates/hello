@@ -2,4 +2,5 @@
 # The example plugin "husk create" wrote. It draws two lines into the surface
 # it occupies and then waits for Husk to close its stdin.
 "$HUSK_BIN_PATH" rpc surface.update '{"surface":"main-stage","lines":["Hello from @NAME@","","Edit plugins/hello to make this plugin yours."]}' >/dev/null
-exec cat >/dev/null
+# Keep the protocol stdout pipe open while cat drains host notifications.
+exec cat 3>&1 >/dev/null
