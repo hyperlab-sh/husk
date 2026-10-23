@@ -921,7 +921,7 @@ func openStore(t *testing.T) *store.Store {
 	}
 	posts := make(chan func(), 64)
 	s, err := store.Open(store.Options{
-		Instance: store.InstanceRef{ID: "husk-test", Named: true},
+		Instance: store.InstanceRef{ID: "husk-test"},
 		Clock:    fakeClock{now: time.Unix(0, 0)},
 		Env: store.Env{
 			LookupEnv: func(k string) (string, bool) {
@@ -935,9 +935,9 @@ func openStore(t *testing.T) *store.Store {
 				}
 				return "", false
 			},
-			HomeDir:    func() (string, error) { return root, nil },
-			RuntimeDir: func() (string, error) { return runtime, nil },
+			HomeDir: func() (string, error) { return root, nil },
 		},
+		RuntimeDir: runtime,
 		Post: func(f func()) bool {
 			select {
 			case posts <- f:

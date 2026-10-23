@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,6 +21,46 @@ import (
 	"github.com/hyperlab-sh/husk/internal/instance"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
+
+// version is the build version, set with -ldflags "-X main.version=...";
+// empty falls back to the module version the toolchain recorded.
+var version string
+
+// buildVersion returns the version the entry and session.ping report, or ""
+// when the build carries none (a "(devel)" build has none).
+func buildVersion() string {
+	if version != "" {
+		return version
+	}
+	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "(devel)" {
+		return bi.Main.Version
+	}
+	return ""
+}
+
+// flagSet reports whether the named flag was given on the command line.
+func flagSet(name string) bool {
+	set := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			set = true
+		}
+	})
+	return set
+}
+
+// startInstanceID is the id of the instance start mode becomes: the --instance
+// name when given (a given empty name is invalid, never the pid default), else
+// the decimal pid.
+func startInstanceID(name string, given bool, pid int) (string, error) {
+	if !given {
+		return strconv.Itoa(pid), nil
+	}
+	if err := instance.ValidName(name); err != nil {
+		return "", err
+	}
+	return name, nil
+}
 
 // stringFlag is a repeatable string flag.
 type stringFlag []string
@@ -52,7 +93,14 @@ func main() {
 	pluginPaths := repeatable("plugin", "Plugin: executable, plugin directory, or husk-plugin.json path (repeatable)")
 	pluginDirs := repeatable("plugin-dir", "Load every immediate subdirectory containing a husk-plugin.json (repeatable)")
 	demo := flag.String("demo", "", "In-process frame demo: pubslots (requires --dump-frame)")
+	instanceName := flag.String("instance", "", "Name this instance (a-z, 0-9 and -, not digits only); default is the pid. Command mode's --instance targets one instead")
 	flag.Parse()
+	// The name is validated before anything touches the filesystem.
+	id, err := startInstanceID(*instanceName, flagSet("instance"), os.Getpid())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "husk: %v\n", err)
+		os.Exit(2)
+	}
 	if *demo != "" {
 		if *demo != "pubslots" || !*dumpFrame {
 			fmt.Fprintln(os.Stderr, "--demo supports pubslots with --dump-frame")
@@ -89,6 +137,8 @@ func main() {
 		model.logOut = os.Stderr
 	}
 
+	// The runtime directory is resolved once; the Server and Store get the
+	// same string.
 	runtimeDir, err := instance.RuntimeDir()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "husk: runtime directory: %v\n", err)
@@ -97,7 +147,7 @@ func main() {
 	prog := newProgramRef()
 	if *dumpFrame {
 		// runDumpFrame builds the headless program; a host Post waits for it.
-		h, err := newHost(prog, model, strconv.Itoa(os.Getpid()), runtimeDir, []string(*pluginPaths), []string(*pluginDirs))
+		h, err := newHost(prog, model, id, runtimeDir, []string(*pluginPaths), []string(*pluginDirs), host.WithVersion(buildVersion()))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "husk: %v\n", err)
 			os.Exit(1)
@@ -110,7 +160,7 @@ func main() {
 	// it. The model attaches the host before the program runs.
 	p := tea.NewProgram(model)
 	prog.set(p)
-	h, err := newHost(prog, model, strconv.Itoa(os.Getpid()), runtimeDir, []string(*pluginPaths), []string(*pluginDirs))
+	h, err := newHost(prog, model, id, runtimeDir, []string(*pluginPaths), []string(*pluginDirs), host.WithVersion(buildVersion()))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "husk: %v\n", err)
 		os.Exit(1)

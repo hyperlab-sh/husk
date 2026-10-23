@@ -12,8 +12,8 @@ import (
 // shared document across instances. Concurrent disjoint patches must all survive.
 func TestReviewConfigPatchAcrossInstancesPreservesAllKeys(t *testing.T) {
 	e := fixture(t)
-	a := e.open(t, "one", true, nil)
-	b := e.open(t, "two", true, nil)
+	a := e.open(t, "one", nil)
+	b := e.open(t, "two", nil)
 	writeConfig(t, a, []string{"config.json"}, `{}`)
 	start := make(chan struct{})
 	var wg sync.WaitGroup

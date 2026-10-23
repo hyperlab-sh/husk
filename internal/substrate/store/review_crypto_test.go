@@ -13,7 +13,7 @@ import (
 func TestReviewKeyringOutageDoesNotMintFallback(t *testing.T) {
 	e := fixture(t)
 	ring := &memoryKeyring{}
-	first := e.open(t, "one", true, func(o *Options) { o.Keyring = ring })
+	first := e.open(t, "one", func(o *Options) { o.Keyring = ring })
 	doc, _ := first.Secrets("old")
 	if err := doc.Put("token", []byte("original")); err != nil {
 		t.Fatal(err)
@@ -22,7 +22,7 @@ func TestReviewKeyringOutageDoesNotMintFallback(t *testing.T) {
 	ring.mu.Lock()
 	ring.unavailable = true
 	ring.mu.Unlock()
-	outage := e.open(t, "two", true, func(o *Options) { o.Keyring = ring })
+	outage := e.open(t, "two", func(o *Options) { o.Keyring = ring })
 	newDoc, _ := outage.Secrets("new")
 	if err := newDoc.Put("token", []byte("new")); !errors.Is(err, ErrUnavailable) {
 		t.Errorf("keyring outage must be unavailable, got %v", err)
@@ -45,7 +45,7 @@ func TestReviewKeyringOutageDoesNotMintFallback(t *testing.T) {
 	ring.mu.Lock()
 	ring.unavailable = false
 	ring.mu.Unlock()
-	recovered := e.open(t, "three", true, func(o *Options) { o.Keyring = ring })
+	recovered := e.open(t, "three", func(o *Options) { o.Keyring = ring })
 	oldDoc, _ := recovered.Secrets("old")
 	value, ok, err := oldDoc.Get("token")
 	if err != nil || !ok || !bytes.Equal(value, []byte("original")) {
@@ -57,13 +57,13 @@ func TestReviewKeyringOutageDoesNotMintFallback(t *testing.T) {
 func TestReviewFallbackDiagnosedAtOpen(t *testing.T) {
 	e := fixture(t)
 	ring := &memoryKeyring{setFailure: true}
-	first := e.open(t, "one", true, func(o *Options) { o.Keyring = ring })
+	first := e.open(t, "one", func(o *Options) { o.Keyring = ring })
 	doc, _ := first.Secrets("secrets")
 	if err := doc.Put("token", []byte("value")); err != nil {
 		t.Fatal(err)
 	}
 	first.Close(context.Background())
-	next := e.open(t, "two", true, func(o *Options) { o.Keyring = ring })
+	next := e.open(t, "two", func(o *Options) { o.Keyring = ring })
 	next.mu.Lock()
 	fallback := next.health.KeyringFallback
 	next.mu.Unlock()

@@ -20,10 +20,10 @@ import (
 func TestReviewLiveAndRecentLogsAreProtected(t *testing.T) {
 	e := fixture(t)
 	var pings atomic.Int32
-	s := e.open(t, "notes", true, func(o *Options) {
+	s := e.open(t, "notes", func(o *Options) {
 		o.InstanceDeps = &instance.Deps{Ping: func(string) error { pings.Add(1); return nil }}
 	})
-	if err := instance.Register(s.RuntimeDir(), instance.Entry{ID: "alive", Name: "alive", PID: os.Getpid(), Socket: instance.SocketPath(s.RuntimeDir(), "alive"), StartedAt: e.clock.Now(), ProtocolVersion: "2.0"}); err != nil {
+	if err := instance.Register(s.RuntimeDir(), instance.Entry{ID: "alive", PID: os.Getpid(), Socket: instance.SocketPath(s.RuntimeDir(), "alive"), StartedAt: e.clock.Now(), ProtocolVersion: "2.0"}); err != nil {
 		t.Fatal(err)
 	}
 	writeLog := func(name string, age time.Duration, content string) string {
@@ -58,7 +58,7 @@ func TestReviewLiveAndRecentLogsAreProtected(t *testing.T) {
 // Finding 5: user clear is local; uninstall alone spans every named instance.
 func TestReviewClearIsLocalAndUninstallIsGlobal(t *testing.T) {
 	e := fixture(t)
-	s := e.open(t, "one", true, nil)
+	s := e.open(t, "one", nil)
 	keys := []Key{{Scope: state.ScopeUser, Path: []string{"slices", "plugin.state", "current.json"}}, {Scope: state.ScopeInstance, Instance: "one", Path: []string{"slices", "plugin.state", "current.json"}}, {Scope: state.ScopeWorkspace, Instance: "one", Path: []string{"plugin.state", "current.json"}}, {Scope: state.ScopeInstance, Instance: "two", Path: []string{"slices", "plugin.state", "current.json"}}, {Scope: state.ScopeWorkspace, Instance: "two", Path: []string{"plugin.state", "current.json"}}}
 	for _, k := range keys {
 		data, _ := json.Marshal(envelope{Version: 1, Namespace: "plugin.state", Scope: k.Scope, Instance: k.Instance, WrittenAt: e.clock.Now(), Value: []byte(`{"keep":true}`)})
@@ -91,7 +91,7 @@ func TestReviewClearIsLocalAndUninstallIsGlobal(t *testing.T) {
 // Finding 9: an unlink between ReadDir and Info is not a failed GC pass.
 func TestReviewGCContinuesWhenFileDisappears(t *testing.T) {
 	e := fixture(t)
-	s := e.open(t, "notes", true, nil)
+	s := e.open(t, "notes", nil)
 	victim := filepath.Join(s.paths.Data, "gone")
 	if err := os.WriteFile(victim, []byte("gone"), 0600); err != nil {
 		t.Fatal(err)
@@ -114,13 +114,13 @@ func TestReviewGCContinuesWhenFileDisappears(t *testing.T) {
 // Finding 10: readable malformed metadata is evidence, not a startup blocker.
 func TestReviewCorruptMetadataIsQuarantined(t *testing.T) {
 	e := fixture(t)
-	s := e.open(t, "notes", true, nil)
+	s := e.open(t, "notes", nil)
 	s.Close(context.Background())
 	k := Key{Scope: state.ScopeInstance, Instance: "notes", Path: []string{"meta.json"}}
 	if err := s.source.Put(context.Background(), k, []byte("{bad metadata")); err != nil {
 		t.Fatal(err)
 	}
-	next := e.open(t, "notes", true, nil)
+	next := e.open(t, "notes", nil)
 	data, _, err := next.source.Get(context.Background(), k)
 	if err != nil || !json.Valid(data) {
 		t.Fatal("metadata not replaced", err)
@@ -134,7 +134,7 @@ func TestReviewCorruptMetadataIsQuarantined(t *testing.T) {
 // Finding 11: denied reads are unavailable, never proof that bytes are corrupt.
 func TestReviewUnreadableSliceIsNotQuarantined(t *testing.T) {
 	e := fixture(t)
-	s := e.open(t, "notes", true, nil)
+	s := e.open(t, "notes", nil)
 	s.Close(context.Background())
 	k := Key{Scope: state.ScopeInstance, Instance: "notes", Path: []string{"slices", "plugin.state", "current.json"}}
 	data, _ := json.Marshal(envelope{Version: 1, Namespace: "plugin.state", Scope: k.Scope, Instance: k.Instance, Value: []byte(`{"safe":true}`)})
@@ -145,7 +145,7 @@ func TestReviewUnreadableSliceIsNotQuarantined(t *testing.T) {
 	if err := os.Chmod(p, 0644); err != nil {
 		t.Fatal(err)
 	}
-	next := e.open(t, "notes", true, nil)
+	next := e.open(t, "notes", nil)
 	actual, err := os.ReadFile(p)
 	if err != nil || !bytes.Equal(actual, data) {
 		t.Error("unreadable slice was moved or replaced", err)
@@ -170,7 +170,7 @@ func TestReviewUnreadableSliceIsNotQuarantined(t *testing.T) {
 // Finding 12: a substring in an unrelated hidden filename does not confer ownership.
 func TestReviewGCSweepsOnlyGeneratedTempNames(t *testing.T) {
 	e := fixture(t)
-	s := e.open(t, "notes", true, nil)
+	s := e.open(t, "notes", nil)
 	f, err := os.CreateTemp(s.paths.Data, ".config.json.tmp-")
 	if err != nil {
 		t.Fatal(err)
@@ -204,8 +204,8 @@ func TestReviewOwnerOnlyRuntimeModeIsAccepted(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.Chmod(runtime, 0700)
-	opts := e.opts("notes", true)
-	opts.Env.RuntimeDir = func() (string, error) { return runtime, nil }
+	opts := e.opts("notes")
+	opts.RuntimeDir = runtime
 	s, err := Open(opts)
 	if err != nil {
 		t.Fatal("owner-only runtime rejected", err)

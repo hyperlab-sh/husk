@@ -299,7 +299,7 @@ func discover(opts ResolveOptions) (Resolved, error) {
 		}
 		return Resolved{}, &Error{
 			Kind:    KindTransport,
-			Message: fmt.Sprintf("%d %s registered but none answered within %s: %s", len(ids), noun, DiscoveryPingTimeout, strings.Join(ids, ", ")),
+			Message: fmt.Sprintf("%d %s registered but none answered within %s: %s", len(ids), noun, ProbeTimeout, strings.Join(ids, ", ")),
 			Skipped: skipped,
 		}
 	default:

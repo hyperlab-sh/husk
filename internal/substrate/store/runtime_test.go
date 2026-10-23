@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,33 +9,74 @@ import (
 	"github.com/hyperlab-sh/husk/internal/instance"
 )
 
-func TestPublicOpenAndInstanceSocketDelegation(t *testing.T) {
+func TestOpenTakesRuntimeDirFromItsOpener(t *testing.T) {
 	e := fixture(t)
-	opts := e.opts("notes", true)
-	called := false
-	opts.Env.RuntimeDir = func() (string, error) { called = true; p := filepath.Join(e.root, "runtime"); return p, privateDir(p) }
+	opts := e.opts("notes")
+	opts.RuntimeDir = filepath.Join(e.root, "runtime")
 	s, err := Open(opts)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Close(context.Background())
-	if !called || s.RuntimeDir() != filepath.Join(e.root, "runtime") || s.SocketPath() != instance.SocketPath(s.RuntimeDir(), "notes") {
-		t.Fatal("runtime/socket delegation failed")
+	if s.RuntimeDir() != opts.RuntimeDir || s.SocketPath() != instance.SocketPath(opts.RuntimeDir, "notes") {
+		t.Fatal("runtime/socket delegation failed", s.RuntimeDir(), s.SocketPath())
 	}
 }
-func TestPublicOpenRejectsRuntimeFailureAndUnsafeDirectory(t *testing.T) {
+
+// Store resolves nothing itself: a missing runtime directory is the opener's
+// error, and Store creates none.
+func TestOpenRejectsMissingAndUnsafeRuntimeDirectory(t *testing.T) {
 	e := fixture(t)
-	opts := e.opts("notes", true)
-	want := errors.New("runtime refused")
-	opts.Env.RuntimeDir = func() (string, error) { return "", want }
-	if _, err := Open(opts); !errors.Is(err, want) {
-		t.Fatal("runtime error lost", err)
+	opts := e.opts("notes")
+	opts.RuntimeDir = filepath.Join(e.root, "absent")
+	if _, err := Open(opts); err == nil {
+		t.Fatal("missing runtime dir accepted")
+	}
+	if _, err := os.Lstat(opts.RuntimeDir); !os.IsNotExist(err) {
+		t.Fatal("Store created the runtime dir", err)
 	}
 	if err := os.Chmod(e.root, 0755); err != nil {
 		t.Fatal(err)
 	}
-	opts.Env.RuntimeDir = func() (string, error) { return e.root, nil } // Explicitly non-private, independent of the process umask.
+	opts.RuntimeDir = e.root // Explicitly non-private, independent of the process umask.
 	if _, err := Open(opts); err == nil {
 		t.Fatal("unsafe runtime accepted")
+	}
+}
+
+// An empty RuntimeDir means no instance is registered: Open succeeds, nothing
+// is created, SocketPath is empty and log GC protects only the caller's id.
+func TestOpenWithoutRuntimeDirMeansNoInstanceRegistered(t *testing.T) {
+	e := fixture(t)
+	opts := e.opts("notes")
+	opts.RuntimeDir = ""
+	pings := 0
+	opts.InstanceDeps = &instance.Deps{Ping: func(string) error { pings++; return nil }}
+	s, err := Open(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close(context.Background())
+	if s.RuntimeDir() != "" || s.SocketPath() != "" {
+		t.Fatal("expected no runtime paths", s.RuntimeDir(), s.SocketPath())
+	}
+	logs := filepath.Join(s.Paths().State, "logs")
+	for _, id := range []string{"notes", "other"} {
+		if err := os.MkdirAll(filepath.Join(logs, id), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	report := &GCReport{}
+	s.collectLogs(context.Background(), report)
+	if pings != 0 || len(report.Problems) != 0 {
+		t.Fatal("no runtime dir must mean no survey", pings, report.Problems)
+	}
+}
+
+func TestInstanceRefNamedIsDerivedFromTheID(t *testing.T) {
+	for id, want := range map[string]bool{"notes": true, "a-1": true, "4242": false, "": false} {
+		if got := (InstanceRef{ID: id}).Named(); got != want {
+			t.Errorf("Named(%q) = %v, want %v", id, got, want)
+		}
 	}
 }

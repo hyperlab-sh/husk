@@ -24,7 +24,7 @@ func TestPremergeTTLIdenticalValueAfterExpiry(t *testing.T) {
 	for _, mode := range []string{"hydrate", "gc", "before-gc"} {
 		t.Run(mode, func(t *testing.T) {
 			e := fixture(t)
-			s := e.open(t, "notes", true, nil)
+			s := e.open(t, "notes", nil)
 			st := attach(t, s)
 			r := state.Retention{Policy: state.TTL, TTL: time.Minute}
 			h := slice(t, st, state.ScopeInstance, r)
@@ -120,7 +120,7 @@ func TestPremergeKeyringDefiniteAbsenceVersusTransient(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			e := fixture(t)
 			ring := &classifiedKeyring{getErr: tt.err}
-			s := e.open(t, "notes", true, func(o *Options) { o.Keyring = ring })
+			s := e.open(t, "notes", func(o *Options) { o.Keyring = ring })
 			doc, _ := s.Secrets("example")
 			err := doc.Put("token", []byte("value"))
 			_, statErr := os.Stat(filepath.Join(s.paths.Data, "keys", "identity.txt"))
@@ -149,7 +149,7 @@ func TestPremergeKeyringDefiniteAbsenceVersusTransient(t *testing.T) {
 
 func TestPremergePatchLockIsHidden(t *testing.T) {
 	e := fixture(t)
-	s := e.open(t, "notes", true, nil)
+	s := e.open(t, "notes", nil)
 	if err := s.Patch("config", LayerUser, "", Doc{"key": "value"}); err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestPremergePatchLockIsHidden(t *testing.T) {
 func TestPremergeSealedNamespacesPreventNewIdentity(t *testing.T) {
 	e := fixture(t)
 	ring := &memoryKeyring{}
-	first := e.open(t, "one", true, func(o *Options) { o.Keyring = ring })
+	first := e.open(t, "one", func(o *Options) { o.Keyring = ring })
 	original, _ := first.Secrets("old")
 	if err := original.Put("token", []byte("original")); err != nil {
 		t.Fatal(err)
@@ -179,7 +179,7 @@ func TestPremergeSealedNamespacesPreventNewIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	absent := &classifiedKeyring{getErr: dbus.NewError("org.freedesktop.DBus.Error.ServiceUnknown", nil)}
-	outage := e.open(t, "two", true, func(o *Options) { o.Keyring = absent })
+	outage := e.open(t, "two", func(o *Options) { o.Keyring = absent })
 	fresh, _ := outage.Secrets("new")
 	if err = fresh.Put("token", []byte("new")); !errors.Is(err, ErrUnavailable) {
 		t.Errorf("late provider must fail unavailable, got %v", err)
@@ -208,7 +208,7 @@ func TestPremergeSealedNamespacesPreventNewIdentity(t *testing.T) {
 	if err = outage.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	recovered := e.open(t, "three", true, func(o *Options) { o.Keyring = ring })
+	recovered := e.open(t, "three", func(o *Options) { o.Keyring = ring })
 	old, _ := recovered.Secrets("old")
 	value, ok, err := old.Get("token")
 	if err != nil || !ok || string(value) != "original" {

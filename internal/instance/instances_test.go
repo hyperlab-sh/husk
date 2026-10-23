@@ -52,8 +52,9 @@ func TestValidNameAllDigitsMessage(t *testing.T) {
 	if err == nil {
 		t.Fatal("all-digits name must be rejected")
 	}
-	if !strings.Contains(err.Error(), "pid") {
-		t.Fatalf("all-digits error should mention the pid collision, got: %v", err)
+	want := `invalid instance name "4242": use [a-z0-9][a-z0-9-]*, at most 32 bytes, not digits only`
+	if err.Error() != want {
+		t.Fatalf("all-digits error = %q, want the spec's message %q", err, want)
 	}
 }
 
@@ -211,7 +212,7 @@ func TestRuntimeDirRefusesUnsafeFallback(t *testing.T) {
 }
 
 // fixedTime is the fixed clock reading every fixture entry carries, so
-// RemoveIfStale comparisons are exact.
+// RecoverStale comparisons are exact.
 func fixedTime() time.Time { return time.Date(2026, 10, 22, 6, 0, 0, 0, time.UTC) }
 
 func TestEntryJSONShape(t *testing.T) {
@@ -238,20 +239,24 @@ func TestEntryJSONShape(t *testing.T) {
 			t.Errorf("pid entry JSON lacks %q: %v", k, fields)
 		}
 	}
+	// host_version is always present, "" when the build carries none; the
+	// entry has no name: the id's spelling says whether it is one.
+	if v, ok := fields["host_version"]; !ok || v != "" {
+		t.Errorf("pid entry host_version = %v (present %v), want \"\"", v, ok)
+	}
 	for _, k := range []string{"name", "husk_version"} {
 		if _, ok := fields[k]; ok {
-			t.Errorf("pid entry JSON should omit %q: %v", k, fields)
+			t.Errorf("entry JSON should not carry %q: %v", k, fields)
 		}
 	}
 
 	named := Entry{
 		ID:              "notes",
-		Name:            "notes",
 		PID:             5120,
 		Socket:          SocketPath(dir, "notes"),
 		StartedAt:       fixedTime(),
 		ProtocolVersion: "2.0",
-		HuskVersion:     "0.9.0",
+		HostVersion:     "0.9.0",
 	}
 	if err := Register(dir, named); err != nil {
 		t.Fatalf("Register: %v", err)
@@ -260,19 +265,14 @@ func TestEntryJSONShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"name", "husk_version"} {
-		if _, ok := fields[k]; !ok {
-			t.Errorf("named entry JSON lacks %q: %v", k, fields)
-		}
-	}
-	if !reflect.DeepEqual(fields["name"], "notes") {
-		t.Errorf("name field = %v, want notes", fields["name"])
+	if !reflect.DeepEqual(fields["host_version"], "0.9.0") {
+		t.Errorf("host_version field = %v, want 0.9.0", fields["host_version"])
 	}
 }
 
 func TestRegisterEntryModeAndNoTempLeftovers(t *testing.T) {
 	dir := runDir(t)
-	e := Entry{ID: "notes", Name: "notes", PID: 5120, Socket: SocketPath(dir, "notes"), StartedAt: fixedTime(), ProtocolVersion: "2.0"}
+	e := Entry{ID: "notes", PID: 5120, Socket: SocketPath(dir, "notes"), StartedAt: fixedTime(), ProtocolVersion: "2.0"}
 	if err := Register(dir, e); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
@@ -343,7 +343,7 @@ func TestRegisterValidation(t *testing.T) {
 	}{
 		{"invalid id", Entry{ID: "Foo_1", PID: 1, Socket: SocketPath(dir, "Foo_1")}},
 		{"empty id", Entry{ID: "", PID: 1, Socket: SocketPath(dir, "")}},
-		{"all digits name", Entry{ID: "notes", Name: "4242", PID: 1, Socket: SocketPath(dir, "notes")}},
+		{"entry over the size cap", Entry{ID: "notes", PID: 1, Socket: SocketPath(dir, "notes"), HostVersion: strings.Repeat("x", MaxEntryBytes)}},
 		{"zero pid", Entry{ID: "notes", PID: 0, Socket: SocketPath(dir, "notes")}},
 		{"empty socket", Entry{ID: "notes", PID: 1, Socket: ""}},
 		{"socket elsewhere", Entry{ID: "notes", PID: 1, Socket: "/tmp/other.sock"}},
@@ -361,11 +361,11 @@ func TestRegisterReplacesStaleEntry(t *testing.T) {
 	// Whatever entry is on disk belongs to a dead run — the claim on the
 	// name was made by binding the socket — so Register simply replaces it.
 	dir := runDir(t)
-	stale := Entry{ID: "notes", Name: "notes", PID: 111, Socket: SocketPath(dir, "notes"), StartedAt: fixedTime(), ProtocolVersion: "1.5"}
+	stale := Entry{ID: "notes", PID: 111, Socket: SocketPath(dir, "notes"), StartedAt: fixedTime(), ProtocolVersion: "1.5"}
 	if err := writeEntryFile(dir, stale); err != nil {
 		t.Fatal(err)
 	}
-	next := Entry{ID: "notes", Name: "notes", PID: 222, Socket: SocketPath(dir, "notes"), ProtocolVersion: "2.0"}
+	next := Entry{ID: "notes", PID: 222, Socket: SocketPath(dir, "notes"), ProtocolVersion: "2.0"}
 	if err := Register(dir, next); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
@@ -383,7 +383,7 @@ func TestRegisterReplacesCorruptEntry(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "notes.json"), []byte("not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	e := Entry{ID: "notes", Name: "notes", PID: 222, Socket: SocketPath(dir, "notes"), StartedAt: fixedTime(), ProtocolVersion: "2.0"}
+	e := Entry{ID: "notes", PID: 222, Socket: SocketPath(dir, "notes"), StartedAt: fixedTime(), ProtocolVersion: "2.0"}
 	if err := Register(dir, e); err != nil {
 		t.Fatalf("Register over a corrupt entry: %v", err)
 	}
@@ -396,7 +396,7 @@ func TestRegisterSamePidOverLiveEntryReplaces(t *testing.T) {
 	// The Server's own re-registration: bind made the name ours, so an
 	// entry with our own pid is replaced without a probe.
 	dir := runDir(t)
-	mine := Entry{ID: "notes", Name: "notes", PID: 222, Socket: SocketPath(dir, "notes"), StartedAt: fixedTime(), ProtocolVersion: "1.5"}
+	mine := Entry{ID: "notes", PID: 222, Socket: SocketPath(dir, "notes"), StartedAt: fixedTime(), ProtocolVersion: "1.5"}
 	if err := writeEntryFile(dir, mine); err != nil {
 		t.Fatal(err)
 	}
@@ -414,39 +414,6 @@ func TestRegisterSamePidOverLiveEntryReplaces(t *testing.T) {
 	}
 }
 
-func TestUnregister(t *testing.T) {
-	dir := t.TempDir()
-	for _, f := range []string{"notes.json", "notes.sock"} {
-		if err := os.WriteFile(filepath.Join(dir, f), []byte("x"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := Unregister(dir, "notes"); err != nil {
-		t.Fatalf("Unregister: %v", err)
-	}
-	for _, f := range []string{"notes.json", "notes.sock"} {
-		if _, err := os.Lstat(filepath.Join(dir, f)); err == nil {
-			t.Errorf("%s still exists", f)
-		}
-	}
-	if err := Unregister(dir, "notes"); err != nil {
-		t.Fatalf("second Unregister should be a no-op, got %v", err)
-	}
-}
-
-func TestUnregisterRemovesSocketWithoutEntry(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "notes.sock"), []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := Unregister(dir, "notes"); err != nil {
-		t.Fatalf("Unregister: %v", err)
-	}
-	if _, err := os.Lstat(SocketPath(dir, "notes")); err == nil {
-		t.Fatal("socket still exists")
-	}
-}
-
 func TestRegisterCleansOwnTempLeftovers(t *testing.T) {
 	// A crashed Register leaves ".<id>.json.tmp-*" behind; the next
 	// Register for the same id sweeps them. Other ids' temps are not ours
@@ -457,7 +424,7 @@ func TestRegisterCleansOwnTempLeftovers(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	e := Entry{ID: "notes", Name: "notes", PID: 5120, Socket: SocketPath(dir, "notes"), StartedAt: fixedTime(), ProtocolVersion: "2.0"}
+	e := Entry{ID: "notes", PID: 5120, Socket: SocketPath(dir, "notes"), StartedAt: fixedTime(), ProtocolVersion: "2.0"}
 	if err := Register(dir, e); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
@@ -469,60 +436,10 @@ func TestRegisterCleansOwnTempLeftovers(t *testing.T) {
 	}
 }
 
-func TestRemoveIfStale(t *testing.T) {
-	dir := t.TempDir()
-	base := func(pid int, at time.Time) Entry {
-		return Entry{ID: "notes", Name: "notes", PID: pid, Socket: SocketPath(dir, "notes"), StartedAt: at, ProtocolVersion: "2.0"}
-	}
-	cases := []struct {
-		label    string
-		file     Entry
-		pinged   Entry
-		wantGone bool
-	}{
-		{"same pid and started_at", base(111, fixedTime()), base(111, fixedTime()), true},
-		{"different pid", base(111, fixedTime()), base(222, fixedTime()), false},
-		{"different started_at", base(111, fixedTime()), base(111, fixedTime().Add(time.Minute)), false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.label, func(t *testing.T) {
-			os.Remove(filepath.Join(dir, "notes.json"))
-			os.Remove(filepath.Join(dir, "notes.sock"))
-			if err := writeEntryFile(dir, tc.file); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(filepath.Join(dir, "notes.sock"), []byte("x"), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			if err := RemoveIfStale(dir, tc.pinged); err != nil {
-				t.Fatalf("RemoveIfStale: %v", err)
-			}
-			_, err := os.Lstat(EntryPath(dir, "notes"))
-			gone := err != nil
-			if gone != tc.wantGone {
-				t.Fatalf("entry gone = %v, want %v", gone, tc.wantGone)
-			}
-			// The socket is never removed by stale cleanup: it belongs to
-			// whoever bound it, possibly the next instance of the same name.
-			if _, err := os.Lstat(SocketPath(dir, "notes")); err != nil {
-				t.Fatal("stale cleanup must leave the socket alone")
-			}
-		})
-	}
-}
-
-func TestRemoveIfStaleMissingEntryIsNoError(t *testing.T) {
-	dir := t.TempDir()
-	e := Entry{ID: "ghost", PID: 1, Socket: SocketPath(dir, "ghost"), StartedAt: fixedTime()}
-	if err := RemoveIfStale(dir, e); err != nil {
-		t.Fatalf("RemoveIfStale on a missing entry: %v", err)
-	}
-}
-
 func TestList(t *testing.T) {
 	dir := t.TempDir()
 	entries := []Entry{
-		{ID: "notes", Name: "notes", PID: 5120, Socket: SocketPath(dir, "notes"), StartedAt: fixedTime(), ProtocolVersion: "2.0"},
+		{ID: "notes", PID: 5120, Socket: SocketPath(dir, "notes"), StartedAt: fixedTime(), ProtocolVersion: "2.0"},
 		{ID: "4242", PID: 4242, Socket: SocketPath(dir, "4242"), StartedAt: fixedTime(), ProtocolVersion: "2.0"},
 	}
 	for _, e := range entries {
@@ -605,7 +522,7 @@ func TestUnregisterRejectsBadID(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"../escape", "", "Foo_1", "notes/x"} {
-		if err := Unregister(dir, id); err == nil {
+		if err := Unregister(dir, id, Identity{}); err == nil {
 			t.Errorf("Unregister(%q) should be refused", id)
 		}
 	}

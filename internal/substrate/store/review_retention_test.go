@@ -18,7 +18,7 @@ func TestReviewHydratedRegistrationDoesNotRewrite(t *testing.T) {
 	for _, policy := range []state.Retention{{Policy: state.TTL, TTL: time.Minute}, {Policy: state.KeepLastN, N: 3}} {
 		t.Run(string(policy.Policy), func(t *testing.T) {
 			e := fixture(t)
-			s := e.open(t, "notes", true, nil)
+			s := e.open(t, "notes", nil)
 			st := attach(t, s)
 			h := slice(t, st, state.ScopeInstance, policy)
 			set(t, h, `{"n":1}`)
@@ -37,7 +37,7 @@ func TestReviewHydratedRegistrationDoesNotRewrite(t *testing.T) {
 			}
 			s.Close(context.Background())
 			e.clock.Advance(30 * time.Second)
-			next := e.open(t, "notes", true, nil)
+			next := e.open(t, "notes", nil)
 			ns := attach(t, next)
 			nh := slice(t, ns, state.ScopeInstance, policy)
 			if !ns.Snapshot().Slices[nh.Namespace()].Hydrated {
@@ -101,7 +101,7 @@ func pauseNextWrite(t *testing.T, s *Store, failure error) (*pausedWriteSource, 
 // Finding 6: a failed old write must not suppress the next value's timer.
 func TestReviewFailureMarksOnlyItsOwnGeneration(t *testing.T) {
 	e := fixture(t)
-	s := e.open(t, "notes", true, nil)
+	s := e.open(t, "notes", nil)
 	st := attach(t, s)
 	h := slice(t, st, state.ScopeInstance, state.Retention{Policy: state.KeepLatest})
 	writer, release := pauseNextWrite(t, s, errors.New("injected old-generation failure"))
@@ -129,7 +129,7 @@ func TestReviewFailureMarksOnlyItsOwnGeneration(t *testing.T) {
 // Finding 1: returning to the old baseline during I/O must not lose that value.
 func TestReviewReturnToBaselineDuringInflightWrite(t *testing.T) {
 	e := fixture(t)
-	s := e.open(t, "notes", true, nil)
+	s := e.open(t, "notes", nil)
 	st := attach(t, s)
 	h := slice(t, st, state.ScopeInstance, state.Retention{Policy: state.KeepLatest})
 	set(t, h, `{"n":0}`)
@@ -162,7 +162,7 @@ func TestReviewUnregisterPersistsPendingValue(t *testing.T) {
 	for _, policy := range []state.Retention{{Policy: state.KeepLatest}, {Policy: state.KeepLastN, N: 2}, {Policy: state.TTL, TTL: time.Minute}, {Policy: state.Manual}} {
 		t.Run(string(policy.Policy), func(t *testing.T) {
 			e := fixture(t)
-			s := e.open(t, "notes", true, nil)
+			s := e.open(t, "notes", nil)
 			st := attach(t, s)
 			h := slice(t, st, state.ScopeInstance, policy)
 			set(t, h, `{"last":true}`)
@@ -188,7 +188,7 @@ func TestReviewUnregisterPersistsPendingValue(t *testing.T) {
 // Finding 4: the evidence retention window starts when quarantine happens.
 func TestReviewQuarantineRefreshesItsAge(t *testing.T) {
 	e := fixture(t)
-	s := e.open(t, "notes", true, nil)
+	s := e.open(t, "notes", nil)
 	s.Close(context.Background())
 	key := Key{Scope: state.ScopeInstance, Instance: "notes", Path: []string{"slices", "plugin.state", "current.json"}}
 	if err := s.source.Put(context.Background(), key, []byte("{broken")); err != nil {
@@ -199,7 +199,7 @@ func TestReviewQuarantineRefreshesItsAge(t *testing.T) {
 	if err := os.Chtimes(p, old, old); err != nil {
 		t.Fatal(err)
 	}
-	next := e.open(t, "notes", true, nil)
+	next := e.open(t, "notes", nil)
 	report, err := next.Check(context.Background())
 	if err != nil || len(report.Quarantined) != 1 {
 		t.Fatal("new evidence collected immediately", report, err)

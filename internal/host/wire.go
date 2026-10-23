@@ -38,8 +38,8 @@ func (r *Root) buildServer() error {
 	if entry.StartedAt.IsZero() {
 		entry.StartedAt = r.instStart
 	}
-	if entry.HuskVersion == "" {
-		entry.HuskVersion = r.opts.version
+	if entry.HostVersion == "" {
+		entry.HostVersion = r.opts.version
 	}
 	scfg := server.Config{
 		InstanceID: r.cfg.InstanceID,

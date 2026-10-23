@@ -259,10 +259,10 @@ func specID(s *manifest.Spec) string {
 
 func (r *Root) buildStore() error {
 	s, err := store.Open(store.Options{
-		Instance: store.InstanceRef{ID: r.cfg.InstanceID, Named: instance.ValidName(r.cfg.InstanceID) == nil},
-		Env:      store.Env{RuntimeDir: func() (string, error) { return r.cfg.RuntimeDir, nil }},
-		Clock:    storeClock{r.clock},
-		Post:     r.post,
+		Instance:   store.InstanceRef{ID: r.cfg.InstanceID},
+		RuntimeDir: r.cfg.RuntimeDir,
+		Clock:      storeClock{r.clock},
+		Post:       r.post,
 	})
 	if err != nil {
 		return err

@@ -12,7 +12,7 @@ import (
 
 func TestNonPersistentAndAnonymousWorkspaceNeverWritten(t *testing.T) {
 	e := fixture(t)
-	s := e.open(t, "4242", false, nil)
+	s := e.open(t, "4242", nil)
 	st := attach(t, s)
 	ephemeral, err := st.Register(state.Spec{Namespace: "plugin.ephemeral", Owner: "plugin", Scope: state.ScopeUser})
 	if err != nil {

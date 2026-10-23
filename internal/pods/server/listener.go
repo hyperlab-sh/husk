@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/hyperlab-sh/husk/internal/instance"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
@@ -24,14 +25,14 @@ type SocketServer struct {
 	listener                      *net.UnixListener
 	conns                         map[*connection]struct{}
 	attempted, closed, registered bool
-	owned                         os.FileInfo
+	ident                         instance.Identity
 	closeErr                      error
 	nextID                        uint64
 	wg                            sync.WaitGroup
 	diagnosticPosting             atomic.Bool
 	peer                          func(*net.UnixConn) (uint32, error)
 	probe                         func(string) error
-	recoveryLock                  func(string) (func() error, error)
+	lockWait                      time.Duration
 }
 
 // New constructs an inert server. Start validates configuration before binding.
@@ -45,7 +46,7 @@ func New(cfg Config) *SocketServer {
 	if cfg.Clock == nil {
 		cfg.Clock = systemClock{}
 	}
-	return &SocketServer{cfg: cfg, handlers: make(map[string]Handler), conns: make(map[*connection]struct{}), peer: peerUID, probe: func(path string) error { return instance.DefaultPing(path, instance.DiscoveryPingTimeout) }, recoveryLock: lockRecovery}
+	return &SocketServer{cfg: cfg, handlers: make(map[string]Handler), conns: make(map[*connection]struct{}), peer: peerUID, probe: instance.Probe}
 }
 
 // Handle registers prefix (without a trailing dot) once, before Start.
@@ -104,42 +105,34 @@ func (s *SocketServer) Start() error {
 	if e.PID == 0 {
 		e.PID = os.Getpid()
 	}
-	if instance.ValidName(e.ID) == nil {
-		if e.Name != "" && e.Name != e.ID {
-			return errors.New("server: registration name differs from id")
-		}
-		e.Name = e.ID
-	} else if e.Name != "" {
-		return errors.New("server: pid instance cannot have a name")
-	}
 	if e.StartedAt.IsZero() {
 		e.StartedAt = s.cfg.Clock.Now()
 	}
 	e.ProtocolVersion = protocol.Version
-	ln, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
-	if err != nil {
-		if !errors.Is(err, os.ErrExist) && !errors.Is(err, syscall.EADDRINUSE) {
+	ln, err := bind(path)
+	if inUse(err) {
+		if err = s.reclaim(path); err != nil {
 			return err
 		}
-		if pingErr := s.probe(path); pingErr == nil {
+		ln, err = bind(path)
+		if inUse(err) {
 			return fmt.Errorf("instance %q is already running", e.ID)
-		} else if !errors.Is(pingErr, instance.ErrSocketRefused) {
-			return fmt.Errorf("instance %q cannot be claimed: %w", e.ID, pingErr)
 		}
-		ln, err = s.recoverStale(path)
-		if err != nil {
-			return err
-		}
+	}
+	if err != nil {
+		return err
 	}
 	// Explicit unlink while the listener still holds its claim avoids Close
 	// automatically deleting a replacement socket that bound after our unlink.
 	ln.SetUnlinkOnClose(false)
 	rollback := func(err error) error { _ = os.Remove(path); _ = ln.Close(); return err }
-	if err := os.Chmod(path, 0600); err != nil {
+	// The identity is taken from the socket this bind created, right after
+	// the bind, never from one that recovery unlinked.
+	ident, err := instance.SocketIdentity(path)
+	if err != nil {
 		return rollback(err)
 	}
-	owned, err := os.Lstat(path)
-	if err != nil {
+	if err := os.Chmod(path, 0600); err != nil {
 		return rollback(err)
 	}
 	if err := instance.Register(s.cfg.RuntimeDir, e); err != nil {
@@ -147,7 +140,7 @@ func (s *SocketServer) Start() error {
 	}
 	s.cfg.Entry = e
 	s.listener = ln
-	s.owned = owned
+	s.ident = ident
 	s.registered = true
 	s.wg.Add(1)
 	go s.accept()
@@ -206,6 +199,45 @@ func (s *SocketServer) post(id uint64, level, message string) {
 	}
 }
 
+func bind(path string) (*net.UnixListener, error) {
+	return net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+}
+
+func inUse(err error) bool {
+	return err != nil && (errors.Is(err, os.ErrExist) || errors.Is(err, syscall.EADDRINUSE))
+}
+
+// reclaim runs claim step 3 after EADDRINUSE: probe the holder; a reply or a
+// timeout fails the start and removes nothing, while a refused or missing
+// socket goes through instance.RecoverStale, whose re-probe under the
+// directory lock decides again before anything is removed.
+func (s *SocketServer) reclaim(path string) error {
+	id := s.cfg.InstanceID
+	if err := s.holderError(id, instance.ClassOf(s.probe(path))); err != nil {
+		return err
+	}
+	classes, err := instance.RecoverStaleWith(s.cfg.RuntimeDir, []*instance.Entry{{ID: id}},
+		&instance.Deps{Ping: s.probe, LockWait: s.lockWait})
+	if errors.Is(err, instance.ErrLocked) {
+		return fmt.Errorf("runtime dir %s is locked", s.cfg.RuntimeDir)
+	}
+	if err != nil {
+		return err
+	}
+	return s.holderError(id, classes[0])
+}
+
+// holderError is the start failure for a name whose holder is not stale.
+func (s *SocketServer) holderError(id string, class instance.Class) error {
+	switch class {
+	case instance.VerdictLive:
+		return fmt.Errorf("instance %q is already running", id)
+	case instance.VerdictUnresponsive:
+		return fmt.Errorf("instance %q did not answer; it may be busy", id)
+	}
+	return nil
+}
+
 // Close refuses new clients, unregisters while the claim is still held, closes
 // every stream and cancels its handlers. It never waits on handler cooperation.
 func (s *SocketServer) Close() error {
@@ -218,16 +250,7 @@ func (s *SocketServer) Close() error {
 	}
 	s.closed = true
 	if s.registered {
-		current, err := os.Lstat(s.SocketPath())
-		if err == nil && os.SameFile(current, s.owned) {
-			s.closeErr = instance.Unregister(s.cfg.RuntimeDir, s.cfg.InstanceID)
-		} else if os.IsNotExist(err) {
-			s.closeErr = instance.RemoveIfStale(s.cfg.RuntimeDir, s.cfg.Entry)
-		} else if err != nil {
-			s.closeErr = err
-		}
-		// A replacement inode belongs to another owner: leave both its entry
-		// and its socket untouched, even if metadata happens to compare equal.
+		s.closeErr = instance.Unregister(s.cfg.RuntimeDir, s.cfg.InstanceID, s.ident)
 	}
 	ln := s.listener
 	var conns []*connection

@@ -10,7 +10,7 @@ import (
 
 func TestFrozenClockGenerationsAndSameProcessRehydration(t *testing.T) {
 	e := fixture(t)
-	s := e.open(t, "notes", true, nil)
+	s := e.open(t, "notes", nil)
 	st := attach(t, s)
 	r := state.Retention{Policy: state.KeepLastN, N: 2}
 	h := slice(t, st, state.ScopeInstance, r)
@@ -33,7 +33,7 @@ func TestFrozenClockGenerationsAndSameProcessRehydration(t *testing.T) {
 		t.Fatal("same-process hydration stale", got)
 	}
 	s.Close(context.Background())
-	next := e.open(t, "notes", true, nil)
+	next := e.open(t, "notes", nil)
 	ns := attach(t, next)
 	nh := slice(t, ns, state.ScopeInstance, r)
 	if got := string(ns.Snapshot().Slices[nh.Namespace()].Value); got != `{"n":111111111111}` {
@@ -51,7 +51,7 @@ func TestFrozenClockGenerationsAndSameProcessRehydration(t *testing.T) {
 }
 func TestLoweredCapHydratesFallbackAndOwnerStillRuns(t *testing.T) {
 	e := fixture(t)
-	s := e.open(t, "notes", true, nil)
+	s := e.open(t, "notes", nil)
 	st := attach(t, s)
 	h := slice(t, st, state.ScopeInstance, state.Retention{Policy: state.KeepLatest})
 	set(t, h, `{"old":"larger than new cap"}`)
@@ -59,7 +59,7 @@ func TestLoweredCapHydratesFallbackAndOwnerStillRuns(t *testing.T) {
 	if err := s.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	next := e.open(t, "notes", true, nil)
+	next := e.open(t, "notes", nil)
 	ns := attach(t, next)
 	owner, err := ns.Register(state.Spec{Namespace: "plugin.state", Owner: "plugin", Scope: state.ScopeInstance, Persistent: true, Retention: state.Retention{Policy: state.KeepLatest}, MaxBytes: 8})
 	if owner == nil || err == nil || !strings.Contains(err.Error(), "discarded persisted") {
