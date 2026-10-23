@@ -419,7 +419,7 @@ Widget-local keys are not keymap entries. The command palette and the slot inspe
 
 Callers: the CLI (user identity) receives the whole listing. A plugin receives the entries whose `plugin` is its id or whose `action` it owns, plus the entries in state `effective` (so neither shadowed nor tombstones) whose `action` is a `husk.*` host action or the id of a rail item some plugin declares (the service reads rail item ids from the same declared plugin documents it reads action owners from), and only its own problems. The host and rail-item keys are the ones the footer, the rail and the palette already display to everyone, so a plugin that renders help, a tour or a layout overlay can show the same keys; another plugin's own actions and the user's other bindings stay out of its view. Any other caller is denied.
 
-Flags: `--action <id>` and `--focus <surface>` filter entries; `--shadowed` includes shadowed entries (hidden by default); `--problems` prints only the problems.
+Flags are client-side projections in both output formats: `--action <id>` and `--focus <surface>` exact-match entry fields and can be combined; focus selects only surface-scoped entries. `--shadowed` includes entries with `state:"shadowed"` (hidden by default); `--problems` prints only the unfiltered problems and rejects `--action` or `--focus` with exit 2. `keys.list` always receives `{}`. Default JSON is `{"entries":[...filtered],"problems":[...]}`; problems-only JSON is `{"problems":[...]}` and empty arrays are `[]`. Problems table columns are `SEVERITY CODE LAYER KEY SOURCE MESSAGE`. An empty selection prints no table rows. Unrecognized states are displayed verbatim; the CLI computes no liveness or catalog state.
 
 Each entry has a `state`:
 
@@ -445,7 +445,7 @@ n        sidebar-list (files)  files.new            focus-local   plugin files #
 q        global                husk.quit            husk          builtin#0                     effective
 ```
 
-JSON output (the reply `result`):
+JSON output (the reply entries after the client-side filters above):
 
 ```json
 {
@@ -572,6 +572,8 @@ This is the complete list of loader codes, plus `invalid_plugin_catalog`, raised
 - No write path. A keymap changes by editing a file and reloading.
 
 ## Level 2: Migration from today
+
+The read-only `husk keys` command is landed, including filtering, source/state tables and problems-only output. The handler's liveness/action-catalog join for `unavailable` and `unknown_action` remains separate work; the CLI already renders those states when supplied.
 
 | Today (`main`) | Change |
 |---|---|
