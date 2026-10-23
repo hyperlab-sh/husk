@@ -516,6 +516,13 @@ func (co *Coordinator) reload(parent context.Context, reason Reason, f *flight) 
 		}
 		result := make(chan prepared, 1)
 		go func() {
+			if initial, ok := service.(interface {
+				RebuildStartup(context.Context, ReloadInput) (Candidate, Report, error)
+			}); ok && name == "settings" && f.reason == ReasonStartup {
+				candidate, report, err := initial.RebuildStartup(ctx, in)
+				result <- prepared{candidate, report, err}
+				return
+			}
 			candidate, report, err := service.Rebuild(ctx, in)
 			result <- prepared{candidate, report, err}
 		}()
@@ -534,6 +541,12 @@ func (co *Coordinator) reload(parent context.Context, reason Reason, f *flight) 
 		if p.err == nil && p.candidate != nil {
 			p.report = p.candidate.Apply()
 		} else {
+			// Failed startup validation can still initialize Settings' per-key
+			// generation-zero baseline. Apply only here, under the flight bound,
+			// never on the rebuild worker; the failed report still skips Theme.
+			if name == "settings" && f.reason == ReasonStartup && errors.Is(p.err, c.ErrInvalid) && p.candidate != nil {
+				p.candidate.Apply()
+			}
 			p.report.Applied = false
 			p.report.Changed = false
 			p.report.Gen = service.Generation()

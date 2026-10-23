@@ -61,9 +61,6 @@ func TestPluginPathsStartupBaseline(t *testing.T) {
 				}
 				baseline := h.root.rt.Settings.Snapshot()
 				wantPaths, wantDirs := initialPaths, initialDirs
-				if startupInvalid {
-					wantPaths, wantDirs = []string{}, []string{}
-				}
 				if !slices.Equal(baseline.Strings("husk.plugins.paths"), wantPaths) || !slices.Equal(baseline.Strings("husk.plugins.dirs"), wantDirs) {
 					t.Fatal("startup did not serve the expected arrays")
 				}

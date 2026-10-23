@@ -23,6 +23,7 @@ import (
 	"github.com/hyperlab-sh/husk/internal/pods/wrapper"
 	"github.com/hyperlab-sh/husk/internal/services"
 	"github.com/hyperlab-sh/husk/internal/services/secrets"
+	"github.com/hyperlab-sh/husk/internal/services/settings"
 	"github.com/hyperlab-sh/husk/internal/stem/calls"
 	"github.com/hyperlab-sh/husk/internal/stem/dispatcher"
 	"github.com/hyperlab-sh/husk/internal/stem/eventbus"
@@ -416,7 +417,7 @@ func (r *Root) buildServices() error {
 
 // startup performs the one launch-time load, before any manifests are declared.
 // Flight failures and invalid plugin launch settings are fatal; other service
-// validation failures retain defaults.
+// validation failures retain each Settings key's independently validated value.
 func (r *Root) startup() error {
 	reports, err := r.rt.Coordinator.Reload(r.ctx, services.ReasonStartup)
 	r.startupReports = reports
@@ -432,7 +433,7 @@ func (r *Root) startup() error {
 	if startupFatal(reports, err) {
 		return startupError(reports, err)
 	}
-	r.rt.Settings.FreezePluginPaths()
+	r.rt.Settings.FreezeStartConsumed()
 	if problems > 0 {
 		r.log(pods.LogMsg{Level: "warn", Message: fmt.Sprintf("services: startup reload: %d problems", problems)})
 	}
@@ -452,7 +453,7 @@ func startupFatal(reports []services.Report, err error) bool {
 			case "store_error", "timed_out", "cancelled":
 				return true
 			case "invalid_value":
-				if report.Service == "settings" && (p.Key == "husk.plugins.paths" || p.Key == "husk.plugins.dirs") {
+				if report.Service == "settings" && settings.IsStartConsumed(p.Key) {
 					return true
 				}
 			}
