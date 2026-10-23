@@ -83,7 +83,16 @@ func RecoverStaleWith(dir string, entries []*Entry, d *Deps) ([]Class, error) {
 		if classes[i] != VerdictStale {
 			continue
 		}
-		if err := removeEntryIfMatches(dir, e); err != nil {
+		sock := SocketPath(dir, e.ID)
+		// Refuse a path that is not a socket before removing anything: the
+		// entry stays, so every survey meets it and warns again.
+		if !missing[i] {
+			if err := checkSocket(sock); err != nil {
+				errs = append(errs, err)
+				continue
+			}
+		}
+		if err := removeEntryIfMatches(dir, e, d); err != nil {
 			errs = append(errs, err)
 		}
 		// A socket the probe found missing is not removed, whatever lstat
@@ -94,7 +103,7 @@ func RecoverStaleWith(dir string, entries []*Entry, d *Deps) ([]Class, error) {
 		if missing[i] {
 			continue
 		}
-		if err := removeSocket(SocketPath(dir, e.ID)); err != nil {
+		if err := removeSocket(sock, d); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -105,7 +114,7 @@ func RecoverStaleWith(dir string, entries []*Entry, d *Deps) ([]Class, error) {
 // started_at, or whatever it holds when e carries neither. A missing or
 // corrupt file is left alone: a corrupt entry is replaced by the next
 // Register for its id.
-func removeEntryIfMatches(dir string, e *Entry) error {
+func removeEntryIfMatches(dir string, e *Entry, d *Deps) error {
 	cur, err := readEntry(dir, e.ID+".json")
 	if err != nil {
 		return nil
@@ -114,14 +123,15 @@ func removeEntryIfMatches(dir string, e *Entry) error {
 		(cur.PID != e.PID || !cur.StartedAt.Equal(e.StartedAt)) {
 		return nil
 	}
-	if err := os.Remove(EntryPath(dir, e.ID)); err != nil && !os.IsNotExist(err) {
+	if err := d.remove(EntryPath(dir, e.ID)); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return nil
 }
 
-// removeSocket unlinks path only if lstat says it is a socket.
-func removeSocket(path string) error {
+// checkSocket returns nil when path is absent or a socket, a *NotSocketError
+// when it is anything else, and the lstat error when it cannot be inspected.
+func checkSocket(path string) error {
 	st, err := os.Lstat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -132,7 +142,15 @@ func removeSocket(path string) error {
 	if st.Mode().Type() != os.ModeSocket {
 		return &NotSocketError{Path: path}
 	}
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+	return nil
+}
+
+// removeSocket unlinks path only if lstat says it is a socket.
+func removeSocket(path string, d *Deps) error {
+	if err := checkSocket(path); err != nil {
+		return err
+	}
+	if err := d.remove(path); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return nil

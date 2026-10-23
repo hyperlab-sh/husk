@@ -86,8 +86,8 @@ func TestSurveyRemovesStaleKeepsOthers(t *testing.T) {
 	if got[2].Entry.ID != "c" || got[2].Verdict != VerdictUnresponsive {
 		t.Fatalf("third row = %+v, want unresponsive c", got[2])
 	}
-	if _, err := os.Lstat(EntryPath(dir, "b")); err == nil {
-		t.Error("stale entry should have been removed")
+	if _, err := os.Lstat(EntryPath(dir, "b")); err != nil {
+		t.Error("a refused non-socket must keep its entry so the next survey warns again")
 	}
 	if _, err := os.Lstat(SocketPath(dir, "b")); err != nil {
 		t.Error("stale cleanup must leave the socket alone")

@@ -5,6 +5,7 @@ package instance
 import (
 	"bufio"
 	"errors"
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
@@ -172,6 +173,57 @@ func TestRecoverStaleRefusesANonSocket(t *testing.T) {
 	}
 	if b, rerr := os.ReadFile(SocketPath(dir, "notes")); rerr != nil || string(b) != "precious" {
 		t.Fatal("a non-socket must be left alone", rerr)
+	}
+}
+
+// A non-socket at <id>.sock is refused before anything is removed: the entry
+// stays, so every survey meets it and warns again.
+func TestRecoverStaleRefusesANonSocketBeforeRemovingTheEntry(t *testing.T) {
+	dir := shortRunDir(t)
+	e := entryFor(t, dir, "notes", 111)
+	if err := os.WriteFile(SocketPath(dir, "notes"), []byte("precious"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		statuses, err := Survey(dir, nil)
+		if err != nil || len(statuses) != 1 || statuses[0].NotSocket != SocketPath(dir, "notes") {
+			t.Fatalf("statuses = %+v, err = %v; every survey must flag the non-socket", statuses, err)
+		}
+		if !exists(EntryPath(dir, "notes")) {
+			t.Fatal("the entry was removed before the non-socket was refused")
+		}
+	}
+	if _, err := RecoverStale(dir, []*Entry{&e}); !exists(EntryPath(dir, "notes")) || err == nil {
+		t.Fatalf("RecoverStale err = %v, entry kept = %v", err, exists(EntryPath(dir, "notes")))
+	}
+}
+
+// A removal failure other than a non-socket (EACCES, EBUSY) is carried out of
+// Survey on the entry's status, naming the path; the survey continues.
+func TestSurveyReportsRemovalFailuresAndContinues(t *testing.T) {
+	dir := shortRunDir(t)
+	entryFor(t, dir, "a-stuck", 111)
+	deadSocket(t, dir, "a-stuck")
+	entryFor(t, dir, "b-dead", 222)
+	deadSocket(t, dir, "b-dead")
+	stuck := SocketPath(dir, "a-stuck")
+	d := &Deps{Remove: func(path string) error {
+		if path == stuck {
+			return &fs.PathError{Op: "remove", Path: path, Err: syscall.EACCES}
+		}
+		return os.Remove(path)
+	}}
+	statuses, err := Survey(dir, d)
+	if err != nil || len(statuses) != 1 {
+		t.Fatalf("statuses = %+v, err = %v", statuses, err)
+	}
+	st := statuses[0]
+	var pe *fs.PathError
+	if st.Entry.ID != "a-stuck" || !errors.As(st.RecoverErr, &pe) || pe.Path != stuck || !errors.Is(st.RecoverErr, syscall.EACCES) {
+		t.Fatalf("status = %+v, want a-stuck with the EACCES path error", st)
+	}
+	if exists(EntryPath(dir, "b-dead")) || exists(SocketPath(dir, "b-dead")) {
+		t.Fatal("the survey must go on and recover the entry beside it")
 	}
 }
 

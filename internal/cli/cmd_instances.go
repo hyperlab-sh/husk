@@ -41,7 +41,7 @@ func runInstances(_ context.Context, inv *Invocation, args []string) error {
 	}
 	rows := make([]instanceRow, 0, len(statuses))
 	for _, st := range statuses {
-		if st.NotSocket != "" {
+		if st.Skipped() {
 			inv.out.Warn(output.WarningUnresponsive, skipWarning(dir, st))
 			continue
 		}

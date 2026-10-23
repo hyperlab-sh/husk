@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"os"
 	"sync"
@@ -39,6 +40,18 @@ type Deps struct {
 	// zero is the production 2.5 s. Tests shorten it to exercise
 	// contention without waiting.
 	LockWait time.Duration
+
+	// Remove unlinks a path in stale recovery; nil is os.Remove. Tests inject
+	// failures such as EACCES or EBUSY.
+	Remove func(path string) error
+}
+
+// remove unlinks path, safe on a nil *Deps.
+func (d *Deps) remove(path string) error {
+	if d != nil && d.Remove != nil {
+		return d.Remove(path)
+	}
+	return os.Remove(path)
 }
 
 // lockWait returns the lock deadline, safe on a nil *Deps.
@@ -106,7 +119,17 @@ type Status struct {
 	// is removed like any stale one), so the status stays in the result,
 	// classed stale; callers skip it and warn naming the path.
 	NotSocket string
+
+	// RecoverErr is the removal failure (an *fs.PathError naming the entry or
+	// socket path) stale recovery hit for this entry, such as EACCES or EBUSY.
+	// The status stays in the result, classed stale; callers skip it and warn
+	// naming the path.
+	RecoverErr error
 }
+
+// Skipped reports whether recovery could not clear this stale entry, so
+// callers skip it and warn instead of treating it as gone.
+func (s Status) Skipped() bool { return s.NotSocket != "" || s.RecoverErr != nil }
 
 // Survey lists the runtime directory's entries with a liveness class,
 // probing them in parallel, then runs stale recovery once, under one lock,
@@ -146,13 +169,29 @@ func Survey(dir string, d *Deps) ([]Status, error) {
 			for k, i := range staleAt {
 				statuses[i].Verdict = classes[k]
 			}
-			// A *NotSocketError leaves that entry stale; carry its path out
-			// so the caller can warn. Other removal errors are not
-			// attributable to an entry and leave it stale and skipped.
-			for _, ns := range notSocketErrors(err) {
+			// A removal failure leaves that entry stale; carry it out so the
+			// caller can warn naming the path, and keep surveying.
+			for _, re := range leafErrors(err) {
+				var ns *NotSocketError
+				var pe *fs.PathError
+				var path string
+				switch {
+				case errors.As(re, &ns):
+					path = ns.Path
+				case errors.As(re, &pe):
+					path = pe.Path
+				default:
+					continue
+				}
 				for _, i := range staleAt {
-					if statuses[i].Verdict == VerdictStale && SocketPath(dir, statuses[i].Entry.ID) == ns.Path {
-						statuses[i].NotSocket = ns.Path
+					id := statuses[i].Entry.ID
+					if statuses[i].Verdict != VerdictStale || (path != SocketPath(dir, id) && path != EntryPath(dir, id)) {
+						continue
+					}
+					if ns != nil {
+						statuses[i].NotSocket = path
+					} else {
+						statuses[i].RecoverErr = re
 					}
 				}
 			}
@@ -160,32 +199,26 @@ func Survey(dir string, d *Deps) ([]Status, error) {
 	}
 	out := make([]Status, 0, len(statuses))
 	for _, st := range statuses {
-		if st.Verdict != VerdictStale || st.NotSocket != "" {
+		if st.Verdict != VerdictStale || st.Skipped() {
 			out = append(out, st)
 		}
 	}
 	return out, nil
 }
 
-// notSocketErrors collects every *NotSocketError in a joined error.
-func notSocketErrors(err error) []*NotSocketError {
-	var out []*NotSocketError
-	var walk func(error)
-	walk = func(err error) {
-		switch e := err.(type) {
-		case nil:
-		case *NotSocketError:
-			out = append(out, e)
-		case interface{ Unwrap() []error }:
-			for _, c := range e.Unwrap() {
-				walk(c)
-			}
-		case interface{ Unwrap() error }:
-			walk(e.Unwrap())
-		}
+// leafErrors flattens a joined error into its members.
+func leafErrors(err error) []error {
+	if err == nil {
+		return nil
 	}
-	walk(err)
-	return out
+	if j, ok := err.(interface{ Unwrap() []error }); ok {
+		var out []error
+		for _, c := range j.Unwrap() {
+			out = append(out, leafErrors(c)...)
+		}
+		return out
+	}
+	return []error{err}
 }
 
 // pingAll classifies every entry, pinging concurrently: discovery must not

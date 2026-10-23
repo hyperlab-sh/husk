@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 
 	"github.com/hyperlab-sh/husk/internal/cli/output"
 	"github.com/hyperlab-sh/husk/internal/instance"
@@ -87,7 +88,7 @@ func (inv *Invocation) resolve() (instance.Resolved, error) {
 		var ie *instance.Error
 		if errors.As(err, &ie) {
 			for _, st := range ie.Skipped {
-				if st.NotSocket == "" {
+				if !st.Skipped() {
 					continue // the error already names unresponsive entries
 				}
 				inv.out.Warn(output.WarningUnresponsive, skipWarning(inv.dir, st))
@@ -164,6 +165,10 @@ func versionLabel(v string) string {
 func skipWarning(dir string, st instance.Status) string {
 	if st.NotSocket != "" {
 		return fmt.Sprintf("%s is not a socket; instance %q skipped", st.NotSocket, st.Entry.ID)
+	}
+	var pe *fs.PathError
+	if errors.As(st.RecoverErr, &pe) {
+		return fmt.Sprintf("cannot remove %s: %v; instance %q skipped", pe.Path, pe.Err, st.Entry.ID)
 	}
 	if st.Locked {
 		return fmt.Sprintf("runtime dir %s is locked; instance %q left as is", dir, st.Entry.ID)

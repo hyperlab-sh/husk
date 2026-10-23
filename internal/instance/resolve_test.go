@@ -337,6 +337,9 @@ func TestResolveDiscoveryOnlyStale(t *testing.T) {
 		return []Entry{namedEntry(dir, "notes", 5120)}
 	})
 	net.live = map[string]bool{}
+	if err := os.Remove(SocketPath(dir, "notes")); err != nil { // a crash left no socket
+		t.Fatal(err)
+	}
 	_, err := Resolve(ResolveOptions{Dir: dir, Deps: net.deps()})
 	var e *Error
 	if !errors.As(err, &e) || e.Kind != KindNoInstance {
@@ -352,6 +355,9 @@ func TestResolveDiscoveryOneLiveAmongStale(t *testing.T) {
 		return []Entry{namedEntry(dir, "notes", 5120), pidEntry(dir, "4242", 4242)}
 	})
 	delete(net.live, SocketPath(dir, "4242"))
+	if err := os.Remove(SocketPath(dir, "4242")); err != nil { // a crash left no socket
+		t.Fatal(err)
+	}
 	got, err := Resolve(ResolveOptions{Dir: dir, Deps: net.deps()})
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
