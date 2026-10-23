@@ -289,9 +289,11 @@ func TestSequenceTable(t *testing.T) {
 		{
 			name: "occupant handover keeps focus but not the sequence",
 			run: func(t *testing.T, m *WorkbenchModel, _ *fakeFE, _ *timerRecorder) {
-				hostPlugin(m, "q", protocol.SurfaceMainStage) // p holds it; q is a later claimant
+				hostPlugin(m, "q") // live, no surface yet
 				press(m, "a")
-				hostLeave(m, "p")
+				withFE(m).occ[protocol.SurfaceMainStage] = "q" // the engine hands the surface over
+				withFE(m).publish()
+				m.refresh()
 				if m.surfaceOwner(protocol.SurfaceMainStage) != "q" {
 					t.Fatalf("setup: owner %q", m.surfaceOwner(protocol.SurfaceMainStage))
 				}
