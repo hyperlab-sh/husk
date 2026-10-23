@@ -8,9 +8,12 @@ import "context"
 // port crosses the seam; production wires one adapter over tea.Program's
 // Post, tests wire inline or queueing fakes.
 type Loop interface {
-	// Do runs fn on the host loop goroutine and returns once it has run.
-	// It returns an error, without running fn, when ctx ends first or the
-	// loop has shut down. The Event bus publishes through Do.
+	// Do runs fn on the host loop goroutine with claimed execution: either
+	// fn runs to completion and Do returns nil, or fn is guaranteed never
+	// to run and Do returns an error. When ctx ends while fn is already
+	// running, Do waits for it and returns nil. Do also ends when the host's
+	// own context ends, with the same completion-or-abandonment guarantee.
+	// The Event bus publishes and Clear applies its reset through Do.
 	Do(ctx context.Context, fn func()) error
 
 	// Post hands fn to the host loop and returns at once; it must not

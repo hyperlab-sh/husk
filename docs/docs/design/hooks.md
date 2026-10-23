@@ -691,7 +691,7 @@ way, so shutdown wins):
 | an allowed `Outcome` | proceeds (a subscriber skipped for timeout, error or exit still counts as allow) |
 | `busy`, from the in-flight cap or the Calls caps | logs the message and proceeds: fail-open, a saturated hook or table must not lock the user out of their own data, and the cap refusal says nothing about the slice |
 | `unavailable` (the loop is gone) | answers `unavailable`; deletes nothing |
-| `cancelled` (the request context ended first) | answers `cancelled`; deletes nothing; the legs drain |
+| `cancelled` (the request context ended first) | answers `cancelled`, or `unavailable` when the context ended because the host is closing; deletes nothing; the legs drain |
 | `denied`, `not_found` or `invalid_params` | a host bug (the hook list or the data the handler built is wrong): logs at error, answers `internal`, deletes nothing |
 
 An outcome with no live subscriber is allowed and proceeds. A nil
