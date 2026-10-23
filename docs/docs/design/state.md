@@ -546,7 +546,9 @@ namespaces while "Migration from today" had the TUI's `recomputeLayout` and
 
 #### Pod-owned slices
 
-`husk.pods` entries carry the converter-resolved `dir` from their initial `starting` write. The field is always present, including `""` for implicit command lines, and later liveness writes leave it unchanged.
+`husk.pods` entries carry the converter-resolved `dir` from their initial
+`starting` write. The field is always present, including `""` for implicit
+command lines, and later liveness writes leave it unchanged.
 
 `husk.pods` status is one of `starting` (launch begun, process not yet
 started), `live` (process started), `exited` (clean exit, or stopped by Husk
