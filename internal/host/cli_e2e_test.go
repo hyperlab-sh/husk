@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/hyperlab-sh/husk/internal/cli"
+	"github.com/hyperlab-sh/husk/internal/cli/output"
 	"github.com/hyperlab-sh/husk/internal/instance"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
@@ -22,7 +23,7 @@ func cliRun(h *harness, args ...string) (code int, stdout, stderr string) {
 		Stderr:     &errb,
 		Stdin:      bytes.NewReader(nil),
 		Getenv:     func(string) string { return "" },
-		RuntimeDir: func() (string, error) { return h.dir, nil },
+		RuntimeDir: func() (string, bool, error) { return h.dir, true, nil },
 	})
 	return code, out.String(), errb.String()
 }
@@ -76,7 +77,7 @@ func TestCLIAgainstRealHost(t *testing.T) {
 
 	t.Run("rpc of an unknown method is the instance's error, exit 1", func(t *testing.T) {
 		code, stdout, stderr := cliRun(h, "rpc", "nope.nothing", "--format", "json")
-		if code != cli.ExitRemote || stdout != "" {
+		if code != output.ExitRemote || stdout != "" {
 			t.Fatalf("exit %d stdout %q stderr %q", code, stdout, stderr)
 		}
 		var e struct{ Error struct{ Code string } }
@@ -104,7 +105,7 @@ func TestCLIAgainstRealHost(t *testing.T) {
 			t.Fatal(err)
 		}
 		code, _, stderr := cliRun(h, "ping", "--format", "table")
-		if code != cli.ExitNoInstance || stderr != "husk: no instance is running\n" {
+		if code != output.ExitNoInstance || stderr != "husk: no instance is running\n" {
 			t.Fatalf("exit %d stderr %q", code, stderr)
 		}
 		if _, err := os.Stat(instance.EntryPath(h.dir, h.id)); !os.IsNotExist(err) {

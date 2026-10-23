@@ -6,10 +6,12 @@ import (
 	"errors"
 	"io"
 	"net"
+	"os"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/hyperlab-sh/husk/internal/cli/output"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
@@ -49,17 +51,25 @@ type event struct {
 	line *protocol.LineError
 }
 
-// Dial connects to the instance socket. A missing or refused socket is
-// ExitNoInstance (the instance went away after resolution); any other
-// failure is ExitTransport.
-func Dial(ctx context.Context, socket string, opts ClientOptions) (*Client, error) {
+// dialSocket opens the Unix connection with its own ConnectTimeout bound; the
+// command's --timeout does not start until it returns. Tests replace it to
+// slow the connect.
+var dialSocket = func(ctx context.Context, socket string) (net.Conn, error) {
 	d := net.Dialer{Timeout: ConnectTimeout}
-	conn, err := d.DialContext(ctx, "unix", socket)
+	return d.DialContext(ctx, "unix", socket)
+}
+
+// Dial connects to the instance socket within ConnectTimeout. A missing or
+// refused socket is ExitNoInstance (the target is stale or went away after
+// resolution; the caller words the message); any other failure is
+// ExitTransport.
+func Dial(ctx context.Context, socket string, opts ClientOptions) (*Client, error) {
+	conn, err := dialSocket(ctx, socket)
 	if err != nil {
 		if errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ECONNREFUSED) {
-			return nil, &Error{Exit: ExitNoInstance, Code: "no_instance", Message: "nobody is listening on " + socket, Err: err}
+			return nil, output.NoInstance(err, "nobody is listening on %s", socket)
 		}
-		return nil, transportErr(err, "connect %s: %v", socket, err)
+		return nil, output.Transport(err, "connect %s: %v", socket, err)
 	}
 	c := &Client{
 		conn:   conn,
@@ -102,9 +112,11 @@ func (c *Client) Close() error {
 }
 
 // Call sends one request and returns the raw result of its reply. An error
-// reply is an *Error with the exit code of its protocol code; a malformed
-// reply line is ExitProtocol; a connection that ends first is
-// ExitTransport; ctx ending is ExitTransport wrapping ctx.Err.
+// reply is an *output.Error with the exit code of its protocol code. While
+// waiting: a protocol.error notification, an unparsable line or a reply with
+// an id the CLI did not send is exit 6; any other notification is ignored; a
+// connection that ends first is exit 5; ctx ending is exit 5 wrapping
+// ctx.Err.
 func (c *Client) Call(ctx context.Context, method string, params any) (json.RawMessage, error) {
 	id, err := c.send(ctx, method, params)
 	if err != nil {
@@ -116,13 +128,16 @@ func (c *Client) Call(ctx context.Context, method string, params any) (json.RawM
 			return nil, err
 		}
 		if m.Method == protocol.MethodProtocolError {
-			return nil, protocolErr(nil, "host rejected the request: %s", protocolErrorText(m))
+			return nil, protocolErrorNotification(m)
 		}
-		if k, _ := m.Kind(); k != protocol.KindReply || m.ID.String() != id.String() {
-			continue // a notification outside a stream, or a stray reply
+		if k, _ := m.Kind(); k != protocol.KindReply {
+			continue // any other notification
+		}
+		if m.ID.String() != id.String() {
+			return nil, output.Protocol(nil, "unreadable reply: unexpected id")
 		}
 		if m.Error != nil {
-			return nil, remoteErr(m.Error)
+			return nil, output.FromReply(m.Error)
 		}
 		return m.Result, nil
 	}
@@ -161,7 +176,7 @@ func (s *Stream) Next(ctx context.Context) (protocol.Message, error) {
 			continue
 		}
 		if m.Method == protocol.MethodProtocolError {
-			return protocol.Message{}, protocolErr(nil, "host rejected a message: %s", protocolErrorText(m))
+			return protocol.Message{}, protocolErrorNotification(m)
 		}
 		return m, nil
 	}
@@ -172,13 +187,13 @@ func (c *Client) send(ctx context.Context, method string, params any) (protocol.
 	c.nextID++
 	id, err := protocol.NewIntID(c.nextID)
 	if err != nil {
-		return protocol.ID{}, protocolErr(err, "request id: %v", err)
+		return protocol.ID{}, output.Protocol(err, "request id: %v", err)
 	}
 	m := protocol.Message{ID: &id, Method: method, Token: c.token}
 	if params != nil {
 		raw, err := json.Marshal(params)
 		if err != nil {
-			return protocol.ID{}, usageErr("params: %v", err)
+			return protocol.ID{}, output.Usage("params: %v", err)
 		}
 		m.Params = raw
 	}
@@ -188,9 +203,12 @@ func (c *Client) send(ctx context.Context, method string, params any) (protocol.
 	if err := c.w.Send(m); err != nil {
 		var pe *protocol.Error
 		if errors.As(err, &pe) {
-			return protocol.ID{}, usageErr("%s", pe.Message)
+			return protocol.ID{}, output.Usage("%s", pe.Message)
 		}
-		return protocol.ID{}, transportErr(err, "send %s: %v", method, err)
+		if errors.Is(err, os.ErrDeadlineExceeded) {
+			return protocol.ID{}, output.Transport(context.DeadlineExceeded, "no reply: %v", context.DeadlineExceeded)
+		}
+		return protocol.ID{}, output.Transport(err, "send %s: %v", method, err)
 	}
 	return id, nil
 }
@@ -202,20 +220,29 @@ func (c *Client) next(ctx context.Context, closedMsg string) (protocol.Message, 
 	case e, ok := <-c.events:
 		switch {
 		case !ok:
-			return protocol.Message{}, transportErr(io.EOF, "%s", closedMsg)
+			return protocol.Message{}, output.Transport(io.EOF, "%s", closedMsg)
 		case e.line != nil:
-			return protocol.Message{}, protocolErr(e.line, "unreadable reply from the instance: %v", e.line)
+			return protocol.Message{}, output.Protocol(e.line, "unreadable reply: %v", e.line)
 		}
 		return e.msg, nil
 	case <-ctx.Done():
-		return protocol.Message{}, transportErr(ctx.Err(), "no reply: %v", ctx.Err())
+		return protocol.Message{}, output.Transport(ctx.Err(), "no reply: %v", ctx.Err())
 	}
 }
 
-func protocolErrorText(m protocol.Message) string {
+// protocolErrorNotification is exit 6 carrying the notification's own code
+// and message: the CLI sent nothing it could mistake the error for.
+func protocolErrorNotification(m protocol.Message) *output.Error {
 	var p protocol.ProtocolErrorParams
 	if json.Unmarshal(m.Params, &p) != nil || p.Message == "" {
-		return "protocol.error"
+		return output.Protocol(nil, "unreadable reply: protocol.error")
 	}
-	return string(p.Code) + ": " + p.Message
+	e := output.Protocol(nil, "%s", p.Message)
+	if p.Code != "" {
+		e.Code = string(p.Code)
+	}
+	return e
 }
+
+// isDeadline reports whether err is a command timeout.
+func isDeadline(err error) bool { return errors.Is(err, context.DeadlineExceeded) }

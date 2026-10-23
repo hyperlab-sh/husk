@@ -17,12 +17,6 @@ import (
 // wait no longer than this.
 const DiscoveryPingTimeout = 500 * time.Millisecond
 
-// LookupPingTimeout bounds one ping for an explicit target — a --socket
-// or --instance (or HUSK_SOCKET_PATH / HUSK_INSTANCE) step — where the
-// user named the instance and a slow answer beats a wrong "no instance".
-// The spec's 2 s.
-const LookupPingTimeout = 2 * time.Second
-
 // Deps holds the seams tests inject so that no test needs a real socket
 // or real network timing. The zero value is production: pings go out over
 // real Unix sockets with the step's timeout. A nil *Deps anywhere means
@@ -32,8 +26,8 @@ type Deps struct {
 	// nil when the instance replied, or an error this package classifies:
 	// ErrSocketMissing or ErrSocketRefused (or a wrapped ENOENT /
 	// ECONNREFUSED / ENOTSOCK) mark the entry stale; anything else marks
-	// it unresponsive. When nil, DefaultPing is used with the step's
-	// timeout (discovery fans out at 500 ms, explicit lookups wait 2 s).
+	// it unresponsive. When nil, DefaultPing is used with
+	// DiscoveryPingTimeout.
 	// Called from multiple goroutines at once.
 	Ping func(socketPath string) error
 }
@@ -138,7 +132,7 @@ func pingAll(entries []Entry, d *Deps) []Status {
 // check anywhere in liveness: the spec rules that a dead pid alone must
 // never stale an entry, because pid reuse makes the check unsafe, and a
 // stale-looking pid says nothing a ping does not say better. Explicit
-// lookups ping at LookupPingTimeout and reuse pingVerdict directly.
+// lookups are not probed at all: the CLI's own connection is their check.
 func (d *Deps) classify(e Entry) Verdict {
 	return pingVerdict(d.pingFor(e.Socket, DiscoveryPingTimeout))
 }

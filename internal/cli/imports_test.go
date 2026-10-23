@@ -10,11 +10,11 @@ import (
 )
 
 // TestImportsStayWithinAllowList pins the spec's dependency rule: the CLI
-// imports the instance package and the wire package from Husk, and no Stem,
-// Services, Substrate or Pods package.
+// imports the output package, the instance package and the wire package from
+// Husk, and no Stem, Services, Substrate or Pods package.
 func TestImportsStayWithinAllowList(t *testing.T) {
 	const module = "github.com/hyperlab-sh/husk/"
-	allowed := map[string]bool{"internal/instance": true, "pkg/protocol": true}
+	allowed := map[string]bool{"internal/cli/output": true, "internal/instance": true, "pkg/protocol": true}
 	files, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)

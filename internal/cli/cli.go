@@ -1,24 +1,27 @@
 // Package cli is the husk binary's subcommand side: every subcommand is a
-// socket client of a running instance. It resolves one instance with
-// internal/instance, speaks pkg/protocol and nothing else, and maps every
-// failure to the spec's exit codes (docs/docs/design/instances.md). It
-// imports no Stem, Services, Substrate or Pods package.
+// socket client of a running instance, or a local command registered by
+// another package. It resolves one instance with internal/instance, speaks
+// pkg/protocol and nothing else, and maps every failure to the spec's exit
+// codes (docs/docs/design/instances.md). It imports no Stem, Services,
+// Substrate or Pods package; formats, errors and exit codes live in the leaf
+// package internal/cli/output.
 package cli
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/charmbracelet/x/term"
+
+	"github.com/hyperlab-sh/husk/internal/cli/output"
 	"github.com/hyperlab-sh/husk/internal/instance"
-	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
 // Env is everything Main reads from the process, so tests drive it without
@@ -32,8 +35,9 @@ type Env struct {
 	StdoutIsTTY bool
 	// Getenv reads an environment variable.
 	Getenv func(string) string
-	// RuntimeDir returns the checked runtime directory.
-	RuntimeDir func() (string, error)
+	// RuntimeDir looks up the runtime directory without creating it: the
+	// checked path, whether it exists, and an error when it is unusable.
+	RuntimeDir func() (dir string, found bool, err error)
 	// Deps are the instance liveness seams; nil is production.
 	Deps *instance.Deps
 }
@@ -44,48 +48,87 @@ func OSEnv() Env {
 		Stdout:      os.Stdout,
 		Stderr:      os.Stderr,
 		Stdin:       os.Stdin,
-		StdoutIsTTY: IsTTY(os.Stdout),
+		StdoutIsTTY: term.IsTerminal(os.Stdout.Fd()),
 		Getenv:      os.Getenv,
-		RuntimeDir:  instance.RuntimeDir,
+		RuntimeDir:  instance.LookupRuntimeDir,
 	}
 }
 
-// command is one subcommand. A later unit adds its commands to the table
-// below and implements run on the Invocation.
+// command is one subcommand of the table.
 type command struct {
 	// usage is the one-line synopsis shown in the usage text.
 	usage string
 	// timeout is the default --timeout; zero means none.
 	timeout time.Duration
+	// local commands talk to no single instance: they reject --instance,
+	// --socket and --timeout.
+	local bool
 	// run executes the command; args are the positional arguments left
 	// after the global flags.
 	run func(ctx context.Context, inv *Invocation, args []string) error
 }
 
-// commands is the subcommand table, keyed by the first non-flag argument.
-func commands() map[string]command {
+// builtins is the socket command table of this package.
+func builtins() map[string]command {
 	return map[string]command{
-		"instances": {usage: "husk instances", timeout: 2 * time.Second, run: runInstances},
+		"instances": {usage: "husk instances", local: true, run: runInstances},
 		"ping":      {usage: "husk ping", timeout: 2 * time.Second, run: runPing},
-		"rpc":       {usage: "husk rpc <method> [params-json]", timeout: 30 * time.Second, run: runRPC},
+		"rpc":       {usage: "husk rpc <method> [<params-json>]", timeout: 30 * time.Second, run: runRPC},
 	}
 }
 
-// Invocation is what a running command works with: the parsed global flags
-// and the helpers every command shares.
-type Invocation struct {
-	env      Env
-	format   string
-	instance string
-	socket   string
-	// timeout is the effective --timeout: it starts when resolution is
-	// done and bounds the rest of the command. Zero means none.
-	timeout time.Duration
+var (
+	registryMu sync.Mutex
+	registered = map[string]output.Command{}
+)
+
+// Register adds a command package's noun to the table, before Main runs. It
+// is the seam through which commands that must not live in this package (the
+// store commands import Store, which this package may not) join the CLI; it
+// panics on an empty, duplicate or built-in noun, which is a wiring mistake.
+func Register(noun string, cmd output.Command) {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	if _, builtin := builtins()[noun]; noun == "" || noun == "help" || builtin {
+		panic("cli: cannot register noun " + fmt.Sprintf("%q", noun))
+	}
+	if _, dup := registered[noun]; dup {
+		panic("cli: noun registered twice: " + noun)
+	}
+	registered[noun] = cmd
 }
 
-// EnvPluginToken is the environment variable holding the plugin token; the
-// CLI sends it as the request's token member.
-const EnvPluginToken = "HUSK_PLUGIN_TOKEN"
+// table is the full command table: the built-ins plus what was registered.
+// Registered commands are local: they never talk to one chosen instance.
+func table() map[string]command {
+	t := builtins()
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	for noun, c := range registered {
+		run := c.Run
+		t[noun] = command{
+			usage: c.Usage,
+			local: true,
+			run: func(ctx context.Context, inv *Invocation, args []string) error {
+				return run(ctx, args, inv.out)
+			},
+		}
+	}
+	return t
+}
+
+// Invocation is what a running command works with: the parsed global flags,
+// the output options and the helpers every command shares.
+type Invocation struct {
+	env Env
+	out output.Options
+	// instance and socket are the target flags.
+	instance, socket string
+	// timeout is the effective --timeout, zero for none.
+	timeout time.Duration
+	// dir is the runtime directory resolution read, for stale recovery.
+	dir string
+}
 
 // withTimeout bounds ctx by the command's --timeout, from now on.
 func (inv *Invocation) withTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
@@ -95,184 +138,146 @@ func (inv *Invocation) withTimeout(ctx context.Context) (context.Context, contex
 	return context.WithTimeout(ctx, inv.timeout)
 }
 
-// Resolve picks the one instance this command talks to, through
-// instance.Resolve. Stale entries are removed there.
-func (inv *Invocation) Resolve() (instance.Resolved, error) {
-	dir, err := inv.env.RuntimeDir()
-	if err != nil {
-		return instance.Resolved{}, runtimeDirErr(err)
-	}
-	res, err := instance.Resolve(instance.ResolveOptions{
-		Dir:           dir,
-		Instance:      inv.instance,
-		Socket:        inv.socket,
-		EnvSocketPath: inv.env.Getenv(instance.EnvSocketPath),
-		EnvInstance:   inv.env.Getenv(instance.EnvInstance),
-		Deps:          inv.env.Deps,
-	})
-	var ie *instance.Error
-	if errors.As(err, &ie) {
-		inv.warnSkipped(ie.Skipped)
-	}
-	if err != nil {
-		return instance.Resolved{}, resolveErr(err)
-	}
-	inv.warnSkipped(res.Skipped)
-	if res.Entry != nil && res.Entry.ProtocolVersion != "" {
-		if err := checkMajor(res.Entry.ProtocolVersion); err != nil {
-			return instance.Resolved{}, err
-		}
-	}
-	return res, nil
-}
-
-// warnSkipped tells the user which unresponsive instances discovery passed
-// over: one stderr line each, a JSON object in JSON mode.
-func (inv *Invocation) warnSkipped(skipped []instance.Status) {
-	for _, st := range skipped {
-		msg := fmt.Sprintf("instance %q did not answer within %s; skipped", st.Entry.ID, instance.DiscoveryPingTimeout)
-		if inv.format == formatJSON {
-			b, _ := json.Marshal(map[string]any{"warning": map[string]any{"code": "unresponsive", "message": msg}})
-			fmt.Fprintf(inv.env.Stderr, "%s\n", b)
-			continue
-		}
-		fmt.Fprintf(inv.env.Stderr, "husk: %s\n", msg)
-	}
-}
-
-// Dial resolves the target, connects to it and returns the client with the
-// context to use for its calls: the parent bounded by --timeout, which
-// starts once resolution is done. The context ends when the client is
-// closed. A target found only by socket path, or by an entry without a
-// version, is asked for its protocol version first, so no command reaches
-// an instance of another major.
-func (inv *Invocation) Dial(ctx context.Context) (*Client, context.Context, instance.Resolved, error) {
-	res, err := inv.Resolve()
-	if err != nil {
-		return nil, ctx, res, err
-	}
-	cctx, cancel := inv.withTimeout(ctx)
-	c, err := Dial(cctx, res.Socket, ClientOptions{Token: inv.env.Getenv(EnvPluginToken)})
-	if err != nil {
-		cancel()
-		return nil, ctx, res, err
-	}
-	c.cancel = cancel
-	if res.Entry == nil || res.Entry.ProtocolVersion == "" {
-		raw, err := c.Call(cctx, protocol.MethodSessionPing, protocol.SessionPingParams{})
-		if err == nil {
-			var ping protocol.SessionPingResult
-			if err = json.Unmarshal(raw, &ping); err != nil {
-				err = protocolErr(err, "unreadable session.ping reply: %v", err)
-			} else {
-				err = checkMajor(ping.ProtocolVersion)
-			}
-		}
-		if err != nil {
-			_ = c.Close()
-			return nil, ctx, res, err
-		}
-	}
-	return c, cctx, res, nil
-}
-
-// checkMajor is the spec's protocol check: a different major is exit 6.
-func checkMajor(version string) error {
-	major, _, err := protocol.ParseVersion(version)
-	if err == nil && major == protocol.Major {
-		return nil
-	}
-	return protocolErr(err, "instance speaks protocol %s, this CLI speaks %d.x", versionLabel(version), protocol.Major)
-}
-
-// versionLabel renders an instance's version as "MAJOR.x" when it parses.
-func versionLabel(v string) string {
-	if major, _, err := protocol.ParseVersion(v); err == nil {
-		return fmt.Sprintf("%d.x", major)
-	}
-	return fmt.Sprintf("%q", v)
-}
-
-// Main runs one subcommand (args[0] is its name) and returns the process
-// exit code. Results go to env.Stdout, everything else to env.Stderr.
+// Main runs one command (args[0] is its noun) and returns the process exit
+// code. Results go to env.Stdout, everything else to env.Stderr. The CLI
+// installs no signal handler: an interrupt ends the process by the signal.
 func Main(ctx context.Context, args []string, env Env) int {
-	table := commands()
-	name := args[0]
-	if name == "help" {
-		usage(env.Stdout, table)
-		return ExitOK
+	cmds := table()
+	out := output.Options{
+		Format: defaultFormat(env), Stdout: env.Stdout, Stderr: env.Stderr,
+		Stdin: env.Stdin, StdoutIsTTY: env.StdoutIsTTY, Getenv: env.Getenv,
 	}
-	cmd, ok := table[name]
+	if len(args) == 0 {
+		out.Format = peekFormat(args, out.Format)
+		return failUsage(out, cmds, "no command")
+	}
+	noun := args[0]
+	if noun == "help" {
+		usage(env.Stdout, cmds)
+		return output.ExitOK
+	}
+	cmd, ok := cmds[noun]
 	if !ok {
-		fmt.Fprintf(env.Stderr, "husk: unknown command %q\n", name)
-		usage(env.Stderr, table)
-		return ExitUsage
+		out.Format = peekFormat(args[1:], out.Format)
+		return failUsage(out, cmds, "unknown command %q", noun)
 	}
 
-	inv := &Invocation{env: env}
+	inv := &Invocation{env: env, out: out}
 	var format string
-	timeout := time.Duration(0)
-	fs := flag.NewFlagSet("husk "+name, flag.ContinueOnError)
-	fs.SetOutput(env.Stderr)
-	fs.StringVar(&inv.instance, "instance", "", "target instance `id`")
-	fs.StringVar(&inv.socket, "socket", "", "target socket `path`")
-	fs.StringVar(&format, "format", "", "output format: json | table (default by TTY)")
-	fs.DurationVar(&timeout, "timeout", 0, "total time for the command after resolution (default per command)")
-	fs.Usage = func() {
-		fmt.Fprintf(env.Stderr, "usage: %s [--instance id | --socket path] [--format json|table] [--timeout duration]\n", cmd.usage)
-		fs.PrintDefaults()
-	}
+	var timeout time.Duration
+	fs := flag.NewFlagSet("husk "+noun, flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fs.StringVar(&inv.instance, "instance", "", "")
+	fs.StringVar(&inv.socket, "socket", "", "")
+	fs.StringVar(&format, "format", "", "")
+	fs.DurationVar(&timeout, "timeout", 0, "")
 	pos, err := parseInterspersed(fs, args[1:])
 	if err != nil {
 		if err == flag.ErrHelp {
-			return ExitOK
+			commandUsage(env.Stdout, cmd, noun)
+			return output.ExitOK
 		}
-		return ExitUsage // the flag package already printed the reason
+		inv.out.Format = peekFormat(args[1:], out.Format)
+		return inv.out.Report(output.Usage("%v", err))
+	}
+	if format != "" {
+		f, err := output.ParseFormat(format)
+		if err != nil {
+			return inv.out.Report(err)
+		}
+		inv.out.Format = f
 	}
 
-	jsonErrors := false // errors follow the format once it is known
-	report := func(err error, timeoutText string) int {
-		e := asError(err, timeoutText)
-		writeError(env.Stderr, e, jsonErrors)
-		return e.Exit
-	}
-
-	switch format {
-	case "":
-		format = formatTable
-		if !env.StdoutIsTTY {
-			format = formatJSON
+	set := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	if cmd.local {
+		for _, name := range []string{"instance", "socket", "timeout"} {
+			if set[name] {
+				return inv.out.Report(output.Usage("husk %s does not take --%s", noun, name))
+			}
 		}
-	case formatJSON, formatTable:
-	default:
-		return report(usageErr("invalid --format %q: use json or table", format), "")
 	}
-	inv.format = format
-	jsonErrors = format == formatJSON
 	if inv.instance != "" && inv.socket != "" {
-		return report(usageErr("--instance and --socket are mutually exclusive"), "")
+		return inv.out.Report(output.Usage("--instance and --socket are mutually exclusive"))
 	}
-	if timeout < 0 {
-		return report(usageErr("--timeout must not be negative"), "")
-	}
-	if timeout == 0 {
-		timeout = cmd.timeout
-	}
-	inv.timeout = timeout
-	timeoutText := ""
-	if timeout > 0 {
-		timeoutText = timeout.String()
+	if inv.timeout, err = effectiveTimeout(timeout, cmd.timeout); err != nil {
+		return inv.out.Report(err)
 	}
 
 	if err := cmd.run(ctx, inv, pos); err != nil {
-		return report(err, timeoutText)
+		return inv.out.Report(inv.finish(err))
 	}
-	return ExitOK
+	return output.ExitOK
+}
+
+// effectiveTimeout applies the --timeout rules: negative is a usage error and
+// 0 means the command's default.
+func effectiveTimeout(flagValue, def time.Duration) (time.Duration, error) {
+	if flagValue < 0 {
+		return 0, output.Usage("--timeout must not be negative")
+	}
+	if flagValue == 0 {
+		return def, nil
+	}
+	return flagValue, nil
+}
+
+// defaultFormat is table on a terminal and json otherwise.
+func defaultFormat(env Env) output.Format {
+	if env.StdoutIsTTY {
+		return output.Table
+	}
+	return output.JSON
+}
+
+// peekFormat reads a valid --format out of args that failed to parse, so the
+// usage error itself is printed in the format the caller asked for.
+func peekFormat(args []string, fallback output.Format) output.Format {
+	f := fallback
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--" {
+			break
+		}
+		name, val, hasVal := strings.Cut(strings.TrimLeft(args[i], "-"), "=")
+		if name != "format" || !strings.HasPrefix(args[i], "-") {
+			continue
+		}
+		if !hasVal {
+			if i+1 == len(args) {
+				break
+			}
+			i++
+			val = args[i]
+		}
+		if p, err := output.ParseFormat(val); err == nil {
+			f = p
+		}
+	}
+	return f
+}
+
+// failUsage reports a usage error: the error object in JSON mode, the
+// message and the usage text in table mode, both on stderr.
+func failUsage(out output.Options, cmds map[string]command, format string, a ...any) int {
+	code := out.Report(output.Usage(format, a...))
+	if out.Format == output.Table {
+		usage(out.Stderr, cmds)
+	}
+	return code
+}
+
+// finish maps a command's error: a deadline becomes the transport failure
+// naming the effective timeout.
+func (inv *Invocation) finish(err error) error {
+	if inv.timeout > 0 && isDeadline(err) {
+		return output.Transport(err, "instance did not answer within %s", inv.timeout)
+	}
+	return err
 }
 
 // parseInterspersed parses flags that may appear between positional
-// arguments, which the standard flag package stops at; "--" ends flag
-// parsing.
+// arguments, which the standard flag package stops at. "--" ends flag
+// parsing; a lone "-" is a positional argument.
 func parseInterspersed(fs *flag.FlagSet, args []string) ([]string, error) {
 	var pos []string
 	for {
@@ -291,32 +296,26 @@ func parseInterspersed(fs *flag.FlagSet, args []string) ([]string, error) {
 	}
 }
 
-// writeError prints a failure to w: one JSON object in JSON mode, one
-// "husk: <message>" line in table mode.
-func writeError(w io.Writer, e *Error, asJSON bool) {
-	if !asJSON {
-		fmt.Fprintf(w, "husk: %s\n", e.Message)
-		return
+func commandUsage(w io.Writer, cmd command, noun string) {
+	fmt.Fprintf(w, "usage: %s", cmd.usage)
+	if !cmd.local {
+		fmt.Fprint(w, " [--instance <id> | --socket <path>] [--timeout <duration>]")
 	}
-	body := map[string]any{"code": e.Code, "message": e.Message}
-	if len(e.Data) > 0 {
-		body["data"] = e.Data
-	}
-	b, _ := json.Marshal(map[string]any{"error": body})
-	fmt.Fprintf(w, "%s\n", b)
+	fmt.Fprint(w, " [--format json|table]\n")
 }
 
-func usage(w io.Writer, table map[string]command) {
-	names := make([]string, 0, len(table))
-	for n := range table {
-		names = append(names, n)
+func usage(w io.Writer, cmds map[string]command) {
+	nouns := make([]string, 0, len(cmds))
+	for n := range cmds {
+		nouns = append(nouns, n)
 	}
-	sort.Strings(names)
+	sort.Strings(nouns)
 	var b strings.Builder
 	b.WriteString("usage: husk [flags]                 start an instance\n")
-	for _, n := range names {
-		fmt.Fprintf(&b, "       %s\n", table[n].usage)
+	for _, n := range nouns {
+		fmt.Fprintf(&b, "       %s\n", cmds[n].usage)
 	}
-	b.WriteString("\nflags of every command follow the command name: --instance <id> | --socket <path>, --format json|table, --timeout <duration>\n")
+	b.WriteString("       husk help\n")
+	b.WriteString("\nglobal flags follow the command: --instance <id> | --socket <path>, --format json|table, --timeout <duration>\n")
 	fmt.Fprint(w, b.String())
 }

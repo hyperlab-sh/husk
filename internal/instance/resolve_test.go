@@ -82,47 +82,42 @@ func TestResolveSocketFlag(t *testing.T) {
 	}
 }
 
-func TestResolveSocketFlagDeadIsNoInstance(t *testing.T) {
-	dir, net := fixture(t, func(dir string) []Entry {
-		return []Entry{namedEntry(dir, "notes", 5120)} // discovery would find this
-	})
-	_, err := Resolve(ResolveOptions{Dir: dir, Socket: "/absent.sock", Deps: net.deps()})
-	var e *Error
-	if !errors.As(err, &e) || e.Kind != KindNoInstance {
-		t.Fatalf("error = %v, want KindNoInstance", err)
-	}
-	if !strings.Contains(err.Error(), `socket "/absent.sock" points at a socket nobody is listening on`) {
-		t.Fatalf("message = %q, want the dead-socket sentence", err.Error())
-	}
+// neverPing fails the test if a probe is attempted: explicit targets are
+// checked by the command's own connection, not by Resolve.
+func neverPing(t *testing.T) *Deps {
+	return &Deps{Ping: func(p string) error {
+		t.Errorf("Resolve probed %s; explicit targets must not be probed", p)
+		return nil
+	}}
 }
 
-func TestResolveEnvSocketPathDeadIsNoInstance(t *testing.T) {
-	// A stale HUSK_SOCKET_PATH is an error with the spec's wording and
-	// never falls through to discovery, even when an instance is running.
-	dir, net := fixture(t, func(dir string) []Entry {
+func TestResolveExplicitTargetsAreNotProbed(t *testing.T) {
+	dir, _ := fixture(t, func(dir string) []Entry {
 		return []Entry{namedEntry(dir, "notes", 5120)}
 	})
-	_, err := Resolve(ResolveOptions{Dir: dir, EnvSocketPath: "/absent.sock", Deps: net.deps()})
-	var e *Error
-	if !errors.As(err, &e) || e.Kind != KindNoInstance {
-		t.Fatalf("error = %v, want KindNoInstance", err)
+	cases := []struct {
+		name string
+		opts ResolveOptions
+		want string
+	}{
+		{"socket flag, dead path", ResolveOptions{Socket: "/absent.sock"}, "/absent.sock"},
+		{"HUSK_SOCKET_PATH, dead path", ResolveOptions{EnvSocketPath: "/absent.sock"}, "/absent.sock"},
+		{"instance flag", ResolveOptions{Instance: "notes"}, SocketPath(dir, "notes")},
+		{"HUSK_INSTANCE", ResolveOptions{EnvInstance: "notes"}, SocketPath(dir, "notes")},
 	}
-	if want := "HUSK_SOCKET_PATH points at a socket nobody is listening on; unset it or pass --instance"; err.Error() != want {
-		t.Fatalf("message = %q, want %q", err.Error(), want)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := tc.opts
+			opts.Dir = dir
+			opts.Deps = neverPing(t)
+			got, err := Resolve(opts)
+			if err != nil || got.Socket != tc.want {
+				t.Fatalf("got %+v, %v; want socket %q", got, err, tc.want)
+			}
+		})
 	}
-}
-
-func TestResolveSocketPathUnresponsiveIsTransport(t *testing.T) {
-	dir, net := fixture(t, func(dir string) []Entry { return nil })
-	net.live["/slow.sock"] = false
-	net.unresponsive["/slow.sock"] = true
-	_, err := Resolve(ResolveOptions{Dir: dir, Socket: "/slow.sock", Deps: net.deps()})
-	var e *Error
-	if !errors.As(err, &e) || e.Kind != KindTransport {
-		t.Fatalf("error = %v, want KindTransport", err)
-	}
-	if !strings.Contains(err.Error(), `"/slow.sock" did not answer within 2s`) {
-		t.Fatalf("message = %q, want the no-answer sentence", err.Error())
+	if _, err := os.Lstat(EntryPath(dir, "notes")); err != nil {
+		t.Errorf("Resolve must not touch the entry: %v", err)
 	}
 }
 
@@ -252,44 +247,6 @@ func TestResolveInstanceFlagNotRegistered(t *testing.T) {
 	}
 }
 
-func TestResolveInstanceFlagStaleRemovesEntry(t *testing.T) {
-	dir, net := fixture(t, func(dir string) []Entry {
-		return []Entry{namedEntry(dir, "notes", 5120)}
-	})
-	net.live = map[string]bool{} // nothing answers: the entry is stale
-	_, err := Resolve(ResolveOptions{Dir: dir, Instance: "notes", Deps: net.deps()})
-	var e *Error
-	if !errors.As(err, &e) || e.Kind != KindNoInstance {
-		t.Fatalf("error = %v, want KindNoInstance", err)
-	}
-	if want := `instance "notes" is not running (stale entry removed)`; err.Error() != want {
-		t.Fatalf("message = %q, want %q", err.Error(), want)
-	}
-	if _, serr := os.Lstat(EntryPath(dir, "notes")); serr == nil {
-		t.Error("stale entry should have been removed")
-	}
-	if _, serr := os.Lstat(SocketPath(dir, "notes")); serr != nil {
-		t.Error("stale cleanup must leave the socket alone")
-	}
-}
-
-func TestResolveInstanceFlagUnresponsiveIsTransport(t *testing.T) {
-	dir, net := fixture(t, func(dir string) []Entry {
-		return []Entry{namedEntry(dir, "notes", 5120)}
-	})
-	net.unresponsive[SocketPath(dir, "notes")] = true
-	net.live[SocketPath(dir, "notes")] = false
-	_, err := Resolve(ResolveOptions{Dir: dir, Instance: "notes", Deps: net.deps()})
-	var e *Error
-	if !errors.As(err, &e) || e.Kind != KindTransport {
-		t.Fatalf("error = %v, want KindTransport", err)
-	}
-	// An unresponsive instance keeps its registration.
-	if _, serr := os.Lstat(EntryPath(dir, "notes")); serr != nil {
-		t.Error("unresponsive entry must be kept")
-	}
-}
-
 func TestResolveEnvInstance(t *testing.T) {
 	dir, net := fixture(t, func(dir string) []Entry {
 		return []Entry{pidEntry(dir, "4242", 4242)}
@@ -312,18 +269,49 @@ func TestResolveEnvInstanceInvalidIsUsage(t *testing.T) {
 	}
 }
 
-func TestResolveEnvInstanceStaleDoesNotFallThrough(t *testing.T) {
+func TestResolveEnvInstanceNotRegisteredDoesNotFallThrough(t *testing.T) {
 	// The spec's no-fallback rule: the env step applies and fails, so a
 	// live instance elsewhere in the directory is never a silent fallback.
 	dir, net := fixture(t, func(dir string) []Entry {
-		return []Entry{namedEntry(dir, "notes", 5120), pidEntry(dir, "4242", 4242)}
+		return []Entry{namedEntry(dir, "notes", 5120)}
 	})
-	delete(net.live, SocketPath(dir, "4242"))
 	_, err := Resolve(ResolveOptions{Dir: dir, EnvInstance: "4242", Deps: net.deps()})
 	var e *Error
 	if !errors.As(err, &e) || e.Kind != KindNoInstance {
 		t.Fatalf("error = %v, want KindNoInstance", err)
 	}
+}
+
+func TestResolveAbsentDirectory(t *testing.T) {
+	cases := []struct {
+		name string
+		opts ResolveOptions
+		kind ErrorKind
+		msg  string
+	}{
+		{"discovery", ResolveOptions{}, KindNoInstance, "no instance is running"},
+		{"instance flag", ResolveOptions{Instance: "notes"}, KindNoInstance, `instance "notes" is not running`},
+		{"HUSK_INSTANCE", ResolveOptions{EnvInstance: "notes"}, KindNoInstance, `instance "notes" is not running`},
+		{"invalid id is still usage", ResolveOptions{Instance: "Foo_1"}, KindUsage, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := tc.opts
+			opts.DirAbsent = true
+			opts.Deps = neverPing(t)
+			_, err := Resolve(opts)
+			var e *Error
+			if !errors.As(err, &e) || e.Kind != tc.kind || (tc.msg != "" && err.Error() != tc.msg) {
+				t.Fatalf("error = %v, want kind %v %q", err, tc.kind, tc.msg)
+			}
+		})
+	}
+	t.Run("a socket path needs no directory", func(t *testing.T) {
+		got, err := Resolve(ResolveOptions{DirAbsent: true, Socket: "/s.sock"})
+		if err != nil || got.Socket != "/s.sock" {
+			t.Fatalf("got %+v, %v", got, err)
+		}
+	})
 }
 
 func TestResolveDiscoveryZero(t *testing.T) {
@@ -421,19 +409,43 @@ func TestResolveDiscoveryOneLiveOneUnresponsive(t *testing.T) {
 	}
 }
 
-func TestResolveDiscoveryOnlyUnresponsive(t *testing.T) {
+func TestResolveDiscoveryOnlyUnresponsiveIsTransport(t *testing.T) {
+	// Exit 5, not 3: a script that starts an instance on "none running"
+	// must not start one beside a hung one.
+	dir, net := fixture(t, func(dir string) []Entry {
+		return []Entry{namedEntry(dir, "notes", 5120), pidEntry(dir, "4242", 4242)}
+	})
+	for _, id := range []string{"notes", "4242"} {
+		net.unresponsive[SocketPath(dir, id)] = true
+		net.live[SocketPath(dir, id)] = false
+	}
+	_, err := Resolve(ResolveOptions{Dir: dir, Deps: net.deps()})
+	var e *Error
+	if !errors.As(err, &e) || e.Kind != KindTransport {
+		t.Fatalf("error = %v, want KindTransport", err)
+	}
+	if want := "2 instances are registered but none answered within 500ms: 4242, notes"; err.Error() != want {
+		t.Fatalf("message = %q, want %q", err.Error(), want)
+	}
+	if len(e.Skipped) != 2 {
+		t.Errorf("Skipped = %+v, want both", e.Skipped)
+	}
+	for _, id := range []string{"notes", "4242"} {
+		if _, serr := os.Lstat(EntryPath(dir, id)); serr != nil {
+			t.Errorf("unresponsive entry %s must be kept", id)
+		}
+	}
+}
+
+func TestResolveDiscoveryOneUnresponsiveMessageIsSingular(t *testing.T) {
 	dir, net := fixture(t, func(dir string) []Entry {
 		return []Entry{namedEntry(dir, "notes", 5120)}
 	})
 	net.unresponsive[SocketPath(dir, "notes")] = true
 	net.live[SocketPath(dir, "notes")] = false
 	_, err := Resolve(ResolveOptions{Dir: dir, Deps: net.deps()})
-	var e *Error
-	if !errors.As(err, &e) || e.Kind != KindNoInstance {
-		t.Fatalf("error = %v, want KindNoInstance", err)
-	}
-	if len(e.Skipped) != 1 || e.Skipped[0].Entry.ID != "notes" {
-		t.Errorf("Skipped = %+v, want the unresponsive notes", e.Skipped)
+	if want := "1 instance is registered but none answered within 500ms: notes"; err == nil || err.Error() != want {
+		t.Fatalf("error = %v, want %q", err, want)
 	}
 }
 
