@@ -83,7 +83,7 @@ A zero-value caller, an unknown kind, a `plugin` kind with an empty id, or any o
 | `settings.list`, `settings.schema`, `settings.validate` | yes | yes | `denied` |
 | `theme.get` | yes | yes | yes |
 | `theme.check` | yes | yes | `denied` |
-| `keys.list` | full listing | full listing | own entries and problems only ([Keybindings](keybindings.md) owns the shape) |
+| `keys.list` | full listing | full listing | own entries, the effective `husk.*` and rail-item entries, and own problems only ([Keybindings](keybindings.md) owns the shape) |
 | `profile.list`, `profile.use` | yes | yes | `denied` |
 | `config.reload` | yes | yes | `denied` |
 | `secrets.get` | any name (audited, see Secrets) | `denied` | declared and granted names |
@@ -385,7 +385,7 @@ The Service exposes the policy view from [Keybindings](keybindings.md) (`Resolve
 4. The resolved keymap is capped at **4096 effective bindings** (the index the Service keeps in memory and `husk keys` prints). Past the cap the weakest-ranked entries are shadowed and reported `too_many`, so a flood of low-layer entries cannot displace a `profile` or `user` binding.
 5. A rebuild that leaves no effective binding for `husk.quit` or `husk.palette.open` still publishes and reports `no_exit_binding` ([Keybindings](keybindings.md), loader rules table).
 6. Lookup never fails: an unknown action id resolves, and the Dispatcher reports `not_found` at dispatch, where the user can see it. A host action declining a key (`ActionReply.Declined`, host-only and never serialized, defined in [Keybindings](keybindings.md) and [Message kinds](message-kinds.md)) is Input's and the Dispatcher's business; the Service never sees it.
-7. `keys.list` for a `plugin` caller returns only the entries whose declaring plugin is the caller or whose action the caller owns in the catalog, and only the caller's own problems; `cli` and `host` get the full listing. The Server joins the listing with State liveness and the action catalog to produce the `state` column ([Keybindings](keybindings.md)). The `problems` array of the result is `[]protocol.Problem` ([Protocol](protocol.md), "Problem"), serialized as is.
+7. `keys.list` for a `plugin` caller returns only the entries whose declaring plugin is the caller or whose action the caller owns in the catalog, plus the entries in state `effective` whose action is a `husk.*` host action or a rail item id declared in the catalog (the `rail_items` of the same declared plugin documents the Service already reads for action owners), and only the caller's own problems; `cli` and `host` get the full listing. The Server joins the listing with State liveness and the action catalog to produce the `state` column ([Keybindings](keybindings.md)). The `problems` array of the result is `[]protocol.Problem` ([Protocol](protocol.md), "Problem"), serialized as is.
 
 ### Secrets
 
