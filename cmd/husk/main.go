@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -102,12 +103,28 @@ func repeatable(name, usage string) *stringFlag {
 	return f
 }
 
-// pluginInstanceDocs preserves configured values unless the matching flag was
-// explicitly supplied. Store replaces each supplied array as a whole.
+// bundleFlag normalizes a supplied path at parsing, preserving empty as disable.
+type bundleFlag string
+
+func (f *bundleFlag) String() string { return string(*f) }
+func (f *bundleFlag) Set(value string) error {
+	if value != "" {
+		abs, err := filepath.Abs(value)
+		if err != nil {
+			return err
+		}
+		value = abs
+	}
+	*f = bundleFlag(value)
+	return nil
+}
+
+// pluginInstanceDocs folds all launch flags into one instance document, leaving
+// configured values alone unless their matching flag was explicitly supplied.
 func pluginInstanceDocs(fs *flag.FlagSet) map[string]map[string]any {
 	given := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { given[f.Name] = true })
-	if !given["plugin"] && !given["plugin-dir"] {
+	if !given["plugin"] && !given["plugin-dir"] && !given["bundle"] {
 		return nil
 	}
 	plugins := map[string]any{}
@@ -117,7 +134,14 @@ func pluginInstanceDocs(fs *flag.FlagSet) map[string]map[string]any {
 	if given["plugin-dir"] {
 		plugins["dirs"] = []string(*fs.Lookup("plugin-dir").Value.(*stringFlag))
 	}
-	return map[string]map[string]any{"config": {"husk": map[string]any{"plugins": plugins}}}
+	husk := map[string]any{}
+	if len(plugins) > 0 {
+		husk["plugins"] = plugins
+	}
+	if given["bundle"] {
+		husk["bundle"] = fs.Lookup("bundle").Value.String()
+	}
+	return map[string]map[string]any{"config": {"husk": husk}}
 }
 
 func main() {
@@ -134,6 +158,8 @@ func main() {
 	holdAlt := flag.Bool("hold-alt", false, "Simulate holding Alt/Option key on startup")
 	repeatable("plugin", "Plugin: executable, plugin directory, or husk-plugin.json path (repeatable)")
 	repeatable("plugin-dir", "Load every immediate subdirectory containing a husk-plugin.json (repeatable)")
+	var bundleDir bundleFlag
+	flag.Var(&bundleDir, "bundle", "Load a bundle directory as plugins and distribution config; empty disables")
 	demo := flag.String("demo", "", "In-process frame demo: pubslots (requires --dump-frame)")
 	instanceName := flag.String("instance", "", "Name this instance (a-z, 0-9 and -, not digits only); default is the pid. Command mode's --instance targets one instead")
 	profileName := flag.String("profile", "", "Select a profile on startup (a-z, 0-9, _ and -); it wins over the saved selection and profile.default")
@@ -192,9 +218,10 @@ func main() {
 		model.logOut = os.Stderr
 	}
 
-	// The runtime directory is resolved once; the Server and Store get the
-	// same string.
-	runtimeDir, err := instance.RuntimeDir()
+	// Resolve without creating: a bad bundle must fail before any runtime or
+	// persistence directory is written. The host checks/creates this path only
+	// after its bundle stage; the Server and Store receive the same string.
+	runtimeDir, _, err := instance.LookupRuntimeDir()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "husk: runtime directory: %v\n", err)
 		os.Exit(1)
