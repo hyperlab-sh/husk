@@ -13,7 +13,7 @@
     {"id": "go.reference.row-actions", "title": "Row actions", "description": "Actions beside each row", "kind": "inline"}
   ],
   "hooks": {
-    "publish": [{"id": "go.reference.before-refresh", "title": "Before refresh", "description": "Called when the reference plugin refreshes"}]
+    "publish": [{"id": "go.reference.before-refresh", "kind": "gate", "title": "Before refresh", "description": "Called when the reference plugin refreshes"}]
   },
   "events": {
     "publish": [{"name": "go.reference.selection-changed", "title": "Selection changed", "description": "The selected row changed"}]

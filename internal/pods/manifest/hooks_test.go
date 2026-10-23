@@ -2,6 +2,8 @@ package manifest
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -174,5 +176,29 @@ func TestHookCatalogRoundTripAndClone(t *testing.T) {
 	clone.HookRegistrations[0].Priority = 99
 	if spec.HooksDeclared[0].Kind != HookTransform || spec.HookRegistrations[0].Priority != 7 {
 		t.Fatal("Clone shares hook slices with the original")
+	}
+}
+
+// The bundled reference plugins are the documented template: they must convert.
+func TestBundledPluginManifestsConvert(t *testing.T) {
+	paths, err := filepath.Glob(filepath.Join("..", "..", "..", "plugins", "*", FileName))
+	if err != nil || len(paths) == 0 {
+		t.Fatalf("no bundled manifests found: %v", err)
+	}
+	for _, path := range paths {
+		t.Run(filepath.Base(filepath.Dir(path)), func(t *testing.T) {
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			dir, err := filepath.Abs(filepath.Dir(path))
+			if err != nil {
+				t.Fatal(err)
+			}
+			src := Source{Path: filepath.Join(dir, FileName), Dir: dir, Bytes: raw}
+			if _, _, err := (V2Converter{}).Convert(src); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }

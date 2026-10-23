@@ -9,6 +9,6 @@
   "actions": [
     {"id": "go.reference-actions.inspect", "title": "Inspect", "description": "Toasts the row that was clicked"}
   ],
-  "hooks": {"subscribe": ["go.reference.before-refresh"]},
+  "hooks": {"subscribe": [{"id": "go.reference.before-refresh", "priority": 10}]},
   "events": {"subscribe": ["go.reference.selection-changed"]}
 }
