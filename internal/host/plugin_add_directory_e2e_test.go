@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -53,7 +54,7 @@ func TestPluginAddDirectoryPublishesEveryOutcomeWithoutCoalescing(t *testing.T) 
 	}
 	code, stdout, stderr := cliRun(h, "plugin", "add", "--dir", root)
 	var result contracts.PluginAddition
-	if code != 0 || json.Unmarshal([]byte(stdout), &result) != nil || len(result.Added) != 2 || result.Added[0].Plugin != "alpha" || result.Added[0].Status != "live" || result.Added[1].Plugin != "beta" || result.Added[1].Status != "failed" || len(result.Refused) != 1 || result.Refused[0].Path != filepath.Join(root, "broken") || len(result.Reports) != 5 {
+	if code != 1 || !strings.Contains(stderr, "plugins failed to launch: beta") || json.Unmarshal([]byte(stdout), &result) != nil || len(result.Added) != 2 || result.Added[0].Plugin != "alpha" || result.Added[0].Status != "live" || result.Added[1].Plugin != "beta" || result.Added[1].Status != "failed" || len(result.Refused) != 1 || result.Refused[0].Path != filepath.Join(root, "broken") || len(result.Reports) != 5 {
 		t.Fatalf("directory add: %d %s %s", code, stdout, stderr)
 	}
 	_ = w.c.SetReadDeadline(time.Now().Add(failBound))

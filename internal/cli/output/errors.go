@@ -14,8 +14,8 @@ import (
 const (
 	// ExitOK: success.
 	ExitOK = 0
-	// ExitRemote: the instance answered with an error reply, or a local
-	// store command failed.
+	// ExitRemote: the instance answered with an error reply, an admitted
+	// plugin failed to launch, or a local store command failed.
 	ExitRemote = 1
 	// ExitUsage: unknown command, bad flag or argument, nothing sent.
 	ExitUsage = 2
@@ -62,7 +62,7 @@ type Error struct {
 	// Exit is the process exit code.
 	Exit int
 	// Code is the "code" of the error object: a Protocol code for an error
-	// reply, otherwise one of the Code constants.
+	// reply or failed plugin launch, otherwise one of the Code constants.
 	Code string
 	// Message is the human sentence.
 	Message string

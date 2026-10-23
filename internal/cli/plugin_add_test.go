@@ -3,6 +3,8 @@ package cli
 import (
 	"encoding/json"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -65,6 +67,72 @@ func TestPluginAddUsageErrorsDoNotConnectAndDirIsCommandSpecific(t *testing.T) {
 	}
 	if srv.connections() != 0 {
 		t.Fatal("usage error connected")
+	}
+}
+
+func TestPluginAddLaunchOutcomesControlExitAndPreserveResult(t *testing.T) {
+	for _, format := range []string{"json", "table"} {
+		for _, tc := range []struct {
+			name     string
+			statuses []string
+			wantExit int
+		}{
+			{"failed path", []string{"failed"}, output.ExitRemote},
+			{"mixed directory", []string{"live", "failed"}, output.ExitRemote},
+			{"multiple failures", []string{"failed", "failed"}, output.ExitRemote},
+			{"live and removed", []string{"live", "removed"}, output.ExitOK},
+		} {
+			t.Run(format+"/"+tc.name, func(t *testing.T) {
+				dir := shortDir(t)
+				added := []map[string]any{}
+				failed := []string{}
+				for i, status := range tc.statuses {
+					id := string(rune('a' + i))
+					added = append(added, map[string]any{"plugin": id, "status": status, "log": "/logs/" + id + ".log", "warnings": []any{}})
+					if status == "failed" {
+						failed = append(failed, id)
+					}
+				}
+				result := map[string]any{"added": added, "refused": []any{map[string]any{"path": "/bad", "code": "conversion", "message": "bad manifest"}}, "reports": []any{map[string]any{"service": "settings", "applied": false}}}
+				srv := serve(t, dir, "a", pingOK("a", func(c *srvConn, req protocol.Message) { c.reply(req, result) }))
+				h := newHarness(t, dir, nil)
+				args := []string{"plugin", "add", "/plugins/a"}
+				if len(tc.statuses) > 1 {
+					args = []string{"plugin", "add", "--dir", "/plugins"}
+				}
+				code := h.run(append(args, "--socket", srv.Socket, "--format", format)...)
+				if code != tc.wantExit {
+					t.Fatalf("exit=%d stdout=%s stderr=%s", code, h.out.String(), h.errb.String())
+				}
+				if format == "json" {
+					var got, want any
+					raw, _ := json.Marshal(result)
+					_ = json.Unmarshal(raw, &want)
+					if json.Unmarshal(h.out.Bytes(), &got) != nil || !reflect.DeepEqual(got, want) {
+						t.Fatalf("result changed: %s", h.out.String())
+					}
+				} else if !strings.Contains(h.out.String(), "/logs/a.log") || !strings.Contains(h.out.String(), "bad manifest") {
+					t.Fatalf("missing outcomes: %s", h.out.String())
+				}
+				if len(failed) == 0 {
+					if h.errb.Len() != 0 {
+						t.Fatal(h.errb.String())
+					}
+					return
+				}
+				message := "plugins failed to launch: " + strings.Join(failed, ", ")
+				if format == "json" {
+					var diagnostic struct {
+						Error struct{ Code, Message string }
+					}
+					if json.Unmarshal(h.errb.Bytes(), &diagnostic) != nil || diagnostic.Error.Code != string(protocol.CodeFailed) || diagnostic.Error.Message != message {
+						t.Fatalf("diagnostic=%s", h.errb.String())
+					}
+				} else if h.errb.String() != "husk: "+message+"\n" {
+					t.Fatalf("diagnostic=%s", h.errb.String())
+				}
+			})
+		}
 	}
 }
 
