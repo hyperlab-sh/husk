@@ -426,7 +426,10 @@ func TestSurfacesResolutionSlice(t *testing.T) {
 	if err := json.Unmarshal(entry.Value, &empty); err != nil {
 		t.Fatalf("initial value not a resolution object: %v", err)
 	}
-	if !reflect.DeepEqual(empty, surfaces.Surfaces{}) {
+	if !reflect.DeepEqual(empty, surfaces.Surfaces{
+		Capture:   map[protocol.SurfaceID]protocol.CaptureMode{},
+		Terminals: map[protocol.SurfaceID]contracts.TerminalMetadata{},
+	}) {
 		t.Fatalf("initial value = %+v, want the empty resolution", empty)
 	}
 
@@ -440,6 +443,7 @@ func TestSurfacesResolutionSlice(t *testing.T) {
 			},
 		},
 		Capture:   map[protocol.SurfaceID]protocol.CaptureMode{protocol.SurfaceMainStage: protocol.CaptureText},
+		Terminals: map[protocol.SurfaceID]contracts.TerminalMetadata{},
 		Visible:   []protocol.SurfaceID{protocol.SurfaceActivityRail, protocol.SurfaceSidebarList, protocol.SurfaceMainHeader, protocol.SurfaceMainStage},
 		Placement: surfaces.Placement{RailItem: "", Kind: ""},
 		Overlays:  surfaces.Overlays{},
@@ -452,7 +456,7 @@ func TestSurfacesResolutionSlice(t *testing.T) {
 	}
 	want := `{"occupants":{"main-stage":{"surface":"main-stage","plugin":"example.editor"}},` +
 		`"contributions":{"example.editor.toolbar":[{"slot":"example.editor.toolbar","id":"example.git.branch","plugin":"example.git","label":"main"}]},` +
-		`"capture":{"main-stage":"text"},"terminals":null,` +
+		`"capture":{"main-stage":"text"},"terminals":{},` +
 		`"visible":["activity-rail","sidebar-list","main-header","main-stage"],` +
 		`"placement":{"rail_item":"","kind":""},` +
 		`"overlays":{"modal":{"plugin":"","rail_item":""},"palette":false,"slot_explorer":false,"settings_center":""}}`

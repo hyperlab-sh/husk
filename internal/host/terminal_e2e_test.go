@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
@@ -72,4 +73,73 @@ func TestTerminalSocketFloodAndDetach(t *testing.T) {
 		}
 	})
 	call(protocol.MethodSurfaceUpdate, protocol.SurfaceUpdateParams{Surface: id, Lines: []string{"line mode restored"}})
+}
+
+func TestTerminalSocketWriteParamErrors(t *testing.T) {
+	noLeaks(t)
+	h, f, _ := bootFrontendWith(t, nil, writePlugin(t, "alpha", false))
+	w := dial(t, h.root.srv.SocketPath())
+	writer, decoder := protocol.NewWriter(w.c), json.NewDecoder(w.r)
+	id := protocol.NewStringID("write")
+	token := f.proc("alpha").Token()
+	oversized := base64.StdEncoding.EncodeToString(make([]byte, protocol.MaxTerminalBytes+1))
+	for _, tc := range []struct{ name, raw string }{
+		{"mistyped", `{"surface":42}`},
+		{"base64", `{"surface":"sidebar-list","data":"!"}`},
+		{"missing_surface", `{"data":"eA=="}`},
+		{"oversized", `{"surface":"sidebar-list","data":"` + oversized + `"}`},
+	} {
+		for _, notification := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/notification=%t", tc.name, notification), func(t *testing.T) {
+				req := protocol.Message{ID: &id, Method: protocol.MethodTerminalWrite, Token: token, Params: json.RawMessage(tc.raw)}
+				if notification {
+					req.ID = nil
+				}
+				if err := w.c.SetDeadline(time.Now().Add(failBound)); err != nil {
+					t.Fatal(err)
+				}
+				if err := writer.Send(req); err != nil {
+					t.Fatal(err)
+				}
+				var reply protocol.Message
+				if err := decoder.Decode(&reply); err != nil {
+					t.Fatal(err)
+				}
+				if !notification {
+					if reply.ID == nil || reply.ID.String() != id.String() || reply.Error == nil || reply.Error.Code != protocol.CodeInvalidParams {
+						t.Fatal("invalid write request did not receive invalid_params")
+					}
+					return
+				}
+				if reply.ID != nil || reply.Method != protocol.MethodProtocolError || reply.Error != nil {
+					t.Fatal("invalid write notification did not receive protocol.error")
+				}
+				var notice protocol.ProtocolErrorParams
+				if err := json.Unmarshal(reply.Params, &notice); err != nil {
+					t.Fatal(err)
+				}
+				if notice.Code != protocol.CodeInvalidParams || notice.Method != protocol.MethodTerminalWrite {
+					t.Fatalf("notification error: %s for %s", notice.Code, notice.Method)
+				}
+			})
+		}
+	}
+	// The connection survives bad params. Valid writes to unattached or foreign
+	// surfaces retain their acknowledged log-and-drop policy.
+	for _, surface := range []protocol.SurfaceID{protocol.SurfaceSidebarList, protocol.SurfaceMainStage} {
+		raw, _ := json.Marshal(protocol.TerminalWriteParams{Surface: surface, Data: "eA=="})
+		if err := w.c.SetDeadline(time.Now().Add(failBound)); err != nil {
+			t.Fatal(err)
+		}
+		if err := writer.Send(protocol.Message{ID: &id, Method: protocol.MethodTerminalWrite, Token: token, Params: raw}); err != nil {
+			t.Fatal(err)
+		}
+		var reply protocol.Message
+		if err := decoder.Decode(&reply); err != nil {
+			t.Fatal(err)
+		}
+		if reply.Error != nil || string(reply.Result) != "{}" {
+			t.Fatal("valid refused write lost its empty acknowledgement")
+		}
+	}
 }

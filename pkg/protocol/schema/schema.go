@@ -69,11 +69,13 @@ func owner(method string) string {
 
 func form(method string) string {
 	switch method {
+	case protocol.MethodTerminalWrite, protocol.MethodTerminalDetach:
+		return "request or notification"
 	case protocol.MethodProtocolError, protocol.MethodEventDeliver, protocol.MethodStateChanged,
 		protocol.MethodSurfaceUpdate, protocol.MethodSurfaceClose, protocol.MethodSurfaceResized,
 		protocol.MethodInputKey, protocol.MethodInputMouse, protocol.MethodInputKeyState,
 		protocol.MethodThemeChanged, protocol.MethodSlotContributions, protocol.MethodToastShow,
-		protocol.MethodTerminalWrite, protocol.MethodTerminalDetach, protocol.MethodTerminalInput:
+		protocol.MethodTerminalInput:
 		return "notification"
 	default:
 		return "request"
@@ -95,9 +97,9 @@ func payloadTypes(method string) (reflect.Type, reflect.Type) {
 	case protocol.MethodTerminalAttach:
 		return reflect.TypeFor[protocol.TerminalAttachParams](), reflect.TypeFor[protocol.TerminalAttachResult]()
 	case protocol.MethodTerminalWrite:
-		return reflect.TypeFor[protocol.TerminalWriteParams](), nil
+		return reflect.TypeFor[protocol.TerminalWriteParams](), reflect.TypeFor[protocol.EmptyResult]()
 	case protocol.MethodTerminalDetach:
-		return reflect.TypeFor[protocol.TerminalDetachParams](), nil
+		return reflect.TypeFor[protocol.TerminalDetachParams](), reflect.TypeFor[protocol.EmptyResult]()
 	case protocol.MethodTerminalInput:
 		return reflect.TypeFor[protocol.TerminalInputParams](), nil
 	case protocol.MethodInputKey:

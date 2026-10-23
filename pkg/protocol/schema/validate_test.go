@@ -34,8 +34,8 @@ func payloads() map[string]payload {
 		protocol.MethodSurfaceUpdate:     {protocol.SurfaceUpdateParams{PluginID: "notes", Surface: protocol.SurfaceMainStage, Title: "t", Subtitle: "s", Badge: "b", Lines: []string{"x"}, HitTargets: hit, StatusMeta: map[string]any{"n": 1}, Capture: &yes}, nil},
 		protocol.MethodSurfaceClose:      {protocol.SurfaceCloseParams{Surface: protocol.SurfaceModal}, nil},
 		protocol.MethodTerminalAttach:    {protocol.TerminalAttachParams{Surface: protocol.SurfaceMainStage, Capture: protocol.CaptureValueAll.Ptr(), Scrollback: &history}, protocol.TerminalAttachResult{Width: 80, Height: 24}},
-		protocol.MethodTerminalWrite:     {protocol.TerminalWriteParams{Surface: protocol.SurfaceMainStage, Data: "eA=="}, nil},
-		protocol.MethodTerminalDetach:    {protocol.TerminalDetachParams{Surface: protocol.SurfaceMainStage}, nil},
+		protocol.MethodTerminalWrite:     {protocol.TerminalWriteParams{Surface: protocol.SurfaceMainStage, Data: "eA=="}, protocol.EmptyResult{}},
+		protocol.MethodTerminalDetach:    {protocol.TerminalDetachParams{Surface: protocol.SurfaceMainStage}, protocol.EmptyResult{}},
 		protocol.MethodTerminalInput:     {protocol.TerminalInputParams{Surface: protocol.SurfaceMainStage, Data: "eA=="}, nil},
 		protocol.MethodSurfaceResized:    {protocol.SurfaceResizedParams{Surfaces: []protocol.SurfaceSize{{Surface: protocol.SurfaceMainStage, Width: 80, Height: 24, Focused: true, Visible: true}}}, nil},
 		protocol.MethodInputKey:          {protocol.SurfaceKeyParams{Surface: protocol.SurfaceMainStage, Key: "ctrl+x", Modifiers: mods}, nil},
@@ -249,16 +249,22 @@ func TestMarshaledMessagesValidateAgainstCommittedSchema(t *testing.T) {
 			}
 			id := protocol.NewStringID("1")
 			msg := protocol.Message{Method: name, Params: params}
-			if form(name) == "request" {
+			if form(name) != "notification" {
 				msg.ID = &id
 			}
 			if err := root.Validate(wire(t, msg)); err != nil {
 				t.Errorf("%s message: %v", form(name), err)
 			}
+			if form(name) == "request or notification" {
+				msg.ID = nil
+				if err := root.Validate(wire(t, msg)); err != nil {
+					t.Errorf("notification message: %v", err)
+				}
+			}
 			if err := compileDef(t, "#/$defs/"+name+".params").Validate(wire(t, row.params)); err != nil {
 				t.Errorf("params: %v", err)
 			}
-			if form(name) != "request" {
+			if form(name) == "notification" {
 				return
 			}
 			result, err := json.Marshal(row.result)

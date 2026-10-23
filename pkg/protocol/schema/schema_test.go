@@ -110,6 +110,26 @@ func TestMethodsAndReferences(t *testing.T) {
 	walk(doc)
 }
 
+func TestTerminalWriteAndDetachSchemaContracts(t *testing.T) {
+	doc := document(t)
+	methods := doc["x-methods"].(map[string]any)
+	defs := doc["$defs"].(map[string]any)
+	for _, method := range []string{protocol.MethodTerminalWrite, protocol.MethodTerminalDetach} {
+		t.Run(method, func(t *testing.T) {
+			if got := methods[method].(map[string]any)["form"]; got != "request or notification" {
+				t.Fatalf("form = %v, want request or notification", got)
+			}
+			result := defs[method+".result"].(map[string]any)
+			if result["$ref"] != "#/$defs/EmptyResult" {
+				t.Fatal("acknowledgement must use the empty-object result schema")
+			}
+			if !schemaAccepts(result, map[string]any{}, defs) || schemaAccepts(result, nil, defs) || schemaAccepts(result, "not an object", defs) {
+				t.Fatal("acknowledgement schema must accept {} and reject non-objects")
+			}
+		})
+	}
+}
+
 func TestPayloadRequiredFieldsAndEnums(t *testing.T) {
 	defs := document(t)["$defs"].(map[string]any)
 	ping := defs["SessionPingResult"].(map[string]any)

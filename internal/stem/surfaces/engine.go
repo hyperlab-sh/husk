@@ -337,6 +337,9 @@ func (e *Engine) Flush() {
 	if res.Capture == nil {
 		res.Capture = map[protocol.SurfaceID]protocol.CaptureMode{}
 	}
+	if res.Terminals == nil {
+		res.Terminals = map[protocol.SurfaceID]contracts.TerminalMetadata{}
+	}
 	changedSlots := map[string]bool{}
 	occupiedBefore := make(map[protocol.SurfaceID]string, len(res.Occupants))
 	for surface, occ := range res.Occupants {

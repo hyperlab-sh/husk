@@ -1527,19 +1527,34 @@ func TestCaptureHandOverInTheSameTickAndUpdateViewKeepsIt(t *testing.T) {
 	}
 }
 
-func TestCommittedSurfacesAlwaysCarriesCaptureKey(t *testing.T) {
+func TestCommittedSurfacesAlwaysCarriesCaptureAndTerminals(t *testing.T) {
 	st, eng, pods := newEngine(t, Options{})
+	check := func(phase string) {
+		t.Helper()
+		entry, ok := st.Get(state.SurfacesNamespace)
+		if !ok {
+			t.Fatal("husk.surfaces not registered")
+		}
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(entry.Value, &raw); err != nil {
+			t.Fatal(err)
+		}
+		for _, key := range []string{"capture", "terminals"} {
+			if got := string(raw[key]); got != "{}" {
+				t.Fatalf("%s: %s on the wire = %q, want {}", phase, key, got)
+			}
+		}
+	}
+	check("registration")
 	pods.launch("alpha.files")
 	settle(st, eng)
-	entry, ok := st.Get(state.SurfacesNamespace)
-	if !ok {
-		t.Fatal("husk.surfaces not registered")
-	}
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(entry.Value, &raw); err != nil {
+	check("resolution")
+	// A resolution pass must also normalize an empty foreign write, not
+	// merely inherit the maps from registration.
+	if err := eng.slice.Set(Surfaces{}); err != nil {
 		t.Fatal(err)
 	}
-	if got := string(raw["capture"]); got != "{}" {
-		t.Fatalf("capture on the wire = %q, want {}", got)
-	}
+	eng.CatalogChanged()
+	settle(st, eng)
+	check("empty foreign write")
 }
