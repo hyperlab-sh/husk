@@ -147,12 +147,12 @@ func (m *WorkbenchModel) renderActivityRailBox() string {
 			if !b.active {
 				pillColor = lipgloss.Color(m.palette.SurfaceElevated)
 				if showShortcuts {
-					iconFg = lipgloss.Color(m.palette.Warning)
+					iconFg = lipgloss.Color(m.palette.Ink)
 				} else {
 					iconFg = lipgloss.Color(m.palette.Ink)
 				}
 			} else if showShortcuts {
-				iconFg = lipgloss.Color(m.palette.Warning)
+				iconFg = lipgloss.Color(m.palette.Ink)
 			}
 
 			tileStyle := lipgloss.NewStyle().Background(pillColor)
@@ -223,8 +223,8 @@ func (m *WorkbenchModel) layoutLabel() string {
 
 func (m *WorkbenchModel) renderTopWorkbenchBar() string {
 	brand := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(m.palette.Canvas)).
-		Background(lipgloss.Color(m.palette.Accent)).
+		Foreground(lipgloss.Color(m.palette.Ink)).
+		Background(lipgloss.Color(m.palette.SurfaceElevated)).
 		Bold(true).
 		Padding(0, 1).
 		Render("◈ HUSK")
@@ -232,15 +232,15 @@ func (m *WorkbenchModel) renderTopWorkbenchBar() string {
 	dragPill := ""
 	if m.activeDrag != "" {
 		dragPill = lipgloss.NewStyle().
-			Foreground(lipgloss.Color(m.palette.Canvas)).
-			Background(lipgloss.Color(m.palette.Success)).
+			Foreground(lipgloss.Color(m.palette.Ink)).
+			Background(lipgloss.Color(m.palette.SurfaceSelected)).
 			Bold(true).
 			Padding(0, 1).
 			Render("⇄ Dragging "+m.activeDrag) + " "
 	} else if m.hoverDivider != "" {
 		dragPill = lipgloss.NewStyle().
-			Foreground(lipgloss.Color(m.palette.Canvas)).
-			Background(lipgloss.Color(m.palette.Warning)).
+			Foreground(lipgloss.Color(m.palette.Ink)).
+			Background(lipgloss.Color(m.palette.SurfaceElevated)).
 			Bold(true).
 			Padding(0, 1).
 			Render("⇄ Drag border: "+m.hoverDivider) + " "
@@ -257,8 +257,8 @@ func (m *WorkbenchModel) renderTopWorkbenchBar() string {
 		}
 	} else if m.modifiers.Alt {
 		dragPill = lipgloss.NewStyle().
-			Foreground(lipgloss.Color(m.palette.Canvas)).
-			Background(lipgloss.Color(m.palette.Warning)).
+			Foreground(lipgloss.Color(m.palette.Ink)).
+			Background(lipgloss.Color(m.palette.SurfaceElevated)).
 			Bold(true).
 			Padding(0, 1).
 			Render("⌥ ALT HELD · Shortcuts Active") + " "
@@ -273,7 +273,7 @@ func (m *WorkbenchModel) renderTopWorkbenchBar() string {
 
 func (m *WorkbenchModel) renderBottomKeybindBar() string {
 	keyStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(m.palette.Accent)).
+		Foreground(lipgloss.Color(m.palette.Ink)).
 		Bold(true)
 	descStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(m.palette.InkMuted))
@@ -295,7 +295,7 @@ func (m *WorkbenchModel) renderBottomKeybindBar() string {
 		left += group
 	}
 	pill := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(m.palette.AccentSecondary)).
+		Foreground(lipgloss.Color(m.palette.InkMuted)).
 		Background(lipgloss.Color(m.palette.SurfaceElevated)).
 		Padding(0, 1).
 		Render("✦ " + themePillName(m.palette.Name))
@@ -361,7 +361,8 @@ func (m *WorkbenchModel) drawSurface(c *canvas, slotID protocol.SurfaceID, callo
 	}
 	if m.showHotspots && rect.InnerW > 0 && rect.InnerH > 0 {
 		hot := lipgloss.NewStyle().
-			Foreground(lipgloss.Color(m.palette.Warning)).
+			Foreground(lipgloss.Color(m.palette.Ink)).
+			Background(lipgloss.Color(m.palette.SurfaceSelected)).
 			Bold(true).
 			Render(calloutNum + " " + slotName)
 		c.draw(uv.Rect(rect.InnerX, rect.InnerY, min(ansi.StringWidth(hot), rect.InnerW), 1), hot)
@@ -404,7 +405,6 @@ func (m *WorkbenchModel) surfaceContentLines(su *protocol.SurfaceUpdateParams, w
 
 func (m *WorkbenchModel) frameLabelStyle() lipgloss.Style {
 	col := lipgloss.Color(m.palette.InkMuted)
-	// the focused slot's label uses the accent colour when it has a border
 	return lipgloss.NewStyle().Foreground(col).Bold(true)
 }
 
@@ -440,8 +440,11 @@ func (m *WorkbenchModel) drawChrome(c *canvas, slotID protocol.SurfaceID, rect S
 			avail = rowW - 1
 		}
 		if label != "" && avail > 0 {
-			styled := lipgloss.NewStyle().
-				Foreground(lipgloss.Color(m.palette.Accent)).
+			labelStyle := m.frameLabelStyle()
+			if m.focusedSlot == slotID {
+				labelStyle = labelStyle.Foreground(lipgloss.Color(m.palette.Ink))
+			}
+			styled := labelStyle.
 				Bold(true).
 				Render(label)
 			if w := ansi.StringWidth(styled); w > avail {
@@ -505,10 +508,10 @@ func (m *WorkbenchModel) dividerEdgeStyles(slotID protocol.SurfaceID) (left, rig
 	lG, rG, tG, bG = "│", "│", "─", "─"
 
 	activeDiv := m.hoverDivider
-	edgeCol := lipgloss.Color(m.palette.Warning)
+	edgeCol := lipgloss.Color(m.palette.Ink)
 	if m.activeDrag != "" {
 		activeDiv = m.activeDrag
-		edgeCol = lipgloss.Color(m.palette.Success)
+		edgeCol = lipgloss.Color(m.palette.Accent)
 	}
 	hlStyle := lipgloss.NewStyle().Foreground(edgeCol).Bold(true)
 
@@ -578,7 +581,7 @@ func (m *WorkbenchModel) drawHotspotArchitectureStage(c *canvas) {
 	}
 	innerW := coreW
 
-	titleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.Accent)).Bold(true)
+	titleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.Ink)).Bold(true)
 	subStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.InkMuted))
 	subtle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.InkSubtle))
 
@@ -595,31 +598,41 @@ func (m *WorkbenchModel) drawHotspotArchitectureStage(c *canvas) {
 		if owner == "" {
 			owner = "husk.core (built-in)"
 		}
+		badgeBg := lipgloss.Color(m.palette.SurfaceElevated)
+		ownerFg := lipgloss.Color(m.palette.InkSubtle)
+		if selected {
+			badgeBg = lipgloss.Color(m.palette.SurfaceSelected)
+			ownerFg = lipgloss.Color(m.palette.InkMuted)
+		}
 		numBadge := lipgloss.NewStyle().
-			Foreground(lipgloss.Color(m.palette.Canvas)).
-			Background(lipgloss.Color(m.palette.Warning)).
+			Foreground(lipgloss.Color(m.palette.Ink)).
+			Background(badgeBg).
 			Bold(true).
 			Padding(0, 1).
 			Render(fmt.Sprintf("#%d", slot.Number))
 
-		idText := lipgloss.NewStyle().
+		rowStyle := lipgloss.NewStyle()
+		if selected {
+			rowStyle = rowStyle.Background(lipgloss.Color(m.palette.SurfaceSelected))
+		}
+		idText := rowStyle.
 			Foreground(lipgloss.Color(m.palette.Ink)).
 			Bold(true).
 			Render(fmt.Sprintf("%-20s", slot.ID))
 
-		titleText := lipgloss.NewStyle().
-			Foreground(lipgloss.Color(m.palette.AccentSecondary)).
+		titleText := rowStyle.
+			Foreground(lipgloss.Color(m.palette.InkMuted)).
 			Render(fmt.Sprintf("%-20s", slot.Title))
 
-		ownerPill := lipgloss.NewStyle().
-			Foreground(lipgloss.Color(m.palette.Success)).
+		ownerPill := rowStyle.
+			Foreground(ownerFg).
 			Render("owner: " + owner)
 
 		row1 := fmt.Sprintf(" %s %s  %s  %s", numBadge, idText, titleText, ownerPill)
 		row2 := "      " + subtle.Render(slot.Description)
 		if selected {
 			// InkSubtle on SurfaceSelected is 4.42:1; InkMuted clears 4.5:1.
-			row2 = "      " + subStyle.Render(slot.Description)
+			row2 = "      " + subStyle.Background(lipgloss.Color(m.palette.SurfaceSelected)).Render(slot.Description)
 			row1 = lipgloss.NewStyle().Background(lipgloss.Color(m.palette.SurfaceSelected)).Render(fitLineWidth(row1, innerW))
 			row2 = lipgloss.NewStyle().Background(lipgloss.Color(m.palette.SurfaceSelected)).Render(fitLineWidth(row2, innerW))
 		}
@@ -660,7 +673,7 @@ func (m *WorkbenchModel) drawToast(c *canvas) {
 	msg := lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.Ink)).Render(ansi.Truncate(m.activeToast.Message, toastW-4, "…"))
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(borderCol).
+		BorderForeground(lipgloss.Color(m.palette.Border)).
 		Background(lipgloss.Color(m.palette.SurfaceElevated)).
 		Padding(0, 1).
 		Width(toastW).
@@ -675,7 +688,7 @@ func (m *WorkbenchModel) drawCommandPalette(c *canvas) uv.Rectangle {
 	cmds := m.filteredCommands()
 
 	hdr := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(m.palette.Warning)).
+		Foreground(lipgloss.Color(m.palette.InkMuted)).
 		Bold(true).
 		Render("⑧ COMMAND PALETTE (app-overlay)")
 	prompt := lipgloss.NewStyle().
@@ -797,13 +810,17 @@ func (m *WorkbenchModel) paletteRow(c paletteCommand, sel bool, iw int, cols pal
 	var b strings.Builder
 	b.WriteString(base.Render(" "))
 	if cols.tag > 0 {
-		b.WriteString(paletteCell(paletteTag(c), cols.tag, false, base.Foreground(lipgloss.Color(m.palette.AccentSecondary))))
+		tagFg := lipgloss.Color(m.palette.InkSubtle)
+		if sel {
+			tagFg = lipgloss.Color(m.palette.InkMuted)
+		}
+		b.WriteString(paletteCell(paletteTag(c), cols.tag, false, base.Foreground(tagFg)))
 		b.WriteString(base.Render(" "))
 	}
 	b.WriteString(paletteCell(c.Title, cols.title, false, base.Foreground(lipgloss.Color(m.palette.Ink))))
 	if cols.hint > 0 {
 		b.WriteString(base.Render(" "))
-		b.WriteString(paletteCell(c.Shortcut, cols.hint, true, base.Foreground(lipgloss.Color(m.palette.Warning))))
+		b.WriteString(paletteCell(c.Shortcut, cols.hint, true, base.Foreground(lipgloss.Color(m.palette.InkMuted))))
 	}
 	b.WriteString(base.Render(" "))
 	return fitLineWidth(b.String(), iw)

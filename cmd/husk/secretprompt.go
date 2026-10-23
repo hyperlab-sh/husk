@@ -126,9 +126,9 @@ func (m *WorkbenchModel) drawSecretPrompt(c *canvas) uv.Rectangle {
 		required = "yes"
 	}
 	rows := []string{
-		lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.Warning)).Bold(true).Render("SECRET ACCESS REQUEST"),
+		m.statusMark("warning", "⚠") + " " + ink.Bold(true).Render("SECRET ACCESS REQUEST"),
 		"",
-		label.Render("Plugin  ") + " " + lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.Accent)).Bold(true).Render(plainText(p.Plugin)),
+		label.Render("Plugin  ") + " " + ink.Bold(true).Render(plainText(p.Plugin)),
 	}
 	if name := plainText(p.PluginName); name != "" {
 		rows = append(rows, field("Claims  ", name+" (the plugin's own claim)"))
@@ -139,7 +139,7 @@ func (m *WorkbenchModel) drawSecretPrompt(c *canvas) uv.Rectangle {
 		rows = append(rows, "  "+ink.Render(line))
 	}
 	rule := lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.Border)).Render(strings.Repeat("─", iw))
-	key := lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.Accent)).Bold(true)
+	key := ink.Bold(true)
 	hint := key.Render("y") + label.Render(" allow   ") + key.Render("n") + label.Render(" decline   ") + key.Render("esc") + label.Render(" ask again later")
 	if !m.secretPrompt.armed {
 		hint = label.Render("y and n are not active yet   ") + key.Render("esc") + label.Render(" ask again later")
@@ -147,11 +147,13 @@ func (m *WorkbenchModel) drawSecretPrompt(c *canvas) uv.Rectangle {
 	rows = append(rows, "", rule, hint)
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(m.palette.Warning)).
-		Background(lipgloss.Color(m.palette.Surface)).
+		BorderForeground(lipgloss.Color(m.palette.BorderFocused)).
+		Background(lipgloss.Color(m.palette.SurfaceElevated)).
 		Padding(0, 1).
 		Width(boxW).
 		Render(strings.Join(rows, "\n"))
 	h := strings.Count(box, "\n") + 1
-	return c.blitBlock(max(0, (m.width-boxW)/2), max(1, (m.height-h)/2), box)
+	r := c.blitBlock(max(0, (m.width-boxW)/2), max(1, (m.height-h)/2), box)
+	c.fillDefaultBg(r, lipgloss.Color(m.palette.SurfaceElevated))
+	return r
 }
