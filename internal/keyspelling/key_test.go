@@ -32,3 +32,20 @@ func TestFormatAlternateTextAndLocks(t *testing.T) {
 		}
 	}
 }
+
+func TestIsTextKey(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want bool
+	}{
+		{"enter", true}, {"backspace", true}, {"delete", true}, {"tab", true}, {"up", true}, {"down", true},
+		{"left", true}, {"right", true}, {"home", true}, {"end", true}, {"pgup", true}, {"pgdown", true}, {"insert", true},
+		{" ", true}, {"a", true}, {"A", true}, {"q", true}, {":", true}, {"ö", true}, {"日", true},
+		{"esc", false}, {"f1", false}, {"f63", false}, {"ctrl+a", false}, {"alt+ö", false}, {"alt+1", false},
+		{"shift+tab", false}, {"ctrl+@", false}, {"", false}, {"[pasted text]", false}, {"space", false}, {"ab", false},
+	} {
+		if got := IsTextKey(tc.in); got != tc.want {
+			t.Errorf("IsTextKey(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}

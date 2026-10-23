@@ -100,6 +100,7 @@ func keyContext(c host.KeyContext) keybinding.KeyContext {
 		FocusOwner:   c.FocusOwner,
 		ModalOpen:    c.ModalOpen,
 		ModalAction:  c.ModalAction,
+		Capture:      c.Capture,
 		Frozen:       c.Frozen,
 	}
 }

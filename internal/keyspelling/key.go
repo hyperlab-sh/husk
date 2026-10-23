@@ -104,3 +104,24 @@ func Normalize(text string) (string, error) {
 	}
 	return Format(tea.Key{Code: code, Mod: mods}), nil
 }
+
+// textNames are the named keys that edit or move through text.
+var textNames = map[string]bool{
+	"enter": true, "backspace": true, "delete": true, "tab": true,
+	"up": true, "down": true, "left": true, "right": true,
+	"home": true, "end": true, "pgup": true, "pgdown": true, "insert": true,
+}
+
+// IsTextKey reports whether spelling is a text key: one unmodified key that
+// produces or edits text. That is a single printable rune (the wire space
+// included) or one of enter, backspace, delete, tab, up, down, left, right,
+// home, end, pgup, pgdown and insert. esc, function keys, anything with a
+// modifier prefix, the empty string and multi-rune spellings that are not a
+// named key (a bracket-wrapped paste) are not text keys.
+func IsTextKey(spelling string) bool {
+	if textNames[spelling] {
+		return true
+	}
+	r, n := utf8.DecodeRuneInString(spelling)
+	return n > 0 && n == len(spelling) && r != utf8.RuneError && unicode.IsPrint(r)
+}
