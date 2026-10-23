@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -120,9 +119,9 @@ func TestPaletteRowBackgroundFullWidth(t *testing.T) {
 	for _, iw := range []int{40, 60, 80, 120} {
 		cols := paletteColumns(cmds, iw)
 		for _, sel := range []bool{false, true} {
-			want := lipgloss.Color(m.palette.Surface)
+			want := m.palette.Surface
 			if sel {
-				want = lipgloss.Color(m.palette.SurfaceSelected)
+				want = m.palette.SurfaceSelected
 			}
 			for _, c := range cmds {
 				cells := frameCells(m.paletteRow(c, sel, iw, cols))

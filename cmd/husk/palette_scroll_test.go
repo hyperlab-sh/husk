@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
@@ -56,7 +55,7 @@ func drawnPalette(m *WorkbenchModel) []string {
 // highlightedRows returns the plain text of the drawn palette rows painted
 // with the selection background.
 func highlightedRows(m *WorkbenchModel) []string {
-	r, g, b, _ := lipgloss.Color(m.palette.SurfaceSelected).RGBA()
+	r, g, b, _ := m.palette.SurfaceSelected.RGBA()
 	needle := fmt.Sprintf("48;2;%d;%d;%d", r>>8, g>>8, b>>8)
 	c := newCanvas(m.width, m.height)
 	m.drawCommandPalette(c)

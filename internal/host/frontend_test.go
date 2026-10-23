@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -147,6 +148,41 @@ func TestNewReturnsAHostWhoseFrontendIsTheRoot(t *testing.T) {
 	}
 	if host.Frontend() != contracts.Frontend(h.root) {
 		t.Fatal("Host.Frontend() is not the root")
+	}
+}
+
+func TestFrontendPaletteANSIReturnsServingPair(t *testing.T) {
+	for _, name := range []string{"base16", "charm"} {
+		t.Run(name, func(t *testing.T) {
+			h, err := boot(t, func(c *contracts.Config) {
+				c.InstanceDocs = map[string]map[string]any{"config": {"theme": map[string]any{"name": name}}}
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			fe := h.root.Frontend()
+			p, idx := fe.PaletteANSI()
+			want, indices := h.root.rt.Theme.WireANSI()
+			if p != want || !maps.Equal(idx, indices) || p.Name != name {
+				t.Fatalf("PaletteANSI = %+v, %v; want %+v, %v", p, idx, want, indices)
+			}
+			if p != fe.Palette() {
+				t.Fatal("Palette changed its hex-only contract")
+			}
+			if name == "base16" {
+				if len(idx) != 19 {
+					t.Fatalf("base16 indices = %v, want 19 roles", idx)
+				}
+				idx["ink"] = -1
+				delete(idx, "canvas")
+				_, again := fe.PaletteANSI()
+				if !maps.Equal(again, indices) {
+					t.Fatal("frontend map was not detached")
+				}
+			} else if len(idx) != 0 {
+				t.Fatalf("hex theme has indices %v", idx)
+			}
+		})
 	}
 }
 

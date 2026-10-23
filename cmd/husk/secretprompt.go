@@ -116,8 +116,8 @@ func (m *WorkbenchModel) drawSecretPrompt(c *canvas) uv.Rectangle {
 	p := m.secretPrompt.prompt
 	boxW := min(72, m.width-8)
 	iw := boxW - 4
-	label := lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.InkMuted))
-	ink := lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.Ink))
+	label := lipgloss.NewStyle().Foreground(m.palette.InkMuted)
+	ink := lipgloss.NewStyle().Foreground(m.palette.Ink)
 	field := func(name, value string) string {
 		return label.Render(name) + " " + ink.Render(value)
 	}
@@ -138,7 +138,7 @@ func (m *WorkbenchModel) drawSecretPrompt(c *canvas) uv.Rectangle {
 	for _, line := range strings.Split(ansi.Wrap(plainText(p.Purpose), iw-2, ""), "\n") {
 		rows = append(rows, "  "+ink.Render(line))
 	}
-	rule := lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.Border)).Render(strings.Repeat("─", iw))
+	rule := lipgloss.NewStyle().Foreground(m.palette.Border).Render(strings.Repeat("─", iw))
 	key := ink.Bold(true)
 	hint := key.Render("y") + label.Render(" allow   ") + key.Render("n") + label.Render(" decline   ") + key.Render("esc") + label.Render(" ask again later")
 	if !m.secretPrompt.armed {
@@ -147,13 +147,13 @@ func (m *WorkbenchModel) drawSecretPrompt(c *canvas) uv.Rectangle {
 	rows = append(rows, "", rule, hint)
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(m.palette.BorderFocused)).
-		Background(lipgloss.Color(m.palette.SurfaceElevated)).
+		BorderForeground(m.palette.BorderFocused).
+		Background(m.palette.SurfaceElevated).
 		Padding(0, 1).
 		Width(boxW).
 		Render(strings.Join(rows, "\n"))
 	h := strings.Count(box, "\n") + 1
 	r := c.blitBlock(max(0, (m.width-boxW)/2), max(1, (m.height-h)/2), box)
-	c.fillDefaultBg(r, lipgloss.Color(m.palette.SurfaceElevated))
+	c.fillDefaultBg(r, m.palette.SurfaceElevated)
 	return r
 }

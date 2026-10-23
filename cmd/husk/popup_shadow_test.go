@@ -1,11 +1,13 @@
 package main
 
 import (
+	"fmt"
 	"image/color"
+	"reflect"
 	"testing"
 
-	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/lucasb-eyer/go-colorful"
 
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
@@ -31,6 +33,48 @@ func shadowed(c *canvas, x, y int) bool {
 	cell := c.buf.CellAt(x, y)
 	return cell != nil && cell.Style.Bg != nil && !sameColor(cell.Style.Bg, shCanvas) &&
 		!sameColor(cell.Style.Bg, color.RGBA{R: 100, G: 150, B: 200, A: 255})
+}
+
+func TestShadowKeepsIndexedCellsAndBlendsHexNeighbour(t *testing.T) {
+	for _, indexed := range []color.Color{ansi.BasicColor(5), ansi.IndexedColor(123)} {
+		for _, channel := range []string{"foreground", "background", "underline"} {
+			t.Run(fmt.Sprintf("%T/%s", indexed, channel), func(t *testing.T) {
+				st := uv.Style{Fg: shInk, Bg: shCanvas, UnderlineColor: shInk, Attrs: uv.AttrBold}
+				switch channel {
+				case "foreground":
+					st.Fg = indexed
+				case "background":
+					st.Bg = indexed
+				case "underline":
+					st.UnderlineColor = indexed
+				}
+				c := shadowTestCanvas(20, 10, uv.Style{Fg: shInk, Bg: shCanvas, UnderlineColor: shInk}, "x")
+				defer c.release()
+				cell := uv.Cell{Content: "i", Width: 1, Style: st, Link: uv.Link{URL: "https://example.invalid"}}
+				c.buf.SetCell(8, 3, &cell)
+				c.castShadow(uv.Rect(2, 2, 6, 4), shInk, shCanvas)
+				if got := c.buf.CellAt(8, 3); !reflect.DeepEqual(*got, cell) {
+					t.Fatalf("indexed cell changed: %+v -> %+v", cell, *got)
+				}
+				neighbour := c.buf.CellAt(9, 3)
+				if !sameColor(neighbour.Style.Fg, towardBlack(shInk)) || !sameColor(neighbour.Style.Bg, towardBlack(shCanvas)) || !sameColor(neighbour.Style.UnderlineColor, towardBlack(shInk)) {
+					t.Fatalf("truecolor neighbour did not blend: %+v", neighbour.Style)
+				}
+			})
+		}
+	}
+}
+
+func TestShadowKeepsUnstyledCellsUnderIndexedDefaults(t *testing.T) {
+	for _, defaults := range [][2]color.Color{{ansi.BasicColor(15), shCanvas}, {shInk, ansi.BasicColor(0)}, {ansi.BasicColor(15), ansi.BasicColor(0)}} {
+		c := shadowTestCanvas(20, 10, uv.Style{}, "·")
+		before := *c.buf.CellAt(9, 4)
+		c.castShadow(uv.Rect(2, 2, 6, 4), defaults[0], defaults[1])
+		if got := c.buf.CellAt(9, 4); !reflect.DeepEqual(*got, before) {
+			t.Errorf("unstyled cell changed under %T/%T defaults: %+v", defaults[0], defaults[1], *got)
+		}
+		c.release()
+	}
 }
 
 func TestShadowDarkensFgBgKeepsGlyphAndAttrs(t *testing.T) {
@@ -274,6 +318,13 @@ func requireShadowAt(t *testing.T, base, got uv.Lines, popup uv.Rectangle, probe
 			}
 			switch {
 			case inShadow(popup, x, y):
+				st := base[y][x].Style
+				if indexedColor(st.Fg) || indexedColor(st.Bg) || indexedColor(st.UnderlineColor) {
+					if !got[y][x].Equal(&base[y][x]) {
+						t.Fatalf("indexed shadow cell (%d,%d) changed", x, y)
+					}
+					continue
+				}
 				darkened++
 				if !near(g, want) {
 					t.Fatalf("shadow cell (%d,%d) bg = %v, want about %v (base %v)", x, y, g, want, b)
@@ -297,8 +348,8 @@ func requireShadowAt(t *testing.T, base, got uv.Lines, popup uv.Rectangle, probe
 	}
 }
 
-func rgb8(m *WorkbenchModel, hex string) [3]int {
-	r, g, b, _ := lipgloss.Color(hex).RGBA()
+func rgb8(m *WorkbenchModel, c color.Color) [3]int {
+	r, g, b, _ := c.RGBA()
 	return [3]int{int(r >> 8), int(g >> 8), int(b >> 8)}
 }
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -50,10 +51,12 @@ type fakeFE struct {
 	Frames   map[string]map[protocol.SurfaceID]protocol.FrameSpec
 	// HintsFn answers Hints; nil advertises none.
 	HintsFn func(contracts.KeyContext) []contracts.KeyHint
-	pods    map[string]string
-	podErr  map[string]string // last_error per Pod
-	occ     map[protocol.SurfaceID]string
-	seq     uint64
+	// PaletteFn serves a palette pair; nil uses the default hex theme.
+	PaletteFn func() (protocol.Palette, map[string]int)
+	pods      map[string]string
+	podErr    map[string]string // last_error per Pod
+	occ       map[protocol.SurfaceID]string
+	seq       uint64
 	// Log is every outbound call in order, for tests that assert on routing.
 	Log       []wireMsg
 	pluginIDs func() []string
@@ -169,6 +172,13 @@ func (f *fakeFE) Hints(ctx contracts.KeyContext) []contracts.KeyHint {
 }
 func (f *fakeFE) Palette() protocol.Palette {
 	return protocol.Palette(theme.Default())
+}
+func (f *fakeFE) PaletteANSI() (protocol.Palette, map[string]int) {
+	if f.PaletteFn != nil {
+		p, idx := f.PaletteFn()
+		return p, maps.Clone(idx)
+	}
+	return f.Palette(), nil
 }
 func (f *fakeFE) InvokeAction(action string, args map[string]any, kind protocol.CallerKind, focus *protocol.FocusContext, reply func(map[string]any, bool, error)) {
 	f.mu.Lock()

@@ -4,7 +4,6 @@ import (
 	"image/color"
 	"testing"
 
-	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 )
 
@@ -31,7 +30,7 @@ func TestChromeRendersPaletteAsTruecolor(t *testing.T) {
 	fg := func(s uv.Style) color.Color { return s.Fg }
 	bg := func(s uv.Style) color.Color { return s.Bg }
 	for name, want := range map[string]struct {
-		hex  string
+		hex  color.Color
 		pick func(uv.Style) color.Color
 	}{
 		"surface background":  {m.palette.Surface, bg},
@@ -42,8 +41,8 @@ func TestChromeRendersPaletteAsTruecolor(t *testing.T) {
 		"muted foreground":    {m.palette.InkMuted, fg},
 		"focused border":      {m.palette.BorderFocused, fg},
 	} {
-		if !hasTruecolorCell(cells, lipgloss.Color(want.hex), want.pick) {
-			t.Errorf("%s: no cell painted with truecolor %s", name, want.hex)
+		if !hasTruecolorCell(cells, want.hex, want.pick) {
+			t.Errorf("%s: no cell painted with truecolor %v", name, want.hex)
 		}
 	}
 }

@@ -18,7 +18,9 @@ import (
 func (m *WorkbenchModel) View() tea.View {
 	if m.tooSmall() {
 		view := tea.NewView(m.renderTooSmall())
-		view.BackgroundColor = lipgloss.Color(m.palette.Canvas)
+		if _, indexed := m.ansi["canvas"]; !indexed {
+			view.BackgroundColor = m.palette.Canvas
+		}
 		view.AltScreen = true
 		view.MouseMode = tea.MouseModeAllMotion
 		view.ReportFocus = true
@@ -51,7 +53,7 @@ func (m *WorkbenchModel) View() tea.View {
 	// not write.
 	// The modal and the palette then cast a shadow (castShadow) that darkens
 	// what is under them.
-	ink, canvasBg := lipgloss.Color(m.palette.Ink), lipgloss.Color(m.palette.Canvas)
+	ink, canvasBg := m.palette.Ink, m.palette.Canvas
 	if m.modalOwner().Open() {
 		m.drawModal(c)
 		r := m.modalRect
@@ -73,14 +75,16 @@ func (m *WorkbenchModel) View() tea.View {
 	// gutter, cells no surface owns) takes Canvas, so the slot shade derived
 	// from Canvas is lighter than what the user sees on every terminal.
 	// Overlays and surfaces have already set their own backgrounds.
-	c.fillDefaultBg(uv.Rect(0, 0, m.width, m.height), lipgloss.Color(m.palette.Canvas))
+	c.fillDefaultBg(uv.Rect(0, 0, m.width, m.height), m.palette.Canvas)
 	out := c.render()
 	c.release()
 	view := tea.NewView(out)
 	// Terminals that support OSC 11 also get their own background set, so
 	// cells outside the grid (resize flashes, scrollback edges) match; Bubble
-	// Tea resets it on exit.
-	view.BackgroundColor = lipgloss.Color(m.palette.Canvas)
+	// Tea resets it on exit. An index canvas leaves the terminal's choice alone.
+	if _, indexed := m.ansi["canvas"]; !indexed {
+		view.BackgroundColor = m.palette.Canvas
+	}
 	view.AltScreen = true
 	view.MouseMode = tea.MouseModeAllMotion
 	view.ReportFocus = true
@@ -116,7 +120,7 @@ func (m *WorkbenchModel) renderActivityRailBox() string {
 	railW := rect.Width
 	bodyH := rect.Height
 
-	railBg := lipgloss.Color(m.palette.Surface)
+	railBg := m.palette.Surface
 	bgRowStyle := lipgloss.NewStyle().Background(railBg)
 	emptyRow := bgRowStyle.Render(strings.Repeat(" ", railW))
 
@@ -145,13 +149,13 @@ func (m *WorkbenchModel) renderActivityRailBox() string {
 		centerCell := strings.Repeat(" ", left) + text + strings.Repeat(" ", 5-left-ansi.StringWidth(text))
 
 		if b.active || isHovered || showShortcuts {
-			pillColor := lipgloss.Color(m.palette.SurfaceSelected)
-			iconFg := lipgloss.Color(m.palette.Accent)
+			pillColor := m.palette.SurfaceSelected
+			iconFg := m.palette.Accent
 			if !b.active {
-				pillColor = lipgloss.Color(m.palette.SurfaceElevated)
-				iconFg = lipgloss.Color(m.palette.Ink)
+				pillColor = m.palette.SurfaceElevated
+				iconFg = m.palette.Ink
 			} else if showShortcuts && b.shortcut != "" {
-				iconFg = lipgloss.Color(m.palette.Ink)
+				iconFg = m.palette.Ink
 			}
 
 			tileStyle := lipgloss.NewStyle().Background(pillColor)
@@ -163,7 +167,7 @@ func (m *WorkbenchModel) renderActivityRailBox() string {
 			rows[b.startY+2] = pad + tileStyle.Render("     ") + pad
 		} else {
 			iconStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color(m.palette.InkMuted)).
+				Foreground(m.palette.InkMuted).
 				Background(railBg)
 			rows[b.startY] = emptyRow
 			rows[b.startY+1] = bgRowStyle.Render(" ") + iconStyle.Render(centerCell) + bgRowStyle.Render(" ")
@@ -222,8 +226,8 @@ func (m *WorkbenchModel) layoutLabel() string {
 
 func (m *WorkbenchModel) renderTopWorkbenchBar() string {
 	brand := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(m.palette.Ink)).
-		Background(lipgloss.Color(m.palette.SurfaceElevated)).
+		Foreground(m.palette.Ink).
+		Background(m.palette.SurfaceElevated).
 		Bold(true).
 		Padding(0, 1).
 		Render("◈ HUSK")
@@ -231,15 +235,15 @@ func (m *WorkbenchModel) renderTopWorkbenchBar() string {
 	dragPill := ""
 	if m.activeDrag != "" {
 		dragPill = lipgloss.NewStyle().
-			Foreground(lipgloss.Color(m.palette.Ink)).
-			Background(lipgloss.Color(m.palette.SurfaceSelected)).
+			Foreground(m.palette.Ink).
+			Background(m.palette.SurfaceSelected).
 			Bold(true).
 			Padding(0, 1).
 			Render("⇄ Dragging "+m.activeDrag) + " "
 	} else if m.hoverDivider != "" {
 		dragPill = lipgloss.NewStyle().
-			Foreground(lipgloss.Color(m.palette.Ink)).
-			Background(lipgloss.Color(m.palette.SurfaceElevated)).
+			Foreground(m.palette.Ink).
+			Background(m.palette.SurfaceElevated).
 			Bold(true).
 			Padding(0, 1).
 			Render("⇄ Drag border: "+m.hoverDivider) + " "
@@ -248,16 +252,16 @@ func (m *WorkbenchModel) renderTopWorkbenchBar() string {
 		if m.hoverRailIdx < len(btns) {
 			b := btns[m.hoverRailIdx]
 			dragPill = lipgloss.NewStyle().
-				Foreground(lipgloss.Color(m.palette.Ink)).
-				Background(lipgloss.Color(m.palette.SurfaceSelected)).
+				Foreground(m.palette.Ink).
+				Background(m.palette.SurfaceSelected).
 				Bold(true).
 				Padding(0, 1).
 				Render(strings.TrimSpace(fmt.Sprintf("%s %s %s", b.icon, b.label, parenthesized(b.shortcut)))) + " "
 		}
 	} else if m.modifiers.Alt {
 		dragPill = lipgloss.NewStyle().
-			Foreground(lipgloss.Color(m.palette.Ink)).
-			Background(lipgloss.Color(m.palette.SurfaceElevated)).
+			Foreground(m.palette.Ink).
+			Background(m.palette.SurfaceElevated).
 			Bold(true).
 			Padding(0, 1).
 			Render("⌥ ALT HELD · Shortcuts Active") + " "
@@ -266,18 +270,18 @@ func (m *WorkbenchModel) renderTopWorkbenchBar() string {
 	gap := max(1, m.width-ansi.StringWidth(brand)-ansi.StringWidth(dragPill))
 	line := brand + strings.Repeat(" ", gap) + dragPill
 	return lipgloss.NewStyle().
-		Background(lipgloss.Color(m.palette.Surface)).
+		Background(m.palette.Surface).
 		Render(fitLineWidth(line, m.width))
 }
 
 func (m *WorkbenchModel) renderBottomKeybindBar() string {
 	keyStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(m.palette.Ink)).
+		Foreground(m.palette.Ink).
 		Bold(true)
 	descStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(m.palette.InkMuted))
+		Foreground(m.palette.InkMuted)
 	sep := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(m.palette.Border)).
+		Foreground(m.palette.Border).
 		Render(" │ ")
 
 	hint := func(k, d string) string {
@@ -294,13 +298,13 @@ func (m *WorkbenchModel) renderBottomKeybindBar() string {
 		left += group
 	}
 	pill := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(m.palette.InkMuted)).
-		Background(lipgloss.Color(m.palette.SurfaceElevated)).
+		Foreground(m.palette.InkMuted).
+		Background(m.palette.SurfaceElevated).
 		Padding(0, 1).
 		Render("✦ " + themePillName(m.palette.Name))
 	line := left + strings.Repeat(" ", max(1, pillRect.Min.X-ansi.StringWidth(left))) + pill
 	return lipgloss.NewStyle().
-		Background(lipgloss.Color(m.palette.Surface)).
+		Background(m.palette.Surface).
 		Render(fitLineWidth(line, m.width))
 }
 
@@ -352,7 +356,7 @@ func (m *WorkbenchModel) drawSurface(c *canvas, slotID protocol.SurfaceID, callo
 			name = strings.TrimRight(name, " ")
 			x := rect.InnerX + (rect.InnerW-ansi.StringWidth(name))/2
 			y := rect.InnerY + (rect.InnerH-1)/2
-			style := lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.InkSubtle)).Background(lipgloss.Color(m.palette.Slot))
+			style := lipgloss.NewStyle().Foreground(m.palette.InkSubtle).Background(m.palette.Slot)
 			c.draw(uv.Rect(x, y, ansi.StringWidth(name), 1), style.Render(name))
 		}
 	} else {
@@ -360,8 +364,8 @@ func (m *WorkbenchModel) drawSurface(c *canvas, slotID protocol.SurfaceID, callo
 	}
 	if m.showHotspots && rect.InnerW > 0 && rect.InnerH > 0 {
 		hot := lipgloss.NewStyle().
-			Foreground(lipgloss.Color(m.palette.Ink)).
-			Background(lipgloss.Color(m.palette.SurfaceSelected)).
+			Foreground(m.palette.Ink).
+			Background(m.palette.SurfaceSelected).
 			Bold(true).
 			Render(calloutNum + " " + slotName)
 		c.draw(uv.Rect(rect.InnerX, rect.InnerY, min(ansi.StringWidth(hot), rect.InnerW), 1), hot)
@@ -376,10 +380,10 @@ func (m *WorkbenchModel) drawSurface(c *canvas, slotID protocol.SurfaceID, callo
 // drawn over the first content row, is covered too; a border ring lies outside
 // the content area and keeps its own styling.
 func (m *WorkbenchModel) fillSlotBg(c *canvas, rect SlotRect) {
-	if m.palette.Slot == "" || rect.InnerW <= 0 || rect.InnerH <= 0 {
+	if m.palette.Slot == nil || rect.InnerW <= 0 || rect.InnerH <= 0 {
 		return
 	}
-	c.fillDefaultBg(uv.Rect(rect.InnerX, rect.InnerY, rect.InnerW, rect.InnerH), lipgloss.Color(m.palette.Slot))
+	c.fillDefaultBg(uv.Rect(rect.InnerX, rect.InnerY, rect.InnerW, rect.InnerH), m.palette.Slot)
 }
 
 // surfaceContentLines clips slot_update lines to a surface's inner area;
@@ -403,12 +407,12 @@ func (m *WorkbenchModel) surfaceContentLines(su *protocol.SurfaceUpdateParams, w
 }
 
 func (m *WorkbenchModel) frameLabelStyle() lipgloss.Style {
-	col := lipgloss.Color(m.palette.InkMuted)
+	col := m.palette.InkMuted
 	return lipgloss.NewStyle().Foreground(col).Bold(true)
 }
 
 func (m *WorkbenchModel) closeStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.InkMuted)).Bold(true)
+	return lipgloss.NewStyle().Foreground(m.palette.InkMuted).Bold(true)
 }
 
 // drawFrame draws content lines into rect's inner area, then the declared
@@ -441,7 +445,7 @@ func (m *WorkbenchModel) drawChrome(c *canvas, slotID protocol.SurfaceID, rect S
 		if label != "" && avail > 0 {
 			labelStyle := m.frameLabelStyle()
 			if m.focusedSlot == slotID {
-				labelStyle = labelStyle.Foreground(lipgloss.Color(m.palette.Ink))
+				labelStyle = labelStyle.Foreground(m.palette.Ink)
 			}
 			styled := labelStyle.
 				Bold(true).
@@ -498,19 +502,19 @@ func (m *WorkbenchModel) drawChrome(c *canvas, slotID protocol.SurfaceID, rect S
 // highlighting the divider being dragged or hovered (only visible when the
 // occupying plugin declared a border frame).
 func (m *WorkbenchModel) dividerEdgeStyles(slotID protocol.SurfaceID) (left, right, top, bot lipgloss.Style, lG, rG, tG, bG string) {
-	borderCol := lipgloss.Color(m.palette.Border)
+	borderCol := m.palette.Border
 	if m.focusedSlot == slotID {
-		borderCol = lipgloss.Color(m.palette.BorderFocused)
+		borderCol = m.palette.BorderFocused
 	}
 	bStyle := lipgloss.NewStyle().Foreground(borderCol)
 	left, right, top, bot = bStyle, bStyle, bStyle, bStyle
 	lG, rG, tG, bG = "│", "│", "─", "─"
 
 	activeDiv := m.hoverDivider
-	edgeCol := lipgloss.Color(m.palette.Ink)
+	edgeCol := m.palette.Ink
 	if m.activeDrag != "" {
 		activeDiv = m.activeDrag
-		edgeCol = lipgloss.Color(m.palette.Accent)
+		edgeCol = m.palette.Accent
 	}
 	hlStyle := lipgloss.NewStyle().Foreground(edgeCol).Bold(true)
 
@@ -580,9 +584,9 @@ func (m *WorkbenchModel) drawHotspotArchitectureStage(c *canvas) {
 	}
 	innerW := coreW
 
-	titleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.Ink)).Bold(true)
-	subStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.InkMuted))
-	subtle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.InkSubtle))
+	titleStyle := lipgloss.NewStyle().Foreground(m.palette.Ink).Bold(true)
+	subStyle := lipgloss.NewStyle().Foreground(m.palette.InkMuted)
+	subtle := lipgloss.NewStyle().Foreground(m.palette.InkSubtle)
 
 	var lines []string
 	lines = append(lines,
@@ -597,14 +601,14 @@ func (m *WorkbenchModel) drawHotspotArchitectureStage(c *canvas) {
 		if owner == "" {
 			owner = "husk.core (built-in)"
 		}
-		badgeBg := lipgloss.Color(m.palette.SurfaceElevated)
-		ownerFg := lipgloss.Color(m.palette.InkSubtle)
+		badgeBg := m.palette.SurfaceElevated
+		ownerFg := m.palette.InkSubtle
 		if selected {
-			badgeBg = lipgloss.Color(m.palette.SurfaceSelected)
-			ownerFg = lipgloss.Color(m.palette.InkMuted)
+			badgeBg = m.palette.SurfaceSelected
+			ownerFg = m.palette.InkMuted
 		}
 		numBadge := lipgloss.NewStyle().
-			Foreground(lipgloss.Color(m.palette.Ink)).
+			Foreground(m.palette.Ink).
 			Background(badgeBg).
 			Bold(true).
 			Padding(0, 1).
@@ -612,15 +616,15 @@ func (m *WorkbenchModel) drawHotspotArchitectureStage(c *canvas) {
 
 		rowStyle := lipgloss.NewStyle()
 		if selected {
-			rowStyle = rowStyle.Background(lipgloss.Color(m.palette.SurfaceSelected))
+			rowStyle = rowStyle.Background(m.palette.SurfaceSelected)
 		}
 		idText := rowStyle.
-			Foreground(lipgloss.Color(m.palette.Ink)).
+			Foreground(m.palette.Ink).
 			Bold(true).
 			Render(fmt.Sprintf("%-20s", slot.ID))
 
 		titleText := rowStyle.
-			Foreground(lipgloss.Color(m.palette.InkMuted)).
+			Foreground(m.palette.InkMuted).
 			Render(fmt.Sprintf("%-20s", slot.Title))
 
 		ownerPill := rowStyle.
@@ -631,9 +635,9 @@ func (m *WorkbenchModel) drawHotspotArchitectureStage(c *canvas) {
 		row2 := "      " + subtle.Render(slot.Description)
 		if selected {
 			// InkSubtle on SurfaceSelected is 4.42:1; InkMuted clears 4.5:1.
-			row2 = "      " + subStyle.Background(lipgloss.Color(m.palette.SurfaceSelected)).Render(slot.Description)
-			row1 = lipgloss.NewStyle().Background(lipgloss.Color(m.palette.SurfaceSelected)).Render(fitLineWidth(row1, innerW))
-			row2 = lipgloss.NewStyle().Background(lipgloss.Color(m.palette.SurfaceSelected)).Render(fitLineWidth(row2, innerW))
+			row2 = "      " + subStyle.Background(m.palette.SurfaceSelected).Render(slot.Description)
+			row1 = lipgloss.NewStyle().Background(m.palette.SurfaceSelected).Render(fitLineWidth(row1, innerW))
+			row2 = lipgloss.NewStyle().Background(m.palette.SurfaceSelected).Render(fitLineWidth(row2, innerW))
 		}
 		lines = append(lines, row1, row2)
 	}
@@ -657,23 +661,23 @@ func (m *WorkbenchModel) drawToast(c *canvas) {
 	if m.activeToast == nil {
 		return
 	}
-	levelCol := lipgloss.Color(m.palette.Info)
+	levelCol := m.palette.Info
 	switch m.activeToast.Level {
 	case "success":
-		levelCol = lipgloss.Color(m.palette.Success)
+		levelCol = m.palette.Success
 	case "error":
-		levelCol = lipgloss.Color(m.palette.Danger)
+		levelCol = m.palette.Danger
 	case "warn":
-		levelCol = lipgloss.Color(m.palette.Warning)
+		levelCol = m.palette.Warning
 	}
 
 	toastW := min(48, m.width-6)
 	title := lipgloss.NewStyle().Foreground(levelCol).Bold(true).Render("● " + m.activeToast.Title)
-	msg := lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.Ink)).Render(ansi.Truncate(m.activeToast.Message, toastW-4, "…"))
+	msg := lipgloss.NewStyle().Foreground(m.palette.Ink).Render(ansi.Truncate(m.activeToast.Message, toastW-4, "…"))
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(m.palette.Border)).
-		Background(lipgloss.Color(m.palette.SurfaceElevated)).
+		BorderForeground(m.palette.Border).
+		Background(m.palette.SurfaceElevated).
 		Padding(0, 1).
 		Width(toastW).
 		Render(title + "\n" + msg)
@@ -687,17 +691,17 @@ func (m *WorkbenchModel) drawCommandPalette(c *canvas) uv.Rectangle {
 	cmds := m.filteredCommands()
 
 	hdr := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(m.palette.InkMuted)).
+		Foreground(m.palette.InkMuted).
 		Bold(true).
 		Render("⑧ COMMAND PALETTE (app-overlay)")
 	prompt := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(m.palette.Accent)).
+		Foreground(m.palette.Accent).
 		Bold(true).
 		Render("❯ ") +
-		lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.Ink)).Render(m.paletteQuery+"█")
+		lipgloss.NewStyle().Foreground(m.palette.Ink).Render(m.paletteQuery+"█")
 
 	iw := palW - 4
-	rule := lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.Border)).Render(strings.Repeat("─", iw))
+	rule := lipgloss.NewStyle().Foreground(m.palette.Border).Render(strings.Repeat("─", iw))
 	var rows []string
 	rows = append(rows, hdr, "", prompt, "", rule)
 
@@ -708,13 +712,13 @@ func (m *WorkbenchModel) drawCommandPalette(c *canvas) uv.Rectangle {
 		rows = append(rows, m.paletteRow(cmds[i], i == m.paletteCursor, iw, cols))
 	}
 	if len(cmds) == 0 {
-		rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.InkSubtle)).Render("  No matching commands"))
+		rows = append(rows, lipgloss.NewStyle().Foreground(m.palette.InkSubtle).Render("  No matching commands"))
 	}
 
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(m.palette.BorderFocused)).
-		Background(lipgloss.Color(m.palette.Surface)).
+		BorderForeground(m.palette.BorderFocused).
+		Background(m.palette.Surface).
 		Padding(0, 1).
 		Render(strings.Join(rows, "\n"))
 
@@ -798,9 +802,9 @@ func paletteCell(s string, w int, right bool, st lipgloss.Style) string {
 // paletteRow renders one palette list row exactly iw cells wide, with the
 // row background on every cell and the selected row highlighted end to end.
 func (m *WorkbenchModel) paletteRow(c paletteCommand, sel bool, iw int, cols paletteCols) string {
-	bg := lipgloss.Color(m.palette.Surface)
+	bg := m.palette.Surface
 	if sel {
-		bg = lipgloss.Color(m.palette.SurfaceSelected)
+		bg = m.palette.SurfaceSelected
 	}
 	base := lipgloss.NewStyle().Background(bg)
 	if sel {
@@ -809,17 +813,17 @@ func (m *WorkbenchModel) paletteRow(c paletteCommand, sel bool, iw int, cols pal
 	var b strings.Builder
 	b.WriteString(base.Render(" "))
 	if cols.tag > 0 {
-		tagFg := lipgloss.Color(m.palette.InkSubtle)
+		tagFg := m.palette.InkSubtle
 		if sel {
-			tagFg = lipgloss.Color(m.palette.InkMuted)
+			tagFg = m.palette.InkMuted
 		}
 		b.WriteString(paletteCell(paletteTag(c), cols.tag, false, base.Foreground(tagFg)))
 		b.WriteString(base.Render(" "))
 	}
-	b.WriteString(paletteCell(c.Title, cols.title, false, base.Foreground(lipgloss.Color(m.palette.Ink))))
+	b.WriteString(paletteCell(c.Title, cols.title, false, base.Foreground(m.palette.Ink)))
 	if cols.hint > 0 {
 		b.WriteString(base.Render(" "))
-		b.WriteString(paletteCell(c.Shortcut, cols.hint, true, base.Foreground(lipgloss.Color(m.palette.InkMuted))))
+		b.WriteString(paletteCell(c.Shortcut, cols.hint, true, base.Foreground(m.palette.InkMuted)))
 	}
 	b.WriteString(base.Render(" "))
 	return fitLineWidth(b.String(), iw)

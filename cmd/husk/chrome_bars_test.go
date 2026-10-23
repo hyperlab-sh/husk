@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
@@ -50,7 +49,7 @@ func TestRailTileGeometry(t *testing.T) {
 								bg = m.palette.SurfaceSelected
 							}
 						}
-						if !sameColor(c.buf.CellAt(x, y).Style.Bg, lipgloss.Color(bg)) {
+						if !sameColor(c.buf.CellAt(x, y).Style.Bg, bg) {
 							t.Errorf("wrong tile background %d,%d", x, y)
 						}
 					}
@@ -88,7 +87,7 @@ func TestRailAltBadgeCentredAndClipped(t *testing.T) {
 			c := newCanvas(7, 38)
 			defer c.release()
 			c.blitBlock(0, 0, m.renderActivityRailBox())
-			if !sameColor(c.buf.CellAt(3, b.startY+1).Style.Fg, lipgloss.Color(m.palette.Ink)) {
+			if !sameColor(c.buf.CellAt(3, b.startY+1).Style.Fg, m.palette.Ink) {
 				t.Fatal("badge not ink coloured")
 			}
 		})
@@ -121,7 +120,7 @@ func TestRailAltIconAndBadgeRoles(t *testing.T) {
 				}
 				b := m.railButtons()[1]
 				rows := strings.Split(m.renderActivityRailBox(), "\n")
-				requireChromeText(t, frameCells(rows[b.startY+1]), text, lipgloss.Color(fg), true, lipgloss.Color(bg))
+				requireChromeText(t, frameCells(rows[b.startY+1]), text, fg, true, bg)
 			})
 		}
 	}
@@ -142,7 +141,7 @@ func TestRailIdleIconDoesNotShiftOnHover(t *testing.T) {
 			c := newCanvas(7, 38)
 			defer c.release()
 			c.blitBlock(0, 0, m.renderActivityRailBox())
-			if !sameColor(c.buf.CellAt(3, b.startY+1).Style.Bg, lipgloss.Color(m.palette.SurfaceElevated)) || !sameColor(c.buf.CellAt(3, b.startY+1).Style.Fg, lipgloss.Color(m.palette.Ink)) {
+			if !sameColor(c.buf.CellAt(3, b.startY+1).Style.Bg, m.palette.SurfaceElevated) || !sameColor(c.buf.CellAt(3, b.startY+1).Style.Fg, m.palette.Ink) {
 				t.Fatal("hover colours")
 			}
 		})
