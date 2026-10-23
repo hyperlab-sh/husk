@@ -72,6 +72,7 @@ func TestHookManifestValidation(t *testing.T) {
 		{"subscribe equals", subscribeOne(`"a.b=c"`), "hooks.subscribe[0].id"},
 		{"subscribe backslash", subscribeOne(`"a.b\\c"`), "hooks.subscribe[0].id"},
 		{"subscribe 257 bytes", subscribeOne(`"` + long[:256] + `a"`), "hooks.subscribe[0].id"},
+		{"subscribe control character", subscribeOne(`"a.b\u0001c"`), "hooks.subscribe[0].id"},
 		{"subscribe object no id", subscribeOne(`{"priority":5}`), "hooks.subscribe[0].id"},
 		{"duplicate string+string", `{"subscribe":["x.y","x.y"]}`, "hooks.subscribe[1].id"},
 		{"duplicate string+object", `{"subscribe":["x.y",{"id":"x.y","priority":3}]}`, "hooks.subscribe[1].id"},
@@ -94,6 +95,31 @@ func TestHookManifestValidation(t *testing.T) {
 				t.Fatalf("a refused manifest returned a Spec: %+v", spec)
 			}
 		})
+	}
+}
+
+// The catalog-form members take the same parsers as "hooks": same defaults,
+// same field-named refusals.
+func TestCatalogFormHookMembers(t *testing.T) {
+	manifest := func(member string) string {
+		return `{"manifest_version":2,"protocol":2,"id":"acme.p","name":"P","version":"1","command":["./plugin"],` + member + `}`
+	}
+	spec, _, err := convertBytes(t, manifest(`"hooks_declared":[{"id":"acme.p.a","kind":"gate"}],"hook_registrations":[{"id":"x.y"},"x.z"]`), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec.HooksDeclared[0].TimeoutMs != 10000 || spec.HookRegistrations[0].Priority != 10 || spec.HookRegistrations[1].Priority != 10 {
+		t.Fatalf("defaults not written: %+v %+v", spec.HooksDeclared, spec.HookRegistrations)
+	}
+	for _, tc := range []struct{ member, want string }{
+		{`"hook_registrations":[{"id":"x.y","priority":5.5}]`, "hook_registrations[0].priority"},
+		{`"hook_registrations":[{"id":"x.y","priority":101}]`, "hooks.subscribe[0].priority"},
+		{`"hooks_declared":[{"id":"acme.p.a","kind":"gate","timeout_ms":"2000"}]`, "hooks_declared[0].timeout_ms"},
+		{`"hooks_declared":[{"id":"acme.p.a"}]`, "hooks.publish[0].kind"},
+	} {
+		if _, _, err := convertBytes(t, manifest(tc.member), true); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("%s: err = %v, want containing %q", tc.member, err, tc.want)
+		}
 	}
 }
 
@@ -129,6 +155,9 @@ func TestV1HooksBecomeGatePublishEntries(t *testing.T) {
 	}
 	if len(spec.HooksDeclared) != 2 {
 		t.Fatalf("hooks = %+v", spec.HooksDeclared)
+	}
+	if spec.HooksDeclared[0].Title != "B" {
+		t.Fatalf("v1 hook title = %q, want B", spec.HooksDeclared[0].Title)
 	}
 	for _, h := range spec.HooksDeclared {
 		if h.Kind != HookGate || h.TimeoutMs != 10000 {
