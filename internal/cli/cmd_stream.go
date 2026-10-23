@@ -8,8 +8,9 @@ import (
 )
 
 // openingBound is the streaming opening bound (instances.md, "Timeouts"):
-// session.ping and the opening reply together. It is not a flag.
-const openingBound = 5 * time.Second
+// session.ping and the opening reply together. It is not a flag; it is a
+// variable only so tests can shorten it.
+var openingBound = 5 * time.Second
 
 // watch is the body of a streaming command: it sends the opening request, prints
 // the opening reply (the generic rendering in table mode, one compact line in

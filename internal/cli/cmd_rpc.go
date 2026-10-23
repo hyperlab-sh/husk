@@ -42,6 +42,21 @@ func runRPC(ctx context.Context, inv *Invocation, args []string) error {
 	return inv.out.Result(raw)
 }
 
+// call connects, sends one request and returns its raw result.
+func (inv *Invocation) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	if raw, err := json.Marshal(params); err != nil {
+		return nil, output.Usage("params: %v", err)
+	} else if err := inv.checkRequestSize(method, raw); err != nil {
+		return nil, err
+	}
+	c, err := inv.Connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+	return c.Call(c.Ctx, method, params)
+}
+
 // objectArg reads a JSON argument: the literal "-" reads stdin. It must be a
 // JSON object, else exit 2 before connecting.
 func (inv *Invocation) objectArg(arg, what string) (json.RawMessage, error) {

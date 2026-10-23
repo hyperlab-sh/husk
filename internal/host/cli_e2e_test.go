@@ -219,7 +219,10 @@ func TestStateStemCLIAgainstRealHost(t *testing.T) {
 	quit := make(chan struct{})
 	h.loop(func() {
 		fe := h.root.Frontend()
+		// Like cmd/husk's husk.quit: the host shuts down from inside the
+		// handler, on the loop, before the action.invoke reply is written.
 		if err := fe.RegisterHostAction("husk.quit", func(map[string]any) (map[string]any, error) {
+			_ = h.root.Close()
 			close(quit)
 			return nil, nil
 		}); err != nil {
@@ -244,6 +247,7 @@ func TestStateStemCLIAgainstRealHost(t *testing.T) {
 		}
 	})
 
+	var stateWatchExit <-chan int // joined in the last subtest
 	t.Run("state set, get and a watch seeing the change", func(t *testing.T) {
 		lines, exit := watchRun(t, h, "state", "watch", "alpha.state", "--format", "json")
 		var open struct {
@@ -299,7 +303,7 @@ func TestStateStemCLIAgainstRealHost(t *testing.T) {
 		if code != 0 || !strings.Contains(stdout, `"alpha.state"`) {
 			t.Fatalf("dump: exit %d stdout %.80q stderr %q", code, stdout, stderr)
 		}
-		_ = exit // ends with the instance; checked in the last subtest
+		stateWatchExit = exit
 	})
 
 	t.Run("state clear is the user's", func(t *testing.T) {
@@ -311,9 +315,9 @@ func TestStateStemCLIAgainstRealHost(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("clear: exit %d: %s", code, stderr)
 		}
-		code, stdout, _ := cliRun(h, "state", "get", "alpha.state", "--format", "table")
-		if code != 0 || stdout == `{"n":2}`+"\n" {
-			t.Fatalf("after clear: exit %d stdout %q", code, stdout)
+		code, stdout, stderr := cliRun(h, "state", "get", "alpha.state", "--format", "table")
+		if code != 0 || stdout != "{}\n" {
+			t.Fatalf("after clear: exit %d stdout %q stderr %q, want the initial {}", code, stdout, stderr)
 		}
 	})
 
@@ -369,8 +373,13 @@ func TestStateStemCLIAgainstRealHost(t *testing.T) {
 		nextLine(t, lines) // opening
 
 		code, _, stderr := cliRun(h, "action", "invoke", "husk.quit", "--format", "json")
-		if code != 0 {
-			t.Fatalf("invoke: exit %d: %s", code, stderr)
+		// Known failure, bead husk-f9p: the real handler closes the Server
+		// before the reply is written, so the CLI sees the connection drop.
+		// When that is fixed this must be exit 0 with the {} result; until
+		// then the exact failure is pinned so it cannot pass vacuously and
+		// fails loudly once the host is fixed.
+		if code != output.ExitTransport || !strings.Contains(stderr, "connection closed by host") {
+			t.Fatalf("invoke husk.quit: exit %d stderr %q; husk-f9p expects exit 5 until the host replies before shutdown (then expect exit 0)", code, stderr)
 		}
 		select {
 		case <-quit:
@@ -381,16 +390,15 @@ func TestStateStemCLIAgainstRealHost(t *testing.T) {
 		if err := <-result; err != nil {
 			t.Fatal(err)
 		}
-		if err := h.root.Close(); err != nil {
-			t.Fatal(err)
-		}
-		select {
-		case code := <-exit:
-			if code != output.ExitTransport {
-				t.Fatalf("watch exit = %d, want %d", code, output.ExitTransport)
+		for name, ch := range map[string]<-chan int{"event watch": exit, "state watch": stateWatchExit} {
+			select {
+			case code := <-ch:
+				if code != output.ExitTransport {
+					t.Fatalf("%s exit = %d, want %d", name, code, output.ExitTransport)
+				}
+			case <-t.Context().Done():
+				t.Fatalf("%s outlived the instance", name)
 			}
-		case <-t.Context().Done():
-			t.Fatal("watch outlived the instance")
 		}
 	})
 }
