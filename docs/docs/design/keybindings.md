@@ -263,7 +263,7 @@ The manifest field is `keybindings`, an optional array. Every entry is surface-s
 }
 ```
 
-Manifest conversion ([Pods](pods.md)) owns these checks and is the only place they run. It keeps the entries that pass and records one problem per entry it drops, in the declared document's `problems` array (`{index, code, message}`, index being the manifest position):
+Manifest conversion ([Pods](pods.md)) owns these checks and is the only place they run. It keeps the entries that pass and records one problem per entry it drops, in the declared document's `problems` array (`{index, code, message, key?}`, index being the manifest position). For a problem not about a binding position, `key` names the manifest member, for example `events.subscribe[1]` (the form `<field>[<i>]`):
 
 | Check | Drops the entry with |
 |---|---|
@@ -510,7 +510,7 @@ This is the complete list of loader codes, plus `invalid_plugin_catalog`, raised
 | `too_many` | loader | More than 2048 entries in one layer file; more than 128 in one manifest (raised by conversion, carried in the document's `problems`); or more than 4096 effective entries after shadowing. | Extra entries are dropped. Past the 4096 cap the last entries in the static order (loader step 5) go first, so a flood of low-layer entries cannot push out `profile` or `user` entries. |
 | `global_not_allowed` | conversion | A manifest entry without `focus`, with a `focus` the plugin does not own, or with `plugin` or `disable`. | The entry is dropped. |
 | `foreign_action` | conversion | A manifest entry whose `action` is neither the plugin's own nor `husk.*`. | The entry is dropped. |
-| `cli_only_event` | conversion | A manifest subscribes to a `secrets.` or `services.` event pattern, which only `cli` watchers receive (carried in the document's `problems`; `index` is the position in the manifest's own subscription list). | That subscription is dropped; the plugin's others stand. |
+| `cli_only_event` | conversion | A manifest subscribes to a `secrets.` or `services.` event pattern, which only `cli` watchers receive (carried in the document's `problems`; `index` is the position in the manifest's own subscription list and `key` names the member, for example `events.subscribe[1]`). | That subscription is dropped; the plugin's others stand. |
 | `suggestion_ignored` | loader, from conversion's `suggestions` | A rail item or command carried `shortcut`. | Nothing is bound; the rail shows no key until a layer binds one. |
 | `no_exit_binding` | loader | After ranking, no effective entry has action `husk.quit` or none has `husk.palette.open`. | The keymap is used as written; a toast at startup. Recovery: `husk action invoke husk.quit`, or a signal. |
 
