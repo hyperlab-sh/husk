@@ -278,3 +278,19 @@ func TestUnreachableIsPerLayerAndScope(t *testing.T) {
 		t.Fatalf("unreachable entries = %v, want [1]", unreachable)
 	}
 }
+
+// Hints list surface-scoped before global, then the stronger layer, then file
+// order; a shadowed binding is never advertised.
+func TestHintsOrder(t *testing.T) {
+	kb := rankKeys(t, map[store.Layer]string{
+		store.LayerDistribution: bind(`{"key":"d","action":"d.run","hint":"D"}`),
+		store.LayerUser:         bind(`{"key":"b","action":"u.b","hint":"B"}`, `{"key":"a","action":"u.a","hint":"A"}`, `{"key":"s","focus":"stage","action":"u.s","hint":"S"}`, `{"key":"d","focus":"stage","action":"u.d","hint":"shadows d globally on stage"}`),
+	}, "")
+	var got []string
+	for _, h := range kb.Hints(keybinding.KeyContext{FocusSurface: "stage", FocusOwner: "a"}) {
+		got = append(got, h.Text)
+	}
+	if want := "[S shadows d globally on stage B A]"; fmt.Sprint(got) != want {
+		t.Fatalf("Hints = %v, want %s", got, want)
+	}
+}
