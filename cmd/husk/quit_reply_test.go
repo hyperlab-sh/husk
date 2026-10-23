@@ -15,11 +15,30 @@ import (
 	"github.com/hyperlab-sh/husk/internal/instance"
 )
 
-// `husk rpc action.invoke` of husk.quit gets its `{}` reply and exit 0, and
-// only then does the instance shut down: the program ends and the entry and
+// `husk rpc action.invoke` and `husk action invoke` of husk.quit each get the
+// `{}` reply and exit 0, and only then does the instance shut down: the program ends and the entry and
 // socket are gone. The host action must not close the Server inside the
 // invocation, before the reply is written (instances.md, cross-table rule 8).
 func TestQuitActionRepliesBeforeTheInstanceStops(t *testing.T) {
+	forms := []struct {
+		name string
+		args func(id string) []string
+	}{
+		{"rpc action.invoke", func(id string) []string {
+			return []string{"rpc", "action.invoke", `{"action":"husk.quit"}`, "--instance", id, "--format", "json"}
+		}},
+		{"action invoke", func(id string) []string {
+			return []string{"action", "invoke", "husk.quit", "--instance", id, "--format", "json"}
+		}},
+	}
+	for i, f := range forms {
+		t.Run(f.name, func(t *testing.T) {
+			quitRepliesBeforeStop(t, "quitreply"+string(rune('a'+i)), f.args)
+		})
+	}
+}
+
+func quitRepliesBeforeStop(t *testing.T, id string, quitArgs func(id string) []string) {
 	state0 := t.TempDir()
 	t.Setenv("HOME", state0)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(state0, "config"))
@@ -27,7 +46,6 @@ func TestQuitActionRepliesBeforeTheInstanceStops(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", filepath.Join(state0, "data"))
 	t.Setenv("XDG_RUNTIME_DIR", filepath.Join(state0, "run"))
 
-	const id = "quitreply"
 	dir := shortRuntimeDir(t, id)
 	model := goldenModel()
 	prog := newProgramRef()
@@ -79,7 +97,7 @@ func TestQuitActionRepliesBeforeTheInstanceStops(t *testing.T) {
 		<-pm.done
 	}
 
-	code, stdout, stderr := run("rpc", "action.invoke", `{"action":"husk.quit"}`, "--instance", id, "--format", "json")
+	code, stdout, stderr := run(quitArgs(id)...)
 	if code != 0 {
 		t.Fatalf("exit %d, stderr %q", code, stderr)
 	}

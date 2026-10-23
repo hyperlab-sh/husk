@@ -234,9 +234,11 @@ func TestStateStemCLIAgainstRealHost(t *testing.T) {
 	quit := make(chan struct{})
 	h.loop(func() {
 		fe := h.root.Frontend()
-		// Like cmd/husk's husk.quit once husk-f9p is fixed: the handler
-		// returns (so the reply is written) and the host shuts down on a
-		// later loop turn.
+		// Mirrors cmd/husk's husk.quit (PR #94, husk-f9p): the handler only
+		// schedules the shutdown and returns, so the reply is written first;
+		// the host closes on a later loop turn (cmd/husk posts a quitMsg,
+		// here a goroutine posts a loop turn). The real action lives in
+		// package main and cannot be imported, hence the fake.
 		if err := fe.RegisterHostAction("husk.quit", func(map[string]any) (map[string]any, error) {
 			go func() { // not h.loop: it calls t.Fatal, which is invalid off the test goroutine
 				_ = h.root.do(context.Background(), func() { _ = h.root.Close() })
@@ -390,7 +392,6 @@ func TestStateStemCLIAgainstRealHost(t *testing.T) {
 	})
 
 	t.Run("action invoke husk.quit replies", func(t *testing.T) {
-		t.Skip("husk-f9p: quitCmd closes the Server before the reply is written")
 		code, stdout, stderr := cliRun(h, "action", "invoke", "husk.quit", "--format", "json")
 		if code != 0 || stdout != "{}\n" {
 			t.Fatalf("invoke husk.quit: exit %d stdout %q stderr %q, want exit 0 and {}", code, stdout, stderr)
