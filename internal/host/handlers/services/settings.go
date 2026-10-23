@@ -1,7 +1,9 @@
 package services
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
 	"github.com/hyperlab-sh/husk/internal/host/handlers"
@@ -42,6 +44,17 @@ type settingsGetResult struct {
 
 // Serve implements contracts.Handler.
 func (h Settings) Serve(ctx context.Context, c contracts.Caller, req protocol.Message, _ contracts.Notifier) protocol.Message {
+	if req.Method == protocol.MethodSettingsSet {
+		reason := ""
+		if c.Kind == contracts.CallerPlugin {
+			reason = "user_only"
+		} else if c.Kind != contracts.CallerCLI || c.PluginID != "" {
+			reason = "invalid_caller"
+		}
+		if reason != "" {
+			return handlers.ErrorReply(req, contracts.NewError(protocol.CodeDenied, "settings.set: "+reason, map[string]any{"reason": reason}))
+		}
+	}
 	if deny := admitCall(req, c); deny != nil {
 		return *deny
 	}
@@ -64,6 +77,30 @@ func (h Settings) Serve(ctx context.Context, c contracts.Caller, req protocol.Me
 			return handlers.ErrorReply(req, err)
 		}
 		return handlers.Reply(req, settingsGetResult{Key: p.Key, Value: value, Source: source})
+	case protocol.MethodSettingsSet:
+		var p struct {
+			Key   string          `json:"key"`
+			Value json.RawMessage `json:"value"`
+		}
+		if bad := handlers.DecodeParams(req, &p); bad != nil {
+			return *bad
+		}
+		if bad := handlers.RequireString(req, "params.key", p.Key); bad != nil {
+			return *bad
+		}
+		var value any
+		if len(p.Value) > 0 {
+			decoder := json.NewDecoder(bytes.NewReader(p.Value))
+			decoder.UseNumber()
+			if err := decoder.Decode(&value); err != nil {
+				return handlers.InvalidParams(req, "params.value", err.Error())
+			}
+		}
+		result, err := h.Port.Set(ctx, c, p.Key, value)
+		if err != nil {
+			return handlers.ErrorReply(req, err)
+		}
+		return handlers.Reply(req, result)
 	case protocol.MethodSettingsList:
 		rows, err := h.Port.List(ctx, c)
 		if err != nil {

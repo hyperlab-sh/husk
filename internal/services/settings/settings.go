@@ -45,6 +45,9 @@ type Snapshot = c.SettingsSnapshot
 
 // Options supplies the distribution schema and the warning sink.
 type Options struct {
+	// Store writes user configuration off the loop; Post registers the reload.
+	Store  StoreWriter
+	Post   c.Post
 	Schema []Entry
 	// Warn receives `settings: unregistered key <key>` once per key per
 	// process. It is not a Problem and appears in no report.
@@ -53,10 +56,11 @@ type Options struct {
 
 // Service publishes immutable snapshots through a single atomic pointer.
 type Service struct {
-	current atomic.Pointer[snapshot]
-	opts    Options
-	base    map[string]Entry // validated host and distribution entries
-	unknown atomic.Pointer[map[string]bool]
+	current  atomic.Pointer[snapshot]
+	opts     Options
+	base     map[string]Entry // validated host and distribution entries
+	unknown  atomic.Pointer[map[string]bool]
+	reloader Reloader
 }
 type snapshot struct {
 	gen         c.Generation

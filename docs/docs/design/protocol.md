@@ -291,7 +291,7 @@ A requester that stops waiting ([Calls](calls.md) times a request out, or a sock
 | | `slot.contributions` | notification | Husk to the publisher |
 | `toast` | `toast.show` | notification | plugin or CLI to Husk |
 | `settings` | `settings.get` | request | plugin or CLI to Husk |
-| | `settings.list`, `settings.schema`, `settings.validate` | request | CLI to Husk |
+| | `settings.list`, `settings.schema`, `settings.validate`, `settings.set` | request | CLI to Husk |
 | `secrets` | `secrets.get`, `secrets.names` | request | plugin or CLI to Husk |
 | | `secrets.set`, `secrets.grant`, `secrets.revoke`, `secrets.reveal` | request | CLI to Husk; a plugin caller gets `denied` ([Services](services.md)) |
 | `keys` | `keys.list` | request | plugin or CLI to Husk |

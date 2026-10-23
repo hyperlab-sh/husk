@@ -61,6 +61,7 @@ func payloads() map[string]payload {
 		protocol.MethodSettingsList:      {obj, obj},
 		protocol.MethodSettingsSchema:    {obj, obj},
 		protocol.MethodSettingsValidate:  {obj, obj},
+		protocol.MethodSettingsSet:       {obj, obj},
 		protocol.MethodSecretsGet:        {obj, obj},
 		protocol.MethodSecretsNames:      {obj, obj},
 		protocol.MethodSecretsSet:        {obj, obj},

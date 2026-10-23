@@ -69,6 +69,8 @@ const (
 	MethodSettingsSchema = "settings.schema"
 	// MethodSettingsValidate validates settings; see design/services.md.
 	MethodSettingsValidate = "settings.validate"
+	// MethodSettingsSet writes one user-layer key; see design/services.md.
+	MethodSettingsSet = "settings.set"
 	// MethodSecretsGet reads a secret; see design/services.md.
 	MethodSecretsGet = "secrets.get"
 	// MethodSecretsNames lists secret names; see design/services.md.
@@ -108,7 +110,7 @@ func Methods() []string {
 		MethodStateGet, MethodStateSet, MethodStatePatch, MethodStateSnapshot, MethodStateWatch, MethodStateClear, MethodStateChanged,
 		MethodSurfaceUpdate, MethodSurfaceClose, MethodSurfaceResized, MethodInputKey, MethodInputMouse, MethodInputKeyState,
 		MethodThemeChanged, MethodThemeGet, MethodThemeList, MethodThemeCheck, MethodSlotContribute, MethodSlotContributions, MethodToastShow,
-		MethodSettingsGet, MethodSettingsList, MethodSettingsSchema, MethodSettingsValidate,
+		MethodSettingsGet, MethodSettingsList, MethodSettingsSchema, MethodSettingsValidate, MethodSettingsSet,
 		MethodSecretsGet, MethodSecretsNames, MethodSecretsSet, MethodSecretsGrant, MethodSecretsRevoke, MethodSecretsReveal,
 		MethodKeysList, MethodProfileList, MethodProfileUse, MethodPluginList, MethodPluginLog, MethodPluginRemove, MethodPluginAdd, MethodConfigReload}
 }
