@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strconv"
 	"time"
 
@@ -27,21 +28,6 @@ func stateCommand() command {
 			"clear": {usage: "husk state clear <namespace>", timeout: t, run: runStateClear},
 		},
 	}
-}
-
-// call connects, sends one request and returns its raw result.
-func (inv *Invocation) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
-	if raw, err := json.Marshal(params); err != nil {
-		return nil, output.Usage("params: %v", err)
-	} else if err := inv.checkRequestSize(method, raw); err != nil {
-		return nil, err
-	}
-	c, err := inv.Connect(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer c.Close()
-	return c.Call(c.Ctx, method, params)
 }
 
 // snapshotSlice is the part of a state.snapshot entry the table shows.
@@ -125,7 +111,7 @@ func runStateDump(ctx context.Context, inv *Invocation, args []string) error {
 	}
 	raw, err := inv.call(ctx, protocol.MethodStateSnapshot, map[string]any{"values": true})
 	if err != nil {
-		return err
+		return dumpHint(err)
 	}
 	return inv.out.Result(raw)
 }
@@ -195,4 +181,23 @@ func runStateClear(ctx context.Context, inv *Invocation, args []string) error {
 		return err
 	}
 	return inv.out.Result(raw)
+}
+
+// dumpHint points a dump the instance refused as too large at state get
+// (state.md): an invalid_params error carrying data.limit gets the pointer
+// appended; its code, data and exit stay.
+func dumpHint(err error) error {
+	var oe *output.Error
+	if !errors.As(err, &oe) || oe.Exit != output.ExitRemote || oe.Code != string(protocol.CodeInvalidParams) {
+		return err
+	}
+	var data struct {
+		Limit *int `json:"limit"`
+	}
+	if json.Unmarshal(oe.Data, &data) != nil || data.Limit == nil {
+		return err
+	}
+	hinted := *oe
+	hinted.Message += "; use husk state get <slice>"
+	return &hinted
 }

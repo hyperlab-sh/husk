@@ -418,3 +418,83 @@ func TestWatchHelpListsEveryVerb(t *testing.T) {
 		t.Fatalf("help mentions --force:\n%s", h.out.String())
 	}
 }
+
+func TestStateDumpHintsAtStateGetWhenTooLarge(t *testing.T) {
+	for _, tc := range []struct {
+		name, data, want string
+	}{
+		{"limit present", `{"limit":4194304}`, "snapshot with values exceeds one protocol line; use husk state get <slice>"},
+		{"no limit, no hint", `{"other":1}`, "snapshot with values exceeds one protocol line"},
+		{"no data, no hint", ``, "snapshot with values exceeds one protocol line"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := shortDir(t)
+			serve(t, dir, "a", pingOK("a", func(c *srvConn, req protocol.Message) {
+				e := &protocol.Error{Code: protocol.CodeInvalidParams, Message: "snapshot with values exceeds one protocol line"}
+				if tc.data != "" {
+					e.Data = json.RawMessage(tc.data)
+				}
+				c.send(protocol.Message{ID: req.ID, Error: e})
+			}))
+			h := newHarness(t, dir, nil)
+			if got := h.run("state", "dump", "--format", "json"); got != output.ExitRemote {
+				t.Fatalf("exit = %d", got)
+			}
+			code, msg, data := errObject(t, h)
+			if code != "invalid_params" || msg != tc.want || string(data) != tc.data {
+				t.Fatalf("error = %s %q %s", code, msg, data)
+			}
+		})
+	}
+	t.Run("other codes get no hint", func(t *testing.T) {
+		dir := shortDir(t)
+		serve(t, dir, "a", pingOK("a", func(c *srvConn, req protocol.Message) {
+			c.send(protocol.Message{ID: req.ID, Error: &protocol.Error{Code: protocol.CodeInternal, Message: "boom", Data: json.RawMessage(`{"limit":1}`)}})
+		}))
+		h := newHarness(t, dir, nil)
+		h.run("state", "dump", "--format", "json")
+		if _, msg, _ := errObject(t, h); msg != "boom" {
+			t.Fatalf("message = %q", msg)
+		}
+	})
+}
+
+func TestWatchOpeningBoundIsTransportExit5(t *testing.T) {
+	saved := openingBound
+	openingBound = 100 * time.Millisecond
+	t.Cleanup(func() { openingBound = saved })
+	for _, tc := range []struct {
+		name string
+		h    func(*srvConn, protocol.Message)
+	}{
+		{"ping answered, watch never", pingOK("a", func(*srvConn, protocol.Message) {})},
+		{"ping never answered", func(*srvConn, protocol.Message) {}},
+	} {
+		for _, args := range [][]string{{"state", "watch"}, {"event", "watch", "user.*"}} {
+			t.Run(tc.name+" "+args[0], func(t *testing.T) {
+				dir := shortDir(t)
+				srv := serve(t, dir, "a", tc.h)
+				h := newHarness(t, dir, nil)
+				// An explicit socket skips discovery, whose own probe would
+				// find the silent instance unresponsive first.
+				// The outer deadline only makes a lost bound fail fast.
+				ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+				defer cancel()
+				start := time.Now()
+				got := Main(ctx, append(args, "--socket", srv.Socket, "--format", "json"), h.env)
+				if elapsed := time.Since(start); elapsed > time.Second {
+					t.Fatalf("took %s: the opening bound did not end the wait, the outer deadline did", elapsed)
+				}
+				if got != output.ExitTransport {
+					t.Fatalf("exit = %d, want %d", got, output.ExitTransport)
+				}
+				if code, msg, _ := errObject(t, h); code != "transport" || msg != "instance did not answer within 100ms" {
+					t.Fatalf("error = %s %q", code, msg)
+				}
+				if h.out.Len() != 0 {
+					t.Fatalf("stdout = %q", h.out.String())
+				}
+			})
+		}
+	}
+}
