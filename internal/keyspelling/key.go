@@ -11,6 +11,9 @@ import (
 )
 
 // Format preserves v1 spelling, including Alt-first and printable shifted text.
+// For ordinary binding keys (printable and named keys, with or without
+// modifiers) the spelling is accepted unchanged by Normalize, except that
+// Shift with a symbol under Ctrl, Super, Meta or Hyper is rejected there.
 func Format(key tea.Key) string {
 	alt := key.Mod.Contains(tea.ModAlt)
 	key.Mod &^= tea.ModAlt | tea.ModNumLock | tea.ModScrollLock
