@@ -12,7 +12,7 @@ func TestLayerFileNames(t *testing.T) {
 		name, instance, profile string
 		doc                     DocName
 		local                   string
-		distribution            []string
+		distribution            map[string]string
 		flags                   bool
 		layer                   Layer
 		file                    string
@@ -23,9 +23,11 @@ func TestLayerFileNames(t *testing.T) {
 		{name: "instance file", doc: "config", local: "instances/t1/config.json", layer: LayerInstance, file: "instances/t1/config.json"},
 		{name: "instance file and flags", doc: "config", local: "instances/t1/config.json", flags: true, layer: LayerInstance},
 		{name: "pid flags", instance: "123", doc: "config", flags: true, layer: LayerInstance},
-		{name: "distribution base", doc: "config", distribution: []string{"config.json"}, layer: LayerDistribution, file: "config.json"},
-		{name: "distribution profile", doc: "config", profile: "work", distribution: []string{"profiles/work/config.json"}, layer: LayerDistribution, file: "profiles/work/config.json"},
-		{name: "distribution folded profile", doc: "config", profile: "work", distribution: []string{"config.json", "profiles/work/config.json"}, layer: LayerDistribution, file: "config.json"},
+		{name: "distribution base", doc: "config", distribution: map[string]string{"config.json": `{"value":true}`}, layer: LayerDistribution, file: "config.json"},
+		{name: "distribution profile", doc: "config", profile: "work", distribution: map[string]string{"profiles/work/config.json": `{"value":true}`}, layer: LayerDistribution, file: "profiles/work/config.json"},
+		{name: "distribution folded profile", doc: "config", profile: "work", distribution: map[string]string{"config.json": `{"value":true}`, "profiles/work/config.json": `{"value":true}`}, layer: LayerDistribution, file: "config.json"},
+		{name: "distribution base, malformed profile", doc: "config", profile: "work", distribution: map[string]string{"config.json": `{"value":true}`, "profiles/work/config.json": `{`}, layer: LayerDistribution, file: "config.json"},
+		{name: "distribution malformed base, valid profile", doc: "config", profile: "work", distribution: map[string]string{"config.json": `{`, "profiles/work/config.json": `{"value":true}`}, layer: LayerDistribution, file: "profiles/work/config.json"},
 		{name: "missing", doc: "config"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -40,8 +42,8 @@ func TestLayerFileNames(t *testing.T) {
 				}
 				if tc.distribution != nil {
 					dist := fstest.MapFS{}
-					for _, file := range tc.distribution {
-						dist[file] = &fstest.MapFile{Data: []byte(`{"value":true}`)}
+					for file, data := range tc.distribution {
+						dist[file] = &fstest.MapFile{Data: []byte(data)}
 					}
 					o.Distribution = dist
 				}
@@ -61,12 +63,51 @@ func TestLayerFileNames(t *testing.T) {
 				t.Fatalf("layers = %+v, want %d", layers, wantLen)
 			}
 			for _, l := range layers {
+				if tc.distribution != nil && l.Doc["value"] != true {
+					t.Errorf("distribution document = %v, want value true", l.Doc)
+				}
 				if l.Layer != tc.layer || l.File != tc.file {
 					t.Errorf("layer/file = %s %q, want %s %q", l.Layer, l.File, tc.layer, tc.file)
 				}
 				if filepath.IsAbs(l.File) || strings.Contains(l.File, "..") || strings.Contains(l.File, "\\") || strings.Contains(l.File, e.root) || strings.HasPrefix(l.File, "/") || strings.HasPrefix(l.File, "./") {
 					t.Errorf("unsafe layer file %q", l.File)
 				}
+			}
+		})
+	}
+}
+
+func TestInvalidLocalLayerProblemsKeepAbsoluteFile(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		parts []string
+		layer Layer
+	}{
+		{"user", []string{"config.json"}, LayerUser},
+		{"instance", []string{"instances", "t1", "config.json"}, LayerInstance},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := fixture(t)
+			s := e.open(t, "t1", nil)
+			writeConfig(t, s, tc.parts, `{`)
+			resolved, err := s.Resolve("config", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantFile := filepath.Join(append([]string{s.paths.Config}, tc.parts...)...)
+			if len(resolved.Problems) != 1 {
+				t.Fatalf("problems = %+v, want one invalid_document", resolved.Problems)
+			}
+			p := resolved.Problems[0]
+			if p.Code != "invalid_document" || p.Layer != tc.layer || p.File != wantFile || !filepath.IsAbs(p.File) {
+				t.Errorf("problem = %+v, want invalid_document in %s at %q (absolute)", p, tc.layer, wantFile)
+			}
+			layers, err := s.Layers("config", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(layers) != 0 {
+				t.Errorf("malformed layer returned documents: %+v", layers)
 			}
 		})
 	}
