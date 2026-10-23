@@ -237,16 +237,19 @@ func (r *Root) refreshCatalog() {
 	}
 }
 
-// remover is the host half of plugin.remove for the Pods Host (pods.Remover).
-type remover struct{ r *Root }
+// lifecycle is the host half of plugin addition and removal.
+type lifecycle struct{ r *Root }
 
-var _ pods.Remover = remover{}
+var _ pods.Workers = lifecycle{}
+
+// Added attaches the same delivery bookkeeping used by startup Pods.
+func (m lifecycle) Added(id string) { m.r.watchPod(id) }
 
 // Undeclare is steps 5 and 6's host half, in the teardown tick: the
 // declaration slices go with the Pod, its declared documents are removed and
 // every reader derived from them refreshes before the reload. Occupant entries
 // of the removed owner drop at the engine's flush, which tick runs.
-func (m remover) Undeclare(id string) {
+func (m lifecycle) Undeclare(id string) {
 	r := m.r
 	if cancel := r.podWatch[id]; cancel != nil {
 		cancel()
@@ -260,7 +263,7 @@ func (m remover) Undeclare(id string) {
 // Reload is step 7's reload: reason plugin under the Host's context. The
 // Coordinator hands back its reports with the aggregate incomplete error, so
 // the reports are the answer whenever there are any.
-func (m remover) Reload(ctx context.Context) ([]contracts.ReloadReport, error) {
+func (m lifecycle) Reload(ctx context.Context) ([]contracts.ReloadReport, error) {
 	reports, err := m.r.rt.Coordinator.Reload(ctx, servicesReasonPlugin)
 	if len(reports) > 0 {
 		return portsservices.Reports(reports), nil
@@ -269,7 +272,7 @@ func (m remover) Reload(ctx context.Context) ([]contracts.ReloadReport, error) {
 }
 
 // Go starts a tracked worker (refused once shutdown began).
-func (m remover) Go(cmd tea.Cmd) { m.r.spawn(cmd) }
+func (m lifecycle) Go(cmd tea.Cmd) { m.r.spawn(cmd) }
 
 // opening builds the notifications a Pod queues before anything else:
 // theme.changed, one surface.resized with every surface the plugin occupies,

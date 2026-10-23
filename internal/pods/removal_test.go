@@ -93,6 +93,8 @@ func (r *removalRecorder) Reload(ctx context.Context) ([]contracts.ReloadReport,
 	return []contracts.ReloadReport{{Service: "profile", Gen: 1, Applied: true}}, nil
 }
 
+func (r *removalRecorder) Added(string) {}
+
 func (r *removalRecorder) Go(cmd tea.Cmd) {
 	go func() {
 		if m := cmd(); m != nil {
@@ -130,7 +132,7 @@ func newRemovalFixture(t *testing.T) *removalFixture {
 		Wrapper:   wrapper.Options{Clock: clock},
 		Registry:  rec,
 		Publisher: rec,
-		Remover:   rec,
+		Workers:   rec,
 		Factory: func(s manifest.Spec, o wrapper.Options) (wrapper.Process, error) {
 			p := &fakeProcess{id: s.ID, info: wrapper.Info{PluginID: s.ID, Status: wrapper.Starting, LogPath: "/logs/" + s.ID + ".log"}, opts: o, done: make(chan struct{}), term: make(chan struct{})}
 			f.procs[s.ID] = p
@@ -533,8 +535,8 @@ func TestTeardownTickOrderAndContent(t *testing.T) {
 	token := f.procs["a"].Token()
 
 	var atUndeclare struct{ tokenLive, podPresent, slicePresent bool }
-	orig := f.h.opts.Remover
-	f.h.opts.Remover = undeclareProbe{Remover: orig, probe: func() {
+	orig := f.h.opts.Workers
+	f.h.opts.Workers = undeclareProbe{Workers: orig, probe: func() {
 		_, atUndeclare.tokenLive = f.h.Resolve(token)
 		_, atUndeclare.podPresent = f.h.Pod("a")
 		atUndeclare.slicePresent = !handle.unregistered
@@ -569,11 +571,11 @@ func TestTeardownTickOrderAndContent(t *testing.T) {
 }
 
 type undeclareProbe struct {
-	Remover
+	Workers
 	probe func()
 }
 
-func (u undeclareProbe) Undeclare(id string) { u.probe(); u.Remover.Undeclare(id) }
+func (u undeclareProbe) Undeclare(id string) { u.probe(); u.Workers.Undeclare(id) }
 
 // A TeardownMsg for an id with no removing entry is stale (shutdown completed
 // the removal, or a test posted it) and a RemoveDoneMsg likewise.
