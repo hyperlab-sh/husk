@@ -51,6 +51,10 @@ Level 2 migration from today's code. Read [Protocol](protocol.md) and
 - [Keybinding policy](keybindings.md): who may bind keys, which layers a
   keymap comes from, how conflicts resolve, the keymap file shape, and what
   `husk keys` reports.
+- [Bundles and `husk create`](bundles.md): a bundle as a directory with a
+  small manifest, one folder per plugin and optional config files; how
+  `husk --bundle` loads it as plugins plus the distribution layer; and what
+  `husk create tui|bundle` writes.
 
 ## Adapters (planned)
 
