@@ -368,9 +368,9 @@ included: the rule, not the palette, is what keeps it so.
    hints, titles, callouts or dev overlays. Today's chrome breaks this in
    sixteen elements (the audit below).
 5. The rule governs **roles drawn, not hex values**. Two roles may hold the
-   same colour in a theme (`charm`'s `border_focused` and `accent_soft` are
-   both its indigo); drawing `border_focused` is allowed where drawing
-   `accent_soft` is not.
+   same colour in a theme (`base16`'s `border_focused` and `accent` are both
+   ANSI index `5`); drawing `border_focused` is allowed where drawing
+   `accent` is not.
 6. A host modal (the Settings center, the secret prompt, any later one)
    follows the same rules: rows on `surface_elevated`, the cursor row on
    `surface_selected`, text in `ink` and `ink_muted`, the frame in
@@ -397,13 +397,13 @@ rows, the shadow's resolution colours, the slot fill) already comply.
 | Borderless frame label (`drawChrome`) | `accent` bold | `ink_muted` bold, as the bordered label already is; `ink` bold on the focused surface |
 | Hovered divider edge (`dividerEdgeStyles`) | `warning` bold | `ink` bold |
 | Dragged divider edge (`dividerEdgeStyles`) | `success` bold | `accent` bold (the one element under manipulation) |
-| Slot explorer title (`renderSlotExplorer`) | `accent` bold | `ink` bold |
+| Slot explorer title (`drawHotspotArchitectureStage`) | `accent` bold | `ink` bold |
 | Slot explorer number badge | `canvas` on `warning` | `ink` bold on `surface_elevated` (`surface_selected` on the selected row) |
 | Slot explorer surface title | `accent_secondary` | `ink_muted` |
-| Slot explorer owner | `success` | `ink_subtle` |
+| Slot explorer owner | `success` | `ink_subtle` on unselected rows, `ink_muted` on the selected row (`surface_selected`), the explorer's existing pattern for descriptions |
 | Toast border (`drawToast`) | the level colour | `border`; the `●` glyph and title keep the level colour |
 | Palette header (`drawCommandPalette`) | `warning` bold | `ink_muted` bold |
-| Palette row tag (`paletteRow`) | `accent_secondary` | `ink_subtle` |
+| Palette row tag (`paletteRow`) | `accent_secondary` | `ink_subtle` on unselected rows, `ink_muted` on the selected row (`surface_selected`) |
 | Palette row shortcut (`paletteRow`) | `warning` | `ink_muted` |
 | Secret prompt title `SECRET ACCESS REQUEST` (`drawSecretPrompt`) | `warning` bold | `ink` bold, preceded by a `⚠` glyph in `warning` (a status glyph, rule 4) |
 | Secret prompt plugin id | `accent` bold | `ink` bold |
@@ -467,6 +467,11 @@ rewrites, each named for the behaviour it pins:
 - the layout label for each row of the table above;
 - the theme slot shows `charm` with no override, the override with one, and
   `theme` for an empty name; a click on it does not reach any surface;
+- no `ink_subtle` is drawn on `surface_selected`: `ink_subtle` on the
+  selected surface is below 4.5:1 in every built-in theme and invisible under
+  `base16` (both index `8`), so a rendering test over the palette with a
+  selected row and the slot explorer with a selected slot finds no cell
+  whose foreground is `ink_subtle` and background `surface_selected`;
 - the colour discipline holds: the source-level role count and the one-accent
   frame described under "Colour discipline";
 - the top bar is brand plus at most one transient pill, no plugin count, no
