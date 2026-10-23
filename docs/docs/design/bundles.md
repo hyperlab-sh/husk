@@ -20,7 +20,7 @@ Two things make a bundle more than "a plugin directory plus a config directory":
 1. **One name for one set.** `husk --bundle ~/apps/notes` is the whole configuration of an application. A plugin that ships inside a bundle needs nothing special; it is an ordinary plugin directory, and the folder that holds it is exactly what `husk.plugins.dirs` already loads.
 2. **The bundle's config files are the distribution layer.** [Store](store.md) merges `distribution < user < profile < instance`. A bundle's `config.json`, `keymap.json` and `profiles/` are mounted as that bottom layer, so a bundle ships defaults and the user's own files still win, exactly as they win over an application's compiled-in defaults.
 
-Two scaffolding commands write the layout so nobody types it by hand: `husk create bundle <name>` writes a bundle with one example plugin, and `husk create tui <name>` writes a Go module that embeds Husk and carries a bundle of its own.
+Two scaffolding commands write the layout so nobody types it by hand: `husk create bundle <name>` writes a bundle with one example plugin and the guide plugin, and `husk create tui <name>` writes a Go module that embeds Husk and carries a bundle of its own.
 
 What this spec is NOT:
 
@@ -124,7 +124,7 @@ Codes follow the `snake_case` vocabulary of the other specs and are what tests m
 | `bundle_id_invalid` | fatal | `id` absent, empty or outside the id rule. |
 | `bundle_path_relative` | fatal | `husk.bundle` set in a layer file to a path that is neither absolute nor `~/`-prefixed. The message names the layer. |
 | `bundle_plugins_not_a_directory` | fatal | `<dir>/plugins` exists and is not a directory. |
-| `bundle_no_plugins` | warning | `<dir>/plugins` is absent or has no folder a converter claims. |
+| `bundle_no_plugins` | warning | `<dir>/plugins` is absent or empty. |
 | `bundle_setting_ignored` | warning (Settings) | `husk.bundle` appears in a layer that cannot set it (`profile`, or the bundle's own config in `distribution`). |
 
 The fatal codes are printed as `husk: bundle <dir>: <message>` on stderr; the exit status is 1 (a start failure, as for an invalid instance name after flag parsing). `husk store check` does not inspect bundles: a bundle is the user's or the application's, not a file Husk owns.
@@ -135,7 +135,7 @@ The fatal codes are printed as `husk: bundle <dir>: <message>` on stderr; the ex
 
 | Synopsis | Writes | Status |
 |---|---|---|
-| `husk create bundle <name>` | `<name>/`, the bundle layout with one example plugin and a README | lands with this spec |
+| `husk create bundle <name>` | `<name>/`, the bundle layout with one example plugin, the guide plugin and a README | lands with this spec |
 | `husk create tui <name> [--module <path>]` | `<name>/`, a Go module that embeds Husk, with a `bundle/` in the same layout | specified here; implementation waits on the public-package move (everything under `internal/` moving to `pkg/`), because the generated `main.go` imports public packages that do not exist yet. The verb is not registered until that move lands. |
 
 Shared rules:
@@ -152,10 +152,11 @@ Shared rules:
 |---|---|
 | `husk-bundle.json` | `{"manifest_version": 1, "id": "<name>", "name": "<name>", "description": "", "version": "0.1.0"}`, indented. |
 | `config.json` | A HuJSON file whose every entry is a comment: the layer order, where the user's files live, and one commented-out `plugins.<id>.<key>` example setting. It must parse to `{}`. |
-| `keymap.json` | `{"version": 1, "bind": []}` with a comment showing one global binding and the `builtin` switch. |
+| `keymap.json` | `{"version": 1, "bind": [{"key": "f2", "action": "guide.toggle"}]}`, with a comment showing the `builtin` switch. |
 | `README.md` | The layout above in three paragraphs, how to run it (`husk --bundle .`) and how a plugin folder may be a symlink. |
 | `plugins/hello/husk-plugin.json` | The example plugin's manifest (below). |
 | `plugins/hello/hello` | The example plugin's executable (below), mode 0755. |
+| `plugins/guide/...` | The guide plugin (specified separately), copied from files embedded in the `husk` binary. |
 
 The example plugin is deliberately the smallest valid v2 plugin: a POSIX shell script, no build step, no language runtime beyond `/bin/sh`, so the bundle runs the moment it is written. Its manifest:
 
@@ -246,25 +247,25 @@ The scaffolded application therefore has exactly two configuration inputs, both 
 |---|---|---|
 | `husk --bundle <dir>` | start mode | this spec; the flag folds into `husk.bundle` in the instance layer |
 | `husk settings get husk.bundle` | no | [Services](services.md): the value in force, and `restart_required` when a layer now says otherwise |
-| `husk store paths` | yes | [Store](store.md): gains a `bundle` row, the loaded bundle's directory or empty |
 | `husk create bundle <name>` | yes | this spec |
 | `husk create tui <name>` | yes | this spec, after the public-package move |
 
 ### Dependency directions
 
 - The bundle package (`internal/bundle` today; public with the move) imports the standard library only. It exports `Load(dir string) (*Bundle, []Warning, error)`, with `Bundle{Dir, Manifest, PluginsDir string; Config fs.FS}`, and `Manifest{ID, Name, Description, Version string}`. Errors carry one of the codes above; the message is for people.
-- `cmd/husk` (the composition root) calls `store.ReadBootstrap`, then `bundle.Load`, then `store.Open` with `Options.Bundle`, and appends `Bundle.PluginsDir` to the plugin directories it hands the converter registry. Nothing else imports the bundle package; Pods and Store never do.
-- The `create` noun lives in its own command package (`internal/cli/createcmd`), which imports the output package and the standard library only (templates through `embed`), never `internal/cli`, Store or the bundle package: it writes a layout, it does not load one. `cmd/husk` wires it with `cli.Register("create", createcmd.Command())` beside the `store` registration ([Instances](instances.md), "Dependency directions"). A test pins its import list.
+- The composition root (`internal/host.New`, which opens Store today) calls `store.ReadBootstrap`, then `bundle.Load`, then `store.Open` with `Options.Bundle`, as its first stages, and appends `Bundle.PluginsDir` to the plugin directories it hands the converter registry. `cmd/husk` only folds `--bundle` into the instance-layer documents it passes through `contracts.Config`. Nothing else imports the bundle package; Pods and Store never do.
+- The `create` noun lives in its own command package (`internal/cli/createcmd`), which imports the output package, `pkg/protocol` (for the running major) and the standard library only (templates and the guide plugin's files through `embed`), never `internal/cli`, Store or the bundle package: it writes a layout, it does not load one. It exports `Command(version string) output.Command`, the version being the build's `host_version`; `cmd/husk` wires it with `cli.Register("create", createcmd.Command(buildVersion()))` beside the `store` registration ([Instances](instances.md), "Dependency directions"). A test pins its import list.
 
 ## Level 2: Migration from today
 
-- `cmd/husk/main.go`: new start flag `--bundle <dir>`, folded into `husk.bundle` in `Options.InstanceDocs`; the planned `--distribution <dir>` flag is not added (the directory form of the distribution layer is a bundle; the `fs.FS` form stays for embedding applications). Startup order gains the bootstrap read and `bundle.Load` before `store.Open`.
-- `internal/substrate/store`: `Options.Bundle fs.FS`; the distribution layer merges two parts; `ReadBootstrap`; `Paths.Bundle`.
+- `cmd/husk/main.go`: new start flag `--bundle <dir>`, folded into `husk.bundle` in the instance-layer documents; the planned `--distribution <dir>` flag is not added (the directory form of the distribution layer is a bundle; the `fs.FS` form stays for embedding applications).
+- `internal/host`: `contracts.Config` carries the flag-built instance documents (today it carries none, and `buildStore` passes Store neither `InstanceDocs` nor `Distribution`); `New` gains the bootstrap read and `bundle.Load` as stages before the plugin specs and `store.Open`.
+- `internal/substrate/store`: `Options.Bundle fs.FS`; the distribution layer merges two parts; `ReadBootstrap`.
 - `internal/pods/manifest`: `Loader.LoadDir` follows a directory entry that is a symlink to a directory (today `entry.IsDir()` skips symlinks).
 - `internal/services`: built-in schema entry `husk.bundle` (string, `""`, restart); the `bundle_setting_ignored` warning.
 - `internal/bundle`: new leaf package.
-- `internal/cli/createcmd`: new command package; `husk create bundle` lands now, `husk create tui` with the public-package move.
-- `plugins/`: unchanged; the example plugin that `husk create` writes is a template inside `createcmd`, not a directory in this repository, so the host still ships no plugin.
+- `internal/cli/createcmd`: new command package; `husk create bundle` lands now, `husk create tui` with the public-package move. `--module` is a command-specific flag with a value, which a registered command cannot take today (`cli.Main` parses one fixed flag set before calling `output.Command.Run`), so the `create tui` unit also opens that seam.
+- `plugins/`: unchanged; the example plugin that `husk create` writes is a template inside `createcmd`, not a directory in this repository. The guide plugin's files are embedded for `husk create` only; the host still loads no plugin by default.
 - Tests, each named for what it pins: a bundle's `config.json` loses to the user layer and wins over an embedded distribution file for the same key; a bundle with no embedded distribution behaves as if the embedded part were empty; `keys.list` reports a bundle keymap entry as layer `distribution`; `husk.bundle` from the user layer, from the named instance's file and from the flag, with flag over instance over user; `husk.bundle` in a profile file is `bundle_setting_ignored`; each fatal code stops the start before Store creates any directory; a bad plugin folder refuses that plugin only; a symlinked plugin folder loads; an explicit `--plugin` with a bundle plugin's id wins; `husk create bundle` output matches a golden tree and the written bundle loads under `--bundle`; `husk create` refuses a non-empty directory and writes nothing; the example plugin's `protocol` equals the running major.
 
 ## Decisions made here
@@ -278,7 +279,7 @@ The scaffolded application therefore has exactly two configuration inputs, both 
 7. **A bad bundle is fatal; a bad plugin inside it is not.** The bundle is the configuration the user asked for and cannot be partially honoured without running a different application; a plugin inside it is one of many and is refused like any plugin-dir entry.
 8. **`plugins/` is optional, with a warning.** A bundle that ships only config is legal (a theme-and-keymap bundle) but unusual, so its absence is logged and nothing else.
 9. **A plugin folder may be a symlink**, as ruled. `LoadDir` therefore follows symlinked directories, which it does not today; this is the only behaviour change outside the new code.
-10. **The scaffolded example plugin is a shell script.** It needs no toolchain, runs on the first `husk --bundle .`, and exercises `HUSK_BIN_PATH`, a declared setting, `surface.update` and the stdio contract, so a developer sees each seam once. Rejected: a Go example (needs a build before the bundle works) and an empty plugin folder (teaches nothing).
+10. **The scaffolded example plugin is a shell script.** It needs no toolchain, runs on the first `husk --bundle .`, and exercises `HUSK_BIN_PATH`, `surface.update` and the stdio contract, so a developer sees each seam once. Rejected: a Go example (needs a build before the bundle works) and an empty plugin folder (teaches nothing).
 11. **`husk create tui` embeds its bundle's config and loads its plugins from a `bundle/` beside the binary.** Plugins are processes, so they cannot run from an embedded filesystem; the config can be embedded and is, so the binary has its defaults with or without the directory. The `bundle/` is byte-for-byte a `husk create bundle` output.
 12. **`husk create` is its own command package, like `store`.** It imports neither the socket client nor Store; it writes files from embedded templates and nothing else, which keeps the import-list tests of [Instances](instances.md) meaningful.
 13. **`<name>` is lowercase.** A bundle id may be mixed case, but a scaffolded directory name should spell the same on case-insensitive filesystems, and the id is derived from the name.
@@ -287,8 +288,8 @@ The scaffolded application therefore has exactly two configuration inputs, both 
 
 ## Open questions
 
-1. **Bundle introspection.** Should the loaded bundle's manifest be visible at run time, as a `husk.bundle` core State slice (`{id, name, version, dir}`) or in `session.ping`? This spec exposes only the directory (`husk settings get husk.bundle`, `husk store paths`). Recommended: add the slice when a plugin or the frontend needs the name, for example a header that shows the application's name; it is a read-only core slice and a protocol minor.
+1. **Bundle introspection.** Should the loaded bundle's manifest be visible at run time, as a `husk.bundle` core State slice (`{id, name, version, dir}`) or in `session.ping`? This spec exposes only the directory (`husk settings get husk.bundle`). Recommended: add the slice when a plugin or the frontend needs the name, for example a header that shows the application's name; it is a read-only core slice and a protocol minor.
 2. **Several bundles.** v1 loads one. Composing several (`--bundle a --bundle b`) would need a merge order for their config files and a duplicate-id rule across bundles. Recommended: wait for a real case; a user who wants two bundles' plugins today passes the second's `plugins/` as `--plugin-dir`.
-3. **The in-repo developer guide plugin.** A separate ruling wants the `husk create` scaffolds to include the host's developer guide plugin once it exists. A plugin that lives in the Husk repository and is built with the host cannot be a folder inside a user's bundle without a binary to point at. Recommended: decide in the guide's spec whether the guide ships as a plugin folder `husk create` copies (needs a built binary beside `husk`), or is reached by a documented `husk.plugins.paths` entry the scaffold's `config.json` shows commented out.
+3. **Resolved: the guide plugin in the scaffolds.** Its files are embedded in the `husk` binary; `husk create bundle|tui` writes them under the scaffold bundle's `plugins/guide/`, and the scaffold's `keymap.json` binds `f2` to `guide.toggle` ("`husk create`" above).
 4. **`husk create tui` with a `dist.*` schema.** The scaffold registers no application settings. Recommended: add a commented example to `main.go` once the public Services constructor's `Schema []Entry` has its final shape.
 5. **Marking bundle plugins in `husk plugin list`.** See decision 15. Recommended: not until a user asks; `plugin.list` could then gain a `dir` field (the plugin's directory), which answers "where did this plugin come from" for `--plugin-dir` entries too, without a bundle-specific field.

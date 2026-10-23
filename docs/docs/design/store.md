@@ -484,7 +484,7 @@ func (s *Store) OpenPluginLog(pluginID string) (*os.File, error)
 
 func (s *Store) GC(ctx context.Context) (GCReport, error)
 func (s *Store) Check(ctx context.Context) (CheckReport, error)
-func (s *Store) Paths() Paths // every resolved directory, for `husk store paths`; Bundle is the loaded bundle's directory or ""
+func (s *Store) Paths() Paths // every resolved directory, for `husk store paths`
 
 // ResetSecrets deletes every sealed secrets/<ns>.age file (and the
 // .<ns>.age.tmp-* crash temps of their writes), the keyring identity and
@@ -692,10 +692,10 @@ secrets. Explicit `GC` and `ResetSecrets` still do what they say.
 
 ### Startup and shutdown order
 
-1. `cmd/husk` parses flags into `InstanceDocs`, calls `ReadBootstrap`, loads
-   the bundle it names if any (a bad bundle stops the start here,
-   [Bundles](bundles.md)), and calls `store.Open` with the bundle's config as
-   `Options.Bundle`.
+1. `cmd/husk` parses flags into `InstanceDocs`; the composition root
+   (`internal/host.New`) calls `ReadBootstrap`, loads the bundle it names if
+   any (a bad bundle stops the start here, [Bundles](bundles.md)), and calls
+   `store.Open` with the bundle's config as `Options.Bundle`.
 2. State is created with Store as `Hydrator`; `Store.Attach` registers the
    `husk.store` slice and the `Listener`.
 3. Stem, Services and Pods register their slices; each persistent one is
