@@ -232,7 +232,11 @@ implementer can check one:
    contrast-checked, so it may be faint; **`border_focused`** is the
    source's second accent, a calmer colour than `accent`: a whole frame edge
    in the accent would shout, and the selected or focused mark inside the
-   frame already carries the accent.
+   frame already carries the accent. **`border_focused` never equals
+   `border`** in a built-in theme: a focused frame's edge must be
+   distinguishable from an unfocused one. When the source's choice would
+   fail a checked pair, `border_focused` is the theme's foreground (its
+   `ink`) instead.
 7. **`ink`**, **`ink_muted`**, **`ink_subtle`** are the source's text,
    secondary text and tertiary text (`text`/`subtext1`/`subtext0`,
    `text`/`subtle`/`muted`, `foreground`/`comment`/`comment`, the grey
@@ -377,15 +381,17 @@ together than on the dark theme by construction.
 `huh` `ThemeDracula`: eight literal colours (background, selection,
 foreground, comment, green, purple, red, yellow). The theme has one raised
 neutral, `selection`, which is the selected surface; the raised step is
-derived. The comment colour serves as border, focused border, muted ink and
-soft accent; as text it is 3:1 on the background, so the two inks that come
-from it are lightened, and as a border it is 2.4:1 on the raised step, so
-both borders lighten by the same rule to the same value. `border_focused` is
-the comment colour rather than the purple (rule 6's second accent) because
-Dracula's purple is also its accent: a purple frame edge around every
-focused surface is the loudness the discipline rule removes. The cost is
-stated plainly: with both borders on one value, a focused frame's edge under
-Dracula is the same colour as an unfocused one. Dracula has no blue and no second accent in `huh`'s file: `info`
+derived. The border is the current-line colour (`#44475a`, the
+specification's current line and selection); at 1.2:1 on the raised step it
+fails the 3:1 border floor and is lightened by the adjustment rule to
+`#808398`. The focused border would be the comment colour rather than the
+purple (rule 6's second accent), because Dracula's purple is also its
+accent and a purple frame edge around every focused surface is the
+loudness the discipline rule removes; but the comment is 2.4:1 on the
+raised step and fails 3:1, so by rule 6 `border_focused` is the foreground
+`#f8f8f2`, distinct from `border`. The comment colour still serves as muted
+ink and soft accent; as text it is 3:1 on the background, so the two inks
+that come from it are lightened. Dracula has no blue and no second accent in `huh`'s file: `info`
 and `accent_secondary` are the Dracula specification's cyan and pink.
 
 | Role | Value | From |
@@ -396,9 +402,9 @@ and `accent_secondary` are the Dracula specification's cyan and pink.
 | `surface_selected` | `#44475a` | selection |
 | `surface_hover` | `#383a46` | = elevated |
 | `slot_background` | `#30323e` | derived |
-| `border` | `#7383b5` | adjusted from comment `#6272a4` (2.4:1 on elevated) |
+| `border` | `#808398` | adjusted from current line `#44475a` (1.2:1 on elevated) |
 | `border_subtle` | `#44475a` | selection |
-| `border_focused` | `#7383b5` | adjusted from comment `#6272a4` (2.4:1 on elevated); = border |
+| `border_focused` | `#f8f8f2` | foreground: comment `#6272a4` fails 3:1 on elevated (2.4:1), so rule 6's fallback |
 | `ink` | `#f8f8f2` | foreground |
 | `ink_muted` | `#a5b5e7` | adjusted from comment `#6272a4` (1.9:1 on selected) |
 | `ink_subtle` | `#93a3d5` | adjusted from comment `#6272a4` (2.4:1 on elevated) |
@@ -620,7 +626,7 @@ role and no `name` (its name is its key).
     "success": "#006f39", "warning": "#686200", "danger": "#ca0d3d", "info": "#0065c0"}},
   "dracula": {"palette": {
     "canvas": "#282a36", "surface": "#282a36", "surface_elevated": "#383a46", "surface_selected": "#44475a", "surface_hover": "#383a46", "slot_background": "#30323e",
-    "border": "#7383b5", "border_subtle": "#44475a", "border_focused": "#7383b5",
+    "border": "#808398", "border_subtle": "#44475a", "border_focused": "#f8f8f2",
     "ink": "#f8f8f2", "ink_muted": "#a5b5e7", "ink_subtle": "#93a3d5",
     "accent": "#cea4ff", "accent_secondary": "#ff91de", "accent_soft": "#6272a4",
     "success": "#50fa7b", "warning": "#f1fa8c", "danger": "#ff7c7c", "info": "#8be9fd"}},
@@ -696,6 +702,8 @@ In `pkg/theme`, each named for what it pins:
 - `TestBuiltInThemesContrast`: `CheckContrast` reports nothing for the eight
   hex themes; for `base16` every pair has an index side, so all are skipped
   and none is reported.
+- `TestBuiltInThemesBorderFocusedDistinct`: in every built-in theme
+  `border_focused` differs from `border` (for `base16`, a different index).
 - `TestBuiltInThemesLadder`: the ladder rule over the eight hex themes, in
   both directions.
 - `TestDefaultIsCharm`: `Default()` equals the `charm` entry, with `name`
@@ -814,12 +822,14 @@ blends a hex neighbour in the same shadow band.
     replaced `AdaptiveColor{Light, Dark}` with `lightDark(dark, light)`
     calls that swap the pair; read literally, v2 draws light-theme greys on
     a dark terminal. The tables mark each value taken "by v1's intent".
-18. **Dracula's `border_focused` is `#7383b5`, the adjusted comment, equal
-    to `border`.** The specification's comment `#6272a4` is 2.4:1 on the
-    elevated surface and fails the 3:1 floor for borders; the adjustment
-    lands on the same value as `border`. The cost is that a focused frame
-    edge is not distinguished from an unfocused one under Dracula; focus
-    still shows through the selected and accent roles.
+18. **`border_focused` differs from `border` in every built-in theme.** A
+    focused frame edge must be distinguishable from an unfocused one.
+    Dracula's `border` is the current-line colour `#44475a`, lightened by
+    the adjustment rule to `#808398` (the literal is 1.2:1 on elevated); its
+    focused border would be the comment `#6272a4`, which fails 3:1 on
+    elevated (2.4:1), so it falls back to the foreground `#f8f8f2`. Adjusting
+    the comment instead would land within a few hundredths of `border`'s
+    luminance and read as the same edge.
 
 ## Open questions
 
