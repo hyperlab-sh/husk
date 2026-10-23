@@ -169,7 +169,7 @@ The rule (`pkg/protocol/version.go`) is:
 
 What changes: this envelope is a breaking change, so the target major is **2** (`protocol.Major = 2`); `protocol.Version` is `"2.0"` for the envelope and `"2.1"` once [Hooks](hooks.md) lands. Husk speaks one major at a time; there is no dual stack.
 
-Minor 2.1 ([Hooks](hooks.md)): `hook.list`; `hook.call` outcome fields `kind`, `data`, `allowed`, `vetoes` and the per-entry `items`, `veto`, `reason`; subscriber params `kind`. Owner-only firing (the CLI included) tightens 2.0 without a major bump because no shipped plugin fires a hook it does not own and no CLI exists yet.
+Minor 2.1 ([Hooks](hooks.md), [Keybindings](keybindings.md)): `hook.list`; `hook.call` outcome fields `kind`, `data`, `allowed`, `vetoes` and the per-entry `items`, `veto`, `reason`; subscriber params `kind`; the optional `capture` field of `surface.update`. Owner-only firing (the CLI included) tightens 2.0 without a major bump because no shipped plugin fires a hook it does not own and no CLI exists yet.
 
 Where the version is checked, since there is no handshake:
 
@@ -234,6 +234,14 @@ A requester that stops waiting ([Calls](calls.md) times a request out, or a sock
 Declarations (actions, surfaces, focus-local keys, published slots, hooks, events, slice) are manifest only; there are no `declare` or `subscribe` methods ([Pods](pods.md), [Message kinds](message-kinds.md)).
 
 Direction rule: stdin carries Husk's requests and notifications; stdout carries the plugin's replies and nothing else. Everything a plugin sends on its own initiative, a render above all, goes to the socket, over a connection the plugin keeps open for as long as it likes, with its token on each request. Each method's params schema is owned by the spec named in [Message kinds](message-kinds.md) (`hook.*` by [Hooks](hooks.md)); this spec owns only the name and the form.
+
+### Surface update
+
+`surface.update` replaces the content of one surface the sender occupies: `surface`, `lines` (the frame, required), and the optional `title`, `subtitle`, `badge`, `hit_targets` and `status_meta`. Minor 2.1 adds the optional `capture` (bool): `true` says this surface is taking text input, `false` says it is not, and an absent field leaves the surface's current value unchanged. The host records it in `husk.surfaces` and reads it into the key context so unmodified text keys reach the occupant instead of global bindings ([Keybindings](keybindings.md), [State](state.md)). A `plugin_id` in the params is ignored; identity comes from the token.
+
+```json
+{"method":"surface.update","params":{"surface":"main-stage","lines":["> search_"],"capture":true}}
+```
 
 ### Surface resize snapshot
 

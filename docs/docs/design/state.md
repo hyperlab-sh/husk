@@ -381,7 +381,7 @@ Error codes come from the [Protocol](protocol.md) registry:
 
 | Namespace | Owner module | Scope | Persistent | Retention | Contents |
 |---|---|---|---|---|---|
-| `husk.surfaces` | Stem: Surfaces (occupants, contributions) and the frontend (visible, placement, overlays) | instance | no | | The occupancy resolution (one occupant per surface), the combined per-slot contributions, visibility, the active placement, overlays. The Surfaces engine holds the only handle and commits every write: it resolves occupants and contributions itself, and applies the frontend's half through `Engine.UpdateView`. This is the only slice the host renders from. |
+| `husk.surfaces` | Stem: Surfaces (occupants, contributions, capture) and the frontend (visible, placement, overlays) | instance | no | | The occupancy resolution (one occupant per surface), the combined per-slot contributions, which surfaces capture text, visibility, the active placement, overlays. The Surfaces engine holds the only handle and commits every write: it resolves occupants and contributions itself, and applies the frontend's half through `Engine.UpdateView`. This is the only slice the host renders from. |
 | `husk.focus` | the frontend | instance | no | | Focused surface, its fallback, terminal focus. |
 | `husk.layout` | the frontend | instance | yes | keep-latest | Dock preferences the user set: shown flags and sizes. |
 | `husk.geometry` | the frontend | instance | no | | Terminal size, too-small flag, computed surface rects. |
@@ -400,6 +400,7 @@ Value shapes:
 {"slice":"husk.surfaces","value":{
   "occupants":{"main-stage":{"surface":"main-stage","plugin":"example.editor"}},
   "contributions":{"example.editor.toolbar":[{"slot":"example.editor.toolbar","id":"example.git.branch","plugin":"example.git","label":"main"}]},
+  "capture":{"main-stage":true},
   "visible":["activity-rail","sidebar-list","main-header","main-stage"],
   "placement":{"rail_item":"","kind":""},
   "overlays":{"modal":{"plugin":"","rail_item":""},"palette":false,"slot_explorer":false}
@@ -446,7 +447,14 @@ leaves `live` the engine vacates its surfaces and hands each to the first
 live claimant in namespace order; a live occupant is never preempted by a
 claimant that goes live later. The host marks the engine on every
 `husk.pods` write (`Engine.LivenessChanged`), so the hand-over lands in the
-same tick, and the new occupant is told its size like any new occupant. It
+same tick, and the new occupant is told its size like any new occupant. The
+engine also keeps `capture`, a map from surface id to `true` for each surface
+whose occupant said it is taking text input: a `surface.update` from the
+occupant with `capture: true` sets the entry, `capture: false` removes it, and
+an absent field changes nothing ([Protocol](protocol.md) 2.1). The engine
+removes the entry whenever the surface's occupant changes, releases or closes
+the surface, or its Pod leaves `live`, so a dead or departed plugin never
+leaves a surface capturing (D93). An unoccupied surface has no entry. It
 also records the cross-plugin contribution order itself, since the
 declarations carry no sequence: each slot's combined list follows a
 per-slot sequence of `(plugin, id)` pairs in the order the engine first
@@ -497,6 +505,9 @@ namespaces while "Migration from today" had the TUI's `recomputeLayout` and
   `state.clear` of `husk.surfaces` in the same Update is still re-resolved
   from the declarations at the next pass. A resolution pass never touches the
   view half.
+- **Input reads `capture`.** On every key press the frontend copies
+  `husk.surfaces.capture[focused surface]` into `KeyContext.Capture` before
+  calling `Resolve` ([Keybindings](keybindings.md)); it never writes it.
 - **`surface.resized` is driven by the frontend's writes.** The host
   listens to State's flush for `husk.geometry`, `husk.focus` and
   `husk.surfaces`. At the end of the tick, after the State flush and the

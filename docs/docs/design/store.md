@@ -230,7 +230,7 @@ Pods conversion drops foreign/unscoped bindings. It passes key spellings through
 unchanged: Keybinding is the single key parser and drops invalid spellings with
 `unparsable_key` in layer `plugin:<source>`. Optional `problems` is an array of
 `{index,code,message}` objects, where index is the original zero-based manifest
-position and code is `foreign_action` or `global_not_allowed`. Keybinding
+position and code is `foreign_action`, `global_not_allowed` or `too_many`. Keybinding
 imports these into its problems with layer `plugin:<source>`; conversion
 diagnostics are never lost.
 Ignored legacy shortcut suggestions may be carried as `suggestions` (an array
