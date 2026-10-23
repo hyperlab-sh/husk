@@ -52,6 +52,9 @@ func (h *Host) Remove(ctx context.Context, c contracts.Caller, pluginID string) 
 	var rm *removal
 	var refusal error
 	if err := h.loop.Do(ctx, func() { rm, refusal = h.beginRemove(pluginID) }); err != nil {
+		if ctx.Err() != nil {
+			return contracts.PluginRemoval{}, ctx.Err() // the caller went away; the reply is dropped
+		}
 		return contracts.PluginRemoval{}, contracts.NewError(protocol.CodeUnavailable, "the host loop no longer runs", nil)
 	}
 	if refusal != nil {
@@ -135,6 +138,7 @@ func (h *Host) teardown(id string, unreaped bool) {
 	switch {
 	case unreaped:
 		p.info.Status, p.info.LastError = wrapper.Failed, unreapedError
+		h.loop.Liveness(LivenessMsg{Info: p.Info()})
 		h.loop.Log(LogMsg{PluginID: id, Level: "warn", Message: fmt.Sprintf("plugin %s %s; removal continues", id, unreapedError)})
 	case p.info.Status == wrapper.Live:
 		// A Starter-owned process: Husk holds nothing to wait for, and the
@@ -191,7 +195,13 @@ func (h *Host) reloadOne(id string) tea.Cmd {
 		if len(reports) > 0 {
 			msg.Reports = reports
 		} else if err != nil {
-			msg.Err = shutdownCancelled()
+			// No report means no reload completed: the Coordinator's context
+			// ended (shutdown). Anything else is not a cancellation.
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				msg.Err = shutdownCancelled()
+			} else {
+				msg.Err = contracts.NewError(protocol.CodeInternal, "services reload failed: "+err.Error(), nil)
+			}
 		}
 		return msg
 	}
