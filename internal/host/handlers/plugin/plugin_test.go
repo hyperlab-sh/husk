@@ -76,6 +76,7 @@ func TestServe(t *testing.T) {
 		{"remove", cli, req(protocol.MethodPluginRemove, `{"plugin":"a"}`), &fakePort{removal: contracts.PluginRemoval{Plugin: "a", Status: contracts.PodExited, Log: "/x/a.log", Reports: []contracts.ReloadReport{{Service: "profile", Gen: 4, Applied: true}}}}, "", `{"plugin":"a","status":"exited","log":"/x/a.log","reports":[{"service":"profile","gen":4,"applied":true,"changed":false}]}`, 1},
 		{"remove reports are an array", cli, req(protocol.MethodPluginRemove, `{"plugin":"a"}`), &fakePort{removal: contracts.PluginRemoval{Plugin: "a", Status: contracts.PodExited}}, "", `"reports":[]`, 1},
 		{"remove denies plugin before the port", plug, req(protocol.MethodPluginRemove, `{"plugin":"a"}`), &fakePort{}, protocol.CodeDenied, "", 0},
+		{"remove denies socket host before decode or port", contracts.Caller{Kind: contracts.CallerHost}, req(protocol.MethodPluginRemove, `{"plugin":3}`), &fakePort{}, protocol.CodeDenied, "", 0},
 		{"remove needs a plugin", cli, req(protocol.MethodPluginRemove, `{}`), &fakePort{}, protocol.CodeInvalidParams, "", 0},
 		{"remove rejects an empty plugin", cli, req(protocol.MethodPluginRemove, `{"plugin":""}`), &fakePort{}, protocol.CodeInvalidParams, "", 0},
 		{"remove rejects wrong type", cli, req(protocol.MethodPluginRemove, `{"plugin":3}`), &fakePort{}, protocol.CodeInvalidParams, "", 0},

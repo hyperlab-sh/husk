@@ -75,6 +75,9 @@ func (r *Loader) detect(dir string) (*Spec, []Warning, error, bool) {
 	for _, c := range r.converters {
 		if src, ok := c.Detect(dir); ok {
 			s, w, e := c.Convert(src)
+			if s != nil {
+				s.Dir = src.Dir
+			}
 			if e != nil {
 				e = fmt.Errorf("manifest %s (%s): %w", src.Path, c.Format(), e)
 			}
@@ -140,7 +143,11 @@ func (r *Loader) LoadPath(path string) (*Spec, []Warning, error) {
 func (r *Loader) implicit(src Source) (*Spec, []Warning, error) {
 	for _, c := range r.converters {
 		if c.Format() == "husk-plugin.json/v1" {
-			return c.Convert(src)
+			s, w, err := c.Convert(src)
+			if s != nil && len(src.Command) == 1 {
+				s.Dir = src.Dir
+			}
+			return s, w, err
 		}
 	}
 	return nil, nil, errors.New("implicit plugins require a v1 converter")

@@ -39,6 +39,8 @@ type PodStatusUpdate struct {
 	StartedAt *time.Time `json:"started_at,omitempty"`
 	// LogPath is the stderr log path; nil leaves it unchanged.
 	LogPath *string `json:"log,omitempty"`
+	// Dir is written only at starting; nil leaves the source unchanged.
+	Dir *string `json:"dir,omitempty"`
 }
 
 // PodRegistry is launch steps 1 and 2 and the later status writes: the

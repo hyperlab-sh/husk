@@ -241,7 +241,8 @@ func TestRemoveAdmissionAndLookup(t *testing.T) {
 		wantData string
 	}{
 		{"plugin caller is denied before any lookup", contracts.Caller{Kind: contracts.CallerPlugin, PluginID: "a"}, "a", false, protocol.CodeDenied, 0, ""},
-		{"host caller is denied", contracts.Caller{Kind: contracts.CallerHost}, "a", false, protocol.CodeDenied, 0, ""},
+		{"host caller reaches lookup", contracts.Caller{Kind: contracts.CallerHost}, "ghost", false, protocol.CodeNotFound, 1, ""},
+		{"input caller is denied", contracts.Caller{Kind: contracts.CallerInput}, "a", false, protocol.CodeDenied, 0, ""},
 		{"zero caller is denied", contracts.Caller{}, "a", false, protocol.CodeDenied, 0, ""},
 		{"empty id is invalid_params", cliCaller, "", false, protocol.CodeInvalidParams, 0, ""},
 		{"unknown id is not_found", cliCaller, "ghost", false, protocol.CodeNotFound, 1, ""},

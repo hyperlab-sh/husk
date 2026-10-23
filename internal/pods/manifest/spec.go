@@ -39,6 +39,8 @@ type Spec struct {
 	// SubscriptionProblems records subscriptions dropped at conversion; they
 	// are served beside the binding problems in the declared keymap document.
 	SubscriptionProblems []BindingProblem `json:"subscription_problems,omitempty"`
+	// Dir is the resolved plugin source directory, empty for command lines.
+	Dir string `json:"dir"`
 }
 
 // Clone detaches every mutable slice, raw JSON buffer and declaration pointer.

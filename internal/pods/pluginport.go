@@ -41,6 +41,7 @@ func (h *Host) List(ctx context.Context, c contracts.Caller) ([]contracts.Plugin
 				StartedAt:   info.StartedAt,
 				LastError:   info.LastError,
 				Log:         info.LogPath,
+				Dir:         spec.Dir,
 			})
 		}
 	}); err != nil {

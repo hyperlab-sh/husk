@@ -123,6 +123,9 @@ func (r *PodRegistry) SetStatus(_ context.Context, pluginID string, upd contract
 	if upd.LogPath != nil {
 		entry["log"] = *upd.LogPath
 	}
+	if upd.Dir != nil {
+		entry["dir"] = *upd.Dir
+	}
 	return r.patchEntry(pluginID, entry)
 }
 
@@ -454,7 +457,7 @@ func (l Loop) Liveness(m pods.LivenessMsg) {
 	if l.Registry == nil {
 		return
 	}
-	upd := contracts.PodStatusUpdate{Status: contracts.PodStatus(m.Info.Status)}
+	upd := contracts.PodStatusUpdate{Status: contracts.PodStatus(m.Info.Status), Dir: m.Dir}
 	if m.Info.LastError != "" {
 		upd.Detail = &m.Info.LastError
 	}
