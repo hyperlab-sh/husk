@@ -77,9 +77,15 @@ func assertApplied(t *testing.T, res boundResult) {
 	}
 }
 func testAbandonedGatherReleasesTurn(t *testing.T, dry bool) {
-	gate, _ := releaseGate(t)
+	gate, release := releaseGate(t)
+	defer release()
 	entered := make(chan struct{}, 1)
+	var callsMu sync.Mutex
+	calls := map[string]int{}
 	st := &fakeStore{blockOnce: gate, onCall: func(call string) {
+		callsMu.Lock()
+		calls[call]++
+		callsMu.Unlock()
 		if call == "profiles" {
 			select {
 			case entered <- struct{}{}:
@@ -103,6 +109,9 @@ func testAbandonedGatherReleasesTurn(t *testing.T, dry bool) {
 	receiveBound(t, "first gather", entered)
 	// Resolve has taken the first-only gate before the deadline is advanced.
 	pollBound(t, "blocked Resolve", func() bool { st.mu.Lock(); defer st.mu.Unlock(); return st.blockOnce == nil })
+	co.mu.Lock()
+	lateInput := co.active.input
+	co.mu.Unlock()
 	clk.advance(2 * time.Second)
 	reason := "reload_deadline"
 	if dry {
@@ -113,6 +122,22 @@ func testAbandonedGatherReleasesTurn(t *testing.T, dry bool) {
 	assertApplied(t, receiveBound(t, "next flight before gate release", second))
 	if got := strings.Join(st.trace(), ","); got != "invalidate,invalidate" {
 		t.Fatalf("trace = %s", got)
+	}
+	release()
+	if late := receiveBound(t, "abandoned gather returned", lateInput); !errors.Is(late.err, context.Canceled) {
+		t.Fatalf("abandoned gather error = %v, want context.Canceled", late.err)
+	}
+	callsMu.Lock()
+	defer callsMu.Unlock()
+	for _, call := range []string{"invalidate", "profiles", "resolve"} {
+		if calls[call] != 2 {
+			t.Fatalf("%s called %d times, want once per gather", call, calls[call])
+		}
+	}
+	for _, call := range []string{"layers:keymap:", "layers:config:", "declared:plugins", "declared:keymap"} {
+		if calls[call] != 1 {
+			t.Fatalf("%s called %d times, want only the successor's call; trace=%v", call, calls[call], calls)
+		}
 	}
 }
 
@@ -162,8 +187,8 @@ func TestTimedOutRebuildReleasesTurnAndCancelsLateWork(t *testing.T) {
 	if err := receiveBound(t, "late rebuild cancellation", hold.returned); err != context.Canceled {
 		t.Fatalf("late context = %v", err)
 	}
-	// Handshake with the next turn ensures the old result has had a chance to
-	// return; only the coordinator can apply, and its first flight has ended.
+	// Only the first coordinator flight could apply this late result, and
+	// that flight has ended. The successor's generation must keep serving.
 	if hold.lateApplies.Load() != 0 || hold.Generation() != gen || gen != second.reports[2].Gen {
 		t.Fatalf("late Apply count=%d gen=%d want %d", hold.lateApplies.Load(), hold.Generation(), gen)
 	}
@@ -234,22 +259,13 @@ func TestLateGatherCannotOverwriteSelection(t *testing.T) {
 	clk := clock()
 	co, _ := NewCoordinator(Options{Store: st, Services: fakeServices(), Clock: clk, Profile: profile})
 	defer co.Close()
-	// Drive this gather directly so its late return has an observable join:
-	// a discarded flight's buffered result is intentionally not exposed.
-	f := &flight{reason: ReasonCLI}
-	co.mu.Lock()
-	co.active = f
-	co.mu.Unlock()
-	ctx, cancel := context.WithCancel(co.ctx)
-	defer cancel()
-	late := make(chan inputResult, 1)
-	go func() { late <- co.loadInput(ctx, f) }()
+	first := startReload(co)
 	receiveBound(t, "profile selected a", entered)
-	clk.advance(2 * time.Second)
-	cancel()
 	co.mu.Lock()
-	co.advanceLocked()
+	late := co.active.input
 	co.mu.Unlock()
+	clk.advance(2 * time.Second)
+	assertFlightError(t, receiveBound(t, "a flight timeout", first).err, "timeout", "reload_deadline")
 	choice.Store("b")
 	assertApplied(t, receiveBound(t, "b flight", startReload(co)))
 	release()
