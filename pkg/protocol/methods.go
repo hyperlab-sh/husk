@@ -89,6 +89,9 @@ const (
 	MethodPluginList = "plugin.list"
 	// MethodPluginLog reads plugin logs; see design/pods.md.
 	MethodPluginLog = "plugin.log"
+	// MethodPluginRemove unloads one plugin from the running instance (a CLI
+	// request, protocol minor 2.1); see design/pods.md "Removing a plugin".
+	MethodPluginRemove = "plugin.remove"
 	// MethodConfigReload reloads configuration; see design/services.md.
 	MethodConfigReload = "config.reload"
 )
@@ -102,7 +105,7 @@ func Methods() []string {
 		MethodThemeChanged, MethodThemeGet, MethodThemeCheck, MethodSlotContribute, MethodSlotContributions, MethodToastShow,
 		MethodSettingsGet, MethodSettingsList, MethodSettingsSchema, MethodSettingsValidate,
 		MethodSecretsGet, MethodSecretsNames, MethodSecretsSet, MethodSecretsGrant, MethodSecretsRevoke, MethodSecretsReveal,
-		MethodKeysList, MethodProfileList, MethodProfileUse, MethodPluginList, MethodPluginLog, MethodConfigReload}
+		MethodKeysList, MethodProfileList, MethodProfileUse, MethodPluginList, MethodPluginLog, MethodPluginRemove, MethodConfigReload}
 }
 
 // MaxMethodBytes is the maximum encoded method-name length.

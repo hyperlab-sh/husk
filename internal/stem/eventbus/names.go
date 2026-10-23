@@ -21,10 +21,11 @@ const (
 const UserPrefix = "user."
 
 var coreNames = map[string]struct{}{
-	"state.changed":      {},
-	"pods.plugin-exited": {},
-	"services.reloaded":  {},
-	"secrets.read":       {},
+	"state.changed":       {},
+	"pods.plugin-exited":  {},
+	"pods.plugin-removed": {},
+	"services.reloaded":   {},
+	"secrets.read":        {},
 }
 
 var corePrefixes = []string{"state.", "surface.", "input.", "pods.", "services.", "secrets.", UserPrefix, "husk."}
