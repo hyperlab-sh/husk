@@ -99,6 +99,10 @@ type Entry struct {
 	Binding
 	State      string  `json:"state"`
 	ShadowedBy *Source `json:"shadowed_by,omitempty"`
+	// dropped marks a duplicate, unreachable or cap-dropped entry: it is listed
+	// but never resolves. A statically shadowed entry still resolves, because
+	// the Frozen and modal filters can leave it as the only candidate.
+	dropped bool
 }
 
 // Listing includes effective and shadowed declarations and every loader problem.
@@ -235,14 +239,14 @@ func (s *Service) Resolve(ctx KeyContext, keys []string) Result {
 		return Result{}
 	}
 	for _, b := range s.current.Load().index[keys[0]] {
-		if !begins(b.Keys, keys) || !scope(b, ctx) || ctx.Frozen && b.Action != "husk.quit" {
+		if !begins(b.Keys, keys) || !scope(b, ctx) || ctx.Frozen && !b.Disable && b.Action != "husk.quit" {
 			continue
 		}
 		// A tombstone unbinds exactly the sequence it names, never a prefix of it.
 		if b.Disable && len(b.Keys) != len(keys) {
 			continue
 		}
-		if ctx.ModalOpen && b.Focus != "modal-surface" && !(b.Focus == "" && (b.Action == "husk.modal.close" || ctx.ModalAction != "" && b.Action == ctx.ModalAction)) {
+		if ctx.ModalOpen && !b.Disable && b.Focus != "modal-surface" && !(b.Focus == "" && (b.Action == "husk.modal.close" || ctx.ModalAction != "" && b.Action == ctx.ModalAction)) {
 			continue
 		}
 		if b.Disable {
@@ -637,7 +641,7 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 			dup := string(src.Layer) + "\x00" + triple(b)
 			entry := Entry{Binding: b, State: "effective"}
 			if first, exists := seen[dup]; exists {
-				entry.State = "shadowed"
+				entry.State, entry.dropped = "shadowed", true
 				entry.ShadowedBy = &first
 				issue("duplicate", src, sequence(b.Keys))
 			} else {
@@ -661,7 +665,7 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 	if len(effective) > 4096 {
 		sort.SliceStable(effective, func(a, b int) bool { return stronger(es[effective[a]].Binding, es[effective[b]].Binding) })
 		for _, i := range effective[4096:] {
-			es[i].State = "shadowed"
+			es[i].State, es[i].dropped = "shadowed", true
 		}
 		dropped := effective[4096:]
 		sort.Ints(dropped)
@@ -671,14 +675,17 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 	}
 	quit, palette := false, false
 	for i := range es {
+		b := es[i].Binding
+		if es[i].dropped {
+			continue
+		}
+		next.index[b.Keys[0]] = append(next.index[b.Keys[0]], b)
 		if es[i].State != "effective" {
 			continue
 		}
-		b := es[i].Binding
 		if b.Disable {
 			es[i].State = "disabled"
 		}
-		next.index[b.Keys[0]] = append(next.index[b.Keys[0]], b)
 		quit = quit || b.Action == "husk.quit"
 		palette = palette || b.Action == "husk.palette.open"
 	}
@@ -710,18 +717,28 @@ func shadowEntries(es []Entry) {
 			extends[sequence(e.Keys[:n])] = append(extends[sequence(e.Keys[:n])], i)
 		}
 	}
-	by := make([]int, len(es))
-	for j, b := range es {
-		by[j] = -1
-		if b.State == "shadowed" {
-			continue
+	// Decide in rank order: every valid shadower outranks the entry it
+	// shadows, so it is already decided, and an entry that is itself shadowed
+	// takes no further part (loader step 3).
+	order := make([]int, 0, len(es))
+	for i, e := range es {
+		if e.State != "shadowed" {
+			order = append(order, i)
 		}
+	}
+	sort.SliceStable(order, func(a, b int) bool { return stronger(es[order[a]].Binding, es[order[b]].Binding) })
+	by := make([]int, len(es))
+	for i := range by {
+		by[i] = -1
+	}
+	for _, j := range order {
+		b := es[j]
 		candidates := extends[sequence(b.Keys)]
 		for n := 1; n <= len(b.Keys); n++ {
 			candidates = append(candidates[:len(candidates):len(candidates)], exact[sequence(b.Keys[:n])]...)
 		}
 		for _, i := range candidates {
-			if i != j && shadows(es[i].Binding, b.Binding) && (by[j] < 0 || stronger(es[i].Binding, es[by[j]].Binding)) {
+			if i != j && by[i] < 0 && shadows(es[i].Binding, b.Binding) && (by[j] < 0 || stronger(es[i].Binding, es[by[j]].Binding)) {
 				by[j] = i
 			}
 		}
@@ -735,13 +752,13 @@ func shadowEntries(es []Entry) {
 }
 
 // unreachable drops, within one layer, scope and plugin condition, every
-// effective sequence that has an effective strict prefix: the shorter binding
-// (or tombstone) always resolves first.
+// effective sequence that has an effective strict prefix binding: the shorter
+// binding always resolves first. A tombstone is not a prefix here.
 func unreachable(es []Entry, issue func(code string, src Source, key string)) {
 	prefixes := map[string]bool{}
 	group := func(b Binding) string { return string(b.Source.Layer) + "\x00" + b.Focus + "\x00" + b.Plugin + "\x00" }
 	for _, e := range es {
-		if e.State == "effective" {
+		if e.State == "effective" && !e.Disable {
 			prefixes[group(e.Binding)+sequence(e.Keys)] = true
 		}
 	}
@@ -751,7 +768,7 @@ func unreachable(es []Entry, issue func(code string, src Source, key string)) {
 		}
 		for n := 1; n < len(es[i].Keys); n++ {
 			if prefixes[group(es[i].Binding)+sequence(es[i].Keys[:n])] {
-				es[i].State = "shadowed"
+				es[i].State, es[i].dropped = "shadowed", true
 				issue("unreachable", es[i].Source, sequence(es[i].Keys))
 				break
 			}
