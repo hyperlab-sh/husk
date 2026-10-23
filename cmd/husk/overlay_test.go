@@ -212,12 +212,16 @@ func TestOverlayClearedOnDeparture(t *testing.T) {
 
 func TestGoldenFrameOverlay(t *testing.T) {
 	m := goldenModel()
-	goldenPlugin(m, "stage", map[protocol.SurfaceID][]string{protocol.SurfaceMainStage: {"stage content beneath annotation"}})
+	const stageContent = "stage content beneath annotation"
+	goldenPlugin(m, "stage", map[protocol.SurfaceID][]string{protocol.SurfaceMainStage: {stageContent}})
+	stage := m.slotRects[protocol.SurfaceMainStage]
+	x0, y0 := stage.InnerX, stage.InnerY
 	rows := make([]string, m.height)
 	style := lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.Accent))
-	rows[8] = strings.Repeat(" ", 12) + style.Render("┌ Overlay ───────┐")
-	rows[9] = strings.Repeat(" ", 12) + style.Render("│") + strings.Repeat(" ", 16) + style.Render("│")
-	rows[10] = strings.Repeat(" ", 12) + style.Render("└────────────────┘")
+	// Paint the label row over the occupied stage's first content row.
+	rows[y0] = strings.Repeat(" ", x0) + style.Render("┌ Overlay ───────┐")
+	rows[y0+1] = strings.Repeat(" ", x0) + style.Render("│") + strings.Repeat(" ", 16) + style.Render("│")
+	rows[y0+2] = strings.Repeat(" ", x0) + style.Render("└────────────────┘")
 	goldenPlugin(m, "annotation", map[protocol.SurfaceID][]string{protocol.SurfaceAppOverlay: rows})
 	// Keep plugin and traffic counters identical: only the layer's pixels change.
 	delete(m.catalog.Occupants, protocol.SurfaceAppOverlay)
@@ -226,6 +230,12 @@ func TestGoldenFrameOverlay(t *testing.T) {
 	after := runGolden(t, m)
 	requireFrameGeometry(t, after)
 	base, over := frameCells(before), frameCells(after)
+	for i, ch := range stageContent {
+		if base[y0][x0+i].Content != string(ch) {
+			t.Fatalf("stage content missing beneath label at %d,%d", x0+i, y0)
+		}
+	}
+	stageBg := lipgloss.Color(m.palette.Slot)
 	scratch := newCanvas(m.width, m.height)
 	defer scratch.release()
 	scratch.blitLines(0, 0, m.width, m.height, rows)
@@ -237,8 +247,16 @@ func TestGoldenFrameOverlay(t *testing.T) {
 				if (uv.Line{base[y][x]}).Render() != (uv.Line{over[y][x]}).Render() {
 					t.Fatalf("transparent cell changed at %d,%d", x, y)
 				}
-			} else if over[y][x].Content != cell.Content || !sameColor(over[y][x].Style.Fg, cell.Style.Fg) || !sameColor(over[y][x].Style.Bg, base[y][x].Style.Bg) {
-				t.Fatalf("painted cell missing at %d,%d", x, y)
+			} else {
+				if x < stage.InnerX || x >= stage.InnerX+stage.InnerW || y < stage.InnerY || y >= stage.InnerY+stage.InnerH {
+					t.Fatalf("painted cell outside stage at %d,%d", x, y)
+				}
+				if over[y][x].Content != cell.Content || !sameColor(over[y][x].Style.Fg, cell.Style.Fg) {
+					t.Fatalf("painted cell missing at %d,%d", x, y)
+				}
+				if !sameColor(base[y][x].Style.Bg, stageBg) || !sameColor(over[y][x].Style.Bg, stageBg) {
+					t.Fatalf("painted cell lost stage background at %d,%d", x, y)
+				}
 			}
 		}
 	}
