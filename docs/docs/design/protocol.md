@@ -105,6 +105,29 @@ Rules:
 5. Unknown top-level members are ignored, including a `jsonrpc` member sent by a JSON-RPC library. Unknown members inside `params`, `result` and `error.data` are ignored.
 6. Husk never trusts identity inside `params`. Any `plugin_id` a plugin puts there is ignored; Husk derives the caller from the channel (the stdio pipe, or the `token` member on a socket request, see [Pods](pods.md)) and sets `plugin_id` itself where a payload reports one. A socket request without `token` is the user's own CLI. Presence is distinct from value: an explicit `"token":""` is a present, invalid credential and is denied, never downgraded to CLI. The Go envelope exposes `Message.HasToken()` using decoded field presence; this adds no wire member.
 
+### Caller
+
+The derived identity is one Go type, `protocol.Caller`, defined in this package because its kind strings are wire-visible (`params.caller` in `action.invoke`, [Message kinds](message-kinds.md)) and because every module that handles a request already imports it. It is the only caller-identity type in the codebase: the Server, the host adapters, the Dispatcher, the hook runner and Services use it unchanged ([Services](services.md), "Callers").
+
+```go
+type Caller struct {
+    Kind     CallerKind `json:"kind"`                // "cli" | "plugin" | "input" | "host"
+    PluginID string     `json:"plugin_id,omitempty"` // set only for "plugin"; the exact plugin id
+    ConnID   uint64     `json:"-"`                   // Server's per-connection number; 0 for in-process callers; never serialized
+}
+
+type CallerKind string
+
+const (
+    CallerCLI    CallerKind = "cli"    // socket request with no token: the user's own shell
+    CallerPlugin CallerKind = "plugin" // socket request with a valid per-launch token
+    CallerInput  CallerKind = "input"  // a key binding resolved by Input, in process
+    CallerHost   CallerKind = "host"   // any other in-process host code (palette, renderer, CLI-less host calls)
+)
+```
+
+Only `cli` and `plugin` are ever produced from a socket request. A zero value is not a valid caller; each receiving module says what it answers to one.
+
 ### Error codes
 
 A closed enum per protocol minor version. A receiver built for an older minor treats an unknown code as `internal`.
@@ -202,7 +225,7 @@ A requester that stops waiting ([Calls](calls.md) times a request out, or a sock
 
 | Namespace | Methods | Form | Direction |
 | :--- | :--- | :--- | :--- |
-| `session` | `session.ping` | request; result `{"id","pid","protocol_version","host_version","uptime_ms"}` | socket caller to Husk; the CLI uses it for liveness, discovery and the version check |
+| `session` | `session.ping` | request; result `{"id","pid","protocol_version","host_version","uptime_ms"}`; `host_version` always present, `""` when the build carries no version, the same rule as the registration entry ([Instances](instances.md)) | socket caller to Husk; the CLI uses it for liveness, discovery and the version check |
 | `protocol` | `protocol.error` | notification | either |
 | `action` | `action.invoke` | request | Husk to the owning plugin (stdin); plugin or CLI to Husk (socket) |
 | | `action.list` | request | socket caller to Husk |

@@ -160,10 +160,10 @@ params}`. This spec fixes the `method` names and `params` shapes.
 ```go
 // Caller says who started a request. Set by the module that accepts the
 // request, never read from params: a plugin cannot claim another identity.
-type Caller struct {
-    Kind     CallerKind // CallerInput | CallerPlugin | CallerCLI | CallerHost
-    PluginID string     // set only when Kind == CallerPlugin
-}
+// It is protocol.Caller ([Protocol](protocol.md), "Caller"), the one
+// caller-identity type shared with the Server, the host adapters, Services
+// and the hook runner; no module defines its own copy.
+type Caller = protocol.Caller // Kind: CallerInput | CallerPlugin | CallerCLI | CallerHost; PluginID set only for CallerPlugin; ConnID set by the Server
 
 // FocusContext is the focus slice of State at dispatch time.
 type FocusContext struct {
@@ -449,9 +449,14 @@ rejects others with a `denied` reply. A bare-shell CLI caller may emit only
 under the `user.` prefix. Core event names have no plugin-id prefix and are
 reserved: `state.changed`, `pods.plugin-exited`, `services.reloaded` and
 `secrets.read` now, and the `state.`, `surface.`, `input.`, `pods.`,
-`services.`, `secrets.`, `user.` and `husk.` prefixes. `secrets.read` is
-delivered to CLI watchers only, never to a plugin subscriber
-([Services](services.md)). A plugin may declare
+`services.`, `secrets.`, `user.` and `husk.` prefixes. `secrets.read` and
+`services.reloaded` are delivered to CLI watchers only, never to a plugin
+subscriber ([Services](services.md)). The mechanism is at subscription time,
+not delivery: manifest conversion rejects a plugin pattern that would match a
+`secrets.` or `services.` name (an exact name, or a prefix pattern at or above
+them, `secrets.*` included; the plugin's subscriptions are dropped and reported
+like a malformed pattern), and `event.watch` from a plugin caller answers
+`denied` for such a pattern. A plugin may declare
 events in its manifest for introspection
 (`"events": {"publish": [{"name": "notes.saved", "title": "...", "coalesce": false}]}`).
 
