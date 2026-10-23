@@ -69,10 +69,10 @@ func run(ctx context.Context, d deps, args []string, o output.Options) error {
 			return err
 		}
 	}
-	// NoBackgroundGC for every verb: a worker GC would run before (or race
-	// with) the command's own work; `gc` calls GC itself, so its report is the
-	// whole truth.
-	s, err := store.Open(store.Options{RuntimeDir: dir, Env: d.env, Keyring: d.keyring, NoBackgroundGC: true, InstanceDeps: d.instance})
+	// Passive for every verb: Open itself must not collect, quarantine or write
+	// metadata, so check moves nothing, gc's report is the whole truth and a
+	// reset touches only secrets. Explicit GC and ResetSecrets still act.
+	s, err := store.Open(store.Options{RuntimeDir: dir, Env: d.env, Keyring: d.keyring, Passive: true, InstanceDeps: d.instance})
 	if err != nil {
 		return output.Store(err, "%v", err)
 	}

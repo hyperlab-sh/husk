@@ -446,3 +446,37 @@ func TestResetSecretsSurveyFailureIsExit7(t *testing.T) {
 		t.Error("failed survey deleted the keyring identity")
 	}
 }
+
+// TestCheckListsACorruptRecordAndMovesNothing: an unparsable slice record is
+// reported by check and stays exactly where and what it was.
+func TestCheckListsACorruptRecordAndMovesNothing(t *testing.T) {
+	f := newFx(t)
+	dir := filepath.Join(f.root, "state", "husk", "user", "slices", "x.y")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for p := dir; p != filepath.Join(f.root, "state"); p = filepath.Dir(p) {
+		_ = os.Chmod(p, 0o700)
+	}
+	file := filepath.Join(dir, "current.json")
+	if err := os.WriteFile(file, []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.run(output.JSON, "check"); err != nil {
+		t.Fatal(err)
+	}
+	var rep struct{ Problems, Quarantined []json.RawMessage }
+	if err := json.Unmarshal(f.out.Bytes(), &rep); err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Problems) == 0 || !strings.Contains(f.out.String(), "x.y") || len(rep.Quarantined) != 0 {
+		t.Fatalf("check output = %s", f.out.String())
+	}
+	if got, err := os.ReadFile(file); err != nil || string(got) != "{not json" {
+		t.Fatalf("record changed: %q %v", got, err)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 {
+		t.Fatalf("directory changed: %v", entries)
+	}
+}
