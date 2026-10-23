@@ -1363,3 +1363,173 @@ func TestLiveOccupantIsNotPreemptedWhenEarlierClaimantComesBack(t *testing.T) {
 		t.Fatalf("a live occupant was preempted: %q", got)
 	}
 }
+
+func bptr(b bool) *bool { return &b }
+
+// captureOn reports the committed capture map of husk.surfaces.
+func captureOn(t *testing.T, st *state.State) map[protocol.SurfaceID]bool {
+	t.Helper()
+	return resolution(t, st).Capture
+}
+
+func TestCaptureLifecycle(t *testing.T) {
+	const stage = protocol.SurfaceMainStage
+	// Each case starts with alpha.files holding main-stage, beta.notes
+	// standing behind it with a claim, and capture set by alpha.
+	tests := []struct {
+		name string
+		act  func(t *testing.T, st *state.State, eng *Engine, pods *pod, live liveness)
+		want bool // capture[main-stage] after the action
+	}{
+		{"set by true", func(t *testing.T, st *state.State, eng *Engine, pods *pod, live liveness) {}, true},
+		{"cleared by false", func(t *testing.T, st *state.State, eng *Engine, pods *pod, live liveness) {
+			if err := eng.SurfaceUpdate("alpha.files", protocol.SurfaceUpdateParams{Surface: stage, Capture: bptr(false)}); err != nil {
+				t.Fatal(err)
+			}
+		}, false},
+		{"unchanged by absent", func(t *testing.T, st *state.State, eng *Engine, pods *pod, live liveness) {
+			if err := eng.SurfaceUpdate("alpha.files", protocol.SurfaceUpdateParams{Surface: stage}); err != nil {
+				t.Fatal(err)
+			}
+		}, true},
+		{"true again is idempotent", func(t *testing.T, st *state.State, eng *Engine, pods *pod, live liveness) {
+			if err := eng.SurfaceUpdate("alpha.files", protocol.SurfaceUpdateParams{Surface: stage, Capture: bptr(true)}); err != nil {
+				t.Fatal(err)
+			}
+		}, true},
+		{"refused update from a non-occupant sets nothing", func(t *testing.T, st *state.State, eng *Engine, pods *pod, live liveness) {
+			if err := eng.SurfaceUpdate("beta.notes", protocol.SurfaceUpdateParams{Surface: stage, Capture: bptr(false)}); err == nil {
+				t.Fatal("foreign update accepted")
+			}
+		}, true},
+		{"cleared by surface.close", func(t *testing.T, st *state.State, eng *Engine, pods *pod, live liveness) {
+			if err := eng.SurfaceClose("alpha.files", protocol.SurfaceCloseParams{Surface: stage}); err != nil {
+				t.Fatal(err)
+			}
+		}, false},
+		{"cleared by host CloseSurface", func(t *testing.T, st *state.State, eng *Engine, pods *pod, live liveness) {
+			if err := eng.CloseSurface(stage); err != nil {
+				t.Fatal(err)
+			}
+		}, false},
+		{"cleared when the claim is dropped", func(t *testing.T, st *state.State, eng *Engine, pods *pod, live liveness) {
+			pods.unclaim("alpha.files", string(stage))
+		}, false},
+		{"cleared when the occupant leaves live (hand-over in the same pass)", func(t *testing.T, st *state.State, eng *Engine, pods *pod, live liveness) {
+			live.dead["alpha.files"] = true
+			eng.LivenessChanged()
+		}, false},
+		{"dropped by a foreign write", func(t *testing.T, st *state.State, eng *Engine, pods *pod, live liveness) {
+			if _, err := st.Clear(state.SurfacesNamespace); err != nil {
+				t.Fatal(err)
+			}
+		}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			live := liveness{dead: map[string]bool{}}
+			st, eng, pods := newEngine(t, Options{Liveness: live})
+			pods.launch("alpha.files")
+			pods.launch("beta.notes")
+			pods.claim("alpha.files", string(stage))
+			pods.claim("beta.notes", string(stage))
+			settle(st, eng)
+			if err := eng.SurfaceUpdate("alpha.files", protocol.SurfaceUpdateParams{Surface: stage, Capture: bptr(true)}); err != nil {
+				t.Fatal(err)
+			}
+			settle(st, eng)
+			if !captureOn(t, st)[stage] {
+				t.Fatal("capture not set by true")
+			}
+
+			tt.act(t, st, eng, pods, live)
+			settle(st, eng)
+			if got := captureOn(t, st)[stage]; got != tt.want {
+				t.Fatalf("capture[main-stage] = %v, want %v (map %v)", got, tt.want, captureOn(t, st))
+			}
+			// The new occupant after a hand-over starts with capture off.
+			if occ := occupantOf(t, st); occ != "" && occ != "alpha.files" && captureOn(t, st)[stage] {
+				t.Fatalf("capture leaked to the new occupant %q", occ)
+			}
+		})
+	}
+}
+
+func TestCaptureRefusedUpdateSetsNothing(t *testing.T) {
+	st, eng, pods := newEngine(t, Options{})
+	pods.launch("alpha.files")
+	pods.claim("alpha.files", string(protocol.SurfaceSidebarList))
+	settle(st, eng)
+	for name, tc := range map[string]struct {
+		plugin  string
+		surface protocol.SurfaceID
+	}{
+		"unoccupied surface": {"alpha.files", protocol.SurfaceSidePanel},
+		"invalid surface":    {"alpha.files", protocol.SurfaceID("nope")},
+		"not the occupant":   {"beta.notes", protocol.SurfaceSidebarList},
+		"no plugin":          {"", protocol.SurfaceSidebarList},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := eng.SurfaceUpdate(tc.plugin, protocol.SurfaceUpdateParams{Surface: tc.surface, Capture: bptr(true)}); err == nil {
+				t.Fatal("update accepted")
+			}
+			settle(st, eng)
+			if got := captureOn(t, st); len(got) != 0 {
+				t.Fatalf("capture = %v after a refused update", got)
+			}
+		})
+	}
+}
+
+func TestCaptureHandOverInTheSameTickAndUpdateViewKeepsIt(t *testing.T) {
+	live := liveness{dead: map[string]bool{}}
+	st, eng, pods := newEngine(t, Options{Liveness: live})
+	pods.launch("alpha.files")
+	pods.launch("beta.notes")
+	pods.claim("alpha.files", string(protocol.SurfaceMainStage))
+	pods.claim("beta.notes", string(protocol.SurfaceSidebarList))
+	settle(st, eng)
+	for _, s := range []protocol.SurfaceID{protocol.SurfaceMainStage, protocol.SurfaceSidebarList} {
+		plugin := map[protocol.SurfaceID]string{protocol.SurfaceMainStage: "alpha.files", protocol.SurfaceSidebarList: "beta.notes"}[s]
+		if err := eng.SurfaceUpdate(plugin, protocol.SurfaceUpdateParams{Surface: s, Capture: bptr(true)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	settle(st, eng)
+
+	// A view write leaves both entries alone.
+	if err := eng.UpdateView(func(v *contracts.SurfaceView) {
+		v.Visible = []protocol.SurfaceID{protocol.SurfaceMainStage}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	settle(st, eng)
+	if got := captureOn(t, st); !got[protocol.SurfaceMainStage] || !got[protocol.SurfaceSidebarList] || len(got) != 2 {
+		t.Fatalf("capture after UpdateView = %v, want both surfaces", got)
+	}
+
+	// Only the surface whose occupant left live loses its entry.
+	live.dead["beta.notes"] = true
+	eng.LivenessChanged()
+	settle(st, eng)
+	if got := captureOn(t, st); !got[protocol.SurfaceMainStage] || got[protocol.SurfaceSidebarList] {
+		t.Fatalf("capture after beta left live = %v, want main-stage only", got)
+	}
+}
+
+func TestCommittedSurfacesAlwaysCarriesCaptureKey(t *testing.T) {
+	st, eng, pods := newEngine(t, Options{})
+	pods.launch("alpha.files")
+	settle(st, eng)
+	entry, ok := st.Get(state.SurfacesNamespace)
+	if !ok {
+		t.Fatal("husk.surfaces not registered")
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(entry.Value, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(raw["capture"]); got != "{}" {
+		t.Fatalf("capture on the wire = %q, want {}", got)
+	}
+}
