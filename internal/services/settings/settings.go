@@ -64,12 +64,12 @@ type Service struct {
 	reloader Reloader
 }
 type snapshot struct {
-	gen               c.Generation
-	pluginPathsFrozen bool
-	values, raw       map[string]any
-	sources           map[string]string
-	schema            map[string]Entry
-	warn              func(string)
+	gen                 c.Generation
+	startConsumedFrozen bool
+	values, raw         map[string]any
+	sources             map[string]string
+	schema              map[string]Entry
+	warn                func(string)
 }
 
 // Builtins returns the complete host/Theme/Profile schema. Frame-dump/demo flags
@@ -80,10 +80,8 @@ func Builtins() []Entry {
 		{Key: "profile.default", Type: TypeString, Default: "", Owner: "husk", Apply: "live"},
 		{Key: "theme.name", Type: TypeString, Default: palette.Default().Name, Owner: "husk", Apply: "live"},
 		{Key: "theme.allow_low_contrast", Type: TypeBool, Default: false, Owner: "husk", Apply: "live"},
-		{Key: "husk.bundle", Type: TypeString, Default: "", Owner: "husk", Apply: "restart", Doc: "Bundle directory loaded once at start, from user and instance layers only."},
-		{Key: "husk.plugins.paths", Type: TypeStrings, Default: []string{}, Owner: "husk", Apply: "restart", Doc: "Plugin arguments loaded once at start, interpreted like --plugin; --plugin is the instance layer on top."},
-		{Key: "husk.plugins.dirs", Type: TypeStrings, Default: []string{}, Owner: "husk", Apply: "restart", Doc: "Plugin directories loaded once at start, interpreted like --plugin-dir; --plugin-dir is the instance layer on top."},
 	}
+	out = append(out, startConsumedEntries()...)
 	data, _ := json.Marshal(palette.Default())
 	var roles map[string]string
 	json.Unmarshal(data, &roles)
@@ -94,6 +92,27 @@ func Builtins() []Entry {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
 	return out
+}
+
+// startConsumedEntries is the single catalog of keys whose values startup
+// consumes before any successful Settings load is guaranteed.
+func startConsumedEntries() []Entry {
+	return []Entry{
+		{Key: "husk.bundle", Type: TypeString, Default: "", Owner: "husk", Apply: "restart", Doc: "Bundle directory loaded once at start, from user and instance layers only."},
+		{Key: "husk.plugins.paths", Type: TypeStrings, Default: []string{}, Owner: "husk", Apply: "restart", Doc: "Plugin arguments loaded once at start, interpreted like --plugin; --plugin is the instance layer on top."},
+		{Key: "husk.plugins.dirs", Type: TypeStrings, Default: []string{}, Owner: "husk", Apply: "restart", Doc: "Plugin directories loaded once at start, interpreted like --plugin-dir; --plugin-dir is the instance layer on top."},
+	}
+}
+
+// IsStartConsumed reports whether startup consumes a key independently of the
+// first successful Settings load. The host also uses it for fatal validation.
+func IsStartConsumed(key string) bool {
+	for _, e := range startConsumedEntries() {
+		if e.Key == key {
+			return true
+		}
+	}
+	return false
 }
 
 // New initializes the built-in snapshot before the first reload. It performs
@@ -195,17 +214,17 @@ func (s *Service) warning(key string) {
 // Snapshot loads an immutable reader without locking.
 func (s *Service) Snapshot() Snapshot { return s.current.Load() }
 
-// FreezePluginPaths fixes the plugin arrays to the snapshot startup used,
-// including defaults when an unrelated validation error prevented publication.
+// FreezeStartConsumed fixes start-consumed keys to the values startup used,
+// even when unrelated validation errors left Settings at generation zero.
 // The host calls it after accepting the startup flight, before loading plugins.
-func (s *Service) FreezePluginPaths() {
+func (s *Service) FreezeStartConsumed() {
 	for {
 		old := s.current.Load()
-		if old.pluginPathsFrozen {
+		if old.startConsumedFrozen {
 			return
 		}
 		next := *old
-		next.pluginPathsFrozen = true
+		next.startConsumedFrozen = true
 		if s.current.CompareAndSwap(old, &next) {
 			return
 		}
@@ -361,6 +380,19 @@ func (s *Service) Preview(ctx context.Context, caller c.Caller, in c.ReloadInput
 
 // Rebuild checks all schemas and values, returning an unpublished candidate.
 func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c.Report, error) {
+	return s.rebuild(ctx, in, false)
+}
+
+// RebuildStartup prepares the initial per-key baseline. If validation fails,
+// it returns both ErrInvalid and an initialization candidate at generation zero:
+// valid keys keep their own values and only invalid keys use their defaults.
+// The coordinator may apply that candidate within the startup deadline while
+// retaining the failed report and skipping Theme. Ordinary Rebuild stays atomic.
+func (s *Service) RebuildStartup(ctx context.Context, in c.ReloadInput) (c.Candidate, c.Report, error) {
+	return s.rebuild(ctx, in, true)
+}
+
+func (s *Service) rebuild(ctx context.Context, in c.ReloadInput, startup bool) (c.Candidate, c.Report, error) {
 	old := s.current.Load()
 	r := c.Report{Service: "settings", Gen: old.gen}
 	if ctx.Err() != nil {
@@ -379,7 +411,7 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 	}
 	next := defaults(schema, s.warning)
 	next.gen = old.gen + 1
-	next.pluginPathsFrozen = old.pluginPathsFrozen
+	next.startConsumedFrozen = old.startConsumedFrozen
 	layerFiles := map[string]string{}
 	for _, l := range in.ConfigLayers {
 		layerFiles[string(l.Layer)] = l.File
@@ -453,12 +485,12 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 		next.sources[key] = layer
 		next.values[key] = v
 	}
-	// Most restart keys take effect on the first successful load. Plugin
-	// arrays are fixed when startup consumes its snapshot, even at generation
-	// zero. Removing a key counts as a change back to the default.
+	// Most restart keys take effect on the first successful load. Start-consumed
+	// keys are fixed even at generation zero. Removing a key counts as a change
+	// back to the default.
 	for key, e := range schema {
 		prev, present := old.values[key]
-		initialized := old.gen > 0 || old.pluginPathsFrozen && (key == "husk.plugins.paths" || key == "husk.plugins.dirs")
+		initialized := old.gen > 0 || old.startConsumedFrozen && IsStartConsumed(key)
 		if e.Apply != "restart" || !present || !initialized || reflect.DeepEqual(next.values[key], prev) {
 			continue
 		}
@@ -470,6 +502,10 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 	}
 	sort.SliceStable(r.Problems, func(i, j int) bool { return r.Problems[i].Key < r.Problems[j].Key })
 	if err := c.Invalid(r.Problems); err != nil {
+		if startup && old.gen == 0 && !old.startConsumedFrozen {
+			next.gen = 0
+			return c.Prepare(ctx, r, false, func() bool { return s.current.CompareAndSwap(old, next) }, s.Generation), r, err
+		}
 		return nil, r, err
 	}
 	if ctx.Err() != nil {
