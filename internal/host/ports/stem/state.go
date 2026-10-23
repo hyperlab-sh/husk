@@ -204,8 +204,9 @@ func (w *State) Watch(ctx context.Context, _ contracts.Caller, slices []string, 
 	return res, nil
 }
 
-// Clear implements contracts.StatePort.Clear: a CLI-only reset of one
-// namespace to its initial value. Unless force is set, husk.before-state-clear
+// Clear implements contracts.StatePort.Clear: a reset of one namespace to its
+// initial value. CLI-only: clear is the user's own action, and a Stem caller
+// over the port is not the user. Unless force is set, husk.before-state-clear
 // gates the delete. An ended ctx before the Store delete stops the clear:
 // shutdown answers unavailable, any other cause cancelled. Once deletion starts,
 // it is not interrupted; after it succeeds the clear answers its real outcome,
