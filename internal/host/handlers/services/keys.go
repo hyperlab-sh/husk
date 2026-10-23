@@ -12,7 +12,8 @@ import (
 // scoped by the port: users see the merged keymap, a plugin sees only its own
 // bindings, and nothing here widens that.
 type Keys struct {
-	Port contracts.KeybindingPort
+	Port    contracts.KeybindingPort
+	Limiter contracts.Limiter
 }
 
 // Serve implements contracts.Handler.
@@ -22,6 +23,10 @@ func (h Keys) Serve(ctx context.Context, c contracts.Caller, req protocol.Messag
 	}
 	if req.Method != protocol.MethodKeysList {
 		return handlers.UnknownMethod(req)
+	}
+	// One budget with the other plugin-callable Services methods.
+	if deny := admitRateLimited(req, c, h.Limiter); deny != nil {
+		return *deny
 	}
 	res, err := h.Port.List(ctx, c)
 	if err != nil {

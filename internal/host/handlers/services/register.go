@@ -16,8 +16,9 @@ type Ports struct {
 	Theme    contracts.ThemePort
 	Keys     contracts.KeybindingPort
 	Config   contracts.ConfigPort
-	// Limiter is the shared settings.get/secrets.get budget applied per
-	// plugin id (services.md, Limits — the cap is spec, not an option),
+	// Limiter is the one budget of every plugin-callable Services method
+	// (settings.get, secrets.get, secrets.names, theme.get, keys.list) applied
+	// per plugin id (services.md, Limits — the cap is spec, not an option),
 	// normally NewWindowLimiter(clock, contracts.RateLimitPerSecond).
 	Limiter contracts.Limiter
 }
@@ -38,7 +39,7 @@ func Register(m *handlers.Mux, p Ports) {
 	m.Register("settings", Settings{Port: p.Settings, Limiter: p.Limiter})
 	m.Register("secrets", Secrets{Port: p.Secrets, Limiter: p.Limiter})
 	m.Register("profile", Profile{Port: p.Profile})
-	m.Register("theme", Theme{Port: p.Theme})
-	m.Register("keys", Keys{Port: p.Keys})
+	m.Register("theme", Theme{Port: p.Theme, Limiter: p.Limiter})
+	m.Register("keys", Keys{Port: p.Keys, Limiter: p.Limiter})
 	m.Register("config", Config{Port: p.Config})
 }

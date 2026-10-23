@@ -12,14 +12,14 @@ import (
 
 // Secrets adapts contracts.SecretsPort for the secrets.* methods. get is
 // open to plugins under the shared per-plugin rate limit; names is open to
-// plugins uncapped; set, grant, revoke and reveal are CLI methods and are
+// plugins under the same budget; set, grant, revoke and reveal are CLI methods and are
 // denied to a plugin caller before the port is touched. Values ride only in
 // the get result and the reveal result, exactly as services.md's examples
 // pin them.
 type Secrets struct {
 	Port contracts.SecretsPort
-	// Limiter is the shared settings.get/secrets.get budget, keyed by plugin
-	// id (services.md, Limits). Register requires it; only a hand-built
+	// Limiter is the one Services budget (every plugin-callable method), keyed
+	// by plugin id (services.md, Limits). Register requires it; only a hand-built
 	// adapter struct can leave it nil, and the guard only defends that.
 	Limiter contracts.Limiter
 }
@@ -71,6 +71,9 @@ func (h Secrets) Serve(ctx context.Context, c contracts.Caller, req protocol.Mes
 		}
 		return handlers.Reply(req, secretsValueResult{Name: p.Name, Value: value})
 	case protocol.MethodSecretsNames:
+		if deny := admitRateLimited(req, c, h.Limiter); deny != nil {
+			return *deny
+		}
 		names, err := h.Port.Names(ctx, c)
 		if err != nil {
 			return handlers.ErrorReply(req, err)

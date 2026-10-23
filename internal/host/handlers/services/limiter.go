@@ -8,7 +8,7 @@ import (
 )
 
 // WindowLimiter is the production contracts.Limiter for the per-plugin
-// settings.get and secrets.get budget. It keeps one tumbling one-second
+// budget shared by every plugin-callable Services method. It keeps one tumbling one-second
 // window per key: the first call under a key opens the window, the first
 // limit calls inside it pass, and the window resets — whole, not partially —
 // once a full second has passed since it opened. This is the fixed-window
