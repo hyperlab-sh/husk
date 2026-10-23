@@ -386,7 +386,7 @@ Error codes come from the [Protocol](protocol.md) registry:
 | `husk.layout` | the frontend | instance | yes | keep-latest | Dock preferences the user set: shown flags and sizes. |
 | `husk.geometry` | the frontend | instance | no | | Terminal size, too-small flag, computed surface rects. |
 | `husk.pods` | Pods | instance | no | | Per plugin: status, pid, start time, last error, log path. |
-| `husk.profile` | Services: Profile | instance | yes | keep-latest | The active profile name. |
+| `husk.profile` | Services: Profile | instance | yes | keep-latest | The chosen profile; `{"active":""}` is an explicit no profile; absent until a choice is made ([Services](services.md), Profile). |
 | `husk.grants` | Services: Secrets | user | yes | manual | Secret grants: `(plugin, name, digest, at)`; never a value ([Services](services.md)). |
 | `husk.store` | Store | instance | no | | Store's own health: last 50 diagnostics, quarantined files, keyring fallback flag ([Store](store.md)). |
 | `<plugin_id>.state` | that plugin's Pod | instance, or user if the manifest asks | per manifest | per manifest | Plugin-defined. Registered at launch, before the plugin starts; unregistered by `husk plugin remove` ([Pods](pods.md)), which keeps its persisted copies. |
