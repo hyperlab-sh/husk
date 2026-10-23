@@ -80,6 +80,16 @@ type Reloadable interface {
 	Generation() Generation
 }
 
+// StartupRebuilder optionally prepares a startup-specific baseline without
+// publishing it. A non-nil candidate returned with ErrInvalid initializes only
+// generation zero; the coordinator may apply it within the startup flight's
+// deadline, but retains a failed report (Applied and Changed false). Ordinary
+// reloads use Rebuild and must never apply a candidate returned with an error.
+// Settings implements this to preserve valid keys while defaulting invalid ones.
+type StartupRebuilder interface {
+	RebuildStartup(context.Context, ReloadInput) (Candidate, Report, error)
+}
+
 // flightKey carries the flight's deadline in the context a Rebuild receives.
 type flightKey struct{}
 
