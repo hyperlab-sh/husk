@@ -1,8 +1,9 @@
 package cli
 
 import (
-	"github.com/hyperlab-sh/husk/pkg/protocol"
 	"time"
+
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
 func configCommand() command {
