@@ -177,3 +177,46 @@ func TestInvalidHandlerReplyBecomesOneInternalReply(t *testing.T) {
 		})
 	}
 }
+
+// A request that arrives after the drain started is refused with the spec's
+// shutdown code, after the running handler's reply and before the stream
+// closes, and its admission slot is released.
+func TestRequestDuringDrainIsRefusedAsShutdown(t *testing.T) {
+	s := inertServer(t)
+	clk := s.cfg.Clock.(*testclock.Clock)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	s.Handle("sample", handlerFunc(func(context.Context, Caller, protocol.Message, Notifier) protocol.Message {
+		close(entered)
+		testclock.Receive(t, release)
+		return protocol.Message{Result: json.RawMessage(`{"first":true}`)}
+	}))
+	start(t, s)
+	c, r := dial(t, s)
+	write(t, c, `{"id":1,"method":"sample.wait"}`)
+	testclock.Receive(t, entered)
+	closed := make(chan error, 1)
+	go func() { closed <- s.Close() }()
+	clk.Await(t, WriteTimeout) // the drain has started
+	write(t, c, `{"id":2,"method":"sample.wait"}`)
+	// The refusal is queued behind nothing: it arrives before the handler is released.
+	m2 := read(t, r)
+	if m2.ID.String() != "2" || m2.Error == nil || m2.Error.Code != protocol.CodeCancelled || string(m2.Error.Data) != `{"reason":"shutdown"}` {
+		t.Fatalf("refusal = %+v", m2)
+	}
+	s.mu.Lock()
+	for conn := range s.conns {
+		if n := len(conn.slots); n != 1 {
+			t.Errorf("admission slots in use = %d, want 1 (the refused request's slot is released)", n)
+		}
+	}
+	s.mu.Unlock()
+	close(release)
+	if err := testclock.Receive(t, closed); err != nil {
+		t.Fatal(err)
+	}
+	m1 := read(t, r)
+	if m1.ID.String() != "1" || string(m1.Result) != `{"first":true}` {
+		t.Fatalf("first reply = %+v", m1)
+	}
+}

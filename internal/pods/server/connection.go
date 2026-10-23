@@ -252,7 +252,7 @@ func (c *connection) receive(req protocol.Message) {
 	case c.slots <- struct{}{}:
 		if !c.beginFlight() {
 			<-c.slots
-			c.reject(req, protocol.CodeUnavailable, "instance is shutting down", nil)
+			c.reject(req, protocol.CodeCancelled, "instance is shutting down", json.RawMessage(`{"reason":"shutdown"}`))
 			return
 		}
 		go func() {

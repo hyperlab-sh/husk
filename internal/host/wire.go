@@ -89,7 +89,7 @@ func (r *Root) buildServer() error {
 	r.mux = mux
 
 	for _, prefix := range inboundPrefixes() {
-		r.srv.Handle(prefix, handlers.ServerHandler{Handler: mux})
+		r.srv.Handle(prefix, handlers.ServerHandler{Handler: mux, Closing: r.closingCtx})
 	}
 	return nil
 }
