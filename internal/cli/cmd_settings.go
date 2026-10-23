@@ -25,7 +25,7 @@ func settingsCommand() command {
 // setSettingCommand shares the write path with theme set. A fixed key means
 // the sole argument is always a string; general settings values prefer JSON.
 func setSettingCommand(usage, fixedKey string) command {
-	return command{usage: usage, timeout: 5 * time.Second, run: func(ctx context.Context, inv *Invocation, args []string) error {
+	return command{usage: usage, timeout: 10 * time.Second, run: func(ctx context.Context, inv *Invocation, args []string) error {
 		want := 1
 		if fixedKey == "" {
 			want = 2
