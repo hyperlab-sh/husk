@@ -385,7 +385,7 @@ Error codes come from the [Protocol](protocol.md) registry:
 | `husk.focus` | the frontend | instance | no | | Focused surface, its fallback, terminal focus. |
 | `husk.layout` | the frontend | instance | yes | keep-latest | Dock preferences the user set: shown flags and sizes. |
 | `husk.geometry` | the frontend | instance | no | | Terminal size, too-small flag, computed surface rects. |
-| `husk.pods` | Pods | instance | no | | Per plugin: status, pid, start time, last error, log path, and (Level 1, not landed, protocol minor 2.3) `dir`, the plugin's directory as the converter resolved it, `""` for an implicit command line ([Settings center](settings-center.md), "Changes to other specs"). |
+| `husk.pods` | Pods | instance | no | | Per plugin: status, pid, start time, last error, log path, and the landed `dir` field (additive, listed with protocol minor 2.3), the plugin's directory as the converter resolved it, `""` for an implicit command line ([Settings center](settings-center.md), "Changes to other specs"). |
 | `husk.profile` | Services: Profile | instance | yes | keep-latest | The chosen profile; `{"active":""}` is an explicit no profile; absent until a choice is made ([Services](services.md), Profile). |
 | `husk.grants` | Services: Secrets | user | yes | manual | Secret grants: `(plugin, name, digest, at)`; never a value ([Services](services.md)). |
 | `husk.store` | Store | instance | no | | Store's own health: last 50 diagnostics, quarantined files, keyring fallback flag ([Store](store.md)). |
@@ -543,6 +543,8 @@ namespaces while "Migration from today" had the TUI's `recomputeLayout` and
   sizes of its own surfaces. A tick that wrote none of the three namespaces
   and resolved nothing does nothing, and an identical write pushes nothing. Geometry reaches
   occupants, never the whole workbench.
+
+`husk.pods` entries carry the converter-resolved `dir` from their initial `starting` write. The field is always present, including `""` for implicit command lines, and later liveness writes leave it unchanged.
 
 `husk.pods` status is one of `starting` (launch begun, process not yet
 started), `live` (process started), `exited` (clean exit, or stopped by Husk
