@@ -65,9 +65,9 @@ func (s *grantTree) Snapshot() *state.Snapshot {
 	return s.State.Snapshot()
 }
 
-// rig is a Secrets service with a blocking prompt fake, a recording publisher
+// secretRig is a Secrets service with a blocking prompt fake, a recording publisher
 // and audit hook, and the package's manual clock.
-type rig struct {
+type secretRig struct {
 	t       *testing.T
 	s       *secrets.Service
 	clk     *manualClock
@@ -90,9 +90,9 @@ type rigOpts struct {
 	maxBytes int
 }
 
-func newRig(t *testing.T, o rigOpts) *rig {
+func newSecretRig(t *testing.T, o rigOpts) *secretRig {
 	t.Helper()
-	r := &rig{
+	r := &secretRig{
 		t: t, tree: &grantTree{State: state.New(state.Options{}), maxBytes: o.maxBytes},
 		clk: clock(), shown: make(chan *promptCall, 16), crypto: o.crypto,
 		joins: make(chan dialogJoin, 64),
@@ -151,7 +151,7 @@ func newRig(t *testing.T, o rigOpts) *rig {
 	return r
 }
 
-func (r *rig) declare(plugins ...string) { apply(r.t, r.s, catalogs(plugins...)) }
+func (r *secretRig) declare(plugins ...string) { apply(r.t, r.s, catalogs(plugins...)) }
 
 // catalogs declares git.token (required, purpose "Push") for each plugin.
 func catalogs(plugins ...string) ReloadInput {
@@ -170,12 +170,12 @@ func catalogWith(plugin, requests string) ReloadInput {
 	return in
 }
 
-func (r *rig) next() *promptCall {
+func (r *secretRig) next() *promptCall {
 	r.t.Helper()
 	return <-r.shown
 }
 
-func (r *rig) joined(plugin string, waiters int, queued bool) {
+func (r *secretRig) joined(plugin string, waiters int, queued bool) {
 	r.t.Helper()
 	want := dialogJoin{plugin, waiters, queued}
 	for got := range r.joins {
@@ -186,13 +186,13 @@ func (r *rig) joined(plugin string, waiters int, queued bool) {
 	r.t.Fatal("dialog join stream closed")
 }
 
-func (r *rig) log() []event {
+func (r *secretRig) log() []event {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return append([]event(nil), r.events...)
 }
 
-func (r *rig) lastEvent() event {
+func (r *secretRig) lastEvent() event {
 	r.t.Helper()
 	l := r.log()
 	if len(l) == 0 {
@@ -206,7 +206,7 @@ type readResult struct {
 	err   error
 }
 
-func (r *rig) readAsync(ctx context.Context, plugin, name string) <-chan readResult {
+func (r *secretRig) readAsync(ctx context.Context, plugin, name string) <-chan readResult {
 	out := make(chan readResult, 1)
 	go func() {
 		v, err := r.s.Read(ctx, pluginCaller(plugin), name)
@@ -215,7 +215,7 @@ func (r *rig) readAsync(ctx context.Context, plugin, name string) <-chan readRes
 	return out
 }
 
-func (r *rig) read(plugin, name string) readResult {
+func (r *secretRig) read(plugin, name string) readResult {
 	v, err := r.s.Read(context.Background(), pluginCaller(plugin), name)
 	return readResult{v, err}
 }
@@ -225,7 +225,7 @@ func (r *rig) read(plugin, name string) readResult {
 func TestReadBlocksOnTheDialog(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
-		answer       func(r *rig, pc *promptCall)
+		answer       func(r *secretRig, pc *promptCall)
 		wantValue    bool
 		wantErr      string
 		wantEvent    string
@@ -233,14 +233,14 @@ func TestReadBlocksOnTheDialog(t *testing.T) {
 		granted      bool
 		noPromptSeam bool
 	}{
-		{name: "accept", answer: func(r *rig, pc *promptCall) { pc.reply <- secrets.Accepted }, wantValue: true, wantEvent: "allowed", granted: true},
-		{name: "decline", answer: func(r *rig, pc *promptCall) { pc.reply <- secrets.Declined }, wantErr: "denied/user_denied", wantEvent: "user_denied"},
-		{name: "dismiss", answer: func(r *rig, pc *promptCall) { pc.reply <- secrets.Dismissed }, wantErr: "denied/user_denied", wantEvent: "user_denied", reprompts: true},
-		{name: "timeout", answer: func(r *rig, pc *promptCall) { r.clk.advance(secrets.DialogTimeout) }, wantErr: "denied/user_denied", wantEvent: "user_denied", reprompts: true},
+		{name: "accept", answer: func(r *secretRig, pc *promptCall) { pc.reply <- secrets.Accepted }, wantValue: true, wantEvent: "allowed", granted: true},
+		{name: "decline", answer: func(r *secretRig, pc *promptCall) { pc.reply <- secrets.Declined }, wantErr: "denied/user_denied", wantEvent: "user_denied"},
+		{name: "dismiss", answer: func(r *secretRig, pc *promptCall) { pc.reply <- secrets.Dismissed }, wantErr: "denied/user_denied", wantEvent: "user_denied", reprompts: true},
+		{name: "timeout", answer: func(r *secretRig, pc *promptCall) { r.clk.advance(secrets.DialogTimeout) }, wantErr: "denied/user_denied", wantEvent: "user_denied", reprompts: true},
 		{name: "headless", noPromptSeam: true, wantErr: "denied/user_denied", wantEvent: "user_denied"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r := newRig(t, rigOpts{noPrompt: tc.noPromptSeam})
+			r := newSecretRig(t, rigOpts{noPrompt: tc.noPromptSeam})
 			r.declare("a")
 			if tc.noPromptSeam {
 				res := r.read("a", "git.token")
@@ -297,7 +297,7 @@ func TestReadBlocksOnTheDialog(t *testing.T) {
 
 // A CLI grant or a digest change clears the memory of a decline.
 func TestDeclineMemoryClearedByGrantAndDigestChange(t *testing.T) {
-	r := newRig(t, rigOpts{})
+	r := newSecretRig(t, rigOpts{})
 	r.declare("a")
 	got := r.readAsync(context.Background(), "a", "git.token")
 	r.next().reply <- secrets.Declined
@@ -336,7 +336,7 @@ func TestDeclineMemoryClearedByGrantAndDigestChange(t *testing.T) {
 // Dialogs are shown one at a time in request order, each with its own 60 s
 // clock that starts when it is shown.
 func TestDialogsQueueInOrderWithTimersStartingWhenShown(t *testing.T) {
-	r := newRig(t, rigOpts{})
+	r := newSecretRig(t, rigOpts{})
 	r.declare("a", "b")
 	ra := r.readAsync(context.Background(), "a", "git.token")
 	pa := r.next()
@@ -374,7 +374,7 @@ func TestDialogsQueueInOrderWithTimersStartingWhenShown(t *testing.T) {
 // Concurrent reads of one triple share one dialog; a different ungranted name
 // from the same plugin is busy/dialog_pending at once.
 func TestDialogSharedAndPerPluginBusy(t *testing.T) {
-	r := newRig(t, rigOpts{})
+	r := newSecretRig(t, rigOpts{})
 	apply(t, r.s, catalogWith("a", `[{"name":"git.token","purpose":"Push","required":true},{"name":"other.key","purpose":"Other"}]`))
 	r.crypto.data["other.key"] = []byte("o")
 	first := r.readAsync(context.Background(), "a", "git.token")
@@ -401,7 +401,7 @@ func TestDialogSharedAndPerPluginBusy(t *testing.T) {
 
 // A CLI grant while the dialog is up closes it and the read continues.
 func TestCLIGrantClosesPendingDialog(t *testing.T) {
-	r := newRig(t, rigOpts{})
+	r := newSecretRig(t, rigOpts{})
 	r.declare("a")
 	got := r.readAsync(context.Background(), "a", "git.token")
 	pc := r.next()
@@ -423,7 +423,7 @@ func TestRebuildClosesPendingDialog(t *testing.T) {
 		"removed":         catalogWith("a", `[]`),
 	} {
 		t.Run(name, func(t *testing.T) {
-			r := newRig(t, rigOpts{})
+			r := newSecretRig(t, rigOpts{})
 			r.declare("a")
 			got := r.readAsync(context.Background(), "a", "git.token")
 			pc := r.next()
@@ -449,7 +449,7 @@ func TestRebuildClosesPendingDialog(t *testing.T) {
 // A closed connection drops the read: no event, nothing remembered, and the
 // dialog goes away with its last waiter.
 func TestContextCancelDropsRead(t *testing.T) {
-	r := newRig(t, rigOpts{})
+	r := newSecretRig(t, rigOpts{})
 	r.declare("a")
 	ctx, cancel := context.WithCancel(context.Background())
 	got := r.readAsync(ctx, "a", "git.token")
@@ -488,7 +488,7 @@ func TestContextCancelDropsRead(t *testing.T) {
 
 // One of two waiters leaving keeps the dialog for the other.
 func TestOneWaiterLeavingKeepsTheDialog(t *testing.T) {
-	r := newRig(t, rigOpts{})
+	r := newSecretRig(t, rigOpts{})
 	r.declare("a")
 	ctx, cancel := context.WithCancel(context.Background())
 	gone := r.readAsync(ctx, "a", "git.token")
@@ -514,7 +514,7 @@ func TestOneWaiterLeavingKeepsTheDialog(t *testing.T) {
 
 // A revoke landing between the accept and the value read does not fail the read.
 func TestRevokeBetweenAcceptAndReadDoesNotFailRead(t *testing.T) {
-	r := newRig(t, rigOpts{})
+	r := newSecretRig(t, rigOpts{})
 	r.declare("a")
 	revoked := make(chan struct{})
 	r.crypto.onGet = func() {
@@ -544,7 +544,7 @@ func TestRevokeBetweenAcceptAndReadDoesNotFailRead(t *testing.T) {
 func TestCLIGetAndRevealAreAudited(t *testing.T) {
 	for _, via := range []string{"get", "reveal"} {
 		t.Run(via, func(t *testing.T) {
-			r := newRig(t, rigOpts{})
+			r := newSecretRig(t, rigOpts{})
 			r.declare("a")
 			var v string
 			var err error
@@ -570,7 +570,7 @@ func TestCLIGetAndRevealAreAudited(t *testing.T) {
 }
 
 func TestHostAndInputNeverReadValues(t *testing.T) {
-	r := newRig(t, rigOpts{})
+	r := newSecretRig(t, rigOpts{})
 	r.declare("a")
 	for name, k := range map[string]Caller{"host": hostCaller, "input": inputCaller} {
 		if _, err := r.s.Read(context.Background(), k, "git.token"); reason(t, err) != "denied/user_only" {
@@ -590,52 +590,52 @@ func TestHostAndInputNeverReadValues(t *testing.T) {
 func TestReadOutcomes(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		run  func(t *testing.T, r *rig) readResult
+		run  func(t *testing.T, r *secretRig) readResult
 		err  string
 		ev   event
 	}{
-		{"allowed", func(t *testing.T, r *rig) readResult {
+		{"allowed", func(t *testing.T, r *secretRig) readResult {
 			r.declare("a")
 			_ = r.s.Grant(context.Background(), cliCaller, "a", "git.token")
 			return r.read("a", "git.token")
 		}, "", event{"git.token", "a", "allowed"}},
-		{"not_declared", func(t *testing.T, r *rig) readResult { r.declare("a"); return r.read("a", "x.y") }, "not_found/not_declared", event{"x.y", "a", "not_declared"}},
-		{"malformed name omitted", func(t *testing.T, r *rig) readResult { r.declare("a"); return r.read("a", "Bad Name\n") }, "not_found/not_declared", event{"", "a", "not_declared"}},
-		{"unset", func(t *testing.T, r *rig) readResult {
+		{"not_declared", func(t *testing.T, r *secretRig) readResult { r.declare("a"); return r.read("a", "x.y") }, "not_found/not_declared", event{"x.y", "a", "not_declared"}},
+		{"malformed name omitted", func(t *testing.T, r *secretRig) readResult { r.declare("a"); return r.read("a", "Bad Name\n") }, "not_found/not_declared", event{"", "a", "not_declared"}},
+		{"unset", func(t *testing.T, r *secretRig) readResult {
 			r.declare("a")
 			delete(r.crypto.data, "git.token")
 			_ = r.s.Grant(context.Background(), cliCaller, "a", "git.token")
 			return r.read("a", "git.token")
 		}, "not_found/unset", event{"git.token", "a", "unset"}},
-		{"unavailable", func(t *testing.T, r *rig) readResult {
+		{"unavailable", func(t *testing.T, r *secretRig) readResult {
 			r.declare("a")
 			_ = r.s.Grant(context.Background(), cliCaller, "a", "git.token")
 			r.crypto.err = errors.New("disk on fire " + sentinel)
 			return r.read("a", "git.token")
 		}, "unavailable/storage", event{"git.token", "a", "unavailable"}},
-		{"stored invalid utf8", func(t *testing.T, r *rig) readResult {
+		{"stored invalid utf8", func(t *testing.T, r *secretRig) readResult {
 			r.declare("a")
 			r.crypto.data["git.token"] = []byte{0xff, 0xfe}
 			_ = r.s.Grant(context.Background(), cliCaller, "a", "git.token")
 			return r.read("a", "git.token")
 		}, "unavailable/storage", event{"git.token", "a", "unavailable"}},
-		{"cli unset", func(t *testing.T, r *rig) readResult {
+		{"cli unset", func(t *testing.T, r *secretRig) readResult {
 			delete(r.crypto.data, "git.token")
 			v, err := r.s.Reveal(context.Background(), cliCaller, "git.token")
 			return readResult{v, err}
 		}, "not_found/unset", event{"git.token", "", "unset"}},
-		{"cli malformed name", func(t *testing.T, r *rig) readResult {
+		{"cli malformed name", func(t *testing.T, r *secretRig) readResult {
 			v, err := r.s.Reveal(context.Background(), cliCaller, "Bad Name")
 			return readResult{v, err}
 		}, "invalid_params/invalid_secret_name", event{"", "", "not_declared"}},
-		{"cli unavailable", func(t *testing.T, r *rig) readResult {
+		{"cli unavailable", func(t *testing.T, r *secretRig) readResult {
 			r.crypto.err = errors.New("x")
 			v, err := r.s.Reveal(context.Background(), cliCaller, "git.token")
 			return readResult{v, err}
 		}, "unavailable/storage", event{"git.token", "", "unavailable"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r := newRig(t, rigOpts{})
+			r := newSecretRig(t, rigOpts{})
 			before := len(r.log())
 			res := tc.run(t, r)
 			if got := reason(t, res.err); got != tc.err {
@@ -653,7 +653,7 @@ func TestReadOutcomes(t *testing.T) {
 }
 
 func TestSetValidation(t *testing.T) {
-	r := newRig(t, rigOpts{})
+	r := newSecretRig(t, rigOpts{})
 	for _, tc := range []struct {
 		name  string
 		key   string
@@ -745,7 +745,7 @@ func TestSecretDeclarationProblems(t *testing.T) {
 
 // secrets.names for each caller, decoded from the JSON a handler would write.
 func TestNamesByCaller(t *testing.T) {
-	r := newRig(t, rigOpts{})
+	r := newSecretRig(t, rigOpts{})
 	apply(t, r.s, catalogWith("a", `[{"name":"git.token","purpose":"Push","required":true},{"name":"zed.key","purpose":"Z"}]`))
 	r.crypto.data["stored.only"] = []byte("v")
 	r.crypto.data["zed.key"] = []byte("z")
@@ -813,7 +813,7 @@ func TestGrantWriteFailure(t *testing.T) {
 		t.Run(via, func(t *testing.T) {
 			// The empty slice fits, but no grant does. Use the real State cap
 			// enforcement rather than replacing Set with a fake error.
-			r := newRig(t, rigOpts{maxBytes: len(`{"grants":[]}`)})
+			r := newSecretRig(t, rigOpts{maxBytes: len(`{"grants":[]}`)})
 			r.declare("a")
 			before := r.tree.Snapshot()
 			got := r.readAsync(context.Background(), "a", "git.token")
@@ -846,7 +846,7 @@ func TestGrantWriteFailure(t *testing.T) {
 }
 
 func TestRevokeWriteFailure(t *testing.T) {
-	r := newRig(t, rigOpts{})
+	r := newSecretRig(t, rigOpts{})
 	r.declare("a")
 	// A revoke normally shrinks the document, so simulate a lost capability
 	// to exercise Set's failure rather than its size cap.
@@ -871,7 +871,7 @@ func TestRebuildBeforeAcceptedWrite(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			posted := make(chan func(), 1)
-			r := newRig(t, rigOpts{post: func(f func()) bool { posted <- f; return true }})
+			r := newSecretRig(t, rigOpts{post: func(f func()) bool { posted <- f; return true }})
 			r.declare("a")
 			before := r.tree.Snapshot()
 			got := r.readAsync(context.Background(), "a", "git.token")
@@ -908,7 +908,7 @@ func TestRebuildBeforeAcceptedWrite(t *testing.T) {
 }
 
 func TestNamesReadsGrantsOnce(t *testing.T) {
-	r := newRig(t, rigOpts{})
+	r := newSecretRig(t, rigOpts{})
 	r.declare("a", "b", "c")
 	if err := r.s.Grant(context.Background(), cliCaller, "b", "git.token"); err != nil {
 		t.Fatal(err)
@@ -930,7 +930,7 @@ func TestNamesReadsGrantsOnce(t *testing.T) {
 func TestGrantRevokeReturnAfterPostedWrite(t *testing.T) {
 	posted := make(chan func(), 4)
 	var hold atomic.Bool
-	r := newRig(t, rigOpts{post: func(f func()) bool {
+	r := newSecretRig(t, rigOpts{post: func(f func()) bool {
 		if hold.Load() {
 			posted <- f
 		} else {
@@ -981,7 +981,7 @@ func TestGrantRevokeReturnAfterPostedWrite(t *testing.T) {
 // granted plugin read. Events, prompts, audit names, problems, names listings
 // and every error string must not carry it.
 func TestValueNeverLeavesAuthorizedReplies(t *testing.T) {
-	r := newRig(t, rigOpts{})
+	r := newSecretRig(t, rigOpts{})
 	r.declare("a", "b")
 	var outbound []string
 	add := func(label string, v any) {
@@ -1057,7 +1057,7 @@ func TestValueNeverLeavesAuthorizedReplies(t *testing.T) {
 // A read during shutdown is dropped like a closed connection: the error says
 // so and no secrets.read event is published for it.
 func TestShutdownDropsReadWithoutEvent(t *testing.T) {
-	r := newRig(t, rigOpts{})
+	r := newSecretRig(t, rigOpts{})
 	r.declare("a")
 	r.s.Close()
 	_, err := r.s.Read(context.Background(), pluginCaller("a"), "git.token")

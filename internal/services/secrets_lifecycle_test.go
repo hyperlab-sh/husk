@@ -16,7 +16,7 @@ func TestGrantRevokeShutdownDoesNotWrite(t *testing.T) {
 				posted := make(chan func(), 1)
 				var mode atomic.Int32 // 0: run, 1: reject, 2: hold
 				var posts atomic.Int32
-				r := newRig(t, rigOpts{post: func(f func()) bool {
+				r := newSecretRig(t, rigOpts{post: func(f func()) bool {
 					posts.Add(1)
 					switch mode.Load() {
 					case 1:
@@ -71,7 +71,7 @@ func TestGrantRevokeShutdownDoesNotWrite(t *testing.T) {
 }
 
 func TestAcceptedWriteRejectedByLoopDropsRead(t *testing.T) {
-	r := newRig(t, rigOpts{post: func(func()) bool { return false }})
+	r := newSecretRig(t, rigOpts{post: func(func()) bool { return false }})
 	r.declare("a")
 	before := r.tree.Snapshot()
 	got := r.readAsync(context.Background(), "a", "git.token")
@@ -91,7 +91,7 @@ func TestLifecycleDropsPendingReads(t *testing.T) {
 		for _, phase := range []string{"shown shared", "queued", "accepting"} {
 			t.Run(cause+"/"+phase, func(t *testing.T) {
 				posted := make(chan func(), 1)
-				r := newRig(t, rigOpts{post: func(f func()) bool { posted <- f; return true }})
+				r := newSecretRig(t, rigOpts{post: func(f func()) bool { posted <- f; return true }})
 				r.declare("a", "b")
 				before := r.tree.Snapshot()
 				target := "a"
@@ -166,7 +166,7 @@ func TestCLIGrantRechecksPostedDeclaration(t *testing.T) {
 	for _, requests := range []string{`[{"name":"git.token","purpose":"Changed"}]`, `[]`} {
 		t.Run(requests, func(t *testing.T) {
 			posted := make(chan func(), 1)
-			r := newRig(t, rigOpts{post: func(f func()) bool { posted <- f; return true }})
+			r := newSecretRig(t, rigOpts{post: func(f func()) bool { posted <- f; return true }})
 			r.declare("a")
 			before := r.tree.Snapshot()
 			done := make(chan error, 1)
@@ -192,7 +192,7 @@ func TestInvalidStoredTextCanBeReplaced(t *testing.T) {
 				name = "over cap/"
 			}
 			t.Run(name+via, func(t *testing.T) {
-				r := newRig(t, rigOpts{})
+				r := newSecretRig(t, rigOpts{})
 				r.declare("a")
 				if err := r.s.Grant(context.Background(), cliCaller, "a", "git.token"); err != nil {
 					t.Fatal(err)
@@ -224,7 +224,7 @@ func TestInvalidStoredTextCanBeReplaced(t *testing.T) {
 }
 
 func TestFailedAcceptedWritePromptsAgain(t *testing.T) {
-	r := newRig(t, rigOpts{maxBytes: len(`{"grants":[]}`)})
+	r := newSecretRig(t, rigOpts{maxBytes: len(`{"grants":[]}`)})
 	r.declare("a")
 	for i := 0; i < 2; i++ {
 		got := r.readAsync(context.Background(), "a", "git.token")
