@@ -313,12 +313,17 @@ so that such a plugin covers only the cells it paints. No plugin kind is named
 here.
 
 - **Rect.** The overlay surface's rect is the whole frame: `(0, 0, width,
-  height)`, the top bar and footer included, whenever the terminal is not too
-  small. It has no chrome: a `frame` declared for it is ignored (logged as a
+  height)` with the terminal's own width and height (not the minimum-clamped
+  widths `placeSlots` lays the regions out in), the top bar and footer
+  included, in every placement. It is placed by `placeSlots` like every
+  surface, so while the terminal is too small the layout is frozen and the
+  rect keeps its last valid value, as every other rect does. It has no chrome: a `frame` declared for it is ignored (logged as a
   conversion warning), its inner rect equals its rect, and `surface.resized`
   for its occupant carries the terminal size with `focused: false` and
   `visible: true`. The frontend writes the rect to `husk.geometry.rects` and
   lists `app-overlay` in `husk.surfaces.visible` like every placed surface.
+  An unoccupied overlay draws nothing: it is a layer, not a region, and has
+  no empty-surface rendering.
 - **Z order.** The overlay is blitted after the bars, every layout and
   placement surface and the modal (its shadow included), and before the
   toast and the command palette. The host's own popups stay reachable above
@@ -338,7 +343,9 @@ here.
 - **Wide glyphs.** The clip rule is unchanged: a wide glyph crossing the frame
   edge is blanked. A wide overlay glyph replaces both cells beneath; a
   transparent cell over the second half of a wide glyph beneath leaves that
-  glyph whole.
+  glyph whole. An opaque cell that replaces either half of a wide glyph
+  beneath also blanks the other half: that cell becomes a plain space that
+  keeps the wide glyph's background, so no half glyph is left on screen.
 - **No slot background, no shadow.** The overlay gets no `fillSlotBg`
   pass and casts no shadow. The final `fillDefaultBg` pass still runs after
   it, so an opaque cell that inherited a default background from a cell no
@@ -351,16 +358,26 @@ here.
   palette. The occupant is still told `input.key_state` and `theme.changed`
   like every plugin.
 - **Published content.** Region slots the occupant declares on `app-overlay`
-  clear and fill their rect as on every surface; the transparency rule applies
-  to the occupant's own lines, not to region contributions.
+  are laid out as on every surface (`layoutPublished`), and every cell of a
+  region's rect is opaque: the region clears and fills its rect as on every
+  surface. The transparency rule applies to the occupant's own lines only.
+  Contributions drawn on the overlay are not clickable, because the overlay
+  is not hit-tested.
 - **Too small.** Nothing is drawn, like every surface; the occupant gets no
   `surface.resized` until the layout returns.
 
 Implementation sketch, `cmd/husk`: `placeSlots` adds `app-overlay` to
-`slotRects` at the full frame; `hitOrder` and `focusNext` skip it; `View`
-draws it after the modal with a `blitOverlay` that writes only opaque cells
-and merges backgrounds as above; `drawSurface` is not used for it (no
-chrome, no slot background). A golden frame with an overlay fixture that
+`slotRects` at the full frame before its early returns for the full-canvas
+and stage placements, as a plain `SlotRect` with the inner rect equal to the
+rect (not through `frameRect`); `frameFor` returns the zero `frame.Spec` for
+`app-overlay`, the `--demo-frame` override included; `hitOrder` skips it,
+which also keeps it out of `View`'s surface loop and out of
+`clickContributionAt`; `focusNext` already cycles a fixed list without it.
+`View` draws it after the modal, only when it has an occupant, with a
+`blitOverlay` that lays the occupant's content out on a scratch canvas of the
+frame's size (as `renderPublished` does) and copies onto the frame only the
+opaque cells and region cells, merging backgrounds as above; `drawSurface` is
+not used for it (no chrome, no slot background). A golden frame with an overlay fixture that
 paints a box and a label over an occupied stage pins the rules: ring and
 label cells carry the overlay's foreground and the stage's background, every
 other cell is byte-identical to the frame without the overlay.

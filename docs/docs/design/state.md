@@ -518,8 +518,9 @@ namespaces while "Migration from today" had the TUI's `recomputeLayout` and
   view half.
 - **`app-overlay` is placed.** The frontend gives `app-overlay` a rect in
   `husk.geometry.rects` equal to the whole frame (`inner` equal to the rect:
-  it has no chrome) and lists it in `visible` whenever the terminal is not
-  too small, so an occupant of the overlay layer is told its size like every
+  it has no chrome) and lists it in `visible` in every placement, occupied or
+  not; while the terminal is too small it keeps its last valid rect like
+  every surface. So an occupant of the overlay layer is told its size like every
   occupant and a reader of the two slices sees every drawable surface. It is
   never `husk.focus.surface`. Drawing rules: [Cell-buffer compositor](cell-buffer-compositor.md),
   "Overlay layer".
