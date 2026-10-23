@@ -47,6 +47,7 @@ husk plugin add ./plugins/reference       # load into this instance; no configur
 husk plugin add --dir ./plugins           # load claimed immediate subdirectories; per-plugin refusals are reported
 husk plugin log go.reference             # the log file of one plugin (not_found before it exists)
 husk plugin remove go.reference          # unload one plugin from this instance (stops it, undeclares it, reloads Services); not remembered across restarts
+husk create bundle demo               # write a runnable bundle with hello and the layout guide (local)
 husk store paths                      # config, state, data and runtime directories (local)
 husk store check                      # corrupt, quarantined and orphan records; deletes nothing
 husk store gc                         # run retention now
