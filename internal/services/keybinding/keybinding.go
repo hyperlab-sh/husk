@@ -9,6 +9,7 @@ import (
 	c "github.com/hyperlab-sh/husk/internal/services/contracts"
 	"github.com/hyperlab-sh/husk/internal/substrate/store"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
+	"reflect"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -701,7 +702,7 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 	if ctx.Err() != nil {
 		return c.ContextError(ctx, r)
 	}
-	return c.Prepare(ctx, r, func() bool { return s.current.CompareAndSwap(old, next) }, s.Generation), r, nil
+	return c.Prepare(ctx, r, !reflect.DeepEqual(old.listing, next.listing), func() bool { return s.current.CompareAndSwap(old, next) }, s.Generation), r, nil
 }
 
 // shadowEntries marks every entry that another entry statically shadows and

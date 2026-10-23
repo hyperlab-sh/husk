@@ -92,10 +92,12 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 	}
 	allow := in.Settings.Bool("theme.allow_low_contrast")
 	source := in.Settings.Source("theme.allow_low_contrast")
-	distributionOptOut := source == "distribution"
+	// Only a distribution value of true is an opt-out, whether or not a
+	// stronger layer overrides it; false is the default and no problem.
+	distributionOptOut := source == "distribution" && allow
 	for _, layer := range in.ConfigLayers {
 		if layer.Layer == "distribution" {
-			if _, exists := c.Dotted(layer.Doc, "theme.allow_low_contrast"); exists {
+			if v, exists := c.Dotted(layer.Doc, "theme.allow_low_contrast"); exists && v == true {
 				distributionOptOut = true
 			}
 		}
@@ -109,7 +111,10 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 		if allow && (source == "user" || source == "profile" || source == "instance") {
 			severity = "warning"
 		}
-		c.Issue(&r.Problems, severity, "low_contrast", in.Settings.Source("theme.palette."+v.Foreground), "theme.palette."+v.Foreground, fmt.Sprintf("%s on %s is %.2f:1, need %.1f:1", v.Foreground, v.Background, v.Ratio, v.Minimum))
+		key, layer := attribute(in, v.Foreground, v.Background)
+		problem := c.Problem{Severity: severity, Code: "low_contrast", Layer: layer, Key: key, Message: fmt.Sprintf("%s on %s is %.2f:1, need %.1f:1", v.Foreground, v.Background, v.Ratio, v.Minimum)}
+		problem.Source = &protocol.Source{Layer: layer, File: configFile(in, layer)}
+		r.Problems = append(r.Problems, problem)
 	}
 	if err = c.Invalid(r.Problems); err != nil {
 		return nil, r, err
@@ -118,5 +123,51 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 		return c.ContextError(ctx, r)
 	}
 	next := &snapshot{old.gen + 1, p, overrides}
-	return c.Prepare(ctx, r, func() bool { return s.current.CompareAndSwap(old, next) }, s.Generation), r, nil
+	return c.Prepare(ctx, r, old.palette != p, func() bool { return s.current.CompareAndSwap(old, next) }, s.Generation), r, nil
+}
+
+// attribute names the role a failing pair is charged to: the foreground when
+// its layer overrode it, else the background's override; the built-in palette
+// passes, so one of them is overridden. An unset slot_background follows the
+// canvas it is derived from.
+func attribute(in c.ReloadInput, fg, bg string) (key, layer string) {
+	override := func(role string) (string, string, bool) {
+		if role == "slot_background" && in.Settings.Source("theme.palette.slot_background") == "default" {
+			role = "canvas"
+		}
+		key := "theme.palette." + role
+		layer := in.Settings.Source(key)
+		return key, layer, layer != "default"
+	}
+	if k, l, ok := override(fg); ok {
+		return k, l
+	}
+	if k, l, ok := override(bg); ok {
+		return k, l
+	}
+	return "theme.palette." + fg, "default"
+}
+
+// configFile is the config-relative file of a layer's config document, from
+// the layer documents the reload was given; empty when the layer has no
+// file (distribution, instance) or was not supplied.
+func configFile(in c.ReloadInput, layer string) string {
+	for _, l := range in.ConfigLayers {
+		if string(l.Layer) != layer {
+			continue
+		}
+		switch layer {
+		case "user":
+			return "config.json"
+		case "profile":
+			path := strings.ReplaceAll(l.File, "\\", "/")
+			if at := strings.LastIndex(path, "/profiles/"); at >= 0 {
+				return path[at+1:]
+			}
+			if in.Profile != nil && *in.Profile != "" {
+				return "profiles/" + *in.Profile + "/config.json"
+			}
+		}
+	}
+	return ""
 }

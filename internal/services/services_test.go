@@ -295,9 +295,17 @@ type fakeStore struct {
 	resolved store.Resolved
 	err      error
 	block    <-chan struct{}
+	mu       sync.Mutex
+	log      []string // "invalidate" per capture, plus whatever note records
 }
 
-func (s *fakeStore) Invalidate() {}
+func (s *fakeStore) note(what string) { s.mu.Lock(); s.log = append(s.log, what); s.mu.Unlock() }
+func (s *fakeStore) trace() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.log...)
+}
+func (s *fakeStore) Invalidate() { s.note("invalidate") }
 func (s *fakeStore) Resolve(store.DocName, string) (store.Resolved, error) {
 	if s.block != nil {
 		<-s.block
@@ -323,7 +331,7 @@ func (s *fakeService) Rebuild(ctx context.Context, in ReloadInput) (Candidate, R
 	}
 	r := Report{Service: s.name, Gen: s.Generation()}
 	old := s.gen.Load()
-	return c.Prepare(ctx, r, func() bool { return s.gen.CompareAndSwap(old, old+1) }, s.Generation), r, nil
+	return c.Prepare(ctx, r, true, func() bool { return s.gen.CompareAndSwap(old, old+1) }, s.Generation), r, nil
 }
 func fakeServices() map[string]Reloadable {
 	out := map[string]Reloadable{}
@@ -405,8 +413,9 @@ func TestCoordinatorTimeoutPartialApplyNeverPublishesLate(t *testing.T) {
 	done := make(chan []Report, 1)
 	go func() {
 		r, err := co.Reload(context.Background(), ReasonCLI)
-		if err == nil {
-			t.Error("timeout not error")
+		var coded *c.Error
+		if !errors.As(err, &coded) || coded.Code != "timeout" || coded.Reason != "reload_deadline" {
+			t.Errorf("timeout error = %v", err)
 		}
 		done <- r
 	}()
@@ -458,14 +467,21 @@ func TestCoordinatorStoreFailureDoesNotPrepareAnyService(t *testing.T) {
 				if len(rep.Problems) != 1 || rep.Problems[0].Code != "store_error" || rep.Problems[0].Severity != "error" {
 					t.Fatalf("%s report = %+v", rep.Service, rep.Problems)
 				}
-				want := []string{"bad source"}
+				// The message names the code, layer and config-relative file
+				// but never Store's own text, which may quote a value.
+				want := []string{"configuration could not be loaded"}
+				absent := "bad source"
 				if tc.problem.Code != "" {
-					want = []string{tc.problem.Code, "layer " + string(tc.problem.Layer), tc.problem.File, tc.problem.Message}
+					want = []string{tc.problem.Code, "layer " + string(tc.problem.Layer), tc.problem.File}
+					absent = tc.problem.Message
 				}
 				for _, text := range want {
 					if !strings.Contains(rep.Problems[0].Message, text) {
 						t.Fatalf("%s message=%q missing %q", rep.Service, rep.Problems[0].Message, text)
 					}
+				}
+				if strings.Contains(rep.Problems[0].Message, absent) {
+					t.Fatalf("%s message=%q leaks %q", rep.Service, rep.Problems[0].Message, absent)
 				}
 			}
 			for _, s := range services {
@@ -506,8 +522,8 @@ func TestCoordinatorCodesARebuildErrorWithoutProblems(t *testing.T) {
 			co, _ := NewCoordinator(Options{Store: &fakeStore{}, Services: services, Clock: clock()})
 			defer co.Close()
 			reports, err := co.Reload(context.Background(), ReasonCLI)
-			if err == nil {
-				t.Fatal("reload reported success")
+			if err != nil {
+				t.Fatalf("a Service that kept its snapshot is a success reply: %v", err)
 			}
 			for _, r := range reports {
 				if r.Service != "keybinding" {

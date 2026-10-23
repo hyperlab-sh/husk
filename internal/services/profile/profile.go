@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sort"
 	"sync/atomic"
 
@@ -260,7 +261,7 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 	if ctx.Err() != nil {
 		return c.ContextError(ctx, r)
 	}
-	return c.Prepare(ctx, r, func() bool {
+	return c.Prepare(ctx, r, old.active != next.active || !reflect.DeepEqual(old.list, next.list), func() bool {
 		if !s.current.CompareAndSwap(old, next) {
 			return false
 		}

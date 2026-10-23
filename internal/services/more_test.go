@@ -89,7 +89,7 @@ func TestThemeOverlayDerivationEveryFormatAndHiddenDistributionHatch(t *testing.
 	in.Doc.Origins = map[string]store.Layer{"theme.allow_low_contrast": store.LayerUser}
 	apply(t, s, in)
 	in.Settings = s.Snapshot()
-	in.ConfigLayers = []store.LayerDoc{{Layer: store.LayerDistribution, Doc: doc(`{"theme":{"allow_low_contrast":false}}`)}}
+	in.ConfigLayers = []store.LayerDoc{{Layer: store.LayerDistribution, Doc: doc(`{"theme":{"allow_low_contrast":true}}`)}}
 	if _, _, err = th.Rebuild(context.Background(), in); err == nil {
 		t.Fatal("masked distribution escape hatch allowed")
 	}
@@ -306,7 +306,7 @@ func TestRuntimeDefaultsListenerAndSettingsFreeze(t *testing.T) {
 	before := runtime.Theme.Generation()
 	source.resolved = store.Resolved{Doc: doc(`{"theme":{"name":5}}`)}
 	reports, err := runtime.Coordinator.Reload(context.Background(), ReasonCLI)
-	if err == nil || reports[1].Applied || reports[2].Applied || runtime.Theme.Generation() != before || !reports[3].Applied || !reports[4].Applied {
+	if err != nil || reports[1].Applied || reports[2].Applied || runtime.Theme.Generation() != before || !reports[3].Applied || !reports[4].Applied {
 		t.Fatal("partial failure semantics", reports, err)
 	}
 	newSettings := newSet(settings.Options{})

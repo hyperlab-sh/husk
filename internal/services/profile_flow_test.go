@@ -115,7 +115,7 @@ func (r *rig) idle() bool {
 	co := r.rt.Coordinator
 	co.mu.Lock()
 	defer co.mu.Unlock()
-	return co.active == nil && co.queued == nil
+	return co.active == nil && len(co.queue) == 0
 }
 
 func userLayer(raw string) store.LayerDoc {
@@ -593,7 +593,10 @@ func testProfileUseWaitsForFollowUp(t *testing.T, switching bool) {
 		t.Fatalf("profile.use replied instead of waiting for the follow-up: %+v", got)
 	}
 	co.mu.Lock()
-	follow := co.queued
+	var follow *flight
+	if len(co.queue) > 0 {
+		follow = co.queue[0]
+	}
 	co.mu.Unlock()
 	// This is a synchronous registration check, not a scheduler-dependent
 	// assertion that the request goroutine has happened to send its reply.
