@@ -148,13 +148,12 @@ func (h *Host) prepare(batch ...string) (uint64, tea.Cmd) {
 // Start is launch step 6's built-in WrapperStarter implementation, over the
 // Factory and the Wrapper: build the process, register its token before Start
 // so even an immediate exit revokes it, then report live when the Wrapper says
-// so. Start is synchronous: nil is returned only once the process actually
-// started (liveness `live` is written exactly then), and a Start failure is
-// returned as the error — the caller reports the plugin failed from it, so a
-// never-started Pod never reads live and is not left `starting`. The Wrapper
-// still posts its own LaunchFailedMsg after the Closed notice for the same
-// failure; the Host applies the first report and ignores duplicates of the
-// same error. Loop-only.
+// so. Start returns nil only when the Wrapper reports Live after its opening.
+// Before spawn, an error may also arrive as a duplicate LaunchFailedMsg. When
+// a child spawned but never became live, mark the opening failure and return
+// its error: the gate publishes that first terminal fact. The Wrapper's later
+// ExitMsg enriches process metadata without replacing the failure or publishing
+// another exit. Loop-only.
 func (h *Host) Start(id string, opening []protocol.Message) error {
 	p, ok := h.pods[id]
 	if !ok {
@@ -181,6 +180,7 @@ func (h *Host) Start(id string, opening []protocol.Message) error {
 	}
 	info := process.Info()
 	if info.Status != wrapper.Live {
+		p.openingFailed = true
 		p.info.LogPath = info.LogPath
 		h.revoke(id)
 		return openingFailure(info)
@@ -195,6 +195,21 @@ func openingFailure(info wrapper.Info) error {
 		return errors.New(info.LastError)
 	}
 	return errors.New("plugin failed during opening")
+}
+
+// finishOpeningExit retains the first failure while the child is reaped.
+func (h *Host) finishOpeningExit(p *Pod, info wrapper.Info) {
+	changed := p.info.PID != info.PID || p.info.ExitStatus != info.ExitStatus || !slices.Equal(p.info.StderrTail, info.StderrTail)
+	p.info.PID, p.info.ExitStatus = info.PID, info.ExitStatus
+	p.info.StderrTail = slices.Clone(info.StderrTail)
+	if info.LogPath != "" && info.LogPath != p.info.LogPath {
+		p.info.LogPath = info.LogPath
+		changed = true
+	}
+	if changed {
+		h.loop.Liveness(LivenessMsg{Info: p.Info()})
+	}
+	h.loop.Log(LogMsg{PluginID: info.PluginID, Level: "info", Message: fmt.Sprintf("plugin %s exited after opening failed (%s); stderr log: %s", info.PluginID, p.info.ExitStatus, p.info.LogPath)})
 }
 
 // Handle applies lifecycle messages on the loop. ClosedMsg and calls.ReplyMsg
@@ -319,7 +334,7 @@ func (h *Host) Handle(msg tea.Msg) bool {
 		}
 		// A start failure may be reported by both the synchronous starter
 		// path and the process's own async notice; apply the first report only.
-		if p.info.Status == wrapper.Failed && p.info.LastError == m.Err.Error() {
+		if p.info.Status == wrapper.Failed && (p.openingFailed || p.info.LastError == m.Err.Error()) {
 			return true
 		}
 		h.revoke(m.PluginID)
@@ -341,6 +356,10 @@ func (h *Host) Handle(msg tea.Msg) bool {
 			return true
 		}
 		h.revoke(m.Info.PluginID)
+		if p.openingFailed {
+			h.finishOpeningExit(p, m.Info)
+			return true
+		}
 		p.info = m.Info
 		p.info.StderrTail = slices.Clone(m.Info.StderrTail)
 		h.loop.Liveness(LivenessMsg{Info: p.Info()})
