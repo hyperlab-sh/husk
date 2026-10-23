@@ -63,7 +63,7 @@ type Options struct {
 	// Profile is step 2's profile choice: whether this is the startup flight,
 	// the unmerged config layers read without a profile, and the profile names
 	// Store lists. It returns the selected name and its selection problems.
-	Profile   func(startup bool, layers []store.LayerDoc, names []string) (string, []Problem)
+	Profile   func(startup bool, layers []store.LayerDoc, names []string) (name string, problems []Problem, write bool)
 	State     c.Tree
 	Publisher c.Publisher
 	Clock     c.Clock
@@ -213,11 +213,13 @@ func (co *Coordinator) Tick() {
 // already registered a flight for; any other value starts a profile reload.
 func (co *Coordinator) profileChanged(raw json.RawMessage) {
 	var v struct {
-		Active string `json:"active"`
+		Active *string `json:"active"`
 	}
 	json.Unmarshal(raw, &v)
 	co.mu.Lock()
-	skip := co.haveSelected && v.Active == co.selected || co.hasExpect && v.Active == co.expect
+	// An absent slice (a state clear) is a change to follow the default again:
+	// it never equals a selection.
+	skip := v.Active != nil && (co.haveSelected && *v.Active == co.selected || co.hasExpect && *v.Active == co.expect)
 	co.hasExpect = false
 	co.mu.Unlock()
 	if !skip {
@@ -435,12 +437,13 @@ func (co *Coordinator) loadInput(f *flight) inputResult {
 	}
 	selected := ""
 	var selectionProblems []Problem
+	var profileWrite bool
 	if co.opts.Profile != nil {
 		layers, err := co.opts.Store.Layers("config", "")
 		if err != nil {
 			return inputResult{err: err}
 		}
-		selected, selectionProblems = co.opts.Profile(f != nil && f.reason == ReasonStartup, layers, co.opts.Store.Profiles())
+		selected, selectionProblems, profileWrite = co.opts.Profile(f != nil && f.reason == ReasonStartup, layers, co.opts.Store.Profiles())
 	}
 	if f != nil {
 		co.mu.Lock()
@@ -464,7 +467,7 @@ func (co *Coordinator) loadInput(f *flight) inputResult {
 	if err != nil {
 		return inputResult{err: err}
 	}
-	return inputResult{in: ReloadInput{Doc: resolved, Layers: layers, ConfigLayers: configLayers, Declared: map[store.DocName]map[string]store.Doc{store.DeclaredPlugins: co.opts.Store.Declared(store.DeclaredPlugins), store.DeclaredKeymap: co.opts.Store.Declared(store.DeclaredKeymap)}, Profile: &selected, ProfileProblems: selectionProblems}}
+	return inputResult{in: ReloadInput{Doc: resolved, Layers: layers, ConfigLayers: configLayers, Declared: map[store.DocName]map[string]store.Doc{store.DeclaredPlugins: co.opts.Store.Declared(store.DeclaredPlugins), store.DeclaredKeymap: co.opts.Store.Declared(store.DeclaredKeymap)}, Profile: &selected, ProfileProblems: selectionProblems, ProfileWrite: profileWrite}}
 }
 
 // Inputs collects fresh user-authorized disk input for dry validation/checks.
