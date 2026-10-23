@@ -116,6 +116,8 @@ const (
 	vContinue verdict = iota // read the value (step 2)
 	vDenied                  // user_denied
 	vUnavailable
+	vDropped  // Pod left live: no answer/event
+	vShutdown // host stopped accepting writes or closed
 )
 
 type declineKey struct{ plugin, name, digest string }
@@ -168,7 +170,24 @@ func New(opts Options) (*Service, error) {
 }
 
 // Close drops every pending prompt and stops their timers.
-func (s *Service) Close() { s.cancel() }
+func (s *Service) Close() {
+	s.cancel()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, d := range s.byPlugin {
+		s.resolveLocked(d, vShutdown)
+	}
+}
+
+// DropPlugin drops a departed Pod's shown, queued or accepting dialog. Waiters
+// return cancelled without an audit event or decline memory. Loop only.
+func (s *Service) DropPlugin(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if d := s.byPlugin[id]; d != nil {
+		s.resolveLocked(d, vDropped)
+	}
+}
 
 // Generation is the current declaration generation.
 func (s *Service) Generation() c.Generation { return s.current.Load().gen }
@@ -234,6 +253,8 @@ func (s *Service) event(name, plugin, outcome string) {
 func storageError() error { return c.Failure("unavailable", "storage") }
 
 func deniedError() error { return c.Failure("denied", "user_denied") }
+
+func shutdownError() error { return c.Failure("cancelled", "shutdown") }
 
 // Read implements secrets.get. Only its successful return carries the value.
 // A plugin's ungranted read blocks on the confirm dialog; a closed ctx drops
@@ -389,11 +410,18 @@ func (s *Service) await(ctx context.Context, plugin, name string, req c.SecretRe
 
 	select {
 	case v := <-w:
+		if s.ctx.Err() != nil {
+			return "", shutdownError()
+		}
 		switch v {
 		case vContinue:
 			return "", nil
 		case vUnavailable:
 			return "unavailable", storageError()
+		case vDropped:
+			return "", c.Failure("cancelled", "plugin_exited")
+		case vShutdown:
+			return "", shutdownError()
 		}
 		return "user_denied", deniedError()
 	case <-ctx.Done():
@@ -458,6 +486,11 @@ func (s *Service) answered(d *dialog, a Answer) {
 		s.mu.Unlock()
 		return
 	}
+	if s.ctx.Err() != nil {
+		s.resolveLocked(d, vShutdown)
+		s.mu.Unlock()
+		return
+	}
 	switch a {
 	case Declined:
 		s.declined[declineKey{d.plugin, d.name, d.digest}] = struct{}{}
@@ -472,9 +505,13 @@ func (s *Service) answered(d *dialog, a Answer) {
 		d.cancel()
 		s.pumpLocked()
 		s.mu.Unlock()
-		if s.opts.Post == nil || !s.opts.Post(func() { s.acceptWrite(d) }) {
+		if err := s.postWrite(func() { s.acceptWrite(d) }); err != nil {
+			v := vUnavailable
+			if failure, ok := err.(*c.Error); ok && failure.Code == "cancelled" {
+				v = vShutdown
+			}
 			s.mu.Lock()
-			s.resolveLocked(d, vUnavailable)
+			s.resolveLocked(d, v)
 			s.mu.Unlock()
 		}
 		return
@@ -493,7 +530,9 @@ func (s *Service) acceptWrite(d *dialog) {
 		return
 	}
 	v := vDenied
-	if cur, ok := s.current.Load().declarations[d.plugin][d.name]; s.ctx.Err() == nil && ok && Digest(cur) == d.digest {
+	if s.ctx.Err() != nil {
+		v = vShutdown
+	} else if cur, ok := s.current.Load().declarations[d.plugin][d.name]; ok && Digest(cur) == d.digest {
 		v = vContinue
 		if err := s.writeGrant(d.plugin, d.name, d.digest); err != nil {
 			v = vUnavailable
@@ -569,23 +608,43 @@ func (s *Service) writeGrant(plugin, name, digest string) error {
 	return err
 }
 
-// postAndWait queues f on the loop and returns once it ran, so a write is
-// visible when the call returns. ctx abandons the wait, not the write.
-func (s *Service) postAndWait(ctx context.Context, f func()) error {
+// postWrite distinguishes a missing storage seam from a loop that has stopped
+// accepting work. The callback must also check shutdown before mutating State.
+func (s *Service) postWrite(f func()) error {
+	if s.ctx.Err() != nil {
+		return shutdownError()
+	}
 	if s.opts.Post == nil {
 		return storageError()
 	}
-	done := make(chan struct{})
-	if !s.opts.Post(func() { defer close(done); f() }) {
-		return storageError()
+	if !s.opts.Post(f) {
+		return shutdownError()
+	}
+	return nil
+}
+
+// postAndWait queues f on the loop and returns once it ran, so a write is
+// visible when the call returns. ctx abandons the wait, not the write; shutdown
+// abandons the write too, even if an already-queued callback is later drained.
+func (s *Service) postAndWait(ctx context.Context, f func()) error {
+	done := make(chan error, 1)
+	if err := s.postWrite(func() {
+		if s.ctx.Err() != nil {
+			done <- shutdownError()
+			return
+		}
+		f()
+		done <- nil
+	}); err != nil {
+		return err
 	}
 	select {
-	case <-done:
-		return nil
+	case err := <-done:
+		return err
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-s.ctx.Done():
-		return c.Failure("cancelled", "shutdown")
+		return shutdownError()
 	}
 }
 

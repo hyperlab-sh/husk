@@ -76,6 +76,7 @@ type Root struct {
 	catRev         uint64
 	catValid       bool
 
+	secretLive map[string]bool                   // Pods live at the previous State flush
 	podWatch   map[string]func()                 // cancels each Pod's surface.resized watcher
 	sizesDirty bool                              // geometry, focus or visibility changed this tick
 	lastSizes  map[protocol.SurfaceID]pushedSize // what each surface's occupant was last told

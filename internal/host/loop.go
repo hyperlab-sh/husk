@@ -300,11 +300,34 @@ func (r *Root) watchPod(id string) {
 // markLivenessChanged is the State flush listener that tells the Surfaces
 // engine a Pod entered or left a status: a claim holds a surface only while
 // its Pod is live (D70), so any husk.pods write may move occupancy. The
-// engine resolves it in the same tick's pass.
-func (r *Root) markLivenessChanged(changes []state.Change, _ *state.Snapshot) {
+// engine resolves it in the same tick's pass. Secrets drops a departed Pod's
+// pending reads here too, without waiting for a connection close or reload.
+func (r *Root) markLivenessChanged(changes []state.Change, snap *state.Snapshot) {
 	for i := range changes {
 		if changes[i].Namespace == state.PodsNamespace {
 			r.engine.LivenessChanged()
+			var doc struct {
+				Plugins map[string]struct {
+					Status contracts.PodStatus `json:"status"`
+				} `json:"plugins"`
+			}
+			if entry, ok := snap.Slices[state.PodsNamespace]; ok {
+				if json.Unmarshal(entry.Value, &doc) != nil {
+					return
+				}
+			}
+			next := map[string]bool{}
+			for id, p := range doc.Plugins {
+				if p.Status == contracts.PodLive {
+					next[id] = true
+				}
+			}
+			for id := range r.secretLive {
+				if !next[id] {
+					r.rt.Secrets.DropPlugin(id)
+				}
+			}
+			r.secretLive = next
 			return
 		}
 	}
