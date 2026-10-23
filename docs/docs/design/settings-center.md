@@ -238,7 +238,7 @@ Styling: a `huh.Theme` is built from the served `Palette` and its index map (`Pa
 
 ### Frontend seams
 
-The center drives the host through `contracts.Frontend` ([Pods](pods.md), "Frontend seams") and nothing else. It uses the existing `Snapshot`, `Palette`, `Themes` and `SetSetting`, the `PaletteANSI` seam [Built-in themes](themes.md) adds, and adds, all with a `host` caller and the authorization that caller has in [Services](services.md) and [Pods](pods.md):
+The center drives the host through `contracts.Frontend` ([Pods](pods.md), "Frontend seams") and nothing else. It uses the existing `Snapshot`, `Palette`, `Themes` and `SetSetting` and the `PaletteANSI` seam that [Built-in themes](themes.md) adds, and it adds the seams below, all with a `host` caller and the authorization that caller has in [Services](services.md) and [Pods](pods.md):
 
 | Seam | Backing method | Goroutine |
 | :--- | :--- | :--- |
