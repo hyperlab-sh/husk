@@ -238,8 +238,12 @@ func (s *SocketServer) holderError(id string, class instance.Class) error {
 	return nil
 }
 
-// Close refuses new clients, unregisters while the claim is still held, closes
-// every stream and cancels its handlers. It never waits on handler cooperation.
+// Close refuses new clients, unregisters while the claim is still held, then
+// drains every stream: request handlers already running finish and their
+// replies are flushed before the stream closes, so a request that asked the
+// instance to stop still gets its reply. The wait is bounded by WriteTimeout
+// on the injected clock, after which the stream is cut and its handlers
+// cancelled; Close does not rely on handler cooperation beyond that.
 func (s *SocketServer) Close() error {
 	s.mu.Lock()
 	if s.closed {
@@ -261,9 +265,12 @@ func (s *SocketServer) Close() error {
 	if ln != nil {
 		_ = ln.Close()
 	}
+	var drained sync.WaitGroup
 	for _, c := range conns {
-		c.close()
+		drained.Add(1)
+		go func() { defer drained.Done(); c.drain() }()
 	}
+	drained.Wait()
 	s.wg.Wait()
 	return s.closeErr
 }

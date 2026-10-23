@@ -46,6 +46,12 @@ type SlotRect struct {
 // (the context ended or Close ran).
 type hostRunEndedMsg struct{ err error }
 
+// quitMsg is the deferred half of the husk.quit action. The action runs inside
+// the dispatcher's invocation on the loop and its reply is handed back only
+// after that Update returns, so shutting down there would close the Server
+// before the invoker gets its reply. The message arrives in a later Update.
+type quitMsg struct{}
+
 type toastExpireMsg struct {
 	id int
 }
@@ -434,6 +440,9 @@ func (m *WorkbenchModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.quitCmd()
 		}
 		return m, nil
+
+	case quitMsg:
+		return m, m.quitCmd()
 
 	case tea.BlurMsg:
 		m.handleBlur()
@@ -1033,7 +1042,7 @@ func (m *WorkbenchModel) hostActionTable() map[string]contracts.HostActionHandle
 		return func(map[string]any) (map[string]any, error) { f(); return nil, nil }
 	}
 	return map[string]contracts.HostActionHandler{
-		"husk.quit":         do(func() { m.cmds = append(m.cmds, m.quitCmd()) }),
+		"husk.quit":         do(func() { m.cmds = append(m.cmds, func() tea.Msg { return quitMsg{} }) }),
 		"husk.home":         do(m.activateHomeWorkbench),
 		"husk.palette.open": do(m.openPalette),
 		"husk.hotspots.toggle_stage": do(func() {

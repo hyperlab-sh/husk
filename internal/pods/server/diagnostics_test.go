@@ -105,6 +105,11 @@ func TestBlockedLoopDiagnosticsNeverStallOneThousandRejectedRequests(t *testing.
 			}
 			closed := make(chan error, 1)
 			go func() { closed <- s.Close() }()
+			if mode == "busy" {
+				// The blocked handlers hold Close until the drain bound.
+				clock.Await(t, WriteTimeout)
+				clock.Advance(WriteTimeout)
+			}
 			if err := testclock.Receive(t, closed); err != nil {
 				t.Fatal(err)
 			}
