@@ -74,7 +74,7 @@ func TestZeroPluginsLayOutEveryRegionSlot(t *testing.T) {
 		if id == protocol.SurfaceActivityRail {
 			continue
 		} // host buttons own the rail
-		name := humanName(id)
+		name := id.Humanised()
 		x := r.InnerX + (r.InnerW-ansi.StringWidth(name))/2
 		y := r.InnerY + (r.InnerH-1)/2
 		rows := strings.Split(m.View().Content, "\n")

@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"strings"
-	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -354,15 +353,6 @@ func (m *WorkbenchModel) renderBottomKeybindBar() string {
 		Render(fitLineWidth(line, m.width))
 }
 
-// humanName mechanically names any surface without a catalog lookup.
-func humanName(id protocol.SurfaceID) string {
-	runes := []rune(strings.ReplaceAll(string(id), "-", " "))
-	if len(runes) > 0 {
-		runes[0] = unicode.ToUpper(runes[0])
-	}
-	return string(runes)
-}
-
 // regionSlot includes the rail for completeness; View draws its host buttons
 // directly rather than calling drawSurface, so it never shows an empty name.
 func regionSlot(id protocol.SurfaceID) bool {
@@ -393,7 +383,7 @@ func (m *WorkbenchModel) drawSurface(c *canvas, slotID protocol.SurfaceID, callo
 	}
 	if regionSlot(slotID) && m.surfaceOwner(slotID) == "" {
 		if rect.InnerW >= 3 && rect.InnerH > 0 {
-			name := fitLineWidth(humanName(slotID), rect.InnerW)
+			name := fitLineWidth(slotID.Humanised(), rect.InnerW)
 			name = strings.TrimRight(name, " ")
 			x := rect.InnerX + (rect.InnerW-ansi.StringWidth(name))/2
 			y := rect.InnerY + (rect.InnerH-1)/2
