@@ -53,7 +53,7 @@ func auditChromeRoles(f *ast.File) (map[string]map[string]int, []string) {
 				case "Success", "Warning", "Danger", "Info":
 					allowed = name == "(*WorkbenchModel).drawToast" || name == "(*WorkbenchModel).statusMark"
 				case "Accent":
-					allowed = name == "(*WorkbenchModel).renderActivityRailBox" || name == "(*WorkbenchModel).drawCommandPalette" || name == "(*WorkbenchModel).dividerEdgeStyles"
+					allowed = name == "(*WorkbenchModel).renderActivityRailBox" || name == "(*WorkbenchModel).drawCommandPalette" || name == "(*WorkbenchModel).dividerEdgeStyles" || name == "(*WorkbenchModel).drawSettings"
 				}
 				if !allowed {
 					violations = append(violations, fmt.Sprintf("%s: forbidden %s", name, role))
@@ -100,6 +100,8 @@ func TestChromeRoleAuditRejectsBypasses(t *testing.T) {
 		{"foreign toast", `func (m *Other) drawToast() { _ = m.palette.Warning }`, true},
 		{"foreign status mark", `func (m *Other) statusMark() { _ = m.palette.Success }`, true},
 		{"foreign rail", `func (m *Other) renderActivityRailBox() { _ = m.palette.Accent }`, true},
+		{"foreign settings", `func (m *Other) drawSettings() { _ = m.palette.Accent }`, true},
+		{"host settings focus", `func (m *WorkbenchModel) drawSettings() { _ = m.palette.Accent }`, false},
 		{"bare function", `func drawToast(m *WorkbenchModel) { _ = m.palette.Warning }`, true},
 		{"package literal", `var f = func(m *WorkbenchModel) { _ = m.palette.Warning }`, true},
 		{"package literal alias", `var f = func(m *WorkbenchModel) { p := m.palette; _ = p.Warning }`, true},
@@ -157,6 +159,9 @@ func TestChromeColourDiscipline(t *testing.T) {
 			if counts[name]["Accent"] != 1 {
 				t.Errorf("want one accent reference in %s; counts: %v", name, counts)
 			}
+		}
+		if counts["(*WorkbenchModel).drawSettings"]["Accent"] != 3 {
+			t.Errorf("want three settings accent reads: focused corner, focused tabs and current theme")
 		}
 	})
 	t.Run("empty frame accent only on active tile", func(t *testing.T) {
