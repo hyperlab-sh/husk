@@ -9,6 +9,10 @@ tags: [architecture-v2, frontend, services, pods]
 
 # Settings center
 
+**Landed:** the center shell, host actions, bottom-bar entry point, Theme tab,
+profile corner, host seams and catalog reader. General, Keys, Store and Installed
+are selectable but their content panes remain specified, not landed.
+
 ## Level 0: What and why
 
 Husk has, or has specified, every method a settings screen needs: `settings.schema` says which keys exist and of what type, `settings.get` and `settings.set` read and write one key, `keys.list` tells which key does what, `theme.list` names the themes, `profile.list` and `profile.use` pick a profile, `husk.pods` says which plugins are loaded and `plugin.remove` unloads one ([Services](services.md), [Keybindings](keybindings.md), [Pods](pods.md)). What it does not have is one place in the TUI where a user sees them. Today a user who wants to change a setting edits a file; the theme selector of [Services](services.md) ("The theme selector") was the first screen to change one from inside Husk, and it was specified as a modal of its own.
@@ -50,7 +54,7 @@ Two more entry points open it on the Theme tab. **`husk.theme.select`** stays a 
 
 The action does nothing while the terminal is frozen, while a plugin's modal or a runtime modal is open, or while the palette is open: its handler (registered through `Frontend.RegisterHostAction`) returns `contracts.ErrDeclined`, so a bound key goes to the occupant like any declined key and a `cli` `action.invoke` gets an empty success reply ([Keybindings](keybindings.md), the decline mechanism), exactly as `husk.theme.select` does. While the center is **already open**, `husk.settings.open` with a `tab` switches to that tab and without one does nothing; it never closes the center (so a bound key is not a toggle; `esc` is the close). Opening writes `overlays.settings_center` in `husk.surfaces` ([State](state.md)) with the active tab's id, and every tab switch rewrites it.
 
-Closing: `esc`, `ctrl+c` (closes the center, never quits, as for the palette), a click outside the modal, and the frozen-terminal transition each close it and write `overlays.settings_center: ""`. Closing **discards dirty fields with no prompt** in v1 (operator ruling); the footer says `esc close (discards edits)` while any field is dirty. A pending reply (a `settings.set`, `profile.use` or `plugin.remove` the center is waiting on) is dropped when it arrives; the write or removal it may have made stands, exactly as for the theme selector. A `profile`, `plugin` or `settings` reload while the center is open does not close it; each tab re-reads its source when the reload publishes ("Reloads while open").
+Closing: `esc`, `ctrl+c` (closes the center, never quits, as for the palette), a click outside the modal (except the theme pill, which switches to Theme even while the center is open), and the frozen-terminal transition each close it and write `overlays.settings_center: ""`. Closing **discards dirty fields with no prompt** in v1 (operator ruling); the footer says `esc close (discards edits)` while any field is dirty. A pending reply (a `settings.set`, `profile.use` or `plugin.remove` the center is waiting on) is dropped when it arrives; the write or removal it may have made stands, exactly as for the theme selector. A `profile`, `plugin` or `settings` reload while the center is open does not close it; each tab re-reads its source when the reload publishes ("Reloads while open").
 
 ### Layout
 
@@ -228,6 +232,11 @@ The built-in catalog is empty: the host embeds no `catalog.json`. A distribution
 
 ### huh
 
+**Landed:** `charm.land/huh/v2` v2.0.3 and its Bubbles v2 dependency build with
+Bubble Tea v2.1.0 and the existing Ultraviolet pin unchanged. Select and Confirm
+render in the workbench compositor under teatest/v2; no fallback or pin bump was
+needed. Production huh use is confined to the center's files.
+
 Forms are built with **`charm.land/huh/v2`** (the canonical vanity path, like `charm.land/bubbletea/v2`; not the old GitHub module path), the line of huh that targets Bubble Tea v2, because Husk is on Bubble Tea v2 (`charmbracelet/x/exp/teatest/v2`, `charmbracelet/ultraviolet` in `go.mod`); the v1 module targets Bubble Tea v1 and cannot be mixed in.
 
 **The compatibility check comes first.** Before writing a field, the implementer adds the dependency and builds `cmd/husk` with the **pinned** `ultraviolet` and Bubble Tea v2 versions in `go.mod`: huh v2 must build against them without moving either pin, and a `tea.Program` with a huh form inside the workbench model must render under `teatest/v2`. huh v2 brings `charm.land/bubbles/v2` (its text inputs and lists) into `go.mod` as a new direct-use dependency, which core does not use today; the check records that the bubbles module builds against the same pins and that nothing outside the center imports it (the same import test as for huh). If it builds only by bumping a pin, the bump is a separate commit that the golden frames pass on; if it does not build at all, or the bump breaks the compositor, huh is **not** used and the fallback below is.
@@ -240,7 +249,7 @@ Styling: a `huh.Theme` is built from the served `Palette` and its index map (`Pa
 
 ### Frontend seams
 
-**Landed:** the center's host seams, including `Themes` and `SetSetting`, are available through `contracts.Frontend`. The center UI remains specified, not landed.
+**Landed:** the center's host seams, including `Themes` and `SetSetting`, are available through `contracts.Frontend`. The shell, Theme tab and profile corner are landed; the remaining tab content is specified, not landed.
 
 The center drives the host through `contracts.Frontend` ([Pods](pods.md), "Frontend seams") and nothing else. It uses `Snapshot`, `Palette`, `Themes`, `SetSetting` and the `PaletteANSI` seam that [Built-in themes](themes.md) adds. The seams below use a `host` caller with the authorization that caller has in [Services](services.md) and [Pods](pods.md), except `KeyListing`, which explicitly requests the full `cli` view:
 
@@ -328,12 +337,12 @@ Each named for the behaviour it pins, in `cmd/husk` on the recording fake fronte
 
 ## Level 2: Migration from today
 
-Nothing of the center's UI exists yet (its host seams and catalog reader have landed, steps 2 and 3); the theme selector it absorbs is itself specified and not landed, so no frontend code is replaced. What lands, in order:
+The shell, Theme tab and profile corner are landed, along with the host seams and catalog reader. The Theme tab is the only selector; no standalone selector was introduced. General, Keys, Store and Installed content remains to land. Implementation order:
 
-1. **huh compatibility check**, as "huh" says, deciding huh v2 or the fallback. One commit, no behaviour.
+1. **huh compatibility check — landed**, as "huh" says: huh v2 builds and renders with the existing pins. One commit, no workbench behaviour.
 2. **Seams — landed.** `contracts.Frontend` exposes `Themes`, `SetSetting`, `SettingsSchema`, `Setting`, `KeyListing`, `Profiles`, `UseProfile`, `RemovePlugin` and `ConfigDir` (`Catalog` landed with the reader, step 3). The root implements them over the existing Services ports and Pods; `KeyListing` calls the same Keybinding port as the handler with a `cli` caller. Writes run on tracked workers and reply only through the loop. `plugin.remove` admits a `host` caller in process ("Changes to other specs"). `husk.pods` entries and `plugin.list` carry `dir`.
 3. **The catalog reader — landed**, a small package beside Services (`internal/services/catalog`), with the rules of "The catalog document", importing `pkg/protocol`, Store's layer types and the shared Store-to-Problem conversion in `services/settings`, and nothing else; tested on fixtures. The host warms its cache on a worker after the startup flight and after each `services.reloaded` and posts the result to the loop. Construction drains the initial worker's post before handing ownership to the frontend; later reloads never wait for the cache. Late workers cannot replace a newer refresh. The cache uses the serving Profile snapshot's active name.
-4. **The center** in `cmd/husk`: the modal, the tab list, the five tabs, the profile corner, the host actions `husk.settings.open` and `husk.theme.select`, the State write, the bottom-bar click, the goldens. The theme selector is implemented **as the Theme tab**, never as a standalone modal.
+4. **The center shell, Theme and profile corner — landed** in `cmd/husk`: the modal, five-tab list, focus and input isolation, profile Select, both host actions, `overlays.settings_center`, bottom-bar click and golden frames. The theme selector is implemented **as the Theme tab**, never as a standalone modal. General, Keys, Store and Installed currently have empty content panes; their implementations and goldens remain specified.
 
 The specs this one amends, each with the minimal consistent edit: [Services](services.md) ("The theme selector" becomes the Theme tab's contract; the toast rule names the center), [State](state.md) (`overlays.settings_center` replaces `overlays.theme_selector`; `husk.pods` gains `dir`), [Keybindings](keybindings.md) (`husk.settings.open` joins the host actions; the context filter row), [Store](store.md) (the `catalog` document in the document list and the directory tree), [Protocol](protocol.md) (`plugin.remove` admits the host; `plugin.list` gains `dir` in minor 2.3), [Pods](pods.md) (the same, and the seams), [Workbench chrome](chrome.md) (the theme pill's click runs `husk.settings.open` with `tab: theme`), [Bundles](bundles.md) (`themes` and `catalog` join the document names a bundle may ship).
 
@@ -341,7 +350,7 @@ The specs this one amends, each with the minimal consistent edit: [Services](ser
 
 - **`plugin.remove` admits a `host` caller — landed.** Previously the four `plugin.*` methods were CLI-only. The Installed tab is the user acting through the frontend, the same trust as the CLI, so `plugin.remove` admits `cli` and `host` (an `input` caller cannot reach it: no key binds a method) and stays `denied` for `plugin`; `plugin.list`, `plugin.log` and `plugin.add` stay CLI-only, because the center reads the Pod set from State and never adds. The frontend reaches `PluginPort.Remove` through the `RemovePlugin` seam, not through the socket adapter, so on the wire `plugin.remove` stays homed `cliOnly` in `MethodHomes`, as `settings.set` does; the port itself admits `cli` and `host`. The sequence under [Pods](pods.md), "Removing a plugin", is unchanged: step 1 admits the two kinds and everything after it is caller-blind.
 - **`husk.pods` entries and `plugin.list` carry `dir` — landed.** The plugin's directory as the converter resolved it (the directory holding `husk-plugin.json`, or the directory a bare executable or manifest file was found in), `""` for a plugin given as an implicit command line. Written by the Pod at `starting` and never changed; additive to a State slice and to a result, so a reader that ignores it is unaffected. It is listed with minor 2.3 but, being an additive field, it does not move `protocol.Version`: minor 2.3 is landed now that both `theme.list` and `settings.set` and minor 2.2's `plugin.add` are served ([Protocol](protocol.md), rule 5 of Versioning). It answers "where did this plugin come from" for every load path, bundle or not.
-- **`overlays.settings_center`** (string: `""` or a tab id) replaces the specified-not-landed `overlays.theme_selector` (bool) in `husk.surfaces`; Input's context filter reads the new field.
+- **`overlays.settings_center` — landed** (string: `""` or a tab id) replaces the specified-not-landed `overlays.theme_selector` (bool) in `husk.surfaces`; Input's context filter reads the new field.
 - **`catalog`** joins `config`, `keymap` and `themes` as a layered Store document name.
 
 ## Decisions taken by this spec
