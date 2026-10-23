@@ -370,7 +370,7 @@ Why the host emulates: the host owns the cell canvas and the key encoder, so a t
 
 ```json
 {"id":3,"method":"theme.list","params":{}}
-{"id":3,"result":{"themes":[{"name":"CharmTone","source":"built-in","current":false},{"name":"evening","source":"user","current":true}]}}
+{"id":3,"result":{"themes":[{"name":"charm","source":"built-in","current":false},{"name":"charm-light","source":"built-in","current":false},{"name":"dracula","source":"built-in","current":false},{"name":"base16","source":"built-in","current":false},{"name":"catppuccin-mocha","source":"built-in","current":false},{"name":"catppuccin-latte","source":"built-in","current":false},{"name":"rose-pine","source":"built-in","current":false},{"name":"rose-pine-moon","source":"built-in","current":false},{"name":"rose-pine-dawn","source":"built-in","current":false},{"name":"evening","source":"user","current":true}]}}
 {"id":4,"method":"settings.set","params":{"key":"theme.name","value":"evening"}}
 {"id":4,"result":{"key":"theme.name","value":"evening","source":"user","reports":[{"service":"profile","gen":5,"applied":true,"changed":false},{"service":"settings","gen":5,"applied":true,"changed":true},{"service":"theme","gen":4,"applied":true,"changed":true},{"service":"keybinding","gen":5,"applied":true,"changed":false},{"service":"secrets","gen":5,"applied":true,"changed":false}]}}
 ```
@@ -387,7 +387,7 @@ Why the host emulates: the host owns the cell canvas and the key encoder, so a t
 | `slot_mouse` | `input.mouse` | notification | |
 | `key_state` | `input.key_state` | notification | `KeyPhase` values unchanged |
 | `command_invoke` | `action.invoke` | request | gains a reply; `command_id` becomes `action` |
-| `theme_changed` | `theme.changed` | notification | palette values stay `#RRGGBB` |
+| `theme_changed` | `theme.changed` | notification | palette values stay `#rrggbb` strings, except that while the built-in `base16` theme is selected a value is an ANSI index `"0"`–`"15"`; a plugin treats a value that does not start with `#` as an index ([Built-in themes](themes.md), "Role values"). Field types are unchanged |
 | `workspace_context` | `state.set` on the application's workspace slice; subscribers get the `state.changed` event | request | no dedicated message |
 | `toast` | `toast.show` | notification | |
 | `close_modal` | `surface.close` with `{"surface":"modal-surface"}` | notification | |

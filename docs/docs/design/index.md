@@ -16,7 +16,13 @@ Background and trade-offs behind decisions in the host.
   adopted.
 - [Workbench chrome](chrome.md): every surface laid out whether occupied or
   not, with its name when empty; the rail tiles; what the top and bottom bars
-  show, including the layout label and the theme name. Specified, not landed.
+  show, including the layout label and the theme name; which palette role
+  each piece of chrome may be drawn with. Specified, not landed.
+- [Built-in themes](themes.md): the nine themes Husk ships as a built-in
+  `themes` layer (`charm` default, `charm-light`, `dracula`, `base16`,
+  `catppuccin-mocha`, `catppuccin-latte`, `rose-pine`, `rose-pine-moon`,
+  `rose-pine-dawn`), how each source palette was mapped onto Husk's roles,
+  the contrast adjustments, and the exact document. Specified, not landed.
 
 ## Architecture v2 (planned)
 
