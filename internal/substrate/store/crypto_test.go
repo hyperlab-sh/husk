@@ -46,6 +46,19 @@ func (r *memoryKeyring) Set(_, _, value string) error {
 	return nil
 }
 
+func (r *memoryKeyring) Delete(_, _ string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.unavailable {
+		return errors.New("no keyring")
+	}
+	if r.value == "" {
+		return keyring.ErrNotFound
+	}
+	r.value = ""
+	return nil
+}
+
 func TestSecretRoundTripRandomCiphertextAndLazyIdentity(t *testing.T) {
 	for _, fallback := range []bool{false, true} {
 		t.Run(map[bool]string{false: "keyring", true: "fallback"}[fallback], func(t *testing.T) {

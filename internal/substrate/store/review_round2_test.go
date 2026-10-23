@@ -94,6 +94,8 @@ func (r *classifiedKeyring) Set(string, string, string) error {
 	return errors.New("no writable keyring")
 }
 
+func (r *classifiedKeyring) Delete(string, string) error { return r.getErr }
+
 func TestPremergeKeyringDefiniteAbsenceVersusTransient(t *testing.T) {
 	cases := []struct {
 		name   string
