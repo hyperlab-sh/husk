@@ -74,10 +74,11 @@ puts in its rail are consumer concerns and do not belong in the frontend.
 - The **humanised name** of a surface is its id with every `-` replaced by a
   space and the first letter upper-cased, nothing else: `sidebar-list` is
   "Sidebar list", `thread-row-status` is "Thread row status", `full-canvas` is
-  "Full canvas". It is computed from the id by one function, never looked up in
-  a table, so a surface added to `pkg/protocol` gets a name without a frontend
-  change. The slot explorer's titles (`Sidebar List`, `Row Status`) are a
-  different thing and are unchanged.
+  "Full canvas". It is computed from the id by one method,
+  `protocol.SurfaceID.Humanised` in `pkg/protocol`, shared by every frontend
+  consumer and never looked up in a table, so a surface added to `pkg/protocol`
+  gets a name without a frontend change. The slot explorer's titles
+  (`Sidebar List`, `Row Status`) are a different thing and are unchanged.
 
 ### Layout: every surface is laid out
 
