@@ -53,6 +53,9 @@ type Options struct {
 	// Warn receives `settings: unregistered key <key>` once per key per
 	// process. It is not a Problem and appears in no report.
 	Warn func(msg string)
+	// PluginAdditions holds paths/dirs from additive launch flags. Each array
+	// overlays the layers below instance, not the named-instance file.
+	PluginAdditions map[string][]string
 }
 
 // Service publishes immutable snapshots through a single atomic pointer.
@@ -125,6 +128,7 @@ var startConsumed = func() map[string]bool {
 func New(opts Options) (*Service, error) {
 	s := &Service{opts: opts, base: map[string]Entry{}}
 	s.opts.Schema = c.Clone(opts.Schema)
+	s.opts.PluginAdditions = c.Clone(opts.PluginAdditions)
 	m := map[string]bool{}
 	s.unknown.Store(&m)
 	add := func(e Entry, source string) error {
@@ -421,6 +425,11 @@ func (s *Service) rebuild(ctx context.Context, in c.ReloadInput, startup bool) (
 	}
 	flat := map[string]any{}
 	flatten("", in.Doc.Doc, schema, flat)
+	for name := range s.opts.PluginAdditions {
+		if name == "paths" || name == "dirs" {
+			delete(flat, "husk.plugins."+name)
+		}
+	}
 	// A profile or distribution cannot choose the distribution's own source.
 	// Read the allowed layers independently: an ignored higher value must not
 	// hide the user value or manufacture a restart_required warning.
@@ -488,6 +497,7 @@ func (s *Service) rebuild(ctx context.Context, in c.ReloadInput, startup bool) (
 		next.sources[key] = layer
 		next.values[key] = v
 	}
+	s.addPlugins(next, in.ConfigLayers, layerFiles, &r.Problems)
 	// Most restart keys take effect on the first successful load. Start-consumed
 	// keys are fixed even at generation zero. Removing a key counts as a change
 	// back to the default.

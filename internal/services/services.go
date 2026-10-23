@@ -823,9 +823,12 @@ type RuntimeOptions struct {
 	Audit     func(string)
 	// ProfileFlag is the --profile start flag: a selection input of the
 	// startup flight only.
-	ProfileFlag   *string
-	ProfileSource func(string) string
-	Schema        []settings.Entry
+	ProfileFlag *string
+	// PluginAdditions contains CLI-only paths/dirs appended to lower-layer
+	// settings to produce instance values.
+	PluginAdditions map[string][]string
+	ProfileSource   func(string) string
+	Schema          []settings.Entry
 	// Warn is the warning sink for unregistered settings keys.
 	Warn    func(msg string)
 	Context context.Context
@@ -837,7 +840,7 @@ func New(opts RuntimeOptions) (*Runtime, error) {
 	if p == nil {
 		return nil, err
 	}
-	set, setErr := settings.New(settings.Options{Schema: opts.Schema, Warn: opts.Warn, Store: opts.Writer, Post: opts.Post})
+	set, setErr := settings.New(settings.Options{Schema: opts.Schema, Warn: opts.Warn, Store: opts.Writer, Post: opts.Post, PluginAdditions: opts.PluginAdditions})
 	if setErr != nil {
 		return nil, setErr
 	}

@@ -17,11 +17,12 @@ import (
 type Option func(*options)
 
 type options struct {
-	version   string
-	logger    func(level, msg string)
-	prompt    func(context.Context, secrets.Prompt) secrets.Answer
-	factory   pods.Factory
-	modifiers func() protocol.ModifierState
+	version         string
+	logger          func(level, msg string)
+	prompt          func(context.Context, secrets.Prompt) secrets.Answer
+	factory         pods.Factory
+	modifiers       func() protocol.ModifierState
+	pluginAdditions map[string][]string
 
 	// Test seams.
 	catalogReader catalog.Reader
@@ -63,6 +64,13 @@ func WithLogger(fn func(level, msg string)) Option { return func(o *options) { o
 // user_denied and nothing is remembered.
 func WithPrompt(fn func(ctx context.Context, p secrets.Prompt) secrets.Answer) Option {
 	return func(o *options) { o.prompt = fn }
+}
+
+// WithPluginAdditions appends launch paths or dirs to the effective settings
+// below the instance layer. Keys are "paths" and "dirs"; replace flags remain
+// in the instance documents instead.
+func WithPluginAdditions(additions map[string][]string) Option {
+	return func(o *options) { o.pluginAdditions = additions }
 }
 
 // WithFactory replaces the process Wrapper factory (fake plugins in tests).
