@@ -2,8 +2,8 @@
 // its owner's operation: the owner fires it, the hook's declared kind says what
 // the subscribers may answer, and the runner returns one Outcome. The runner
 // asks every live subscriber through internal/stem/calls and reads their
-// replies by kind. This version runs the collect and gate kinds; the transform
-// chain is refused at startTransform.
+// replies by kind: collect and gate fan out at once, transform runs a chain of
+// one leg at a time.
 //
 // The runner is confined to the host loop: Call and Complete are called from
 // Update and never block, and onDone runs on the loop goroutine exactly once
@@ -60,7 +60,7 @@ const (
 	CodeBusy = protocol.CodeBusy
 	// CodeUnavailable reports that Calls cannot currently deliver.
 	CodeUnavailable = protocol.CodeUnavailable
-	// CodeInternal reports a runner bug or a seam not yet implemented.
+	// CodeInternal reports a runner bug or an unclassified Calls failure.
 	CodeInternal = protocol.CodeInternal
 )
 
@@ -182,6 +182,9 @@ type HookError struct {
 	// Message explains the failure.
 	Message string
 	// Data is the wire error's structured data member; nil when absent.
+	// Calls only delivers an error whose data is a JSON object (anything else
+	// becomes its own internal/invalid_reply error), so this carries the
+	// member whole.
 	Data map[string]any
 }
 
@@ -262,6 +265,16 @@ type call struct {
 	waiting int
 	entries []HookResult
 	done    func(Outcome)
+	// chain is the transform state; nil for collect and gate.
+	chain *chain
+}
+
+// chain is a transform call's state: the live subscribers in order, the next
+// stage to send and the data the next stage receives.
+type chain struct {
+	asked []string
+	next  int
+	data  map[string]any
 }
 
 // New returns a Runner over opts. It panics when a required view is missing
@@ -334,7 +347,7 @@ func (r *Runner) Call(caller Caller, hook string, data map[string]any, onDone fu
 	}
 	if len(asked) == 0 {
 		r.inFlight[hook]++
-		defer func() { r.inFlight[hook]-- }()
+		defer r.release(hook)
 		if onDone != nil {
 			onDone(emptyOutcome(def.Kind, data))
 		}
@@ -347,15 +360,19 @@ func (r *Runner) Call(caller Caller, hook string, data map[string]any, onDone fu
 	if err := r.opts.Calls.CanSend(pluginIDs(preflight)...); err != nil {
 		return capError(err)
 	}
-	c := &call{def: def, waiting: len(asked), entries: make([]HookResult, len(asked)), done: onDone}
+	c := &call{def: def, done: onDone}
 	r.inFlight[hook]++
 	if def.Kind == Transform {
-		err := r.startTransform(c, asked, params)
-		if err != nil {
-			r.inFlight[hook]--
+		if data == nil {
+			data = map[string]any{}
 		}
-		return err
+		c.entries = make([]HookResult, 0, len(asked))
+		c.chain = &chain{asked: asked, data: data}
+		r.advance(c, params)
+		return nil
 	}
+	c.waiting = len(asked)
+	c.entries = make([]HookResult, len(asked))
 	r.fanOut(c, asked, params)
 	return nil
 }
@@ -369,7 +386,8 @@ func (r *Runner) authorize(caller Caller, hook string) (HookDef, error) {
 	}
 	switch caller.Kind {
 	case CallerPlugin:
-		if !ok || caller.PluginID == "" || def.Owner != caller.PluginID {
+		// A plugin never fires a husk.* hook, whatever its id says.
+		if !ok || caller.PluginID == "" || caller.PluginID == HostOwner || def.Owner != caller.PluginID {
 			return denied()
 		}
 	case CallerHost:
@@ -387,11 +405,78 @@ func (r *Runner) authorize(caller Caller, hook string) (HookDef, error) {
 	return def, nil
 }
 
-// startTransform is the seam for the transform chain: one leg per stage, in
-// priority order, each stage sent from Complete. Until the chain lands the
-// kind is refused. On a nil return the chain owns c and its in-flight slot.
-func (r *Runner) startTransform(c *call, asked []string, params json.RawMessage) error {
-	return &HookError{Code: CodeInternal, Message: "transform kind not implemented"}
+// advance sends the next transform stage, or finishes the call when none is
+// left. Stages that fail without a leg (a cap hit, an undeliverable send) are
+// recorded and skipped in the same loop; a stage that gets a leg parks the
+// chain until Complete resolves it. params is the first stage's encoded
+// params, nil afterwards. A closed Calls table ends the chain.
+func (r *Runner) advance(c *call, params json.RawMessage) {
+	ch := c.chain
+	for ch.next < len(ch.asked) {
+		plugin := ch.asked[ch.next]
+		ch.next++
+		entry := HookResult{Plugin: plugin}
+		if err := r.opts.Calls.CanSend(calls.PluginID(plugin)); err != nil {
+			r.logf("hooks: %s: stage %s skipped: %v", c.def.ID, plugin, err)
+			if errors.Is(err, calls.ErrClosed) {
+				entry.Err = shutdownError()
+				c.entries = append(c.entries, entry)
+				break
+			}
+			entry.Err = capError(err)
+			c.entries = append(c.entries, entry)
+			continue
+		}
+		if params == nil {
+			var err error
+			if params, err = encodeParams(c.def, ch.data); err != nil {
+				entry.Err = err.(*HookError)
+				c.entries = append(c.entries, entry)
+				continue
+			}
+		}
+		h, err := r.opts.Calls.Send(calls.PluginID(plugin), Method, params, calls.Options{Timeout: c.def.Timeout, Requester: Requester})
+		params = nil
+		if err != nil {
+			r.logf("hooks: %s: send to %s failed: %v", c.def.ID, plugin, err)
+			entry.Err = legSendError(err)
+			c.entries = append(c.entries, entry)
+			if isShutdown(entry.Err) {
+				break
+			}
+			continue
+		}
+		r.legs[h] = leg{call: c, slot: len(c.entries)}
+		c.entries = append(c.entries, entry)
+		return
+	}
+	r.finish(c)
+}
+
+// shutdownError is the entry of a leg that Calls closing cut short.
+func shutdownError() *HookError {
+	return &HookError{Code: protocol.CodeCancelled, Message: "shutting down", Data: map[string]any{"reason": "shutdown"}}
+}
+
+// isShutdown reports whether e is the cancelled/shutdown error: the host is
+// closing, so a transform chain ends instead of going on.
+func isShutdown(e *HookError) bool {
+	return e != nil && e.Code == protocol.CodeCancelled && e.Data["reason"] == "shutdown"
+}
+
+// legSendError maps a failed Send to the subscriber's entry error. A closed
+// table is a shutdown; an unavailable writer is a disconnect.
+func legSendError(err error) *HookError {
+	switch {
+	case errors.Is(err, calls.ErrClosed):
+		return shutdownError()
+	case errors.Is(err, calls.ErrUnavailable):
+		e := sendError(err)
+		e.Data = map[string]any{"reason": "disconnected"}
+		e.Message = "subscriber disconnected"
+		return e
+	}
+	return sendError(err)
 }
 
 // fanOut sends one leg per subscriber, all in this Update and in priority
@@ -439,6 +524,17 @@ func (r *Runner) Complete(results ...calls.Result) int {
 		c := l.call
 		entry := r.interpret(c.def, c.entries[l.slot].Plugin, res)
 		c.entries[l.slot] = entry
+		if c.chain != nil {
+			if entry.Data != nil {
+				c.chain.data = entry.Data
+			}
+			if isShutdown(entry.Err) {
+				r.finish(c)
+			} else {
+				r.advance(c, nil)
+			}
+			continue
+		}
 		c.waiting--
 		if c.waiting == 0 {
 			r.finish(c)
@@ -449,9 +545,20 @@ func (r *Runner) Complete(results ...calls.Result) int {
 
 // finish delivers the call's outcome, then frees its in-flight slot.
 func (r *Runner) finish(c *call) {
-	defer func() { r.inFlight[c.def.ID]-- }()
+	defer r.release(c.def.ID)
 	if c.done != nil {
-		c.done(buildOutcome(c.def.Kind, c.entries))
+		out := buildOutcome(c.def.Kind, c.entries)
+		if c.chain != nil {
+			out.Data = c.chain.data
+		}
+		c.done(out)
+	}
+}
+
+// release frees one in-flight slot of hook, dropping the entry at zero.
+func (r *Runner) release(hook string) {
+	if r.inFlight[hook]--; r.inFlight[hook] <= 0 {
+		delete(r.inFlight, hook)
 	}
 }
 
@@ -535,10 +642,19 @@ func (r *Runner) interpret(def HookDef, plugin string, res calls.Result) HookRes
 	if !ok {
 		return invalid("reply must be a JSON object")
 	}
-	var foreign []string
+	if foreign := foreignFields(def.Kind, fields); len(foreign) > 0 {
+		r.ignoreForeign(plugin, def.ID, foreign)
+	}
 	switch def.Kind {
+	case Transform:
+		if raw, has := fields["data"]; has && !isNull(raw) {
+			data := decodeObject(raw)
+			if data == nil {
+				return invalid("data must be an object")
+			}
+			out.Data = data
+		}
 	case Collect:
-		foreign = present(fields, "data", "veto", "reason")
 		if raw, has := fields["items"]; has {
 			items, ok := decodeArray(raw)
 			if !ok {
@@ -549,28 +665,41 @@ func (r *Runner) interpret(def HookDef, plugin string, res calls.Result) HookRes
 			}
 		}
 	case Gate:
-		foreign = present(fields, "data", "items")
 		var veto bool
-		var reason string
 		if raw, has := fields["veto"]; has {
 			if veto, ok = decodeBool(raw); !ok {
 				return invalid("veto must be a boolean")
 			}
 		}
-		if raw, has := fields["reason"]; has {
-			if reason, ok = decodeString(raw); !ok {
-				return invalid("reason must be a string")
-			}
-		}
 		if veto {
-			out.Veto, out.Reason = true, reason
+			// A reason belongs to a veto; without one it is not read.
+			if raw, has := fields["reason"]; has {
+				if out.Reason, ok = decodeString(raw); !ok {
+					out.Reason = ""
+					return invalid("reason must be a string")
+				}
+			}
+			out.Veto = true
 		}
-	}
-	if len(foreign) > 0 {
-		r.ignoreForeign(plugin, def.ID, foreign)
 	}
 	return out
 }
+
+// foreignFields lists the reply fields that belong to another kind.
+func foreignFields(kind Kind, fields map[string]json.RawMessage) []string {
+	switch kind {
+	case Transform:
+		return present(fields, "items", "veto", "reason")
+	case Collect:
+		return present(fields, "data", "veto", "reason")
+	case Gate:
+		return present(fields, "data", "items")
+	}
+	return nil
+}
+
+// isNull reports whether raw is the JSON null.
+func isNull(raw json.RawMessage) bool { return bytes.Equal(bytes.TrimSpace(raw), []byte("null")) }
 
 // ignoreForeign logs, once per (subscriber, hook) per process, that a reply
 // carried fields of another kind.

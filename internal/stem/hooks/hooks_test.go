@@ -59,7 +59,7 @@ func (c *fakeCatalog) List() []HookDef {
 	return out
 }
 
-// hookOf declares hook id owned by owner, with a 10s timeout, and registers
+// declare declares hook id owned by owner, with a 10s timeout, and registers
 // subscribers at ascending priorities in the given order.
 func (c *fakeCatalog) declare(id, owner string, kind Kind, subscribers ...string) *fakeCatalog {
 	if c.defs == nil {
@@ -282,6 +282,7 @@ func TestOwnershipTable(t *testing.T) {
 		{"plugin go.reference owns it", Caller{Kind: CallerPlugin, PluginID: "go.reference"}, "go.reference.before-refresh", ""},
 		{"plugin on a missing hook", Caller{Kind: CallerPlugin, PluginID: "a"}, "a.missing", protocol.CodeDenied},
 		{"plugin without id", Caller{Kind: CallerPlugin}, "a.h", protocol.CodeDenied},
+		{"plugin named husk on a host hook", Caller{Kind: CallerPlugin, PluginID: HostOwner}, "husk.before-state-clear", protocol.CodeDenied},
 		{"cli on an existing hook", Caller{Kind: CallerCLI}, "a.h", protocol.CodeDenied},
 		{"cli on a host hook", Caller{Kind: CallerCLI}, "husk.before-state-clear", protocol.CodeDenied},
 		{"cli on a missing hook", Caller{Kind: CallerCLI}, "a.missing", protocol.CodeDenied},
@@ -346,20 +347,6 @@ func TestNoLiveSubscriberAnswersAtOnceWithTheKindsEmptyOutcome(t *testing.T) {
 		if len(g.box.sent) != 0 || g.r.Pending() != 0 || g.r.inFlight[tc.hook] != 0 {
 			t.Fatal("no leg and no in-flight slot expected")
 		}
-	}
-}
-
-// --- transform seam --------------------------------------------------------
-
-func TestTransformIsRefusedAtTheSeamWithoutCounting(t *testing.T) {
-	g := newRig(t, (&fakeCatalog{}).declare("a.t", "a", Transform, "b"), fakeLiveness{"b": true}, calls.TableOptions{})
-	col := &collector{}
-	he := wantCode(t, g.r.Call(Caller{Kind: CallerPlugin, PluginID: "a"}, "a.t", nil, col.onDone), protocol.CodeInternal)
-	if he.Message != "transform kind not implemented" {
-		t.Fatalf("message %q", he.Message)
-	}
-	if col.n != 0 || len(g.box.sent) != 0 || g.r.Pending() != 0 || g.r.inFlight["a.t"] != 0 {
-		t.Fatal("refused transform leaked work")
 	}
 }
 
@@ -557,6 +544,28 @@ func TestLegDeadlineIsTheDeclaredTimeout(t *testing.T) {
 	}
 }
 
+func TestLongerTimeoutHookHasNotExpiredWhenTheShorterOneHas(t *testing.T) {
+	cat := (&fakeCatalog{}).
+		declare("a.short", "a", Gate, "b").timeout("a.short", 2*time.Second).
+		declare("a.long", "a", Gate, "b").timeout("a.long", 5*time.Second)
+	g := newRig(t, cat, fakeLiveness{"b": true}, calls.TableOptions{})
+	short, long := &collector{}, &collector{}
+	g.fire("a.short", nil, short)
+	g.fire("a.long", nil, long)
+	g.clock.advance(2 * time.Second)
+	if n := g.r.Complete(g.table.Expire(g.clock.now)...); n != 1 {
+		t.Fatalf("expiry resolved %d legs, want only the short hook's", n)
+	}
+	if short.n != 1 || long.n != 0 || g.r.Pending() != 1 {
+		t.Fatalf("short=%d long=%d pending=%d", short.n, long.n, g.r.Pending())
+	}
+	entryErr(t, short.out.Results[0], protocol.CodeTimeout)
+	g.clock.advance(3 * time.Second)
+	if n := g.r.Complete(g.table.Expire(g.clock.now)...); n != 1 || long.n != 1 {
+		t.Fatalf("long hook: resolved %d, delivered %d", n, long.n)
+	}
+}
+
 func TestSubscriberErrorExitAndShutdownEntries(t *testing.T) {
 	cat := (&fakeCatalog{}).declare("a.g", "a", Gate, "b", "c", "d")
 	g := newRig(t, cat, fakeLiveness{"b": true, "c": true, "d": true}, calls.TableOptions{})
@@ -705,8 +714,8 @@ func TestInFlightCap(t *testing.T) {
 		if n := g.r.Complete(g.table.Close()...); n != 16 {
 			t.Fatalf("close resolved %d legs", n)
 		}
-		if g.r.inFlight["a.g"] != 0 {
-			t.Fatalf("in flight %d after close", g.r.inFlight["a.g"])
+		if len(g.r.inFlight) != 0 {
+			t.Fatalf("in flight %v after close", g.r.inFlight)
 		}
 	})
 
@@ -778,7 +787,6 @@ func TestGateWrongTypesAreInvalidParamsAndCountAsAllow(t *testing.T) {
 		{"veto null", `{"veto":null}`},
 		{"reason number", `{"veto":true,"reason":5}`},
 		{"reason null", `{"veto":true,"reason":null}`},
-		{"reason number without veto", `{"reason":5}`},
 		{"non-object result", `[1]`},
 		{"string result", `"veto"`},
 	} {
@@ -791,6 +799,52 @@ func TestGateWrongTypesAreInvalidParamsAndCountAsAllow(t *testing.T) {
 				t.Fatalf("a malformed reply must count as allow: %#v", col.out)
 			}
 		})
+	}
+}
+
+func TestGateReasonWithoutVetoIsIgnoredNotInvalid(t *testing.T) {
+	for _, reply := range []string{`{"reason":5}`, `{"veto":false,"reason":5}`, `{"reason":null}`, `{"reason":"why"}`} {
+		g, col := gateRig(t, "p1")
+		g.answer("p1", reply)
+		e := col.out.Results[0]
+		if e.Err != nil || e.Veto || e.Reason != "" || !col.out.Allowed {
+			t.Fatalf("%s: entry %#v", reply, e)
+		}
+	}
+}
+
+func TestForeignFieldIsLoggedEvenWhenTheReplyIsInvalid(t *testing.T) {
+	g, col := gateRig(t, "p1")
+	g.answer("p1", `{"items":[1],"veto":"yes"}`)
+	entryErr(t, col.out.Results[0], protocol.CodeInvalidParams)
+	if len(g.logs) != 1 || !strings.Contains(g.logs[0], "items") {
+		t.Fatalf("logs %q", g.logs)
+	}
+}
+
+func TestLegErrorDataIsCarriedVerbatim(t *testing.T) {
+	g, col := gateRig(t, "p1", "p2")
+	g.fail("p1", &protocol.Error{Code: protocol.CodeFailed, Message: "no", Data: json.RawMessage(`{"k":1,"nested":{"a":[true]}}`)})
+	g.fail("p2", &protocol.Error{Code: protocol.CodeFailed, Message: "bare"})
+	p1, p2 := col.out.Results[0].Err, col.out.Results[1].Err
+	want := map[string]any{"k": json.Number("1"), "nested": map[string]any{"a": []any{true}}}
+	if p1 == nil || p1.Code != protocol.CodeFailed || p1.Message != "no" || !reflect.DeepEqual(p1.Data, want) {
+		t.Fatalf("error with data %#v", p1)
+	}
+	if p2 == nil || p2.Data != nil {
+		t.Fatalf("error without data %#v", p2)
+	}
+}
+
+// Calls refuses an error whose data is not an object and answers its own
+// internal error, so the runner never sees a non-object data member.
+func TestNonObjectErrorDataNeverReachesTheRunner(t *testing.T) {
+	g, col := gateRig(t, "p1")
+	g.fail("p1", &protocol.Error{Code: protocol.CodeFailed, Message: "no", Data: json.RawMessage(`[1]`)})
+	e := col.out.Results[0]
+	entryErr(t, e, protocol.CodeInternal)
+	if e.Err.Data["reason"] != "invalid_reply" {
+		t.Fatalf("error %#v", e.Err)
 	}
 }
 
