@@ -55,6 +55,11 @@ Level 2 migration from today's code. Read [Protocol](protocol.md) and
   small manifest, one folder per plugin and optional config files; how
   `husk --bundle` loads it as plugins plus the distribution layer; and what
   `husk create tui|bundle` writes.
+- [Guide plugin](guide-plugin.md): an in-repo developer plugin that draws
+  numbered callouts, surface names, occupants and keys over the live layout
+  on the `app-overlay` surface; the overlay layer's drawing rules and the
+  keys a plugin may read are specified in the compositor, State and
+  Keybinding specs.
 
 ## Adapters (planned)
 
