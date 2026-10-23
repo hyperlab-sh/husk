@@ -11,6 +11,7 @@ import (
 	stheme "github.com/hyperlab-sh/husk/internal/services/theme"
 	"github.com/hyperlab-sh/husk/internal/substrate/store"
 	palette "github.com/hyperlab-sh/husk/pkg/theme"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -572,3 +573,97 @@ func TestCoordinatorCodesARebuildErrorWithoutProblems(t *testing.T) {
 		})
 	}
 }
+
+// genCountService counts Generation reads: every flight that runs reads each
+// Service's generation at least once, so the count tells how many ran.
+type genCountService struct {
+	fakeService
+	reads atomic.Int64
+}
+
+func (s *genCountService) Generation() Generation {
+	s.reads.Add(1)
+	return s.fakeService.Generation()
+}
+
+// waitIdle spins until the coordinator has no active or queued flight.
+func waitIdle(t *testing.T, co *Coordinator) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		co.mu.Lock()
+		idle := co.active == nil && len(co.queue) == 0
+		co.mu.Unlock()
+		if idle {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("coordinator never went idle")
+		}
+		runtime.Gosched()
+	}
+}
+
+func assertShutdown(t *testing.T, err error) {
+	t.Helper()
+	var coded *c.Error
+	if !errors.As(err, &coded) || coded.Code != "cancelled" || coded.Reason != "shutdown" {
+		t.Fatalf("err = %v, want cancelled/shutdown", err)
+	}
+}
+
+// A profile.use flight is requested on the loop and launched by Tick. A Close
+// that comes before that Tick launches it itself, so its waiter is answered
+// cancelled/shutdown; the flight touches neither Store nor the Publisher, and
+// a later Tick runs nothing.
+func TestCloseLaunchesALoopRequestedFlight(t *testing.T) {
+	services := fakeServices()
+	counter := &genCountService{fakeService: fakeService{name: "secrets"}}
+	services["secrets"] = counter
+	source := &fakeStore{}
+	var events atomic.Int64
+	co, err := NewCoordinator(Options{Store: source, Services: services, Clock: clock(), Publisher: c.PublishFunc(func(string, any) { events.Add(1) })})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waiter := co.AwaitProfile("x")
+	co.mu.Lock()
+	started := co.active != nil && co.active.started
+	co.mu.Unlock()
+	if started {
+		t.Fatal("AwaitProfile on the loop launched its flight before Tick")
+	}
+	co.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	reports, err := waiter.Wait(ctx)
+	assertShutdown(t, err)
+	if len(reports) != 5 {
+		t.Fatalf("reports = %+v, want five", reports)
+	}
+	for i, rep := range reports {
+		if rep.Service != order()[i] || rep.Applied || len(rep.Problems) != 1 || rep.Problems[0].Code != "cancelled" {
+			t.Fatalf("report %d = %+v, want %s cancelled", i, rep, order()[i])
+		}
+	}
+	waitIdle(t, co)
+	ran := counter.reads.Load()
+	co.Tick()
+	waitIdle(t, co)
+	if got := counter.reads.Load(); got != ran {
+		t.Fatalf("Tick after Close ran another flight (generation reads %d then %d)", ran, got)
+	}
+	if got := source.trace(); len(got) != 0 {
+		t.Fatalf("store trace = %v, want no invalidate", got)
+	}
+	if n := events.Load(); n != 0 {
+		t.Fatalf("published %d services.reloaded events after Close", n)
+	}
+	for _, s := range services {
+		if calls := s.(interface{ rebuilds() int64 }).rebuilds(); calls != 0 {
+			t.Fatalf("a Service rebuilt after Close (%d)", calls)
+		}
+	}
+}
+
+func (s *fakeService) rebuilds() int64 { return s.calls.Load() }
