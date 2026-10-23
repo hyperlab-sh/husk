@@ -795,6 +795,13 @@
     "keys.list.result": {
       "description": "Result owned by design/keybindings.md; no additional field constraints specified here."
     },
+    "plugin.add.params": {
+      "description": "Payload owned by design/pods.md; no additional field constraints specified here.",
+      "type": "object"
+    },
+    "plugin.add.result": {
+      "description": "Result owned by design/pods.md; no additional field constraints specified here."
+    },
     "plugin.list.params": {
       "description": "Payload owned by design/pods.md; no additional field constraints specified here.",
       "type": "object"
@@ -1130,6 +1137,15 @@
       },
       "result": {
         "$ref": "#/$defs/keys.list.result"
+      }
+    },
+    "plugin.add": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/plugin.add.params"
+      },
+      "result": {
+        "$ref": "#/$defs/plugin.add.result"
       }
     },
     "plugin.list": {

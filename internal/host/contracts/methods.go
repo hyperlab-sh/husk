@@ -7,8 +7,8 @@ import "github.com/hyperlab-sh/husk/pkg/protocol"
 // allowed caller kinds.
 const Outbound = "outbound"
 
-// Unrouted marks wire methods no handler serves: protocol.error, which is
-// never answered. Every other inbound method has a port.
+// Unrouted marks wire methods no handler serves yet: protocol.error, which
+// never has one, and plugin.add until PluginPort grows its Add method.
 const Unrouted = "unrouted"
 
 // MethodHome says which port interface serves one wire method, under which
@@ -103,6 +103,9 @@ func MethodHomes() map[string]MethodHome {
 		protocol.MethodPluginList:   home("PluginPort", "List", cliOnly),
 		protocol.MethodPluginLog:    home("PluginPort", "Log", cliOnly),
 		protocol.MethodPluginRemove: home("PluginPort", "Remove", cliOnly),
+		// plugin.add is CLI-only (pods.md, "Adding a plugin"); it stays
+		// unrouted until the addition sequence lands behind a PluginPort method.
+		protocol.MethodPluginAdd: {Port: Unrouted},
 
 		protocol.MethodConfigReload: home("ConfigPort", "Reload", cliOnly),
 	}

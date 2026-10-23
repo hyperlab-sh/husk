@@ -164,7 +164,7 @@ Triggers, each carried as the reload's `reason`:
 | `startup` | the host finished construction and hydrated State | the composition root, once per process, before the first plugin launches |
 | `cli` | `config.reload` | a `cli` or `host` caller through the Server |
 | `profile` | the `husk.profile` slice changed | the coordinator's own State flush listener |
-| `plugin` | a plugin's declared documents were added or removed | the Pods host, after `Store.Declare` (launch step 3) or `Store.Undeclare` (`plugin.remove` step 7, [Pods](pods.md)); the removal waits for this flight and returns its five reports in the `plugin.remove` reply, the same `Report` objects `config.reload` returns, and a report with `applied: false` does not fail the removal |
+| `plugin` | a plugin's declared documents were added or removed | the Pods host, after `Store.Declare` (launch step 3, at startup and for each `plugin.add` batch) or `Store.Undeclare` (`plugin.remove` step 7, [Pods](pods.md)); the launch gate, the add and the removal each wait for this flight, and the add and the removal return its five reports in their replies, the same `Report` objects `config.reload` returns; a report with `applied: false` fails neither |
 
 One reload runs these steps in order:
 

@@ -24,6 +24,7 @@ var coreNames = map[string]struct{}{
 	"state.changed":       {},
 	"pods.plugin-exited":  {},
 	"pods.plugin-removed": {},
+	"pods.plugin-added":   {},
 	"services.reloaded":   {},
 	"secrets.read":        {},
 }

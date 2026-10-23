@@ -184,8 +184,8 @@ A closed enum per protocol minor version. A receiver built for an older minor tr
 | `busy` | a pending-call cap or a rate limit is full | Calls, Server |
 | `timeout` | the receiver did not reply in time; Husk synthesizes this reply | Calls |
 | `cancelled` | the request was dropped: owner exited or disconnected, or the instance is shutting down | Calls |
-| `conflict` | a compare-and-set precondition failed | State |
-| `failed` | the handler ran and reported an application failure | plugin action or hook handlers |
+| `conflict` | a compare-and-set precondition failed, or the target already exists or is owned by an operation in progress (`plugin.add` of a loaded or removing id, a host action id a plugin owns) | State, handlers |
+| `failed` | the handler ran and reported an application failure (a plugin's own failure, or a manifest that fails conversion in `plugin.add`) | plugin action or hook handlers, `plugin.add` |
 | `internal` | a bug in the receiver, including a reply that is neither result nor error | either side |
 
 `message` is a human-readable sentence for logs and toasts; programs branch on `code` only. `data` is optional and carries the specifics a program may need: `{"limit":4194304}` for `line_too_long` and size failures, `{"reason":"plugin_exited"}` or `{"reason":"shutdown"}` for `cancelled`, `{"reason":"user_denied"}` for a `denied` secret read, `{"revision":9}` for `conflict`. Every other spec names its errors from this table and says what it puts in `data`; no spec defines codes of its own.
@@ -231,6 +231,8 @@ The rule (`pkg/protocol/version.go`) is:
 What changes: this envelope is a breaking change, so the target major is **2** (`protocol.Major = 2`); `protocol.Version` is `"2.0"` for the envelope and `"2.1"` once [Hooks](hooks.md) lands. Husk speaks one major at a time; there is no dual stack.
 
 Minor 2.1 ([Hooks](hooks.md), [Keybindings](keybindings.md), [Pods](pods.md)): `hook.list`; `hook.call` outcome fields `kind`, `data`, `allowed`, `vetoes` and the per-entry `items`, `veto`, `reason`; subscriber params `kind`; the optional `capture` field of `surface.update`; `plugin.remove` and the `pods.plugin-removed` event name. Owner-only firing (the CLI included) tightens 2.0 without a major bump because no shipped plugin fires a hook it does not own and no CLI exists yet.
+
+Minor 2.2 ([Pods](pods.md), "Adding a plugin"): `plugin.add` and the `pods.plugin-added` event name. `protocol.Version` moves to `2.2` when the handler lands; until then the method name is reserved vocabulary (the constant, the schema entry and the reserved event name exist) that the host answers `unknown_method`.
 
 Where the version is checked, since there is no handshake:
 
@@ -291,6 +293,7 @@ A requester that stops waiting ([Calls](calls.md) times a request out, or a sock
 | `profile` | `profile.list`, `profile.use` | request | CLI to Husk |
 | `plugin` | `plugin.list`, `plugin.log` | request | CLI to Husk |
 | | `plugin.remove` | request (minor 2.1); params, result and sequence: [Pods](pods.md), "Removing a plugin" | CLI to Husk |
+| | `plugin.add` | request (minor 2.2); params, result and sequence: [Pods](pods.md), "Adding a plugin" | CLI to Husk |
 | `config` | `config.reload` | request | CLI to Husk |
 
 Declarations (actions, surfaces, focus-local keys, published slots, hooks, events, slice) are manifest only; there are no `declare` or `subscribe` methods ([Pods](pods.md), [Message kinds](message-kinds.md)).
