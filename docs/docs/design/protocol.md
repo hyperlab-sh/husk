@@ -205,7 +205,7 @@ The rule (`pkg/protocol/version.go`) is:
 
 What changes: this envelope is a breaking change, so the target major is **2** (`protocol.Major = 2`); `protocol.Version` is `"2.0"` for the envelope and `"2.1"` once [Hooks](hooks.md) lands. Husk speaks one major at a time; there is no dual stack.
 
-Minor 2.1 ([Hooks](hooks.md), [Keybindings](keybindings.md)): `hook.list`; `hook.call` outcome fields `kind`, `data`, `allowed`, `vetoes` and the per-entry `items`, `veto`, `reason`; subscriber params `kind`; the optional `capture` field of `surface.update`. Owner-only firing (the CLI included) tightens 2.0 without a major bump because no shipped plugin fires a hook it does not own and no CLI exists yet.
+Minor 2.1 ([Hooks](hooks.md), [Keybindings](keybindings.md), [Pods](pods.md)): `hook.list`; `hook.call` outcome fields `kind`, `data`, `allowed`, `vetoes` and the per-entry `items`, `veto`, `reason`; subscriber params `kind`; the optional `capture` field of `surface.update`; `plugin.remove` and the `pods.plugin-removed` event name. Owner-only firing (the CLI included) tightens 2.0 without a major bump because no shipped plugin fires a hook it does not own and no CLI exists yet.
 
 Where the version is checked, since there is no handshake:
 
@@ -265,6 +265,7 @@ A requester that stops waiting ([Calls](calls.md) times a request out, or a sock
 | `keys` | `keys.list` | request | plugin or CLI to Husk |
 | `profile` | `profile.list`, `profile.use` | request | CLI to Husk |
 | `plugin` | `plugin.list`, `plugin.log` | request | CLI to Husk |
+| | `plugin.remove` | request (minor 2.1); params, result and sequence: [Pods](pods.md), "Removing a plugin" | CLI to Husk |
 | `config` | `config.reload` | request | CLI to Husk |
 
 Declarations (actions, surfaces, focus-local keys, published slots, hooks, events, slice) are manifest only; there are no `declare` or `subscribe` methods ([Pods](pods.md), [Message kinds](message-kinds.md)).

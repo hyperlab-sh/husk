@@ -190,7 +190,13 @@ one `plugins` document and one `keymap` document per plugin, keyed by the
 same plugin id passed as `source` to `Declare`. Fields mirror the declaration
 types in [Pods](pods.md)'s `Spec`, in snake_case. Services import no Pod types.
 Pods finish declaring both documents before requesting a `plugin` reload.
-`Undeclare(source)` removes both documents on teardown, not on process exit.
+`Undeclare(source)` removes both documents on teardown, not on process exit;
+its one caller in v1 is `plugin.remove` ([Pods](pods.md), "Removing a plugin",
+step 6). It is idempotent: a source with no declared documents changes nothing
+and returns normally. Every `Declare` and `Undeclare` advances
+`DeclaredRevision`, which is how the readers that cache a view of the declared
+documents (the action catalog, the frontend's rail items, slots and frames)
+learn to refresh.
 
 A `plugins` document is an object with these fields. Absent arrays mean empty;
 unknown fields are retained by Store and ignored by Services for forward growth.
@@ -421,8 +427,9 @@ func (s *Store) Hydrate(spec state.Spec) (value json.RawMessage, ok bool)
 // Flush; marks the persistent slices among changes dirty and returns.
 func (s *Store) onFlush(changes []state.Change, snap *state.Snapshot)
 
-// Called by Pods when a plugin is uninstalled: deletes every persisted copy
-// of <pluginID>.state in every scope.
+// Deletes every persisted copy of <pluginID>.state in every scope. Reserved
+// for an uninstall; no v1 command calls it. `plugin.remove` ([Pods](pods.md))
+// is an unload and keeps every persisted copy.
 func (s *Store) RemovePlugin(pluginID string) error
 
 // Called by state.clear: deletes shared user copies and this instance's own
@@ -621,6 +628,7 @@ files or discards the internal diagnostic history.
 | `husk store reset-secrets` | no, refuses while any instance runs | deletes every sealed file and the identity |
 | `husk state clear <namespace>` | yes, through the instance | `ClearSlice` deletes shared user and this instance's copies only, then the handler calls `State.Clear` ([State](state.md)); other instances are untouched |
 | `husk config reload` | yes | `Invalidate`, through Services |
+| `husk plugin remove <id>` | yes, through the instance | `Undeclare` of the plugin's two declared documents, then a Services reload with reason `plugin` ([Pods](pods.md)); the plugin's slice is unregistered and its pending persistent writes flushed (invariant 5); no file is deleted and `RemovePlugin` is not called |
 
 ### Startup and shutdown order
 

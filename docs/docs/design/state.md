@@ -389,9 +389,9 @@ Error codes come from the [Protocol](protocol.md) registry:
 | `husk.profile` | Services: Profile | instance | yes | keep-latest | The active profile name. |
 | `husk.grants` | Services: Secrets | user | yes | manual | Secret grants: `(plugin, name, digest, at)`; never a value ([Services](services.md)). |
 | `husk.store` | Store | instance | no | | Store's own health: last 50 diagnostics, quarantined files, keyring fallback flag ([Store](store.md)). |
-| `<plugin_id>.state` | that plugin's Pod | instance, or user if the manifest asks | per manifest | per manifest | Plugin-defined. Registered at launch, before the plugin starts. |
-| `<plugin_id>.occupants` | that plugin's Pod | instance | no | | The plugin's occupancy declarations, one entry per claimed surface. The plugin cannot write it. Registered at launch with `<plugin_id>.state`. |
-| `<plugin_id>.contributions` | that plugin's Pod | instance | no | | The plugin's contribution declarations grouped by target slot. The value carries no sequence; the Surfaces engine records the cross-plugin order. The plugin cannot write it. |
+| `<plugin_id>.state` | that plugin's Pod | instance, or user if the manifest asks | per manifest | per manifest | Plugin-defined. Registered at launch, before the plugin starts; unregistered by `husk plugin remove` ([Pods](pods.md)), which keeps its persisted copies. |
+| `<plugin_id>.occupants` | that plugin's Pod | instance | no | | The plugin's occupancy declarations, one entry per claimed surface. The plugin cannot write it. Registered at launch with `<plugin_id>.state`, unregistered with it. |
+| `<plugin_id>.contributions` | that plugin's Pod | instance | no | | The plugin's contribution declarations grouped by target slot. The value carries no sequence; the Surfaces engine records the cross-plugin order. The plugin cannot write it. Registered and unregistered with `<plugin_id>.state`. |
 | `<owner>.workspace` | the workspace owner the distribution names | workspace | yes, named instances only | keep-latest | Application-defined workspace content. |
 
 Value shapes:
@@ -583,7 +583,7 @@ With one:
 | `if_revision` stale | State | `ErrConflict`; no change | `conflict` with the current revision; the plugin re-reads and retries. |
 | Read of an unknown slice or unresolved pointer | Server, from the snapshot | Request refused | `not_found`. |
 | Plugin process exits | Wrapper | `husk.pods` entry becomes `exited` or `failed`; the plugin's slice keeps its value | Dispatcher refuses actions for it; watchers of `husk.pods` see the change. |
-| Pod torn down (plugin removed from the instance) | Pods | `Unregister`; tombstone revision kept | One `state.changed` with `removed: true`; later `state.get` gets `not_found`. |
+| Pod torn down (`husk plugin remove`, [Pods](pods.md)) | Pods, on the loop, in one tick | `Unregister` of `<id>.state`, `<id>.occupants` and `<id>.contributions`; tombstone revisions kept; the `husk.pods` entry removed; persisted copies of `<id>.state` kept ([Store](store.md)) | One flush with three `state.changed` carrying `removed: true` and one for `husk.pods`; later `state.get` on the three gets `not_found`; the Surfaces engine drops the owner's claims and slot entries in that tick. |
 | Write through a handle after `Unregister` | State | `ErrUnregistered`; no change | Programming error in the owner; logged. |
 | Clear of an unknown or unregistered namespace | State, in `Clear` | `ErrUnregistered` wrapped with the namespace; no change | Server maps it to `not_found`. |
 | Snapshot with values exceeds one protocol line | Server | Request refused | `invalid_params`; `husk state dump` suggests `husk state get <slice>`. |
