@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	c "github.com/hyperlab-sh/husk/internal/services/contracts"
+	"github.com/hyperlab-sh/husk/internal/services/settings"
 	stheme "github.com/hyperlab-sh/husk/internal/services/theme"
 	"github.com/hyperlab-sh/husk/internal/substrate/store"
 	palette "github.com/hyperlab-sh/husk/pkg/theme"
@@ -99,35 +99,44 @@ func TestThemeValueGrammar(t *testing.T) {
 			})
 		}
 	}
-	in := themeInput(t, `{}`, nil)
-	in.Settings = integerOverride{in.Settings}
-	_, r, err := stheme.New().Rebuild(t.Context(), in)
-	if err == nil || !hasProblem(r.Problems, "invalid_color", "error") {
-		t.Fatalf("integer override accepted: %+v", r)
-	}
-}
-
-// A Theme input with an integer override must not turn it into an ANSI role;
-// Settings normally rejects the non-string before Theme can see it.
-type integerOverride struct{ c.SettingsSnapshot }
-
-func (s integerOverride) Source(key string) string {
-	if key == "theme.palette.ink" {
-		return "user"
-	}
-	return s.SettingsSnapshot.Source(key)
-}
-func (s integerOverride) String(key string) string {
-	if key == "theme.palette.ink" {
-		return ""
-	}
-	return s.SettingsSnapshot.String(key)
-}
-func (s integerOverride) Raw(key string) (any, bool) {
-	if key == "theme.palette.ink" {
-		return float64(4), true
-	}
-	return s.SettingsSnapshot.Raw(key)
+	t.Run("integer override", func(t *testing.T) {
+		st := newSet(settings.Options{})
+		th := stheme.New()
+		before, _ := th.WireANSI()
+		set := fakeServices()
+		set["settings"], set["theme"] = st, th
+		in := input(`{"theme":{"palette":{"ink":4}}}`)
+		in.Doc.Origins = map[string]store.Layer{"theme.palette.ink": store.LayerUser}
+		co, err := NewCoordinator(Options{Store: &fakeStore{resolved: in.Doc}, Services: set, Settings: st.Snapshot, Clock: clock()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer co.Close()
+		reports, err := co.Reload(t.Context(), ReasonCLI)
+		if err != nil || len(reports) != 5 {
+			t.Fatalf("reload reports=%+v err=%v", reports, err)
+		}
+		for _, r := range reports {
+			switch r.Service {
+			case "settings":
+				if r.Applied || r.Changed || len(r.Problems) != 1 {
+					t.Fatalf("integer override was not refused: %+v", r)
+				}
+				p := r.Problems[0]
+				if p.Code != "invalid_value" || p.Severity != "error" || p.Key != "theme.palette.ink" || p.Layer != "user" {
+					t.Fatalf("integer override diagnostic: %+v", p)
+				}
+			case "theme":
+				if r.Applied || r.Changed || !hasProblem(r.Problems, "settings_unchanged", "warning") {
+					t.Fatalf("Theme was not skipped: %+v", r)
+				}
+			}
+		}
+		after, indices := th.WireANSI()
+		if after != before || len(indices) != 0 || st.Generation() != 0 || th.Generation() != 0 {
+			t.Fatalf("integer override changed serving snapshots: palette=%+v indices=%v", after, indices)
+		}
+	})
 }
 
 func TestOverrideKeepsThemeSlot(t *testing.T) {

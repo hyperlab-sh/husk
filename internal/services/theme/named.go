@@ -19,6 +19,7 @@ type definition struct {
 
 func resolveThemes(layers []store.LayerDoc, problems *[]c.Problem) map[string]definition {
 	out := map[string]definition{}
+	known := palette.Roles(palette.Default())
 	layers = append([]store.LayerDoc{{Layer: layerBuiltIn, Doc: palette.BuiltIn()}}, layers...)
 	for _, l := range layers {
 		themes, _ := l.Doc["themes"].(map[string]any)
@@ -30,7 +31,7 @@ func resolveThemes(layers []store.LayerDoc, problems *[]c.Problem) map[string]de
 				issue("too_many_themes", "more than 64 themes; the rest ignored")
 				break
 			}
-			roles, indices, reason := themeRoles(l, name, themes[name])
+			roles, indices, reason := themeRoles(l, name, themes[name], known)
 			if reason != "" {
 				issue("invalid_theme", "theme "+name+": "+reason)
 				continue
@@ -43,7 +44,7 @@ func resolveThemes(layers []store.LayerDoc, problems *[]c.Problem) map[string]de
 
 const layerBuiltIn = "built-in"
 
-func themeRoles(l store.LayerDoc, name string, raw any) (map[string]string, map[string]int, string) {
+func themeRoles(l store.LayerDoc, name string, raw any, known map[string]string) (map[string]string, map[string]int, string) {
 	if !themeName.MatchString(name) {
 		return nil, nil, "invalid name"
 	}
@@ -57,7 +58,6 @@ func themeRoles(l store.LayerDoc, name string, raw any) (map[string]string, map[
 	}
 	roles := map[string]string{}
 	indices := map[string]int{}
-	known := palette.Roles(palette.Default())
 	// OrderedMembers gives deterministic diagnostics for programmatic maps too.
 	for _, role := range l.OrderedMembers("/themes/"+name+"/palette", values) {
 		if _, exists := known[role]; !exists || role == "name" {
