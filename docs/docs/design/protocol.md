@@ -143,7 +143,7 @@ type FocusContext struct {
 
 ### Problem
 
-`Problem` lives here for the same reason as `Caller`: it crosses the wire as is (the `problems` array of `keys.list`, `settings.validate` and `theme.check`, and every report in `config.reload`, `profile.use` and `services.reloaded`), and the host contracts that carry those results must not import Services. It is the one diagnostic type every Service, the coordinator and the Keybinding listing use ([Services](services.md), "Snapshots, rebuilds and reports"; [Keybindings](keybindings.md), "What `keys.list` reports"); no module defines its own copy. The codes themselves are owned by the spec that raises them: [Services](services.md) for the Service and coordinator tables, [Keybindings](keybindings.md) for the loader table. Store's own `Problem` ([Store](store.md)) is a different type for a different reader: Services import it into one of these.
+`Problem` lives here for the same reason as `Caller`: it crosses the wire as is (the `problems` array of `keys.list`, `settings.validate` and `theme.check`, and every report in `config.reload`, `profile.use` and `services.reloaded`), and the host contracts that carry those results must not import Services. It is the one diagnostic type every Service, the coordinator and the Keybinding listing use ([Services](services.md), "Snapshots, rebuilds and reports"; [Keybindings](keybindings.md), "What `keys.list` reports"); no module defines its own copy. The codes themselves are owned by the spec that raises them: [Services](services.md) for the Service and coordinator tables, [Keybindings](keybindings.md) for the loader table. Store's `Resolved.Problems` entry ([Store](store.md), "Layers": code, message, file and path; no severity, no layer) is a different type for a different reader: Services import it into one of these.
 
 ```go
 // Problem is one diagnostic: a stable code, where it came from, and prose.
@@ -367,7 +367,7 @@ The CLI is a socket client speaking this protocol and nothing else. It connects,
 ### Dependency direction
 
 - `pkg/protocol` imports the standard library only. Nothing in it imports Stem, Services, Substrate or Pods.
-- Calls, Dispatcher, Event bus, Hook runner, Server, Wrapper and the CLI import `pkg/protocol`; `pkg/protocol` never imports them.
+- Calls, Dispatcher, Event bus, Hook runner, Server, Wrapper, Services and the CLI import `pkg/protocol`; `pkg/protocol` never imports them.
 - Calls knows `Message`, `ID`, `Error` and `Code`; it knows no method name. Routers know method names; they do not build ids.
 - Plugins written in Go import `pkg/protocol` and nothing else from Husk.
 
@@ -393,7 +393,7 @@ Done in the cutover and retirement: `pkg/huskipc` and `pkg/manifest` are deleted
 2. The new envelope is protocol major **2.0**, with no dual stack. A major-1 `hello` on stdout gets one major-1 `protocol_error` on stdin and the plugin is stopped.
 3. The version is checked before launch (manifest `protocol` major) and told to the plugin in `HUSK_PROTOCOL_VERSION`; socket callers read it from `session.ping`. No handshake carries it.
 4. Ids are strings or integers, scoped per sender and channel. Husk's own are integers from the Calls counter.
-5. Error codes are the fifteen in the table; a minor may add codes and older receivers map unknown codes to `internal`. No other spec defines codes; specifics go in `data`.
+5. Error codes are the fifteen in the table; a minor may add codes and older receivers map unknown codes to `internal`. No other spec defines **error** codes; specifics go in `data`. Problem codes (`Problem.Code`) are owned by the spec that raises them.
 6. Bad input with a readable request id gets an error reply; everything else gets a `protocol.error` notification. Replies and `protocol.error` are never answered. Unknown notifications are ignored silently, unknown requests get `unknown_method`.
 7. `protocol.error` is rate-limited to 10 per second per channel.
 8. No handshake on either channel. The pipe is the plugin's identity, the manifest its declaration, the environment its configuration; the socket identifies a caller by the `token` member per request.

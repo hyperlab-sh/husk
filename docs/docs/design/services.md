@@ -124,7 +124,8 @@ type Reloadable interface {
 
 // Candidate publishes at most once. Apply returns the final Report. A
 // candidate carries its flight's deadline: Apply after it is a no-op that
-// returns Applied false, so a late candidate can never change a generation.
+// returns Applied false with one `candidate_superseded` problem, so a late
+// candidate can never change a generation.
 type Candidate interface{ Apply() Report }
 ```
 
@@ -138,7 +139,7 @@ Rules, each testable:
 6. `Rebuild` may run on any goroutine and writes no State. Only the posted callbacks named under Profile and Secrets write State.
 7. `Code` is the contract; `Message` is prose. Every code a Service can emit is in its table in this spec (Keybinding: the loader table in [Keybindings](keybindings.md)); a new code is a spec change. `Changed` is false whenever `Applied` is false.
 
-Codes raised by the coordinator or by a candidate's `Apply`, in any report, all `error` unless noted; none builds a candidate, and the previous snapshot keeps serving:
+Codes raised by the coordinator or by a candidate's `Apply`, in any report; each leaves the previous snapshot serving (`applied:false`):
 
 | Code | Raised by | Condition | Severity | Effect |
 | :--- | :--- | :--- | :--- | :--- |
@@ -288,6 +289,7 @@ Applied to the whole merged document on every rebuild. Severity decides the outc
 | `restart_required` | Known key with `apply: restart` whose value differs from the value in force | warning | the value in force stays in the snapshot; removing the key counts as a change back to the default; the message names both values |
 | `type_clash` | Store merged an object over a non-object or the reverse ([Store](store.md)) | warning | the higher layer's value stands, as Store merged it; the message names the key and both layers |
 | `foreign_schema_key`, `duplicate_schema_key`, `invalid_schema_default`, `invalid_schema_entry`, `secret_as_setting` | Plugin schema problems above | warning | that plugin's entries are not registered |
+| `invalid_plugin_catalog` | A plugin's declared document does not decode or its `id` is not its Store source ("Snapshots, rebuilds and reports") | warning | that plugin's entries are not registered; its keys become `unknown_key` |
 
 The value **in force** for a `restart` key is the value the first successful Settings load of the process produced; the first load therefore never reports `restart_required`. Until that load, nothing is in force and the default serves. `settings.get` and `Snapshot.Source` report the value in force and the layer that supplied it at that load; the pending value appears only in the problem message and in the file.
 
@@ -395,7 +397,7 @@ A plugin declares what it wants in its manifest:
 {"secrets": [{"name": "git.token", "purpose": "Push and pull over HTTPS", "required": true}]}
 ```
 
-`name` matches `[a-z0-9_.-]{1,64}`. `purpose` is the sentence the user reads in the dialog: plugin-controlled text, 1 to 200 runes, printable, no newline or other control character. `required` is informational in v1 (shown in the dialog and in `husk secrets list`); it changes no behaviour. A plugin may declare at most **16** secrets. A declaration is dropped, with a `warning` problem of layer `plugin:<id>` (`Source.Plugin` and `Source.Order` set), when its name is invalid (`invalid_secret_name`), when the same plugin already declared the name (`duplicate_secret`), when its `purpose` breaks the rule above (`invalid_purpose`; the message says which rule, never the text), or when it is past the sixteenth (`too_many_secrets`). The plugin's other declarations stand. This is the complete list of Secrets codes; a problem message never contains a `purpose`.
+`name` matches `[a-z0-9_.-]{1,64}`. `purpose` is the sentence the user reads in the dialog: plugin-controlled text, 1 to 200 runes, printable, no newline or other control character. `required` is informational in v1 (shown in the dialog and in `husk secrets list`); it changes no behaviour. A plugin may declare at most **16** secrets. A declaration is dropped, with a `warning` problem of layer `plugin:<id>` (`Source.Plugin` and `Source.Order` set), when its name is invalid (`invalid_secret_name`), when the same plugin already declared the name (`duplicate_secret`), when its `purpose` breaks the rule above (`invalid_purpose`; the message says which rule, never the text), or when it is past the sixteenth (`too_many_secrets`). The plugin's other declarations stand. This is the complete list of Secrets codes, with `invalid_plugin_catalog` from "Snapshots, rebuilds and reports"; a problem message never contains a `purpose`.
 
 Names are global to the user (`git.token` is one value whichever plugin reads it), grants are per plugin. Two plugins that both declare `git.token` and are both granted share the value; a per-plugin namespace would block that sharing, and the per-pair grant keeps the user in control. This is the opposite of a per-extension secret store with no cross-extension policy (the VS Code model, where any extension can in practice read another's token); here the host mediates every read.
 
@@ -535,6 +537,8 @@ CLI: `husk secrets list`, `husk secrets set <name>` (value from stdin, trailing 
 | Plugin exceeds 20 Services calls per second | Server | `busy`, `rate_limited` | The plugin gets the error |
 | Plugin calls a user-only method | Server, Services | `denied`, `user_only` | The plugin gets the error |
 | Invalid caller reaches a Service | Services | `denied`, `invalid_caller` | A composition bug; logged |
+| A plugin's declared document does not decode, or its `id` is not its Store source | Settings, Keybinding, Secrets rebuild | That plugin's declarations are ignored by the reporting Service; everything else applies | `invalid_plugin_catalog` warning under `plugin:<id>`; no toast |
+| `Apply` reached after the deadline, after `Close`, or after the generation moved | the candidate's `Apply` | Nothing swapped; old snapshot serves | `applied:false`, `candidate_superseded`; never in a healthy flight |
 
 ### Code layout
 
@@ -545,7 +549,7 @@ Services live under one import root as `services/{profile,settings,theme,keybind
 The five Services and the coordinator exist. Items below are where the code on `main` and this spec differ; each is small and self-contained.
 
 - Caller identity: five `Caller` structs exist (Server, host contracts, Dispatcher, hooks, Services) and adapters convert between them. The spec requires the one `protocol.Caller`. The `host` kind currently counts as a user for secrets; the spec denies it secret operations.
-- `Problem` is a Services type with no `Code` and no `Source`; codes are embedded in messages. The spec moves it to `protocol.Problem` with both fields and adds the code tables. The code also emits codes the tables did not list: `store_unavailable` for a failed Store resolution (the spec's `store_error`), `duplicate_secret_declaration` (the spec's `duplicate_secret`), `invalid_value` for a palette override `Overlay` rejects (the spec's `invalid_color`), `candidate_superseded`, `invalid_plugin_catalog` and `settings_unchanged` as `error` (the spec defines all three under "Snapshots, rebuilds and reports"; the last two are `warning`).
+- `Problem` is a Services type with no `Code` and no `Source`; the kind of failure lives only in the message (`Store resolution failed`, `timed out`, `Settings failed; palette unchanged`, `candidate cancelled or superseded`), and every coordinator problem, Theme's skip included, is an `error`. The spec moves the type to `protocol.Problem`, adds `Code` and `Source`, adds the code tables, and makes `settings_unchanged` and `invalid_plugin_catalog` warnings. The coordinator folds its own `Close` into the timeout path and reports `timed_out`; the spec reports `cancelled`.
 - Settings exposure: every `husk.*` key is readable by every plugin. The spec adds `Entry.Public` and exposes only entries marked public; none is marked today.
 - Unknown settings keys outside a declared plugin subtree are errors that block the whole Settings rebuild. The spec makes every unknown key a warning with the raw value retained. A plugin schema error is an error in the Settings report; the spec makes it a warning that drops only that plugin's entries.
 - Profile selection reads the merged document for `profile.default` and resolves twice; the spec reads the unmerged `user` layer and resolves once. `--profile` is not wired, and the chosen profile is not written back to the slice.

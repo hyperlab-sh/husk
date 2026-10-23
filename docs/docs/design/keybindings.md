@@ -472,7 +472,7 @@ Loader order, which decides which problem an entry gets when more than one rule 
 5. The 4096 cap over the entries still effective. The static order for the cap is: scope (surface before global), layer rank, `plugin` set before unset, then `Source.Plugin`, then `Source.Order`; the last entries in that order are dropped.
 6. `no_exit_binding`.
 
-This is the complete list of codes.
+This is the complete list of loader codes, plus `invalid_plugin_catalog`, raised by the Service for a plugin's declared document that does not decode ([Services](services.md), "Snapshots, rebuilds and reports").
 
 | Code | Raised by | Condition | Effect |
 |---|---|---|---|
