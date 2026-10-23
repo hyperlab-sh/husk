@@ -131,7 +131,7 @@ func TestInvalidCallersDeniedEverywhere(t *testing.T) {
 			"secrets.grant":     func() error { return sec.Grant(context.Background(), k, "a", "x.y") },
 			"secrets.revoke":    func() error { return sec.Revoke(context.Background(), k, "a", "x.y") },
 			"keys.list":         func() error { _, e := kb.ListFor(k); return e },
-			"theme.get":         func() error { _, e := th.Get(k); return e },
+			"theme.get":         func() error { _, _, e := th.Get(k); return e },
 			"settings.validate": func() error { _, e := set.Validate(ctx, k, input(`{}`)); return e },
 		}
 		for method, call := range calls {

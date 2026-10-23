@@ -52,12 +52,14 @@ func (s *Service) WireANSI() (protocol.Palette, map[string]int) {
 // the resolved theme name. Index roles appear as their xterm hex.
 func (s *Service) Overrides() map[string]string { return c.Clone(s.current.Load().overrides) }
 
-// Get implements theme.get for every authenticated caller.
-func (s *Service) Get(caller c.Caller) (protocol.Palette, error) {
+// Get implements theme.get for every authenticated caller, returning the
+// palette and a detached index map from one serving snapshot read.
+func (s *Service) Get(caller c.Caller) (protocol.Palette, map[string]int, error) {
 	if err := c.CheckCaller(caller); err != nil {
-		return protocol.Palette{}, err
+		return protocol.Palette{}, nil, err
 	}
-	return s.Wire(), nil
+	pal, indices := s.WireANSI()
+	return pal, indices, nil
 }
 
 // Check performs a user-only dry build for theme.check.

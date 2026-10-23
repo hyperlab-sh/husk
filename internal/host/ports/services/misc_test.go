@@ -22,7 +22,7 @@ func TestThemeGetOpenToPluginsCheckUserOnly(t *testing.T) {
 	port := Theme{Svc: svc, Inputs: staticInputs{}, Settings: settingsSvc}
 
 	for _, c := range []host.Caller{userCaller, filesCaller, stemHost} {
-		pal, err := port.Get(context.Background(), c)
+		pal, _, err := port.Get(context.Background(), c)
 		if err != nil || pal.Name == "" {
 			t.Fatalf("get(%s) = %+v err=%v", string(c.Kind), pal, err)
 		}

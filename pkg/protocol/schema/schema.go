@@ -181,6 +181,21 @@ func variant(required []string, absent ...string) map[string]any {
 }
 
 func (g *generator) typeSchema(t reflect.Type) map[string]any {
+	if t == reflect.TypeFor[protocol.ANSIRoles]() {
+		var roles []string
+		palette := reflect.TypeFor[protocol.Palette]()
+		for i := 0; i < palette.NumField(); i++ {
+			role, _, _ := strings.Cut(palette.Field(i).Tag.Get("json"), ",")
+			if role != "name" {
+				roles = append(roles, role)
+			}
+		}
+		return map[string]any{
+			"type":                 "object",
+			"propertyNames":        map[string]any{"enum": roles},
+			"additionalProperties": map[string]any{"type": "integer", "minimum": 0, "maximum": 15},
+		}
+	}
 	if t == reflect.TypeFor[json.RawMessage]() {
 		return map[string]any{}
 	}

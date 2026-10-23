@@ -242,8 +242,9 @@ type ThemeEntry struct {
 
 // ThemePort serves theme.get, theme.list and theme.check.
 type ThemePort interface {
-	// Get serves theme.get for every authenticated caller.
-	Get(ctx context.Context, c Caller) (protocol.Palette, error)
+	// Get serves theme.get for every authenticated caller, returning the palette
+	// and a detached index map from one snapshot read.
+	Get(ctx context.Context, c Caller) (protocol.Palette, map[string]int, error)
 	// List returns the serving themes, built-in first then sorted by name.
 	List(ctx context.Context, c Caller) ([]ThemeEntry, error)
 	// Check serves theme.check (user only).

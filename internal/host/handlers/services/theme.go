@@ -19,6 +19,8 @@ type Theme struct {
 
 type themeGetResult struct {
 	Palette protocol.Palette `json:"palette"`
+	// ANSI maps palette roles (never name) to indices 0..15; absent for hex themes.
+	ANSI protocol.ANSIRoles `json:"ansi,omitempty"`
 }
 
 // Serve implements contracts.Handler.
@@ -33,11 +35,11 @@ func (h Theme) Serve(ctx context.Context, c contracts.Caller, req protocol.Messa
 		if deny := admitRateLimited(req, c, h.Limiter); deny != nil {
 			return *deny
 		}
-		pal, err := h.Port.Get(ctx, c)
+		pal, indices, err := h.Port.Get(ctx, c)
 		if err != nil {
 			return handlers.ErrorReply(req, err)
 		}
-		return handlers.Reply(req, themeGetResult{Palette: pal})
+		return handlers.Reply(req, themeGetResult{Palette: pal, ANSI: indices})
 	case protocol.MethodThemeList:
 		if deny := admitRateLimited(req, c, h.Limiter); deny != nil {
 			return *deny

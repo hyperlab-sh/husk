@@ -212,6 +212,9 @@ type SurfaceMouseParams struct {
 // ThemeChangedParams delivers the complete palette.
 type ThemeChangedParams struct {
 	Palette Palette `json:"palette"`
+	// ANSI maps palette roles (never name) to indices 0..15. It is absent
+	// when no role is an ANSI index.
+	ANSI ANSIRoles `json:"ansi,omitempty"`
 }
 
 // ToastShowParams displays a toast. PluginID is assigned by Husk, never trusted
