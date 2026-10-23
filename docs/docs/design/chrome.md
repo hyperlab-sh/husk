@@ -39,7 +39,7 @@ This spec fixes five things:
 4. **The bottom bar shows the layout label at the left and the theme name at
    the right**, around the key hints. The theme name is clickable; it runs
    `husk.settings.open` with `tab: theme`, which opens the Settings center on
-   its Theme tab, the theme selector, once that lands.
+   its Theme tab, the landed theme selector.
 5. **The frame is drawn with surfaces, borders and inks only.** The accent
    marks exactly the focused or selected element and the status colours
    appear only on status glyphs, badges and toasts; see "Colour discipline".
@@ -307,9 +307,10 @@ never from Settings.
 **Clicking the theme name** (a left click on any cell of the pill) opens the
 Settings center on its Theme tab, the theme selector: it runs the host action
 `husk.settings.open` with the argument `tab: theme` ([Settings center](settings-center.md),
-"Opening and closing"; [Services](services.md), "The theme selector"; not
-landed). Until that lands the click is consumed
-(it reaches no surface and starts no drag) and does nothing; hover does not
+"Opening and closing"; [Services](services.md), "The theme selector"). This is
+landed. The pill wins over outside-click dismissal when the center is already
+open: it switches to Theme, never closes. The click reaches no surface and starts
+no drag, including when opening is declined by another modal; hover does not
 change the pill. No other cell of the bottom bar is a click target.
 
 ### The layout label
