@@ -144,7 +144,7 @@ Shared rules:
 
 1. `<name>` matches `[a-z0-9][a-z0-9._-]{0,63}`: a valid bundle id, lowercase so the directory name is the same on every filesystem. Anything else is exit 2 (`usage`) before the filesystem is touched. It is both the directory name (relative to the working directory) and the bundle `id`.
 2. The target directory must not exist, or must exist and be empty. Any other state (a non-empty directory, a file, a symlink, an unreadable path) is exit 1 with error code `create` and the message `husk: <dir> exists and is not empty` (or the OS error). Nothing is written in that case. There is no `--force`; the user deletes the directory.
-3. Files are written with mode 0644, executables 0755, directories 0755, in one pass; a write failure stops the command with exit 1 `create` and leaves what was written (the directory is the user's to delete; the message names the file that failed). Nothing is written outside `<dir>`.
+3. Files are written with mode 0644, executables 0755, newly created directories 0755 (an existing empty target keeps its permissions), in one pass; a write failure stops the command with exit 1 `create` and leaves what was written (the directory is the user's to delete; the message names the file that failed). Nothing is written outside `<dir>`.
 4. Output on stdout: in `json` format, `{"dir": "<absolute dir>", "files": ["<relative path>", ...]}`; in `table` format, one relative path per line. Exit 0.
 5. `husk create` reads no configuration and no instance state; the running binary's version (`host_version`) is the one input it takes from the build.
 
