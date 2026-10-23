@@ -61,7 +61,7 @@ Husk has nine fixed slots, modeled on `bb`, plus three placement surfaces (below
 | `main-header` | Header band above the main stage |
 | `main-stage` | Main canvas, or the active stage plugin |
 | `side-panel` | Collapsible right-hand drawer |
-| `app-overlay` | Command palette, modal plugins and toasts |
+| `app-overlay` | Whole-frame overlay layer a plugin draws over the layout, above the modal and below the host's toast and palette; never focused or hit-tested ([Cell-buffer compositor](design/cell-buffer-compositor.md), "Overlay layer") |
 
 Husk assigns no application meaning to a surface; the occupying plugin decides what it shows.
 
