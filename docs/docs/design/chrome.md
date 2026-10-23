@@ -307,10 +307,10 @@ never from Settings.
 **Clicking the theme name** (a left click on any cell of the pill) opens the
 Settings center on its Theme tab, the theme selector: it runs the host action
 `husk.settings.open` with the argument `tab: theme` ([Settings center](settings-center.md),
-"Opening and closing"; [Services](services.md), "The theme selector"). This is
-landed. The pill wins over outside-click dismissal when the center is already
-open: it switches to Theme, never closes. The click reaches no surface and starts
-no drag, including when opening is declined by another modal; hover does not
+"Opening and closing"; [Services](services.md), "The theme selector"). While
+the center is already open the pill wins over outside-click dismissal: it
+switches the center to Theme and never closes it. The click reaches no surface
+and starts no drag, including when the action declines; hover does not
 change the pill. No other cell of the bottom bar is a click target.
 
 ### The layout label
@@ -361,9 +361,9 @@ included: the rule, not the palette, is what keeps it so.
    icon; the palette prompt glyph `❯` (the palette is the focused element
    while it is open); the divider under drag; the marker on the current theme
    in the Settings center's Theme tab; the Settings center's focused tab
-   label, its focused form field and its focused profile corner. The focused surface's border is
-   `border_focused`, a role of its own. No key, hint, brand, label, title or
-   badge is accent-coloured for being one.
+   label, its focused form field and its focused profile corner. The
+   focused surface's border is `border_focused`, a role of its own. No key,
+   hint, brand, label, title or badge is accent-coloured for being one.
 3. **`accent_secondary` and `accent_soft` are for plugins.** The chrome never
    draws them.
 4. **`success`, `warning`, `danger` and `info` appear only on status glyphs,
@@ -456,7 +456,8 @@ regenerated for these moves ("Tests and goldens").
 | Occupant leaves `live` | Engine vacates; the surface shows its name from that tick |
 | Occupant claimed, no content yet | Blank canvas (slot background), not the name |
 | Palette name empty | Theme slot shows `theme` |
-| Theme name clicked while another modal, the palette or the secret prompt is up | Click consumed; the action declines, nothing opens |
+| Theme name clicked while a plugin's modal or a runtime modal is open, or the terminal is frozen | Click consumed; the action declines, nothing opens |
+| Theme name clicked while the palette or the secret prompt is up | The palette or prompt takes the click first; the action is not run, nothing opens |
 | Theme name longer than 24 cells | Clipped with `…`; the label and the hints are unaffected |
 | Bottom bar too narrow for every hint group | Groups dropped from the end until the rest fits; the label and the theme name stay |
 | Rail shorter than the tiles need | Tiles that do not fit are not drawn, as today |
