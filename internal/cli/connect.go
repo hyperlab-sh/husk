@@ -211,10 +211,14 @@ func (inv *Invocation) recoverTarget(cause error, res instance.Resolved) error {
 	return output.NoInstance(cause, "%s", msg)
 }
 
-// joinedErrors flattens an errors.Join result into its members.
+// joinedErrors flattens nested errors.Join results into their leaves.
 func joinedErrors(err error) []error {
 	if j, ok := err.(interface{ Unwrap() []error }); ok {
-		return j.Unwrap()
+		var out []error
+		for _, c := range j.Unwrap() {
+			out = append(out, joinedErrors(c)...)
+		}
+		return out
 	}
 	return []error{err}
 }

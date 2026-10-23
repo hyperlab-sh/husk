@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"io/fs"
 	"net"
 	"os"
@@ -210,4 +211,19 @@ func TestRemovalFailureIsWarnedAboutNamingThePath(t *testing.T) {
 		}
 		stays(t, dir)
 	})
+}
+
+// skipWarning names every path of a nested join of removal failures.
+func TestSkipWarningNamesEveryRemovalPath(t *testing.T) {
+	pe := func(p string) error { return &fs.PathError{Op: "remove", Path: p, Err: syscall.EACCES} }
+	st := instance.Status{
+		Entry:      instance.Entry{ID: "stuck"},
+		RecoverErr: errors.Join(errors.Join(errors.Join(pe("/a.json"), pe("/a.sock")), pe("/b")), pe("/c")),
+	}
+	got := skipWarning("/dir", st)
+	for _, p := range []string{"/a.json", "/a.sock", "/b", "/c"} {
+		if !strings.Contains(got, p) {
+			t.Fatalf("warning %q does not name %s", got, p)
+		}
+	}
 }
