@@ -56,20 +56,14 @@ Directions, stated once:
 ```go
 package server
 
-// Caller is who sent a request, as the Server attributes it. The kinds are
-// the socket subset of the Caller kinds in Message kinds ("cli", "plugin").
-type Caller struct {
-    Kind     CallerKind // CallerCLI or CallerPlugin
-    PluginID string     // set when Kind == CallerPlugin
-    ConnID   uint64     // unique per accepted connection, for logs and watch cleanup
-}
-
-type CallerKind uint8
-
-const (
-    CallerCLI    CallerKind = iota + 1 // no token: the user's CLI, a script, a test harness
-    CallerPlugin                       // valid plugin token
-)
+// Caller is protocol.Caller, the one caller-identity type ([Protocol](protocol.md),
+// "Caller"; defined once, used unchanged by the Server, the host adapters, the
+// Dispatcher, the hook runner and Services). The Server produces only the two
+// socket kinds, CallerCLI (no token: the user's CLI, a script, a test harness)
+// and CallerPlugin (valid plugin token), and fills ConnID, the number unique
+// to the accepted connection that logs and watch cleanup use. CallerInput and
+// CallerHost never arrive over the socket.
+type Caller = protocol.Caller
 
 // Handler serves one method family. It runs on connection workers and
 // must not block the Bubble Tea loop; it posts to the loop and waits on ctx.
@@ -134,7 +128,7 @@ Method families and their handlers (registered by `internal/host.New`; names and
 
 | Prefix | Handler owner | Notes |
 | :--- | :--- | :--- |
-| `session.` | Server itself | `session.ping` returns `{id, pid, protocol_version, host_version, uptime_ms}`. No caller restriction. |
+| `session.` | Server itself | `session.ping` returns `{id, pid, protocol_version, host_version, uptime_ms}`; `host_version` is always present, `""` when the build carries no version, the same rule as the registration entry ([Instances](instances.md)). No caller restriction. |
 | `action.` | Dispatcher | `action.invoke`, `action.list`. The Dispatcher applies permission using `Caller`. |
 | `event.` | Event bus | `event.emit` (a request; a plugin may emit only under its own id, the bare CLI only under `user.`), `event.watch` (streams `event.deliver` notifications on this connection; for the CLI and debugging). |
 | `state.` | State | `state.get`, `state.snapshot`, `state.watch` for everyone. `state.set` and `state.patch` are accepted only from a plugin caller and only for that plugin's own slice; the Server forwards them to that plugin's Pod, which writes State as the slice owner. `state.clear` is CLI only. |
@@ -353,7 +347,7 @@ Launch:
 - `exec.CommandContext(pluginCtx, argv[0], argv[1:]...)` with `cmd.Cancel` sending SIGTERM and `cmd.WaitDelay` = stop grace, as today. `cmd.Dir` = `Spec.WorkDir`.
 - `SysProcAttr.Setpgid = true`; Cancel and kill signal the process group, so a plugin started through a wrapper script stops with its children and no grandchild keeps a pipe open.
 - stdin and stdout are pipes; stderr is the log file handed over as an `*os.File` (no copy goroutine), as today.
-- After `cmd.Start`, the Pod queues the opening notifications [Protocol](protocol.md) lists, in order and before any request: `theme.changed`, one `surface.resized` carrying every surface the plugin occupies (a single snapshot, never one message per surface), `input.key_state`. Pods cannot build them alone: the modifier state is Input bookkeeping that is not in State ([State](state.md)). So `pods.Loop.Opening(pluginID string) []protocol.Message` builds them from Theme, the `husk.geometry` rects and Input's modifier state; the Pod calls it on the loop, starts the process and queues the lines before reporting `live`. Later `theme.changed` pushes follow a reload that published a palette different from the previous one ([Services](services.md), "Theme"); the Pods host learns of it from `services.reloaded` and sends the new palette through each live `Channel`.
+- After `cmd.Start`, the Pod queues the opening notifications [Protocol](protocol.md) lists, in order and before any request: `theme.changed`, one `surface.resized` carrying every surface the plugin occupies (a single snapshot, never one message per surface), `input.key_state`. Pods cannot build them alone: the modifier state is Input bookkeeping that is not in State ([State](state.md)). So `pods.Loop.Opening(pluginID string) []protocol.Message` builds them from Theme, the `husk.geometry` rects and Input's modifier state; the Pod calls it on the loop, starts the process and queues the lines before reporting `live`. Later `theme.changed` pushes follow a reload that published a palette different from the previous one ([Services](services.md), "Theme"): the Pods host subscribes to `services.reloaded` in process, and when a report has `service` `theme` and `changed` true it reads the serving palette from Theme and sends it through each live `Channel`.
 
 Environment, built from Husk's own environment with every inherited `HUSK_*` variable removed first:
 
@@ -480,7 +474,7 @@ No per-request timeout lives in the Server. A request waits as long as its handl
 
 ## Level 2: Migration from today
 
-Host contracts. `internal/host/contracts` holds the consumer-defined Go interfaces the host's adapters and composition root code against: the adapter `Handler`, `Caller` and `Notifier` (same shapes as the Server's, converted by a one-line adapter), one owner port per method family (`StatePort`, `CallsPort`, `SessionPort`, `SettingsPort`, `SecretsPort`, `ProfilePort`, `ThemePort`, `KeybindingPort`, `ConfigPort`, `EventPort`, `HookPort`, `PluginPort`, `SurfacePort`; `MethodHomes` maps every wire method to its one port), the launch seams for the steps above (`PodRegistry`, `CatalogDeclarer`, `Reloader`, `SliceRegistrar`, `WrapperStarter`), the `Limiter` for the 20 calls per second per plugin rule, the `Config` and `Host` of the composition root, and `Frontend` with its value types (see Frontend seams). Ports return errors that carry a wire code (`CodedError`); adapters map by code and never read error text. The package imports neither Services nor the Server.
+Host contracts. `internal/host/contracts` holds the consumer-defined Go interfaces the host's adapters and composition root code against: the adapter `Handler` and `Notifier` (same shapes as the Server's; the caller is `protocol.Caller` on both sides, so nothing converts it), one owner port per method family (`StatePort`, `CallsPort`, `SessionPort`, `SettingsPort`, `SecretsPort`, `ProfilePort`, `ThemePort`, `KeybindingPort`, `ConfigPort`, `EventPort`, `HookPort`, `PluginPort`, `SurfacePort`; `MethodHomes` maps every wire method to its one port), the launch seams for the steps above (`PodRegistry`, `CatalogDeclarer`, `Reloader`, `SliceRegistrar`, `WrapperStarter`), the `Limiter` for the 20 calls per second per plugin rule, the `Config` and `Host` of the composition root, and `Frontend` with its value types (see Frontend seams). Ports return errors that carry a wire code (`CodedError`); adapters map by code and never read error text. The package imports neither Services nor the Server.
 
 Composition root. The v2 host boots from `internal/host.New(contracts.Config)`, not from `cmd/husk`. `New` builds, in order, the plugin specs (`--plugin` / `--plugin-dir` through the converter registry), Store, State, Services, the Stem modules (Calls, Dispatcher, Hook runner, Event bus, Surfaces), Pods and the Server, registers every adapter from `internal/host/handlers` on one Mux and the Mux on the Server for each inbound prefix of `MethodHomes` except `session` (the Server answers `session.ping` from its registration entry), and wires the launch seams. It listens and starts nothing until `Run`, which starts the Server and adds the configured plugins as one launch batch. The caller owns the Bubble Tea loop: it posts what `Config.Post` receives back into the host through `Update` on the loop goroutine. `Close` is idempotent and follows [Shutdown](#shutdown): the Calls table closes, the Server stops and unregisters, plugins stop, then the final flush and Store close (the Store stays open if host workers are still running after a bounded wait, so no worker sees it closed). `Config.Post` may block for backpressure, but once the loop owner has closed its post gate it returns false without blocking; the owner closes that gate before calling `Close` from `Update`, and `cmd/husk` honours that precondition. A failure in any stage closes what was already built. The root also owns the content of the Pod opening (`theme.changed`, `surface.resized`, `input.key_state`), registers each plugin's occupants and contributions declaration slices from its manifest before the first reload and drops them with the Pod, and calls the Surfaces engine's `CatalogChanged()` whenever the published-slot catalog changes. `cmd/husk` runs on this root.
 
