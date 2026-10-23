@@ -151,7 +151,8 @@ func (s *Store) Resolve(name DocName, profile string) (Resolved, error)
 // document the same way, because a named theme is replaced whole by a higher
 // layer and keeps its source layer ([Services](services.md), "Named themes");
 // the frontend's catalog seam reads the "catalog" document the same way
-// ([Settings center](settings-center.md), "The catalog document"). Store
+// ([Settings center](settings-center.md), "The catalog document"; reader and
+// off-loop cache landed). Store
 // knows none of these documents' meaning; all are files named <doc>.json in
 // the directory tree below.
 func (s *Store) Layers(name DocName, profile string) ([]LayerDoc, error)
@@ -200,6 +201,14 @@ func (s *Store) Declare(name DocName, source string, d Doc)
 func (s *Store) Undeclare(source string)
 func (s *Store) Declared(name DocName) map[string]Doc // source -> doc
 ```
+
+`LayerDoc.MemberOrder` preserves object member order by JSON pointer so bounded
+readers can keep the first declarations in file order. `OrderedMembers` completes
+missing metadata in lexical order for programmatic documents; returned metadata
+is detached from Store's cache.
+
+The `catalog` document reader and its off-loop frontend cache are landed. The
+built-in catalog is empty and catalog diagnostics do not affect reload reports.
 
 `store.Problem` is Store's own diagnostic type (it shapes the `husk.store` slice
 and `husk store check` output), not `protocol.Problem`; Services convert load
