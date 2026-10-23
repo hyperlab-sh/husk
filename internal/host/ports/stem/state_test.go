@@ -51,7 +51,7 @@ func (l *blockedLoop) Post(fn func()) bool {
 // deadLoop models a loop that has shut down: Post refuses the closure.
 type deadLoop struct{}
 
-func (deadLoop) Do(ctx context.Context, fn func()) error { return ctx.Err() }
+func (deadLoop) Do(context.Context, func()) error { return errors.New("loop gone") }
 
 func (deadLoop) Post(func()) bool { return false }
 
@@ -392,7 +392,6 @@ func TestStatePortWriteErrors(t *testing.T) {
 				_, err := w.Patch(ctxBG, callerAtlas, "atlas.state", json.RawMessage(`{}`), 0)
 				return err
 			},
-			func() error { return w.Clear(ctxBG, callerCLI, "atlas.state", false) },
 		} {
 			wantPortCode(t, call(), protocol.CodeUnavailable)
 		}

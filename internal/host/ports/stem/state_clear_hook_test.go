@@ -345,8 +345,18 @@ func TestClearWithoutAFirerOrForAnUnknownSlice(t *testing.T) {
 	t.Run("no firer wired", func(t *testing.T) {
 		cl := &cleaner{}
 		w, _, _ := newPort(t, StatePortOptions{Cleaner: cl}, specFresh)
+		if _, err := w.Set(ctxBG, callerAtlas, "atlas.state", json.RawMessage(`{"dirty":1}`)); err != nil {
+			t.Fatal(err)
+		}
 		if err := w.Clear(ctxBG, callerCLI, "atlas.state", false); err != nil {
 			t.Fatal(err)
+		}
+		if got := cl.deletedNS(); !reflect.DeepEqual(got, []string{"atlas.state"}) {
+			t.Fatalf("deleted = %v", got)
+		}
+		res, err := w.Get(ctxBG, callerCLI, "atlas.state", "")
+		if err != nil || string(res.Value) != `{"fresh":true}` {
+			t.Fatalf("reset = %s, %v", res.Value, err)
 		}
 	})
 	t.Run("an unregistered slice asks nobody and is not_found", func(t *testing.T) {

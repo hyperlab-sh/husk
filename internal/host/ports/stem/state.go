@@ -50,7 +50,7 @@ type HookFirer interface {
 // StatePortOptions configures NewStatePort. State and Loop are required;
 // Handles is required for plugin writes (its absence fails those calls with
 // internal), Cleaner, Hooks and Logf are optional. Without Hooks, Clear
-// fires nothing; a nil Logf discards.
+// has no hooks wired and the gate passes; a nil Logf discards.
 type StatePortOptions struct {
 	State   *state.State
 	Loop    Loop
@@ -205,13 +205,15 @@ func (w *State) Watch(ctx context.Context, _ contracts.Caller, slices []string, 
 }
 
 // Clear implements contracts.StatePort.Clear: a CLI-only reset of one
-// namespace to its initial value (D51: clear is the user's own action,
-// reachable only from the user's CLI; a Stem caller over the port is not
-// the user here). Persisted copies are deleted through the Store seam
-// first; the in-memory clear runs on the loop. Unless force is set,
-// husk.before-state-clear is fired first and a veto, a shutdown or an ended
-// ctx stops the clear before anything is deleted (hooks.md, Host-fired
-// hooks).
+// namespace to its initial value. Unless force is set, husk.before-state-clear
+// gates the delete. An ended ctx before the Store delete stops the clear:
+// shutdown answers unavailable, any other cause cancelled. Once deletion starts,
+// it is not interrupted; after it succeeds the clear answers its real outcome,
+// ignoring caller cancellation. The reset uses Loop.Do's claimed semantics:
+// shutdown abandons a queued reset, but waits for a running reset. A skipped
+// reset still succeeds because the persisted copies are gone and the live value
+// dies with the host. A wedged loop holds the handler until shutdown, like other
+// loop-bound ports.
 func (w *State) Clear(ctx context.Context, c contracts.Caller, namespace string, force bool) error {
 	if c.Kind != contracts.CallerCLI {
 		return contracts.NewError(protocol.CodeDenied, "state.clear clears the user's own data; only the user's CLI may do it", nil)
@@ -221,19 +223,47 @@ func (w *State) Clear(ctx context.Context, c contracts.Caller, namespace string,
 			return err
 		}
 	}
+	if ctx.Err() != nil {
+		if errors.Is(context.Cause(ctx), contracts.ErrShutdown) {
+			return coded(protocol.CodeUnavailable, "the host is shutting down")
+		}
+		return coded(protocol.CodeCancelled, "request ended before deletion; nothing was cleared")
+	}
 	if w.cleaner != nil {
 		// Persisted copies go first, mirroring store.md's documented clear
 		// sequence — Store.ClearSlice deletes the shared user and instance
 		// copies, then the handler resets State — so both orders agree. A
 		// failed delete aborts with State untouched and the retry is
 		// idempotent.
-		if err := w.cleaner.DeleteSlice(ctx, namespace); err != nil {
+		if err := w.cleaner.DeleteSlice(context.WithoutCancel(ctx), namespace); err != nil {
 			return contracts.NewError(protocol.CodeInternal, "deleting persisted slice "+namespace+": "+err.Error(), nil)
 		}
 	}
-	_, err := w.apply(ctx, namespace, func() (uint64, error) { return w.st.Clear(namespace) })
-	if err != nil {
-		return err
+	return w.applyClear(ctx, namespace)
+}
+
+// applyClear completes an already-deleted clear, abandoning a queued reset only
+// on shutdown. Loop.Do waits for a claimed closure even if its context ends.
+func (w *State) applyClear(ctx context.Context, namespace string) error {
+	applyCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	defer cancel()
+	stop := context.AfterFunc(ctx, func() {
+		if errors.Is(context.Cause(ctx), contracts.ErrShutdown) {
+			cancel()
+		}
+	})
+	defer stop()
+	limit := w.limitFor(namespace)
+	var rev uint64
+	var writeErr error
+	if err := w.loop.Do(applyCtx, func() {
+		rev, writeErr = w.st.Clear(namespace)
+	}); err != nil {
+		w.log("warn", "state.clear: %s: in-memory reset skipped because the host is closing; persisted copies are deleted", namespace)
+		return nil
+	}
+	if writeErr != nil {
+		return w.mapWriteError(namespace, rev, limit, writeErr)
 	}
 	return nil
 }
@@ -323,7 +353,7 @@ func (w *State) writeHandle(c contracts.Caller, namespace string) (contracts.Sli
 	return h, nil
 }
 
-// apply posts f to the loop and waits for its outcome on ctx. A Post that
+// apply posts a Set or Patch to the loop and waits for its outcome on ctx. A Post that
 // reports the loop no longer running answers unavailable at once; if ctx
 // ends first the reply is cancelled, and the posted closure may still run
 // later. limit is the size cap captured before the write was posted — the
