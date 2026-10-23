@@ -82,7 +82,7 @@ $XDG_RUNTIME_DIR/husk/      when XDG_RUNTIME_DIR is set and non-empty
 
 Rules:
 
-1. Start mode creates the directory with mode 0700 if absent. The CLI never creates it: an absent directory means no instance is running (`husk instances` prints `[]` or an empty table; resolution by discovery is exit 3; resolution by id is exit 3). Either side uses an existing directory only if `lstat` shows a real directory (not a symlink) owned by the current uid with no group or world permission bits. Otherwise the instance refuses to start and the CLI refuses to read it (exit 7).
+1. Start mode creates the directory with mode 0700 if absent. No command creates it, `store` commands included: an absent directory means no instance is running (`husk instances` prints `[]` or an empty table; resolution by discovery is exit 3; resolution by id is exit 3). Either side uses an existing directory only if `lstat` shows a real directory (not a symlink) owned by the current uid with no group or world permission bits. Otherwise the instance refuses to start and the CLI refuses to read it (exit 7).
 2. A set but unusable `XDG_RUNTIME_DIR` is an error, never a fallback to `/tmp`. The `/tmp` form is used only when the variable is empty or unset.
 3. The path is `filepath.Clean`ed before use (a trailing slash in `XDG_RUNTIME_DIR` does not change it), and every path written into an entry or compared against one is built from that cleaned directory.
 4. The directory is shared by all of the user's instances and is never removed. It holds sockets, entries and the temporary files `Register` writes (`.<id>.json.tmp-*`, see entry rule 1), nothing else; the files of a stale instance are removed by the stale recovery protocol below.
@@ -127,7 +127,7 @@ The Server ([Pods](pods.md)) runs these steps at start and exit. The CLI runs th
 3. On `EADDRINUSE`: probe the socket.
    - Reply: the name is held. Start fails with `instance "<id>" is already running`. Nothing is registered or removed.
    - Timeout: the holder is unresponsive. Start fails with `instance "<id>" did not answer; it may be busy`. Nothing is removed. A busy instance never loses its name to a newcomer.
-   - Refused or missing: run stale recovery (below), then bind once more. A second `EADDRINUSE` fails start.
+   - Refused or missing: run stale recovery (below), then bind once more. Step 2 applies to this bind as well: the socket identity is taken from the socket this bind created, never from the one recovery unlinked. A second `EADDRINUSE` fails start.
 4. `chmod 0600` the socket.
 5. Write the entry with `Register`. If this fails, close the listener, unlink the socket just bound, and fail start: no instance may listen without being discoverable.
 6. Hand the socket path and id to the Wrapper for plugin environments ([Pods](pods.md)).
@@ -136,11 +136,13 @@ The Server ([Pods](pods.md)) runs these steps at start and exit. The CLI runs th
 
 **Stale recovery (Server on a refused claim; CLI on a stale entry):**
 
-1. Take an exclusive advisory lock (`flock`, `LOCK_EX`, blocking) on a file descriptor opened read-only on the runtime directory itself. No lock file is created. Wait at most 2.5 s (the connect bound plus the probe bound): on expiry the Server fails start with `runtime dir <path> is locked`; the CLI treats the entry as unresponsive (it is skipped with the unresponsive warning and nothing is removed). The lock is released when the descriptor closes, so a holder that dies releases it without any cleanup step.
-2. Probe the socket again under the lock. A reply ends recovery with nothing removed and the entry is live: the Server fails start as for a held name; the CLI reports the failure that brought it here (exit 3, message without `(stale entry removed)`) and never retries the command against a socket it did not resolve; `Survey` lists the entry as `live`. A timeout ends recovery with nothing removed and the entry is unresponsive.
+1. Take an exclusive advisory lock (`flock`, `LOCK_EX`) on a file descriptor opened read-only on the runtime directory itself. No lock file is created. `flock` has no timeout, so acquire with `LOCK_NB`, retrying every 50 ms until a 2.5 s deadline (the connect bound plus the probe bound; `flock.TryLockContext` in the existing `gofrs/flock`). Never leave a blocking `flock` running after the deadline: an abandoned blocking call can acquire the lock later and hold it until the process exits. On expiry nothing is removed; the Server fails start with `runtime dir <path> is locked`, and the CLI treats the entry as locked (a class of its own in the failure table below: the user is told about the lock, not about the instance). The lock is released when the descriptor closes, so a holder that dies releases it without any cleanup step.
+2. Probe the socket again under the lock. A reply ends recovery with nothing removed and the entry is live: the Server fails start as for a held name; the CLI reports exit 3 with `instance "<id>" started while this command ran; retry` and never retries the command itself against a socket it did not resolve; `Survey` lists the entry as `live`. A timeout ends recovery with nothing removed and the entry is unresponsive.
 3. If `<id>.json` exists and still holds the same `pid` and `started_at` as the entry that was probed, remove it. The Server, which has no entry in hand, removes `<id>.json` if present.
 4. If `<id>.sock` exists and `lstat` says it is a socket, unlink it. If the path exists and is not a socket, leave it and fail (Server: start fails naming the path; CLI: the entry is skipped and a warning names the path).
 5. Release the lock.
+
+`Survey` takes the lock once and runs steps 2 to 4 for every stale entry under it, so a survey after several crashes costs one lock wait, not one per entry.
 
 Removal is silent: the CLI prints no message for a stale entry it removed, except the `(stale entry removed)` suffix when that entry was the explicit target.
 
@@ -169,7 +171,7 @@ A leaf package (`internal/instance`, D72; whether a public client package joins 
 | Socket identity | `SocketIdentity(path) (Identity, error)`: the `(dev, ino)` of `<id>.sock`, taken after `bind`. |
 | Entry files | `Register(dir, Entry) error` (atomic write, own leftovers removed first), `Unregister(dir, id string, ident Identity) error` (entry, then the socket only if its identity is unchanged; idempotent), `List(dir) ([]Entry, error)` (valid-id `*.json` only, corrupt skipped, no probing). |
 | Probing and classification | `Probe(socket) error` (one `session.ping`, 500 ms deadline) and the three-way classification. |
-| Stale recovery | `RecoverStale(dir, Entry) (Class, error)` implementing steps 1 to 5 above, usable by the Server (entry optional) and the CLI; it returns the class the re-probe found so callers act on live and unresponsive as step 2 says. |
+| Stale recovery | `RecoverStale(dir string, entries []*Entry) ([]Class, error)` implementing steps 1 to 5 above once for all given entries under one lock; the CLI passes one entry or `Survey`'s stale set, the Server passes a single `&Entry{ID: id}` (it has only the id; steps 3 and 4 then act on the id alone). It returns the class the re-probe found per entry so callers act on live and unresponsive as step 2 says; a lock deadline expiry is the error `ErrLocked`. |
 | Survey | `Survey(dir) ([]Status, error)`: lists, probes every entry in parallel, runs stale recovery on stale ones, returns live and unresponsive entries with their class, sorted by id. |
 | Resolution | `Resolve(ResolveOptions) (Resolved, error)` implementing the resolution order below and returning a typed error whose kind maps to an exit code. |
 | Environment names | The constants `HUSK_SOCKET_PATH`, `HUSK_INSTANCE`, `HUSK_BIN_PATH`. |
@@ -249,8 +251,8 @@ Invariants:
 ### Connecting and the version check
 
 1. The CLI opens one connection to the target, with a 2 s connect deadline. `ENOENT` or `ECONNREFUSED` here (the instance went away between resolution and connect) is exit 3 and, for a target found by entry, runs stale recovery. Any other connect failure is exit 5.
-2. On that connection it first sends `session.ping` and reads the reply, under `--timeout`. The reply's `protocol_version` major must equal the CLI's; otherwise exit 6 before anything else is sent. A missing or unparsable version is also exit 6.
-3. It then sends the command's request on the same connection, with the token rule above, and waits for the reply under `--timeout`. A streaming command then keeps reading notifications.
+2. On that connection it first sends `session.ping` and reads the reply, under `--timeout` (for a streaming command, under the fixed 5 s opening bound in Timeouts). The reply's `protocol_version` major must equal the CLI's; otherwise exit 6 before anything else is sent. A missing or unparsable version is also exit 6.
+3. It then sends the command's request on the same connection, with the token rule above, and waits for the reply under `--timeout` (streaming: the same 5 s opening bound, which covers steps 2 and 3 together). A streaming command then keeps reading notifications with no bound.
 4. It closes the connection when the command ends. One command, one connection. Discovery's probe connections are closed by `Survey`; the command then opens its own connection in step 1.
 
 What the CLI does with lines that are not the awaited reply:
@@ -261,7 +263,7 @@ What the CLI does with lines that are not the awaited reply:
 | waiting for a reply | any other notification | ignored |
 | waiting for a reply | a reply whose `id` the CLI did not send | exit 6, `unreadable reply: unexpected id` |
 | streaming | the stream's own method (`state.changed`, `event.deliver`) | printed |
-| streaming | a `protocol.error` notification | exit 6, as above |
+| streaming | a `protocol.error` notification | exit 6, as above. The CLI has sent nothing on this connection after the opening request, so the error is about its own request; no "was it ours?" check is needed. |
 | streaming | any other notification or any reply | ignored |
 | either | a line that is not a valid message | exit 6, `unreadable reply: <detail>` |
 
@@ -272,15 +274,16 @@ The entry's `protocol_version` is informational (`husk instances` shows it); the
 | Bound | Value | Where it applies |
 |---|---|---|
 | Probe | 500 ms, all entries in parallel | Discovery, `husk instances`, stale recovery. A live local instance answers in milliseconds; discovery must not feel slow. |
-| Directory lock wait | 2.5 s | Stale recovery step 1. Not a flag. |
-| Survey total | one probe round plus one lock wait (3 s) | `husk instances` and discovery; not a flag. |
+| Directory lock wait | 2.5 s, `LOCK_NB` retried every 50 ms | Stale recovery step 1. Not a flag. |
+| Survey total | 3.5 s: one probe round, one lock wait, one re-probe round under the lock | `husk instances` and discovery; not a flag. The lock is taken once for all stale entries, so the total does not grow with their number. |
 | Connect | 2 s | Step 1 of connecting. A local connect that takes longer is a failure (exit 5). Does not overlap `--timeout`. |
 | Command (`--timeout`) | per command, see the table | From the first byte sent (step 2) to the final reply. Expiry is exit 5 with `instance did not answer within <timeout>`. |
-| Streaming | none; `--timeout` rejected | `state watch` and `event watch` run until a signal or the connection ends. |
+| Streaming opening | 5 s, not a flag | `state watch` and `event watch`: connecting steps 2 and 3 together (the `session.ping` and the opening reply). Expiry is exit 5 with `instance did not answer within 5s`. |
+| Streaming | none; `--timeout` rejected | After the opening reply, the notification stream runs until a signal or the connection ends. |
 
 ### Command table
 
-The complete v1 command set. The synopsis column fixes the spelling of every subcommand and flag. The owner column names the spec that defines the arguments' meaning, the method's params and the reply; this spec adds nothing to that. Every command is a named wrapper over one method, except the local ones marked "none".
+The complete v1 command set, one row (`plugin remove`) reserved for a method another piece of work defines. The synopsis column fixes the spelling of every subcommand and flag. The owner column names the spec that defines the arguments' meaning, the method's params and the reply; this spec adds nothing to that. Every command is a named wrapper over one method, except the local ones marked "none".
 
 | Synopsis | Method | Owner | Default timeout |
 |---|---|---|---|
@@ -334,7 +337,7 @@ Rules that apply across the table:
 6. **No `husk hook call`.** A hook is fired by its owner inside its own operation ([Hooks](hooks.md)); a CLI firer would make subscribers act on an operation that is not happening. To see a hook fire, invoke the owner's operation (`husk action invoke`).
 7. **No `husk keys adopt` and no `husk keys set`.** The CLI never writes a keymap ([Keybindings](keybindings.md)).
 8. **No `husk stop`.** `husk action invoke husk.quit` asks an instance to quit; the CLI is always allowed to invoke actions ([Message kinds](message-kinds.md)).
-9. **Local commands** (`store ...`) open Store without an instance. They live in their own package, the store command package (`internal/cli/storecmd`), which imports Store and the `instance` package; `cmd/husk` wires its noun into the command table. A local command that fails is exit 1 with error code `store` and Store's reason in `message`; `reset-secrets` refused because an instance is live or unresponsive is exit 1 `store` with a message naming those instances. A survey needs a usable runtime directory; the same exit 7 applies.
+9. **Local commands** (`store ...`) open Store without an instance. They live in their own package, the store command package (`internal/cli/storecmd`), which imports Store, the `instance` package and the output package, never `internal/cli`; `cmd/husk` registers its noun with `cli.Register` before dispatch (Dependency directions). They pass Store the directory `LookupRuntimeDir` found (or none), so opening Store creates nothing. A local command that fails is exit 1 with error code `store` and Store's reason in `message`; `reset-secrets` refused because an instance is live or unresponsive is exit 1 `store` with a message naming those instances. A survey needs a usable runtime directory; the same exit 7 applies.
 
 ### Output
 
@@ -433,11 +436,14 @@ Any command ended by `SIGINT`, `SIGTERM` or `SIGPIPE` dies by the signal; the CL
 
 ### Dependency directions
 
-- The socket client and every command that talks to an instance live in `internal/cli` (D72), which imports the `instance` package and the protocol package only. It imports no Stem, Services, Substrate or Pods package, and reaches State, the action catalog, the keymap, config and plugins only through the Server. A test pins that import list.
-- The `store` noun lives in the store command package (`internal/cli/storecmd`), which imports Store (a Substrate package) and the `instance` package, and nothing from `internal/cli` beyond the shared output and error helpers. It never opens a socket.
+Imports go one way; no two of these packages import each other.
+
+- The output package (`internal/cli/output`) is a leaf: `--format` handling, the error object and warning lines, exit codes, the generic table rendering. It imports the standard library and the protocol package only.
+- The socket client and every command that talks to an instance live in `internal/cli` (D72), which imports the output package, the `instance` package and the protocol package only. It imports no Stem, Services, Substrate or Pods package, and reaches State, the action catalog, the keymap, config and plugins only through the Server. It exports the command table with one registration seam, `cli.Register(noun string, cmd Command)`, and `cli.Main(args)`. A test pins that import list.
+- The `store` noun lives in the store command package (`internal/cli/storecmd`), which imports the output package, the `instance` package and Store (a Substrate package), and never `internal/cli`. It never talks to an instance; its only socket use is the probes `Survey` makes for `reset-secrets`. A test pins its import list too (Store, `instance`, output, standard library), so neither package grows a socket client or a Substrate import by accident.
 - `instance` imports the standard library only.
-- The Server imports `instance` for the registry protocol; the Wrapper imports it for the variable names; Store imports it for `RuntimeDir` and the liveness probe its log GC uses.
-- `cmd/husk` dispatches: `argv[1]` to `internal/cli` (which holds the command table and wires the store command package's noun into it) or to start mode. It carries no command logic.
+- The Server imports `instance` for the registry protocol; the Wrapper imports it for the variable names; Store imports it for the liveness probe its log GC uses and for `SocketPath`. Store does not resolve the runtime directory itself: its opener passes it (`Options.RuntimeDir`): start mode passes `RuntimeDir()`, the store command package passes what `LookupRuntimeDir()` found or `""` for absent, which Store treats as "no instance registered" in its liveness probes ([Store](store.md)).
+- `cmd/husk` dispatches: `argv[1]` to `cli.Main` or to start mode, after calling `storecmd.Register` once. Registration is wiring, not command logic; `cmd/husk` carries none.
 
 ### Failure modes
 
@@ -455,8 +461,11 @@ Any command ended by `SIGINT`, `SIGTERM` or `SIGPIPE` dies by the signal; the CL
 | Discovery: several live | CLI | Prints the list | as in Output | 4 |
 | Discovery: one live, others unresponsive | CLI | Uses the live one | warning per skipped entry: `husk: instance "hung" did not answer within 500ms; skipped` | 0 |
 | `--instance` or `HUSK_INSTANCE` not registered | CLI | | `husk: instance "notes" is not running` | 3 |
-| `--instance` or `HUSK_INSTANCE` entry stale | CLI | Stale recovery | `husk: instance "notes" is not running (stale entry removed)`; without the suffix when the re-probe under the lock found a new holder | 3 |
-| Directory lock not acquired within 2.5 s | CLI stale recovery step 1 | Entry treated as unresponsive, nothing removed | `husk: instance "notes" did not answer within 500ms; skipped` (and the unresponsive exit path of the caller) | 5 |
+| `--instance` or `HUSK_INSTANCE` entry stale | CLI | Stale recovery | `husk: instance "notes" is not running (stale entry removed)` | 3 |
+| `--instance` or `HUSK_INSTANCE` entry stale, re-probe under the lock answered | CLI | Nothing removed, command not retried | `husk: instance "notes" started while this command ran; retry` | 3 |
+| Directory lock not acquired within 2.5 s, explicit target | CLI stale recovery step 1 | Nothing removed | `husk: instance "notes" is not answering and the runtime dir is locked; retry` | 5 |
+| Directory lock not acquired within 2.5 s, discovery | CLI stale recovery step 1 | Entry left as is, nothing removed | warning `husk: runtime dir <path> is locked; instance "notes" left as is`; then the discovery rule as if the entry were unresponsive (0 when another instance is live, 5 when none is) | 0 or 5 |
+| Directory lock not acquired within 2.5 s, `husk instances` | CLI stale recovery step 1 | Entry listed `unresponsive`, nothing removed | the same warning | 0 |
 | Directory lock not acquired within 2.5 s | Server stale recovery step 1 | Start fails | `husk: runtime dir <path> is locked` | start fails |
 | `reset-secrets` while an instance is live or unresponsive | store command package | Nothing deleted | `husk: 2 instances are registered (4242, notes); stop them first` | 1 |
 | Other local `store` failure | store command package | | Store's reason | 1 |
@@ -491,7 +500,8 @@ What `main` has and what this spec changes. Rows without a "today" are new.
 | Today | Target |
 |---|---|
 | `internal/instance` exists with `Entry`, `Register`, `Unregister`, `List`, `RemoveIfStale`, `Survey`, `Resolve`, `DefaultPing`, two probe timeouts (500 ms discovery, 2 s lookup). | One probe timeout (500 ms). `RemoveIfStale` becomes `RecoverStale` with the directory lock (2.5 s wait) and socket removal. `Unregister` takes the socket identity. `RuntimeDir` gains a non-creating lookup for the CLI. `Resolve` does not probe explicit targets; the command's own connection is the check. |
-| No `store` command package. | `internal/cli/storecmd`, the only command package that imports Store. |
+| No `store` command package; output and error helpers live inside `internal/cli`. | `internal/cli/output` (leaf), `internal/cli` (socket commands, `Register`), `internal/cli/storecmd` (the only command package that imports Store). |
+| Store resolves the runtime directory itself with `instance.RuntimeDir`. | Store takes it from its opener (`Options.RuntimeDir`); only start mode creates it. |
 | `Entry` has `name` and `husk_version`. | `name` dropped (the id's spelling says whether it is a name). `husk_version` renamed `host_version`, matching `session.ping`. |
 | The Server (`internal/pods/server`) runs the claim with its own `recoverStale` and `gofrs/flock`; `Close` compares `os.SameFile` of the path against an `Lstat` taken after bind. | The Server calls `instance.RecoverStale`; one implementation of the protocol. The after-bind `Lstat` becomes `instance.SocketIdentity` and is passed to `Unregister`. |
 | The Server's `session.ping` reads `HostVersion` from `Entry.HuskVersion`; `cmd/husk` passes no version. | `host_version` set from the build version in both places. |
@@ -521,7 +531,7 @@ What `main` has and what this spec changes. Rows without a "today" are new.
 15. **`event emit` is acknowledged.** `event.emit` is a request whose `{}` reply means the event is on the bus ([Protocol](protocol.md)); a CLI that cannot report acceptance is useless in scripts.
 16. **No `husk hook call`, no `husk keys adopt`, no `husk stop`.** Each has an existing path or an owner that forbids it; see the command table rules.
 17. **No signal handlers, streams included.** A watch has no natural end, so "interrupted means success" was tempting, but it made `husk` inconsistent with itself (every other command dies by the signal) and with `tail -f` and its kin. Dying by the signal everywhere is one rule and less code.
-18. **The `store` noun is its own package.** The socket client stays free of Substrate, which is the point of the import rule; the one noun that needs Store imports it from a sibling package.
+18. **The `store` noun is its own package, and the output helpers are a leaf below both.** The socket client stays free of Substrate, which is the point of the import rule; the one noun that needs Store imports it from a sibling package. Sharing the output helpers through `internal/cli` would make the two packages import each other, so the helpers are a third package neither depends on the other for. Store takes the runtime directory from its opener for the same reason: `husk store paths` on a fresh machine must not leave a runtime directory behind.
 19. **Socket identity is `(dev, ino)` from `lstat` after `bind`.** The listener descriptor cannot identify the path's inode, so the Server records the identity when it binds and compares it when it unregisters.
 
 ## Rulings applied

@@ -524,8 +524,12 @@ Instance names follow [Instances](instances.md): `[a-z0-9][a-z0-9-]*`, at most
 
 Every directory Store creates is checked after creation with `Lstat`: it must
 not be a symlink, must be owned by the current uid, and must have mode 0700.
-The runtime directory is resolved and checked by `instance.RuntimeDir`
-([Instances](instances.md)); Store calls it and fails `Open` when it fails.
+The runtime directory is resolved and checked by the `instance` package
+([Instances](instances.md)) and handed to Store by its opener as
+`Options.RuntimeDir`: start mode passes `instance.RuntimeDir()` (creates), the
+store commands pass what `instance.LookupRuntimeDir()` found, or `""` when the
+directory is absent, which Store treats as "no instance registered" for its
+liveness probes. Store never creates the runtime directory.
 An existing runtime root follows that module's rule: current-uid ownership and
 no group/other permission bits, not an exact requirement on the owner's bits.
 Today's per-run `mkdtemp` directory is replaced by that check.
