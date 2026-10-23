@@ -383,3 +383,54 @@ func TestUnreachableIgnoresTombstonesAndConditions(t *testing.T) {
 		})
 	}
 }
+
+// A binding shadowed by a shorter, stronger prefix is never advertised; the
+// hint returns once the shadower is gone.
+func TestHintsSkipPrefixShadowedBindings(t *testing.T) {
+	dist := bind(`{"keys":["g","x"],"action":"d.y","hint":"Y"}`)
+	kb := rankKeys(t, map[store.Layer]string{store.LayerProfile: bind(`{"key":"g","action":"p.a"}`), store.LayerDistribution: dist}, "")
+	if hints := kb.Hints(keybinding.KeyContext{}); len(hints) != 0 {
+		t.Fatalf("hints = %+v, want none", hints)
+	}
+	kb = rankKeys(t, map[store.Layer]string{store.LayerDistribution: dist}, "")
+	if hints := kb.Hints(keybinding.KeyContext{}); len(hints) != 1 || hints[0].Text != "Y" {
+		t.Fatalf("hints = %+v, want Y", hints)
+	}
+}
+
+// Two shadowed same-layer entries keep no prefix relation in the resolution
+// set: under the modal filter the shorter one wins, and no extra problem is
+// reported.
+func TestShadowedUnreachableLeavesTheResolutionSet(t *testing.T) {
+	kb := rankKeys(t, map[store.Layer]string{
+		store.LayerProfile: bind(`{"key":"g","action":"p.x"}`),
+		store.LayerUser:    bind(`{"keys":["g","x"],"action":"husk.modal.close"}`, `{"key":"g","action":"husk.modal.close"}`),
+	}, "")
+	modal := keybinding.KeyContext{ModalOpen: true, FocusSurface: "modal-surface"}
+	if got := resolved(kb, modal, "g"); got != "husk.modal.close" {
+		t.Errorf("modal g = %s, want husk.modal.close", got)
+	}
+	if got := resolved(kb, keybinding.KeyContext{}, "g"); got != "p.x" {
+		t.Errorf("unfiltered g = %s, want p.x", got)
+	}
+	for _, p := range kb.Listing().Problems {
+		if p.Code == "unreachable" {
+			t.Errorf("extra problem %+v", p)
+		}
+	}
+}
+
+// A same-layer tombstone before a longer binding on its prefix makes the
+// binding untypeable; after it, both work. Pinned so the order dependence is
+// deliberate.
+func TestTombstoneBeforeLongerBindingIsOrderDependent(t *testing.T) {
+	tomb, long := `{"key":"g","disable":true}`, `{"keys":["g","x"],"action":"u.long"}`
+	kb := rankKeys(t, map[store.Layer]string{store.LayerUser: bind(tomb, long)}, "")
+	if got := resolved(kb, keybinding.KeyContext{}, "g"); got != "<none>" {
+		t.Errorf("tombstone first: g = %s, want none", got)
+	}
+	kb = rankKeys(t, map[store.Layer]string{store.LayerUser: bind(long, tomb)}, "")
+	if resolved(kb, keybinding.KeyContext{}, "g") != "<prefix>" || resolved(kb, keybinding.KeyContext{}, "g", "x") != "u.long" {
+		t.Errorf("tombstone last: long binding not typeable")
+	}
+}

@@ -157,7 +157,7 @@ A binding names one key with `key` or two to four keys with `keys`; exactly one 
 | The terminal becomes frozen while keys are pending | Nothing special. The next key is resolved under the Frozen filter. |
 | A reload swaps the keymap while keys are pending | Nothing special. The next key is resolved against the keymap current at that moment. |
 
-If, within one scope, layer and plugin condition, an effective binding's sequence is a strict prefix of another effective binding's sequence, the longer one can never be typed. The loader drops the longer one and reports `unreachable`. (The same prefix in two different scopes or layers is not a conflict: ranking decides at run time.)
+If, within one scope, layer and plugin condition, an effective binding's sequence is a strict prefix of another effective binding's sequence, the longer one can never be typed. The loader drops the longer one and reports `unreachable`. (The same prefix in two different scopes or layers is not a conflict: ranking decides at run time.) A tombstone is not the shorter sequence here: a same-layer tombstone that precedes a longer binding on its prefix makes that binding untypeable, so order the tombstone after it.
 
 ### Keymap file shape
 
@@ -532,7 +532,7 @@ This is the complete list of codes.
 | Keymap document size | 256 KiB | A hand-edited keymap is a few KiB; the cap bounds parse time and memory. |
 | Entries per layer file | 2048 | Same. |
 | Entries per manifest | 128 | A plugin is a surface, not a keyboard. |
-| Effective entries after ranking | 4096 | Bounds lookup memory and `husk keys` output. |
+| Effective entries after ranking | 4096 | Bounds `husk keys` output and the effective set; the resolution index also holds statically shadowed entries, which the per-file limit of 2048 bounds. |
 | Keys per sequence | 4 | Longer sequences are unusable by hand. |
 | Sequence timeout | 1500 ms (Input's clock) | Long enough for a deliberate sequence, short enough that a stray prefix does not trap input. |
 | `hint` length | 40 runes | The footer has fixed room for four hints. |
@@ -570,6 +570,7 @@ This is the complete list of codes.
 | Loader reports a document over 256 KiB as `too_many` | Report `too_large`. **Landed**; a missing `bind` also names the key `bind`. |
 | Conversion accepts `focus_bindings` as an alias of `keybindings` | Accept `keybindings` only. **Landed**: a manifest that still spells `focus_bindings` gets an `ignored_field` warning and binds nothing. The service no longer re-checks focus-local ownership, scope or the 128-entry cap; conversion owns them. |
 | Declared document name `focus-keymap` | `keymap` (D64; rename unit). |
+| Resolution index holds effective entries only | **Landed**: it holds every entry except duplicates, `unreachable` and cap-dropped ones. If the 4096 cap drops a shadower, the entries it shadowed keep their `shadowed` state but resolve in its place. `Hints` reads effective entries and skips any whose proper prefix already matches. |
 | `docs/docs/architecture.md`, "Input routing" | Says layer order decides; now scope decides first. **Landed.** |
 
 Behavior changes users can notice, compared with the layer-first draft of this spec:

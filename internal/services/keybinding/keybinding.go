@@ -265,18 +265,24 @@ func (s *Service) Resolve(ctx KeyContext, keys []string) Result {
 func (s *Service) Hints(ctx KeyContext) []Hint {
 	var out []Hint
 	seen := map[string]bool{}
-	snap := s.current.Load()
 	var all []Binding
-	for _, bindings := range snap.index {
-		all = append(all, bindings...)
+	for _, e := range s.current.Load().listing.Entries {
+		if e.State == "effective" && !e.Disable {
+			all = append(all, e.Binding)
+		}
 	}
 	sort.SliceStable(all, func(i, j int) bool { return stronger(all[i], all[j]) })
 	for _, b := range all {
 		if b.Hint == "" || seen[triple(b)] {
 			continue
 		}
+		// A shorter sequence that already matches in ctx ends the sequence early.
+		reachable := true
+		for n := 1; n < len(b.Keys); n++ {
+			reachable = reachable && s.Resolve(ctx, b.Keys[:n]).Outcome != Match
+		}
 		r := s.Resolve(ctx, b.Keys)
-		if r.Outcome == Match && r.Binding.Action == b.Action && r.Binding.Source == b.Source {
+		if reachable && r.Outcome == Match && r.Binding.Action == b.Action && r.Binding.Source == b.Source {
 			out = append(out, Hint{append([]string(nil), b.Keys...), b.Action, b.Hint})
 			seen[triple(b)] = true
 			if len(out) == 4 {
@@ -755,23 +761,37 @@ func shadowEntries(es []Entry) {
 // effective sequence that has an effective strict prefix binding: the shorter
 // binding always resolves first. A tombstone is not a prefix here.
 func unreachable(es []Entry, issue func(code string, src Source, key string)) {
-	prefixes := map[string]bool{}
+	effective, resolving := map[string]bool{}, map[string]bool{}
 	group := func(b Binding) string { return string(b.Source.Layer) + "\x00" + b.Focus + "\x00" + b.Plugin + "\x00" }
 	for _, e := range es {
-		if e.State == "effective" && !e.Disable {
-			prefixes[group(e.Binding)+sequence(e.Keys)] = true
+		if e.dropped || e.Disable {
+			continue
+		}
+		resolving[group(e.Binding)+sequence(e.Keys)] = true
+		if e.State == "effective" {
+			effective[group(e.Binding)+sequence(e.Keys)] = true
 		}
 	}
 	for i := range es {
-		if es[i].State != "effective" {
+		if es[i].dropped {
 			continue
 		}
+		prefixes := resolving
+		if es[i].State == "effective" {
+			prefixes = effective
+		}
 		for n := 1; n < len(es[i].Keys); n++ {
-			if prefixes[group(es[i].Binding)+sequence(es[i].Keys[:n])] {
-				es[i].State, es[i].dropped = "shadowed", true
-				issue("unreachable", es[i].Source, sequence(es[i].Keys))
-				break
+			if !prefixes[group(es[i].Binding)+sequence(es[i].Keys[:n])] {
+				continue
 			}
+			// A statically shadowed entry is already listed and reported; it
+			// only leaves the resolution index.
+			if es[i].State == "effective" {
+				es[i].State = "shadowed"
+				issue("unreachable", es[i].Source, sequence(es[i].Keys))
+			}
+			es[i].dropped = true
+			break
 		}
 	}
 }
