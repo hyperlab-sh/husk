@@ -52,4 +52,5 @@ One Go binary in two roles that exercises every extension point: a publisher (fr
 
 ## 3. History
 
+- **2026-10-23, runtime plugin addition.** `plugin.add` and `husk plugin add` load a path or directory batch into the current instance without changing configuration. Startup and runtime share conversion, registration and launch gates; each admitted batch waits for its reload and all launch outcomes. Removal owns its id until its reload completes, disconnected callers do not cancel accepted additions, and re-add keeps persisted slices and grants. Protocol 2.2 advertises the method; addition events follow the final liveness flush.
 - **2026-10-22, v1 wire retired.** The v1 wire package, the v1 manifest package and the frozen v1 schema were deleted once nothing imported them. `cmd/husk` runs on the v2 host, plugins speak `pkg/protocol`, and `husk-plugin.json` is read by `internal/pods/manifest`.
