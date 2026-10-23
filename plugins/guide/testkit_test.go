@@ -82,11 +82,11 @@ func start(t *testing.T, l layout, failDials ...int) *harness {
 		_ = outR.Close()
 		receive(t, h.done)
 	})
-	h.connect(l)
+	h.connect(l, fixtureKeys())
 	h.host(protocol.Message{Method: protocol.MethodThemeChanged, Params: raw(protocol.ThemeChangedParams{Palette: testPalette()})})
 	return h
 }
-func (h *harness) connect(l layout) {
+func (h *harness) connect(l layout, keys ...keyListing) {
 	plug, host := net.Pipe()
 	p := &peer{host, make(chan protocol.Message, 128)}
 	h.peer = p
@@ -104,6 +104,9 @@ func (h *harness) connect(l layout) {
 		h.t.Fatalf("watch params %s", watch.Params)
 	}
 	h.respond(watch, map[string]any{"seq": 1, "slices": []sliceValue{{"husk.geometry", raw(l.Geometry)}, {"husk.surfaces", raw(l.Surfaces)}, {"husk.focus", raw(l.Focus)}, {"husk.pods", raw(map[string]any{"plugins": map[string]any{}})}}}, nil)
+	if len(keys) > 0 {
+		h.respond(h.expect(protocol.MethodKeysList), keys[0], nil)
+	}
 }
 func (h *harness) host(m protocol.Message) {
 	h.t.Helper()

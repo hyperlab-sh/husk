@@ -40,8 +40,8 @@ func displayBefore(a, b keyEntry) bool {
 	if layerRank(a.Source.Layer) != layerRank(b.Source.Layer) {
 		return layerRank(a.Source.Layer) > layerRank(b.Source.Layer)
 	}
-	if (a.Plugin == "") != (b.Plugin == "") {
-		return a.Plugin != ""
+	if a.Source.Plugin != b.Source.Plugin {
+		return a.Source.Plugin < b.Source.Plugin
 	}
 	return a.Source.Order < b.Source.Order
 }
@@ -81,6 +81,9 @@ func (l layout) surfaceKey(k keyListing, id protocol.SurfaceID) string {
 	case protocol.SurfaceModal:
 		rail := l.Surfaces.Overlays.Modal.RailItem
 		if rail == "" {
+			if _, visible := l.Geometry.Rects[id]; visible {
+				return k.effective("husk.modal.close", id, "unbound")
+			}
 			return "rail"
 		}
 		return k.effective(rail, id, "palette") + ", " + k.effective("husk.modal.close", id, "unbound")

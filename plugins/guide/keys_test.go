@@ -21,6 +21,10 @@ func TestEffectiveKeys(t *testing.T) {
 	earlier := conditioned
 	earlier.Keys = []string{"e"}
 	earlier.Source.Order = 1
+	fromA, fromB := higher, higher
+	fromA.Keys, fromB.Keys = []string{"a"}, []string{"b"}
+	fromA.Source.Plugin, fromB.Source.Plugin = "example.a", "example.b"
+	fromA.Source.Order, fromB.Source.Order = 9, 0
 	other := scoped
 	other.Focus = protocol.SurfaceSidebarList
 	disabled := higher
@@ -34,7 +38,8 @@ func TestEffectiveKeys(t *testing.T) {
 	}{
 		{"global before scoped", []keyEntry{scoped, global}, "g"},
 		{"layer", []keyEntry{global, higher}, "ctrl+x ctrl+y"},
-		{"condition", []keyEntry{higher, conditioned}, "c"},
+		{"condition does not reorder", []keyEntry{higher, conditioned}, "ctrl+x ctrl+y"},
+		{"source plugin before order", []keyEntry{fromB, fromA}, "a"},
 		{"source order", []keyEntry{conditioned, earlier}, "e"},
 		{"wrong focus", []keyEntry{other}, "unbound"},
 		{"disabled and shadowed", []keyEntry{disabled, shadowed}, "unbound"},
@@ -64,6 +69,15 @@ func TestEffectiveKeys(t *testing.T) {
 			}
 		})
 	}
+	t.Run("visible modal without rail", func(t *testing.T) {
+		modal := fixture()
+		modal.Geometry.Rects[protocol.SurfaceModal] = rect{10, 5, 100, 20}
+		close := binding("husk.modal.close", "esc")
+		close.Focus = protocol.SurfaceModal
+		if got := modal.surfaceKey(keyListing{Entries: []keyEntry{close}}, protocol.SurfaceModal); got != "esc" {
+			t.Fatalf("modal key %q, want esc", got)
+		}
+	})
 	l.Surfaces.Placement.RailItem = "example.rail"
 	l.Surfaces.Overlays.Modal.RailItem = "example.modal"
 	for _, tt := range []struct {

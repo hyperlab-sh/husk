@@ -19,17 +19,44 @@ func TestDefaultFrame(t *testing.T) {
 		t.Fatalf("rows %d", len(grid))
 	}
 	order := []protocol.SurfaceID{protocol.SurfaceActivityRail, protocol.SurfaceSidebarNavigation, protocol.SurfaceMainHeader, protocol.SurfaceSidePanel, protocol.SurfaceSidebarList, protocol.SurfaceMainStage, protocol.SurfaceSidebarFooter}
+	legend := legendBounds(l)
+	callouts := []string{"①", "② Sidebar navigation", "③ Main header · main-header · empty · f1", "④ Side panel · side-panel · empty · ]", "⑤ Sidebar list · sidebar-list", "⑥ Main stage · main-stage · example.editor · f1", "⑦ Sidebar footer"}
 	for i, id := range order {
 		r := l.Geometry.Rects[id]
-		if got := grid[r.Y][r.X+1].text; got != string(rune('①'+i)) {
-			t.Errorf("%s callout %q", id, got)
+		var caption strings.Builder
+		for x := r.X + 1; x <= r.X+len([]rune(callouts[i])); x++ {
+			caption.WriteString(grid[r.Y][x].text)
 		}
-		want := "┌"
+		if caption.String() != callouts[i] {
+			t.Fatalf("%s callout %q, want %q", id, caption.String(), callouts[i])
+		}
+		chars, fg := []rune("┌┐└┘─│"), "38;2;17;34;51"
 		if id == protocol.SurfaceMainStage {
-			want = "╔"
+			chars, fg = []rune("╔╗╚╝═║"), "38;2;34;51;68"
+			assertTextAt(t, grid, r.X+1, r.Y, callouts[i], "38;2;17;34;51")
 		}
-		if grid[r.Y][r.X].text != want {
-			t.Errorf("%s corner %q", id, grid[r.Y][r.X].text)
+		for y := r.Y; y < r.Y+r.Height; y++ {
+			for x := r.X; x < r.X+r.Width; x++ {
+				top, bottom := y == r.Y, y == r.Y+r.Height-1
+				left, right := x == r.X, x == r.X+r.Width-1
+				if !(top || bottom || left || right) || inside(legend, x, y) || top && x > r.X && x <= r.X+len([]rune(callouts[i])) {
+					continue
+				}
+				glyph := chars[5]
+				switch {
+				case top && left:
+					glyph = chars[0]
+				case top && right:
+					glyph = chars[1]
+				case bottom && left:
+					glyph = chars[2]
+				case bottom && right:
+					glyph = chars[3]
+				case top || bottom:
+					glyph = chars[4]
+				}
+				assertTextAt(t, grid, x, y, string(glyph), fg)
+			}
 		}
 	}
 	for y, row := range grid {
@@ -37,7 +64,7 @@ func TestDefaultFrame(t *testing.T) {
 			t.Fatalf("row %d width %d", y, len(row))
 		}
 		for x, c := range row {
-			allowed := x >= 78 && x <= 141 && y >= 25 && y <= 38
+			allowed := inside(legend, x, y)
 			for _, id := range order {
 				r := l.Geometry.Rects[id]
 				allowed = allowed || x >= r.X && x < r.X+r.Width && (y == r.Y || y == r.Y+r.Height-1) || y >= r.Y && y < r.Y+r.Height && (x == r.X || x == r.X+r.Width-1)
@@ -79,7 +106,13 @@ func TestHiddenAndNotPlaced(t *testing.T) {
 		delete(l.Geometry.Rects, id)
 	}
 	h := start(t, l)
-	lines := strings.Split(plain(h.on(fixtureKeys())), "\n")
+	frame := h.on(fixtureKeys())
+	grid := decode(t, frame)
+	for _, id := range []protocol.SurfaceID{protocol.SurfaceSidebarNavigation, protocol.SurfaceSidebarList, protocol.SurfaceSidebarFooter} {
+		assertLegendRow(t, l, grid, id, "hidden", "[")
+	}
+	assertLegendRow(t, l, grid, protocol.SurfaceThreadRowStatus, "not placed", "")
+	lines := strings.Split(plain(frame), "\n")
 	for _, name := range []string{"Sidebar navigation", "Sidebar list", "Sidebar footer"} {
 		found := false
 		for _, line := range lines {
@@ -109,6 +142,14 @@ func TestEmptyAndFailedClaimant(t *testing.T) {
 	if !strings.Contains(plain(before), "empty") {
 		t.Fatal("missing empty label")
 	}
+	grid := decode(t, before)
+	stage := l.Geometry.Rects[protocol.SurfaceMainStage]
+	prefix := "⑥ Main stage · "
+	assertTextAt(t, grid, stage.X+1+len([]rune(prefix)), stage.Y, "main-stage", "38;2;17;34;51")
+	prefix += "main-stage · "
+	assertTextAt(t, grid, stage.X+1+len([]rune(prefix)), stage.Y, "empty", "38;2;68;85;102")
+	assertTextAt(t, grid, stage.X+1+len([]rune(prefix+"empty · ")), stage.Y, "f1", "38;2;17;34;51")
+	assertLegendRow(t, l, grid, protocol.SurfaceMainStage, "empty", "f1")
 	h.socket(changed("husk.pods", map[string]any{"plugins": map[string]any{"example.editor": map[string]string{"status": "failed"}}}))
 	keys := h.expect(protocol.MethodKeysList)
 	h.respond(keys, fixtureKeys(), nil)
@@ -146,6 +187,12 @@ func TestUnknownAndNarrowCallouts(t *testing.T) {
 	if []rune(lines[5])[7] != '┌' || []rune(lines[5])[26] != '┐' {
 		t.Fatal("callout overwrote corners")
 	}
+	for _, width := range []int{4, 5} {
+		l.Geometry.Rects[protocol.SurfaceSidebarList] = rect{7, 5, width, 4}
+		h.socket(changed("husk.geometry", l.Geometry))
+		grid := decode(t, h.frame())
+		assertTextAt(t, grid, 7, 5, "┌⑤"+strings.Repeat("─", width-3)+"┐", "38;2;17;34;51")
+	}
 }
 func TestToggleUsesLatestBaseline(t *testing.T) {
 	l := fixture()
@@ -175,31 +222,41 @@ func TestToggleUsesLatestBaseline(t *testing.T) {
 	receive(t, h.out)
 }
 func TestRefusedClaimStaysLive(t *testing.T) {
-	l := fixture()
-	l.Surfaces.Occupants[protocol.SurfaceAppOverlay] = struct {
-		Plugin string `json:"plugin"`
-	}{"example.other"}
-	h := start(t, l)
-	h.toggle(1)
-	keys := h.expect(protocol.MethodKeysList)
-	h.respond(keys, fixtureKeys(), nil)
-	h.frame()
-	h.state(false)
-	reply := receive(t, h.out)
-	if reply.Error == nil || reply.Error.Code != protocol.CodeFailed || reply.Error.Message != "app-overlay is occupied by example.other" {
-		t.Fatalf("refusal %+v", reply)
+	for _, tc := range []struct{ name, owner, message string }{
+		{"occupied", "example.other", "app-overlay is occupied by example.other"},
+		{"unclaimed", "", "app-overlay is not claimed by guide"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			l := fixture()
+			delete(l.Surfaces.Occupants, protocol.SurfaceAppOverlay)
+			if tc.owner != "" {
+				l.Surfaces.Occupants[protocol.SurfaceAppOverlay] = struct {
+					Plugin string `json:"plugin"`
+				}{tc.owner}
+			}
+			h := start(t, l)
+			h.toggle(1)
+			keys := h.expect(protocol.MethodKeysList)
+			h.respond(keys, fixtureKeys(), nil)
+			h.frame()
+			h.state(false)
+			reply := receive(t, h.out)
+			if reply.Error == nil || reply.Error.Code != protocol.CodeFailed || reply.Error.Message != tc.message {
+				t.Fatalf("refusal %+v", reply)
+			}
+			if strings.Count(h.logs.String(), tc.message) != 1 {
+				t.Fatal("refusal not logged once")
+			}
+			l.Surfaces.Occupants[protocol.SurfaceAppOverlay] = struct {
+				Plugin string `json:"plugin"`
+			}{"guide"}
+			h.socket(changed("husk.surfaces", l.Surfaces), changed("husk.pods", map[string]any{}))
+			keys = h.expect(protocol.MethodKeysList)
+			h.respond(keys, fixtureKeys(), nil)
+			// Still live and able to toggle after resolution hands over the claim.
+			h.on(fixtureKeys())
+		})
 	}
-	if strings.Count(h.logs.String(), "app-overlay is occupied by example.other") != 1 {
-		t.Fatal("refusal not logged once")
-	}
-	l.Surfaces.Occupants[protocol.SurfaceAppOverlay] = struct {
-		Plugin string `json:"plugin"`
-	}{"guide"}
-	h.socket(changed("husk.surfaces", l.Surfaces), changed("husk.pods", map[string]any{}))
-	keys = h.expect(protocol.MethodKeysList)
-	h.respond(keys, fixtureKeys(), nil)
-	// Still live and able to toggle when the resolved claim is handed over.
-	h.on(fixtureKeys())
 }
 func TestReconnectUsesFreshWatch(t *testing.T) {
 	l := fixture()
@@ -210,7 +267,14 @@ func TestReconnectUsesFreshWatch(t *testing.T) {
 	l.Geometry.Terminal.Height = 60
 	delete(l.Geometry.Rects, protocol.SurfaceSidebarList)
 	h.connect(l)
+	keys := fixtureKeys()
+	keys.Entries[3].Keys = []string{"ctrl+n"}
+	keys.Entries[4].Keys = []string{"f3"}
+	h.respond(h.expect(protocol.MethodKeysList), keys, nil)
 	lines := h.frame()
+	if !strings.Contains(plain(lines), "ctrl+n next focus · f3 hide guide") {
+		t.Fatal("reconnect did not refresh ready keys")
+	}
 	if len(lines) != 60 || len(decode(t, lines)[0]) != 200 {
 		t.Fatal("reconnect used stale geometry")
 	}
@@ -218,6 +282,24 @@ func TestReconnectUsesFreshWatch(t *testing.T) {
 		t.Fatal("reconnect retained missing rect")
 	}
 }
+func TestReconnectDuringKeysRequest(t *testing.T) {
+	l := fixture()
+	h := start(t, l)
+	h.on(fixtureKeys())
+	h.socket(changed("husk.pods", map[string]any{}))
+	h.expect(protocol.MethodKeysList) // Intentionally leave this request unanswered.
+	_ = h.peer.Close()
+	l.Geometry.Terminal.Width, l.Geometry.Terminal.Height = 200, 60
+	h.connect(l)
+	keys := fixtureKeys()
+	keys.Entries[4].Keys = []string{"f4"}
+	h.respond(h.expect(protocol.MethodKeysList), keys, nil)
+	lines := h.frame()
+	if len(lines) != 60 || len(decode(t, lines)[0]) != 200 || !strings.Contains(plain(lines), "f4 hide guide") {
+		t.Fatal("reconnect did not resume rendering with new baseline and keys")
+	}
+}
+
 func TestKeysFailure(t *testing.T) {
 	h := start(t, fixture())
 	h.toggle(1)
@@ -265,6 +347,13 @@ func TestNumberingPastTwenty(t *testing.T) {
 	if !strings.HasPrefix(lines[38], "┌⑳") || !strings.HasPrefix(lines[40], "┌21") {
 		t.Fatalf("number 20/21: %q / %q", lines[38], lines[40])
 	}
+	l.Geometry.Rects["future-20"] = rect{0, 40, 1, 1}
+	h.socket(changed("husk.geometry", l.Geometry))
+	grid := decode(t, h.frame())
+	assertTextAt(t, grid, 0, 40, "2", "38;2;17;34;51")
+	if grid[40][1].text != " " || grid[40][1].fg != "" {
+		t.Fatal("unboxed number escaped its one-cell rect")
+	}
 }
 func TestLegendGeometry(t *testing.T) {
 	for _, size := range [][2]int{{84, 24}, {200, 60}} {
@@ -309,10 +398,10 @@ func TestThemeAndSmallRects(t *testing.T) {
 	}
 }
 func TestDialFailureRetry(t *testing.T) {
-	h := start(t, fixture(), 1)
+	h := start(t, fixture(), 3)
 	h.on(fixtureKeys())
-	if strings.Count(h.logs.String(), "injected dial failure") != 1 {
-		t.Fatalf("dial diagnostics: %s", h.logs.String())
+	if strings.Count(h.logs.String(), "injected dial failure") != 1 || strings.Count(h.logs.String(), "connection recovered") != 1 {
+		t.Fatalf("dial outage must log once plus recovery: %s", h.logs.String())
 	}
 }
 func TestSourceEmbeddingAndManifest(t *testing.T) {

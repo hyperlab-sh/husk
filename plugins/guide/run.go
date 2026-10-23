@@ -53,6 +53,7 @@ type input struct {
 	messages   []protocol.Message
 	conn       io.ReadWriteCloser
 	ended      bool
+	recovered  bool
 	err        error
 }
 type pendingKind int
@@ -85,6 +86,8 @@ type plugin struct {
 // pump groups complete messages already buffered by one stream read. A partial
 // next line does not delay the complete notifications from the current read.
 func pump(ctx context.Context, r io.Reader, host bool, generation uint64, send func(input)) {
+	// Keep this size >= protocol.ReadLoop's 64 KiB read buffer: bufio must
+	// reuse br rather than wrap it, so Buffered/Peek see the remaining lines.
 	br := bufio.NewReaderSize(r, 64*1024)
 	var batch []protocol.Message
 	flush := func() {
@@ -139,13 +142,17 @@ func run(parent context.Context, cfg config, stdin io.ReadCloser, stdout, log io
 		generation++
 		gen := generation
 		start(func() {
+			reported := false
 			for ctx.Err() == nil {
 				c, err := cfg.dial(ctx)
 				if err == nil {
-					send(input{generation: gen, conn: c})
+					send(input{generation: gen, conn: c, recovered: reported})
 					return
 				}
-				send(input{generation: gen, err: fmt.Errorf("connect: %w", err)})
+				if !reported {
+					send(input{generation: gen, err: fmt.Errorf("connect: %w", err)})
+					reported = true
+				}
 				if cfg.retry(ctx) != nil {
 					return
 				}
@@ -175,6 +182,9 @@ func run(parent context.Context, cfg config, stdin io.ReadCloser, stdout, log io
 				continue
 			}
 			if event.conn != nil {
+				if event.recovered {
+					fmt.Fprintln(log, "guide: connection recovered")
+				}
 				conn = event.conn
 				p.socket = protocol.NewWriter(conn)
 				gen := generation
@@ -185,7 +195,7 @@ func run(parent context.Context, cfg config, stdin io.ReadCloser, stdout, log io
 					connect()
 					continue
 				}
-				if p.toggle != nil {
+				if p.toggle != nil || p.shown || !p.keysReady {
 					if err := p.requestKeys(); err != nil {
 						disconnect()
 						connect()
@@ -400,6 +410,9 @@ func (p *plugin) flush() error {
 	var failure *protocol.Error
 	if owner != "guide" {
 		message := "app-overlay is occupied by " + owner
+		if owner == "" {
+			message = "app-overlay is not claimed by guide"
+		}
 		if message != p.loggedRefusal {
 			fmt.Fprintln(p.log, "guide:", message)
 			p.loggedRefusal = message
