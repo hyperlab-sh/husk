@@ -124,6 +124,10 @@ func recordRows(items []any) (headers []string, rows [][]string, ok bool) {
 		headers = append(headers, k)
 	}
 	sort.Strings(headers)
+	shown := make([]string, len(headers)) // escaped like any key; lookups use the raw one
+	for i, h := range headers {
+		shown[i] = cell(h)
+	}
 	for _, it := range items {
 		obj := it.(map[string]any)
 		row := make([]string, len(headers))
@@ -134,7 +138,7 @@ func recordRows(items []any) (headers []string, rows [][]string, ok bool) {
 		}
 		rows = append(rows, row)
 	}
-	return headers, rows, true
+	return shown, rows, true
 }
 
 // cell renders one value: strings bare unless they hold a control character
