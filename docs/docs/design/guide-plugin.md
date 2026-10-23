@@ -147,10 +147,11 @@ A frame at 200x60 is at most 60 lines of 200 cells with a few SGR runs each, wel
 
 ## Level 2: Migration from today
 
-Nothing of the guide exists. What the host needs first, each in its owning spec:
+Nothing of the guide exists. The host prerequisites below are implemented,
+each in its owning spec:
 
-1. **`app-overlay` becomes drawable** ([Cell-buffer compositor](cell-buffer-compositor.md), "Overlay layer"; [State](state.md), "Frontend-owned slices"). Today `placeSlots` never gives `app-overlay` a rect, so an occupant's content is never drawn, its claim yields no `surface.resized` with a size, and `husk.geometry.rects` and `husk.surfaces.visible` do not list it. The frontend places it at the full frame and `View` blits it with the transparency rule after the modal and before the toast and palette.
-2. **Plugins may read the host's keys** ([Keybindings](keybindings.md), "`husk keys`"). Today a plugin caller of `keys.list` receives only its own entries; it also receives the effective entries of `husk.*` actions and rail item ids, which the footer, rail and palette already display.
+1. **`app-overlay` becomes drawable** ([Cell-buffer compositor](cell-buffer-compositor.md), "Overlay layer"; [State](state.md), "Frontend-owned slices"). The frontend places it at the full frame, includes it in `husk.geometry.rects` and `husk.surfaces.visible`, sends `surface.resized` to its occupant, and `View` blits it with the transparency rule after the modal and before the toast and palette.
+2. **Plugins may read the host's keys** ([Keybindings](keybindings.md), "`husk keys`"). A plugin caller of `keys.list` receives its own entries and problems plus the effective entries of `husk.*` actions and declared rail item ids, which the footer, rail and palette already display. Other plugins' shadowed or disabled entries and problems remain hidden.
 3. **The footer hint follows liveness** ([Keybindings](keybindings.md), "Rail items, palette and footer"). The frontend filters `Hints` against `husk.pods`.
 
 Then the plugin: `plugins/guide/husk-plugin.json`, `main.go` and `main_test.go`, a Go binary importing `pkg/protocol` and nothing else from Husk, git-ignored like `plugins/reference/reference`. `husk --dump-frame --plugin-dir ./plugins` renders the reference pair and the guide together once `guide.toggle` has been invoked; a `--dump-frame` fixture that toggles it is the regression test for the overlay layer in the host.
