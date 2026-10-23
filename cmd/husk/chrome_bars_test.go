@@ -88,8 +88,8 @@ func TestRailAltBadgeCentredAndClipped(t *testing.T) {
 			c := newCanvas(7, 38)
 			defer c.release()
 			c.blitBlock(0, 0, m.renderActivityRailBox())
-			if !sameColor(c.buf.CellAt(3, b.startY+1).Style.Fg, lipgloss.Color(m.palette.Warning)) {
-				t.Fatal("badge not warning coloured")
+			if !sameColor(c.buf.CellAt(3, b.startY+1).Style.Fg, lipgloss.Color(m.palette.Ink)) {
+				t.Fatal("badge not ink coloured")
 			}
 		})
 	}
