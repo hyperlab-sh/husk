@@ -68,8 +68,9 @@ type StatePort interface {
 	// ends (the connection closed).
 	Watch(ctx context.Context, c Caller, slices []string, n Notifier) (StateSnapshotResult, error)
 	// Clear serves state.clear, user only (plugin callers get denied). force
-	// is the request's "force" flag: skip the husk.before-state-clear gate's
-	// vetoes; false when absent.
+	// is the request's "force" flag: when true the husk.before-state-clear
+	// hook is not fired at all (hooks.md, "Host-fired hooks"); false when
+	// absent.
 	Clear(ctx context.Context, c Caller, namespace string, force bool) error
 }
 

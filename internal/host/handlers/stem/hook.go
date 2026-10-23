@@ -29,7 +29,7 @@ type hookEntry struct {
 	Data   json.RawMessage `json:"data,omitempty"`
 	Items  json.RawMessage `json:"items,omitempty"`
 	Veto   bool            `json:"veto,omitempty"`
-	Reason string          `json:"reason,omitempty"`
+	Reason *string         `json:"reason,omitempty"`
 	Err    *protocol.Error `json:"error,omitempty"`
 }
 
@@ -113,10 +113,15 @@ func (h Hook) call(ctx context.Context, c contracts.Caller, req protocol.Message
 		out.Allowed, out.Vetoes = &o.Allowed, &vetoes
 	}
 	for _, r := range o.Results {
-		out.Results = append(out.Results, hookEntry{
+		e := hookEntry{
 			Plugin: r.Plugin, Data: present(r.Data), Items: present(r.Items),
-			Veto: r.Veto, Reason: r.Reason, Err: hookWireError(r.Err),
-		})
+			Veto: r.Veto, Err: hookWireError(r.Err),
+		}
+		if r.Veto {
+			// A vetoing entry carries veto and reason together, even "".
+			e.Reason = &r.Reason
+		}
+		out.Results = append(out.Results, e)
 	}
 	return handlers.Reply(req, out)
 }
@@ -161,7 +166,7 @@ func hookWireError(err contracts.CodedError) *protocol.Error {
 		e.Code = protocol.CodeInternal
 	}
 	var withData contracts.DataError
-	if errors.As(err, &withData) && len(withData.Data()) > 0 {
+	if errors.As(err, &withData) && withData.Data() != nil {
 		if raw, merr := json.Marshal(withData.Data()); merr == nil {
 			e.Data = raw
 		}

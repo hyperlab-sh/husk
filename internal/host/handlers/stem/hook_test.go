@@ -110,6 +110,18 @@ func TestHookCallOutcomes(t *testing.T) {
 			`{"kind":"gate","allowed":false,"vetoes":[{"plugin_id":"index","reason":"index write in progress"}],"results":[{"plugin_id":"index","veto":true,"reason":"index write in progress"},{"plugin_id":"preview"}]}`,
 		},
 		{
+			"gate: veto with an empty reason keeps reason on both",
+			contracts.HookOutcome{Kind: "gate", Vetoes: []contracts.HookVeto{{Plugin: "b"}}, Results: []contracts.HookResult{{Plugin: "b", Veto: true}}},
+			`{"kind":"gate","allowed":false,"vetoes":[{"plugin_id":"b","reason":""}],"results":[{"plugin_id":"b","veto":true,"reason":""}]}`,
+		},
+		{
+			"leg error with empty data object keeps it",
+			contracts.HookOutcome{Kind: "collect", Allowed: true, Results: []contracts.HookResult{
+				{Plugin: "stats", Err: contracts.NewError(protocol.CodeFailed, "x", map[string]any{})},
+			}},
+			`{"kind":"collect","results":[{"plugin_id":"stats","error":{"code":"failed","message":"x","data":{}}}]}`,
+		},
+		{
 			"leg error carries data verbatim",
 			contracts.HookOutcome{Kind: "collect", Allowed: true, Results: []contracts.HookResult{
 				{Plugin: "stats", Err: contracts.NewError(protocol.CodeCancelled, "plugin exited", map[string]any{"reason": "plugin_exited"})},
