@@ -645,8 +645,9 @@ With one:
     `showHotspots` and `stageMode`.
   - To `husk.pods`: `plugins` reduced to liveness (`Connected`, `PeerPID`) plus
     process status from `lifecycle.go` (`pluginProcess`, `pluginExitedMsg`).
-    `Writer`, `Closer`, `FramesRecv` and `totalIPCEvents` stay with the
-    Wrapper and Server.
+    `Writer`, `Closer` and `FramesRecv` stay with the Wrapper and Server.
+    The frontend has no traffic counter; frame-dump settling fingerprints
+    published content and Pod status.
   - To the workspace slice: `wsContext`. The `workspace_context` message
     becomes a write by the workspace owner; `welcome.context` and the
     broadcast become reads of the slice and its `state.changed`.
