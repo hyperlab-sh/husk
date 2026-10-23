@@ -163,6 +163,27 @@ type invoked struct {
 func (f *fakeFE) Snapshot() *state.Snapshot                { return f.Snap }
 func (f *fakeFE) StartupReports() []contracts.ReloadReport { return nil }
 func (f *fakeFE) Catalog() contracts.CatalogResult         { return contracts.CatalogResult{} }
+func (f *fakeFE) Themes() []contracts.ThemeEntry           { return nil }
+func (f *fakeFE) SettingsSchema() []contracts.SettingEntry { return nil }
+func (f *fakeFE) Setting(string) (any, string, error)      { return nil, "", nil }
+func (f *fakeFE) KeyListing() contracts.KeyListing         { return contracts.KeyListing{} }
+func (f *fakeFE) Profiles() []contracts.ProfileInfo        { return nil }
+func (f *fakeFE) ConfigDir() string                        { return "" }
+func (f *fakeFE) SetSetting(_ string, _ any, reply func(contracts.SettingSetResult, error)) {
+	if reply != nil {
+		reply(contracts.SettingSetResult{}, nil)
+	}
+}
+func (f *fakeFE) UseProfile(_ string, reply func(contracts.ProfileUseResult, error)) {
+	if reply != nil {
+		reply(contracts.ProfileUseResult{}, nil)
+	}
+}
+func (f *fakeFE) RemovePlugin(_ string, reply func(contracts.PluginRemoval, error)) {
+	if reply != nil {
+		reply(contracts.PluginRemoval{}, nil)
+	}
+}
 
 func (f *fakeFE) Hints(ctx contracts.KeyContext) []contracts.KeyHint {
 	if f.HintsFn == nil {
@@ -336,23 +357,6 @@ func contribute(m *WorkbenchModel, slot string, c contribution) {
 // setContent publishes content for a surface the way the content sink does.
 func setContent(m *WorkbenchModel, plugin string, p protocol.SurfaceUpdateParams) {
 	m.content(plugin, p)
-}
-
-func (f *fakeFE) lastKey() (keySent, bool) {
-	if len(f.Keys) == 0 {
-		return keySent{}, false
-	}
-	return f.Keys[len(f.Keys)-1], true
-}
-
-func (f *fakeFE) keysTo(plugin string) []string {
-	var out []string
-	for _, k := range f.Keys {
-		if k.Plugin == plugin {
-			out = append(out, k.P.Key)
-		}
-	}
-	return slices.Clone(out)
 }
 
 // hello is what a test declares about a plugin: the surfaces it occupies and
