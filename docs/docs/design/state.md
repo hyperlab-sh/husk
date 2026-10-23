@@ -446,7 +446,14 @@ Pod that is starting, failed or exited holds nothing, stays in its
 declaration, and resolves if the Pod is live at a later pass. When a Pod
 leaves `live` the engine vacates its surfaces and hands each to the first
 live claimant in namespace order; a live occupant is never preempted by a
-claimant that goes live later. The host marks the engine on every
+claimant that goes live later. From protocol 2.6, an occupant may retain its
+claim as **yielded** through `surface.close` with `yield: true`: yielded live
+claims rank after every ordinary live claim, and among yielded claims the
+same namespace order applies. A yielded claim becomes ordinary again when
+it regains occupancy. Yield rank is engine-local, scoped to the plugin's
+claim on that surface; withdrawing the declaration or removing the plugin
+drops it. `husk.surfaces` lists resolved occupants, not claimants, so this
+adds no field or slice. The host marks the engine on every
 `husk.pods` write (`Engine.LivenessChanged`), so the hand-over lands in the
 same tick, and the new occupant is told its size like any new occupant. The
 engine also keeps `capture`, a map from surface id to `"text"` or `"all"`
@@ -471,11 +478,21 @@ the slice and its shape are fixed here.
 
 Release travels the same narrow paths for every surface: the occupant's
 `surface.close`, the host's force-release through the same path, or the
-owner's declarations going away. Each of the first two also retracts the
-claim declaration at its source — the engine asks the plugin's Pod to
-remove the surface from `<plugin_id>.occupants` — so a freed surface cannot
-be re-occupied by its own stale declaration, and a freed surface resolves
-its standing refused claims in namespace order. A refused claim stays
+owner's declarations going away. By default each of the first two also
+retracts the claim declaration at its source — the engine asks the plugin's
+Pod to remove the surface from `<plugin_id>.occupants` — so a freed surface
+cannot be re-occupied by its own stale declaration. The occupant's
+`surface.close` with `yield: true` instead keeps the declaration and marks
+that claim yielded; the engine does not ask the Pod to release it. The
+freed surface resolves ordinary live claims first, then yielded live
+claims, in namespace order within each rank. If there is no other live
+claimant, the yielder immediately re-occupies the surface and receives the
+normal `surface.resized`, even if its dimensions have not changed; this is
+not an error. Release still clears capture and detaches a terminal, even
+on immediate reoccupation. Yield requires occupancy through a layout
+claim; it is not available to an unclaimed or runtime surface (Protocol's
+`invalid_params` naming `yield`). An absent or false `yield` keeps the
+retracting close, and a host force-release always retracts. A refused claim stays
 recorded in the declaration, the occupant is unchanged, and the refusal is
 counted; a returning plugin's re-registered declarations resolve again,
 first live claim wins among the claims that arrive after the re-registration.
