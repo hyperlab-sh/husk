@@ -151,7 +151,8 @@ func (s *Store) Layers(name DocName, profile string) ([]LayerDoc, error)
 
 type LayerDoc struct {
 	Layer Layer
-	File  string // path for problems and `husk keys`; "" for the distribution fs
+	File  string // config-relative, slash-separated; distribution relative to its root;
+	             // "" for a layer with no single file (flag-folded instance)
 	Doc   Doc
 }
 
@@ -185,6 +186,10 @@ func (s *Store) Declare(name DocName, source string, d Doc)
 func (s *Store) Undeclare(source string)
 func (s *Store) Declared(name DocName) map[string]Doc // source -> doc
 ```
+
+`store.Problem` is Store's own diagnostic type (it shapes the `husk.store` slice
+and `husk store check` output), not `protocol.Problem`; Services convert load
+problems into `protocol.Problem` in one place, `services/settings`.
 
 #### Declared-document schema (Services / Pods boundary)
 
