@@ -76,10 +76,9 @@ func (m *WorkbenchModel) settingsCorner() string {
 func (m *WorkbenchModel) drawSettings(c *canvas) uv.Rectangle {
 	s := m.settings
 	r := m.settingsRect()
-	p := m.palette
-	base := lipgloss.NewStyle().Foreground(p.Ink).Background(p.SurfaceElevated)
-	muted := base.Foreground(p.InkMuted)
-	border := base.Foreground(p.BorderFocused)
+	base := lipgloss.NewStyle().Foreground(m.palette.Ink).Background(m.palette.SurfaceElevated)
+	muted := base.Foreground(m.palette.InkMuted)
+	border := base.Foreground(m.palette.BorderFocused)
 	// Draw a completely opaque box, then replace only the cells each fragment owns.
 	rows := make([]string, r.Dy())
 	rows[0] = "┌" + strings.Repeat("─", r.Dx()-2) + "┐"
@@ -92,7 +91,7 @@ func (m *WorkbenchModel) drawSettings(c *canvas) uv.Rectangle {
 	corner := m.settingsCornerRect()
 	style := muted
 	if s.focus == settingsProfileFocus {
-		style = base.Foreground(p.Accent)
+		style = base.Foreground(m.palette.Accent)
 	}
 	c.blitBlock(corner.Min.X, corner.Min.Y, style.Render(m.settingsCorner()))
 	labels := []string{"General", "Keys", "Theme", "Plugins", " Store", " Installed"}
@@ -101,11 +100,11 @@ func (m *WorkbenchModel) drawSettings(c *canvas) uv.Rectangle {
 		st := base
 		marker := " "
 		if tabs[row] == s.tab {
-			st = st.Background(p.SurfaceSelected)
+			st = st.Background(m.palette.SurfaceSelected)
 			marker = "▸"
 		}
 		if s.focus == settingsTabsFocus && tabs[row] != "" {
-			st = st.Foreground(p.Accent)
+			st = st.Foreground(m.palette.Accent)
 		}
 		text := marker + " " + label
 		if tabs[row] != "" && s.focus == settingsTabsFocus {
@@ -126,11 +125,11 @@ func (m *WorkbenchModel) drawSettings(c *canvas) uv.Rectangle {
 			entry := s.themes[i]
 			st := base
 			if i == s.cursor {
-				st = st.Background(p.SurfaceSelected)
+				st = st.Background(m.palette.SurfaceSelected)
 			}
 			mark := st.Render(" ")
 			if entry.Current {
-				mark = st.Foreground(p.Accent).Render("●")
+				mark = st.Foreground(m.palette.Accent).Render("●")
 			}
 			tail := ""
 			if s.pending && i == s.cursor {
@@ -175,7 +174,7 @@ func (m *WorkbenchModel) drawSettings(c *canvas) uv.Rectangle {
 		c.blitLines(pr.Min.X, pr.Min.Y, pr.Dx(), pr.Dy(), strings.Split(s.profileView, "\n"))
 	}
 	area := uv.Rect(r.Min.X, r.Min.Y, r.Dx(), r.Dy())
-	c.fillDefaultBg(area, p.SurfaceElevated)
+	c.fillDefaultBg(area, m.palette.SurfaceElevated)
 	return area
 }
 

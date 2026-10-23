@@ -42,7 +42,7 @@ type settingsCenter struct {
 	profileNames     []string
 	profileTop       int
 	profileView      string // huh rendering is cached on Update; View remains pure
-	styled           drawPalette
+	styled           protocol.Palette
 	indices          map[string]int
 }
 
@@ -149,9 +149,9 @@ func (m *WorkbenchModel) refreshSettings() {
 			}
 		}
 	}
-	if s.profileForm != nil && (s.styled != m.palette || !maps.Equal(s.indices, m.ansi)) {
+	if s.profileForm != nil && (s.styled != protocol.Palette(m.served) || !maps.Equal(s.indices, m.ansi)) {
 		s.profileForm.WithTheme(settingsHuhTheme(m.palette))
-		s.styled, s.indices = m.palette, maps.Clone(m.ansi)
+		s.styled, s.indices = protocol.Palette(m.served), maps.Clone(m.ansi)
 	}
 	if s.profileForm != nil {
 		r := m.settingsProfileRect()
@@ -360,7 +360,7 @@ func (m *WorkbenchModel) buildSettingsProfiles(choice string) {
 	s.profileChoice = choice
 	field := huh.NewSelect[string]().Title("Profile").Options(options...).Value(&s.profileChoice)
 	s.profileForm = huh.NewForm(huh.NewGroup(field)).WithShowHelp(false).WithShowErrors(false).WithTheme(settingsHuhTheme(m.palette)).WithWidth(m.settingsProfileRect().Dx())
-	s.styled, s.indices = m.palette, maps.Clone(m.ansi)
+	s.styled, s.indices = protocol.Palette(m.served), maps.Clone(m.ansi)
 	m.cmds = append(m.cmds, s.profileForm.Init())
 }
 
