@@ -347,39 +347,70 @@ func (r *Root) startup() error {
 	r.startupReports = reports
 	r.drainBuildPosts(false)
 	problems := 0
-	fatal := len(reports) == 0 && err != nil
 	for _, report := range reports {
 		for _, p := range report.Problems {
 			if p.Severity == "error" {
 				problems++
 			}
-			switch p.Code {
-			case "store_error", "timed_out", "cancelled":
-				fatal = true
-			}
 		}
 	}
-	if fatal {
-		var details []string
-		seen := map[string]bool{}
-		for _, report := range reports {
-			for _, p := range report.Problems {
-				text := fmt.Sprintf("%s: %s", p.Code, p.Message)
-				if p.Source != nil {
-					text += fmt.Sprintf(" (layer %s, file %s)", p.Source.Layer, p.Source.File)
-				}
-				if !seen[text] {
-					seen[text] = true
-					details = append(details, text)
-				}
-			}
-		}
-		return fmt.Errorf("%w: %s", err, strings.Join(details, "; "))
+	if startupFatal(reports, err) {
+		return startupError(reports, err)
 	}
 	if problems > 0 {
 		r.log(pods.LogMsg{Level: "warn", Message: fmt.Sprintf("services: startup reload: %d problems", problems)})
 	}
 	return nil
+}
+
+// startupFatal distinguishes flight failures from nonfatal service validation.
+// A flight may fail after earlier services have already applied their snapshots.
+func startupFatal(reports []services.Report, err error) bool {
+	if len(reports) == 0 && err != nil {
+		return true
+	}
+	for _, report := range reports {
+		for _, p := range report.Problems {
+			switch p.Code {
+			case "store_error", "timed_out", "cancelled":
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func startupError(reports []services.Report, err error) error {
+	if err == nil {
+		err = errors.New("startup reload failed")
+	}
+	var details, codes []string
+	seen := map[string]bool{}
+	sameMessage := true
+	for _, report := range reports {
+		for _, p := range report.Problems {
+			text := fmt.Sprintf("%s: %s", p.Code, p.Message)
+			if p.Source != nil {
+				text += fmt.Sprintf(" (layer %s, file %s)", p.Source.Layer, p.Source.File)
+			}
+			// Do not discard provenance that exists only on the problem.
+			if p.Message != err.Error() || p.Source != nil {
+				sameMessage = false
+			}
+			if !seen[text] {
+				seen[text] = true
+				details = append(details, text)
+				codes = append(codes, p.Code)
+			}
+		}
+	}
+	if len(details) == 0 {
+		return err
+	}
+	if sameMessage {
+		return fmt.Errorf("%s: %w", strings.Join(codes, ", "), err)
+	}
+	return fmt.Errorf("%w: %s", err, strings.Join(details, "; "))
 }
 
 func (r *Root) buildStem() error {
