@@ -16,6 +16,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/hyperlab-sh/husk/internal/cli"
+	"github.com/hyperlab-sh/husk/internal/cli/storecmd"
 	"github.com/hyperlab-sh/husk/internal/host"
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
 	"github.com/hyperlab-sh/husk/internal/instance"
@@ -91,6 +92,7 @@ func main() {
 	// "-" is a subcommand. The CLI installs no signal handler; a signal ends
 	// it by the signal.
 	if len(os.Args) > 1 && !strings.HasPrefix(os.Args[1], "-") {
+		cli.Register("store", storecmd.Command())
 		os.Exit(cli.Main(context.Background(), os.Args[1:], cli.OSEnv()))
 	}
 	dumpFrame := flag.Bool("dump-frame", false, "Render one live frame after plugin sync and exit")
