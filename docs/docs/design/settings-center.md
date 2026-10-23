@@ -255,7 +255,7 @@ The center drives the host through `contracts.Frontend` ([Pods](pods.md), "Front
 | `Catalog()` | the catalog cache: `Store.Resolve("catalog", profile)` for its problems only, then `Store.Layers("catalog", profile)` validated by the rules above, on a host worker, at startup and after every `services.reloaded`, posted to the loop; `{entries, problems}` | any; a cache read, never I/O |
 | `ConfigDir() string` | the user layer's config directory, for the empty-catalog message | any |
 
-None of them blocks the loop: the writers run their method off the loop and post the reply, like `SetSetting`. The frontend never imports Services, Pods or Store.
+None of them blocks the loop: the writers run their method off the loop and post the reply, like `SetSetting`, including its shutdown rule (a `cancelled` reply with `data.reason` `shutdown`, or none once the post gate has closed; [Pods](pods.md), "Frontend seams"). The frontend never imports Services, Pods or Store.
 
 ### Invariants
 
