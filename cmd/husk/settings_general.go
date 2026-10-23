@@ -173,9 +173,9 @@ func (m *WorkbenchModel) buildSettingsField(f *settingsField) {
 		}
 		f.widget = input
 	}
-	// The field keymap has no next/previous/submit or external-editor binding.
-	// Those are owned by the center, so no asynchronous huh completion can
-	// escape after the last field, nor can an editor suspend the workbench.
+	// The center owns traversal and drops huh's submission commands, so no
+	// asynchronous completion can escape after the last field. Disable the
+	// external-editor binding too: a field must not suspend the workbench.
 	keys := huh.NewDefaultKeyMap()
 	keys.Input.Next.SetKeys()
 	keys.Input.Prev.SetKeys()
@@ -191,7 +191,10 @@ func (m *WorkbenchModel) buildSettingsField(f *settingsField) {
 	keys.Confirm.Reject.SetKeys()
 	keys.Select.Next.SetKeys()
 	keys.Select.Prev.SetKeys()
-	keys.Select.Submit.SetKeys()
+	// Select's Home/End paths move its cursor before its accessor. An
+	// internal Enter commits that cursor below; its next-field command is
+	// discarded, so it can never submit or complete the host-owned form.
+	keys.Select.Submit.SetKeys("enter")
 	keys.Select.Filter.SetKeys()
 	f.widget.WithKeyMap(keys).WithTheme(settingsHuhTheme(m.palette)).WithWidth(m.settingsContentRect().Dx() - 2)
 	f.widget.Blur()
@@ -256,7 +259,6 @@ func (m *WorkbenchModel) refreshSettingsGeneral() {
 			f.source = source
 			if !f.dirty() && !reflect.DeepEqual(value, f.snapshot) {
 				f.accept(value)
-				f.syncWidget()
 			}
 			f.snapshot = value
 		}
@@ -346,6 +348,9 @@ func (m *WorkbenchModel) settingsGeneralKey(msg tea.Msg) tea.Cmd {
 	before, _ := f.value()
 	beforeText := f.text
 	_, cmd := f.widget.Update(msg)
+	if f.entry.Type == "enum" {
+		f.widget.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	}
 	after, _ := f.value()
 	if beforeText != f.text || !reflect.DeepEqual(before, after) {
 		f.revision++
