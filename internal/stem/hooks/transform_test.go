@@ -311,7 +311,42 @@ func TestTransformFirstStageCapHitRefusesTheWholeCall(t *testing.T) {
 	// A later stage's cap does not matter to the preflight.
 	delete(snd.canErr, "p1")
 	snd.canErr["p2"] = calls.ErrPluginBusy
-	g.fire("a.t", nil, col)
+	g.fire("a.t", map[string]any{"v": 1}, col)
+	if want := []string{"p1"}; !reflect.DeepEqual(g.sentTo(), want) {
+		t.Fatalf("sent %v", g.sentTo())
+	}
+	g.answer("p1", `{}`)
+	if col.n != 1 || len(col.out.Results) != 2 {
+		t.Fatalf("delivered %d: %#v", col.n, col.out.Results)
+	}
+	e := col.out.Results[1]
+	if e.Plugin != "p2" || e.Err == nil || e.Err.Code != CodeBusy || e.Data != nil {
+		t.Fatalf("p2 entry %#v", e)
+	}
+	if !reflect.DeepEqual(col.out.Data, map[string]any{"v": 1}) {
+		t.Fatalf("outcome data %#v", col.out.Data)
+	}
+}
+
+func TestSubscriberShutdownErrorReplyDoesNotEndTheChain(t *testing.T) {
+	g, col, _ := chainRig(t, nil, "p1", "p2", "p3")
+	g.fire("a.t", map[string]any{"v": 1}, col)
+	g.fail("p1", &protocol.Error{Code: protocol.CodeCancelled, Message: "stopping", Data: json.RawMessage(`{"reason":"shutdown"}`)})
+	if want := []string{"p1", "p2"}; !reflect.DeepEqual(g.sentTo(), want) {
+		t.Fatalf("sent %v: a subscriber's own reply must not end the chain", g.sentTo())
+	}
+	if got := g.legData("p2"); got != `{"v":1}` {
+		t.Fatalf("stage 2 data %s", got)
+	}
+	g.answer("p2", `{}`)
+	g.answer("p3", `{}`)
+	if col.n != 1 || len(col.out.Results) != 3 {
+		t.Fatalf("delivered %d: %#v", col.n, col.out.Results)
+	}
+	e := col.out.Results[0].Err
+	if e == nil || e.Code != protocol.CodeCancelled || e.Message != "stopping" || !reflect.DeepEqual(e.Data, map[string]any{"reason": "shutdown"}) {
+		t.Fatalf("p1 error %#v, want the reply verbatim", e)
+	}
 }
 
 func TestTransformInvalidReplacementIsThatStagesEntryAndDataPassesThrough(t *testing.T) {
@@ -412,6 +447,10 @@ func TestTransformVetoFieldIsIgnoredAndLoggedOncePerSubscriber(t *testing.T) {
 		g.fire("a.t", map[string]any{"v": i}, col)
 		g.answer("p1", `{"veto":true,"reason":"no"}`)
 		g.answer("p2", `{"veto":true,"data":{"v":9}}`)
+		want := map[string]any{"v": json.Number("9")}
+		if !reflect.DeepEqual(col.out.Data, want) || !reflect.DeepEqual(col.out.Results[1].Data, want) {
+			t.Fatalf("data beside a foreign field must still apply: %#v / %#v", col.out.Data, col.out.Results[1].Data)
+		}
 		if !col.out.Allowed || len(col.out.Vetoes) != 0 {
 			t.Fatalf("a transform cannot veto: %#v", col.out)
 		}
