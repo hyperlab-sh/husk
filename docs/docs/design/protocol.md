@@ -235,7 +235,7 @@ Minor 2.1 ([Hooks](hooks.md), [Keybindings](keybindings.md), [Pods](pods.md)): `
 
 Minor 2.2 ([Pods](pods.md), "Adding a plugin"): `plugin.add` and the `pods.plugin-added` event name. `protocol.Version` moves to `2.2` when the handler lands; until then the method name is reserved vocabulary (the constant, the schema entry and the reserved event name exist) that the host answers `unknown_method`.
 
-Minor 2.3 ([Services](services.md), "Theme" and "Settings"; [Settings center](settings-center.md)): `theme.list` and `settings.set`, plus the `settings` reload reason in `services.reloaded`, plus the `dir` field of each `plugin.list` entry and `husk.pods` entry (the plugin's directory as the converter resolved it, `""` for an implicit command line; [Pods](pods.md), "plugin.* wire shapes"), and `plugin.remove` admitting a `host` caller in process beside `cli` on the wire. The two methods are specified below under "Theme selection and the settings write (minor 2.3)" and land together with their handlers: the constants, the schema entries and the rows of the method table are added in the change that serves them, so `pkg/protocol` never names a method the host answers `unknown_method` to.
+Minor 2.3 ([Services](services.md), "Theme" and "Settings"; [Settings center](settings-center.md)): `theme.list` and `settings.set`, plus the `settings` reload reason in `services.reloaded`, plus the `dir` field of each `plugin.list` entry and `husk.pods` entry (additive; the plugin's directory as the converter resolved it, `""` for an implicit command line; [Pods](pods.md), "plugin.* wire shapes"). `protocol.Version` moves to `2.3` with whichever of these items lands first (rule 5 above: the minor is "specified, not landed" until all of it is served). `plugin.remove` admitting a `host` caller at its port is a port rule, not a wire change, and is not part of any minor. The two methods are specified below under "Theme selection and the settings write (minor 2.3)" and land together with their handlers: the constants, the schema entries and the rows of the method table are added in the change that serves them, so `pkg/protocol` never names a method the host answers `unknown_method` to.
 
 Where the version is checked, since there is no handshake:
 
@@ -295,7 +295,7 @@ A requester that stops waiting ([Calls](calls.md) times a request out, or a sock
 | `keys` | `keys.list` | request | plugin or CLI to Husk |
 | `profile` | `profile.list`, `profile.use` | request | CLI to Husk |
 | `plugin` | `plugin.list`, `plugin.log` | request | CLI to Husk |
-| | `plugin.remove` | request (minor 2.1); params, result and sequence: [Pods](pods.md), "Removing a plugin" | CLI to Husk; from minor 2.3 also the host in process (the Settings center's Installed tab, [Settings center](settings-center.md)) |
+| | `plugin.remove` | request (minor 2.1); params, result and sequence: [Pods](pods.md), "Removing a plugin" | CLI to Husk; the host also reaches the port in process, not over the wire (the Settings center's Installed tab, [Settings center](settings-center.md)) |
 | | `plugin.add` | request (minor 2.2); params, result and sequence: [Pods](pods.md), "Adding a plugin" | CLI to Husk |
 | `config` | `config.reload` | request | CLI to Husk |
 
