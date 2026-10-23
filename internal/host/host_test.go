@@ -593,7 +593,7 @@ func storeStopped(r *Root) bool {
 }
 
 func TestStartupFailureClosesWhatStarted(t *testing.T) {
-	stages := []string{"store", "state", "services", "startup", "manifests", "stem", "pods", "server"}
+	stages := []string{"bundle", "store", "state", "services", "startup", "manifests", "stem", "pods", "server"}
 	for _, stage := range stages {
 		t.Run(stage, func(t *testing.T) {
 			noLeaks(t)
@@ -611,7 +611,7 @@ func TestStartupFailureClosesWhatStarted(t *testing.T) {
 			if failed == nil || !storeStopped(failed) {
 				t.Fatalf("the Store worker still runs after New failed at %s", stage)
 			}
-			storeBuilt := true
+			storeBuilt := stage != "bundle"
 			if got := slices.Contains(steps, "store"); got != storeBuilt {
 				t.Fatalf("store closed = %v after failing %s (steps %v)", got, stage, steps)
 			}

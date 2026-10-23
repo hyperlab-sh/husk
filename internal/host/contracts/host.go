@@ -29,7 +29,7 @@ const RateLimitPerSecond = 20
 type Config struct {
 	// InstanceID is the pid or the --instance name.
 	InstanceID string
-	// RuntimeDir is the checked runtime directory.
+	// RuntimeDir is the runtime path, checked/created after bundle validation.
 	RuntimeDir string
 	// Entry is the registration entry the Server writes once listening.
 	Entry instance.Entry
