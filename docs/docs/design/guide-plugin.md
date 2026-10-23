@@ -1,0 +1,172 @@
+---
+type: Design Spec
+title: "Guide plugin: a live annotated layout"
+description: "An in-repo developer plugin that decorates the running layout with numbered callouts, surface names, occupants and keys, drawn on the app-overlay surface."
+status: planned
+generated: { by: claude/claude-fable-5-1, at: 2026-10-23T18:00:00Z }
+tags: [architecture-v2, plugins, developer-tooling]
+---
+
+# Guide plugin: a live annotated layout
+
+## Level 0: What and why
+
+The guide is a plugin, `plugins/guide` (plugin id `guide`), that draws over the whole workbench while it is toggled on: a box around every surface on screen, a numbered callout on each box with the surface's humanised name, its id, the plugin occupying it and the key that reaches it, and a legend listing the numbers. It is the terminal version of an annotated screenshot in an application's documentation, except that it is live: open the sidebar and its box appears, let a plugin exit and its surface reads `empty`, rebind a dock key and the callout shows the new key.
+
+It exists for people building on the framework. A developer wiring a first plugin has to learn twelve surface ids, which ones are shown in the default layout, which key toggles which dock, and why a claim did not take effect; today that knowledge lives in the architecture page and in the host's slot explorer. The guide answers it on the running instance. It is developer tooling in the sense of the framework rule: it knows nothing about any application, and it is not an onboarding or product guide. Suggestions, stores, bundles and anything a product would show its users stay in the consumer.
+
+It is **not**:
+
+- loaded by default. `husk` starts with no plugins ([Pods](pods.md)); the guide is loaded like any other, by `--plugin-dir` or `--plugin`, and the project scaffolds (specified separately) include it in what they generate.
+- part of the host. It is a process speaking the protocol, with a manifest, a surface claim and one action. Nothing in `cmd/husk` or `internal/` knows the word `guide`.
+- a replacement for the host's slot explorer (`husk.hotspots.toggle_stage`, `husk.hotspots.badges`). The explorer is host UI that describes the fixed surfaces; the guide shows what is true now, through the same wire a third-party plugin would use. In the dogfooding sense it is the proof that a plugin can draw a tour or a debugging overlay without host privileges.
+- interactive. v1 has one action, `guide.toggle`, and one view (callouts plus legend). It takes no keys, no mouse and no focus.
+
+Who depends on it: nobody in the host. It depends on three general facts of the framework, two of which this spec adds to the specs that own them: the layout is readable from State (`husk.geometry`, `husk.surfaces`, `husk.focus`, [State](state.md)); an `app-overlay` occupant draws a transparent layer over the frame ([Cell-buffer compositor](cell-buffer-compositor.md), "Overlay layer"); and a plugin may read the host's effective keys with `keys.list` ([Keybindings](keybindings.md), "`husk keys`").
+
+## Level 1: Contract
+
+### Manifest
+
+```json
+{
+  "manifest_version": 2,
+  "protocol": 2,
+  "id": "guide",
+  "name": "Layout guide",
+  "version": "0.1.0",
+  "description": "Draws numbered callouts, names, occupants and keys over the live layout; toggle with guide.toggle",
+  "command": ["./guide"],
+  "surfaces": [{"id": "app-overlay"}],
+  "actions": [
+    {"id": "guide.toggle", "title": "Toggle layout guide", "description": "Shows or hides the annotated layout overlay", "public": true}
+  ],
+  "events": {"subscribe": ["state.changed"]}
+}
+```
+
+Rules:
+
+1. The guide claims **`app-overlay` and nothing else**. It never claims a layout surface, a placement surface or a published slot, declares no rail item, no published slot, no hook and no focus-local binding. Reason: a developer loads it next to the plugins under development, and it must never take a surface one of them could want. `app-overlay` is the one surface whose purpose is to lie over the others ([Cell-buffer compositor](cell-buffer-compositor.md), "Overlay layer").
+2. Its one action is `guide.toggle`, in its own id space. It is `public`, so another plugin may toggle it ([Message kinds](message-kinds.md), permission rule); the CLI and the palette can anyway. Args are ignored. The reply is `{"shown": true}` or `{"shown": false}`, the state after the toggle.
+3. Nothing in the manifest binds a key: no manifest can ([Keybindings](keybindings.md)). The key comes from a keymap layer. The project scaffolds bind `guide.toggle` globally in their distribution keymap with a hint, so the footer shows it; this spec recommends `f2` with hint `guide`, a key the built-in layer leaves free. A developer running `husk --plugin-dir ./plugins` without such a layer reaches the action from the palette (`husk.palette.open`, `ctrl+p`) or with `husk action invoke guide.toggle`.
+4. The footer shows the hint only while the guide is live: the frontend drops a `Hints` entry whose action belongs to a plugin that is not `live` in `husk.pods`, the same filter the palette applies to plugin actions ([Keybindings](keybindings.md), "Rail items, palette and footer").
+5. The plugin's declared `state` block is absent: `guide.state` is the default non-persistent instance slice and holds `{"shown": bool}`, written with `state.set` on every toggle so `husk state get guide.state` answers whether the guide is on. Persistence is deliberately off: a guide that comes back on at the next start would surprise the person who forgot it.
+
+### What the guide reads
+
+The guide learns the layout from State and the keys from the Keybinding service; it computes nothing the host has not already decided. It opens one socket connection at start and keeps it for its lifetime (one connect, [Protocol](protocol.md) decision 9).
+
+| Fact | Source | Shape used |
+| :--- | :--- | :--- |
+| Rect of every surface on screen | `husk.geometry.rects` ([State](state.md)) | `{x, y, width, height, inner}`; a surface without a rect is not on screen |
+| Terminal size, too-small flag | `husk.geometry.terminal`, `husk.geometry.too_small` | |
+| Occupant of every surface | `husk.surfaces.occupants` | `plugin`; absent means `empty` |
+| Which surfaces are shown | `husk.surfaces.visible` | the list; `modal-surface` appears while a modal is open |
+| Active rail item and placement | `husk.surfaces.placement` | `{rail_item, kind}`; `kind` is `full-canvas` or `stage` while one is active |
+| The open modal | `husk.surfaces.overlays.modal` | `{plugin, rail_item}` |
+| Focused surface | `husk.focus.surface` | |
+| Plugin status | `husk.pods.plugins[<id>].status` | `live`, `exited`, `failed`, `starting`; an occupant is always live ([State](state.md), "Surfaces resolution"), so this is read only to annotate `empty` surfaces whose claimant is not live |
+| Keys | `keys.list` ([Keybindings](keybindings.md)) | effective entries whose `action` is a `husk.*` host action, a rail item id or `guide.toggle` |
+
+It reads State with one `state.watch` request for `husk.geometry`, `husk.surfaces`, `husk.focus` and `husk.pods` on its socket connection: the reply is the baseline and every later `state.changed` notification on that connection carries the value at the snapshot the host flushed, so a resize that moves every rect reaches the guide as one consistent tick ([State](state.md), "Plugin requests"). The manifest `state.changed` subscription is the stdin mirror of the same facts and is used only to notice a watch connection the host dropped (the guide reconnects and re-watches; it never renders from a stale baseline). `keys.list` is requested each time the guide is toggled on and after every `state.changed` for `husk.pods`, which is when a reload may have changed the keymap ([Keybindings](keybindings.md), "Reload"); the keys themselves are not State and have no change event a plugin may subscribe to ([Message kinds](message-kinds.md), reserved names).
+
+The twelve surface ids are a fixed vocabulary of the protocol (`protocol.SurfaceID`, [Protocol](protocol.md)), so the guide carries a static table for them: the humanised name, and which action reaches each one. The table is the only host knowledge the guide holds, and every entry of it names a surface id or a `husk.*` action id that the protocol or the built-in keymap already publishes.
+
+| Surface | Name | Key shown is the effective key of |
+| :--- | :--- | :--- |
+| `activity-rail` | Activity rail | none (`mouse`) |
+| `sidebar-navigation` | Sidebar navigation | `husk.sidebar.toggle` |
+| `sidebar-list` | Sidebar list | `husk.sidebar.toggle`, and `husk.focus.next` in the legend footer |
+| `thread-row-status` | Row status | `husk.sidebar.toggle` |
+| `sidebar-footer` | Sidebar footer | `husk.sidebar.toggle` |
+| `main-header` | Main header | `husk.home` |
+| `main-stage` | Main stage | `husk.home` |
+| `side-panel` | Side panel | `husk.sidepanel.toggle` |
+| `app-overlay` | App overlay | `guide.toggle` (the guide's own key, from its own `keys.list` entry) |
+| `modal-surface` | Modal | the rail item in `overlays.modal.rail_item`, then `husk.modal.close` |
+| `full-canvas` | Full canvas | the rail item in `placement.rail_item` |
+| `workspace-stage` | Workspace stage | the rail item in `placement.rail_item`, then `husk.home` |
+
+Where the table names a rail item, the guide looks the item's id up in the `keys.list` entries (a rail item is addressable as an action by its id, [Keybindings](keybindings.md)) and shows the first effective global key, or `palette` when nothing binds it. Where an action has no effective key the callout shows `unbound`.
+
+### What the guide draws
+
+While shown, the guide sends one `surface.update` for `app-overlay` per State tick it received (coalesced: at most one render per notification batch), with `lines` covering the whole terminal. The overlay layer's rules make every cell the guide does not paint transparent ([Cell-buffer compositor](cell-buffer-compositor.md), "Overlay layer"), so what follows is everything the user sees change.
+
+1. **Boxes.** For every surface that has a rect in `husk.geometry.rects` except `app-overlay` itself, the guide draws a single-line box on the surface's outer rect: the ring of cells `(x..x+width-1, y..y+height-1)`. Where the occupant declared a `border`, the ring is the occupant's own border cells and the guide repaints them in the guide's colour; where it did not, the ring is the first and last row and column of the occupant's content, which the box covers for as long as the guide is on. A rect narrower than 2 or shorter than 2 gets no box, only a callout.
+2. **Callouts.** At the top-left cell of each box the guide writes the callout: `① Sidebar list · sidebar-list · example.files · [`, that is the number, the humanised name, the surface id, the occupant (`empty` when none) and the key, separated by ` · `. The callout is clipped to the box's top edge, dropping fields from the right until it fits, never below the number alone. Numbers are `1..n` in **reading order**: surfaces sorted by `y`, then `x` of their rect; the modal, when open, comes last whatever its position, because it is above the others. Numbers are circled digits for 1 to 20 (`①`..`⑳`) and plain digits after that.
+3. **The focused surface** gets a double-line box; every other box is single-line. The focused surface is `husk.focus.surface`, or `modal-surface` while a modal is open (the frontend writes it so, [State](state.md)).
+4. **Legend.** A box of `n + 2` rows, where `n` is the number of entries, anchored at the bottom-right of the frame, one row above the footer, 2 cells from the right edge, `min(64, terminal width - 4)` cells wide, clipped to the frame. One row per surface in number order: `① Sidebar list   sidebar-list   example.files   [`. After the shown surfaces the legend lists the surfaces of the fixed table that have no rect, with `hidden` in the occupant column and the key that shows them (for `thread-row-status`, which the current layout never places, `not placed`). The legend's last row reads `tab next focus · <key> hide guide`, where `<key>` is the guide's own key or `palette`. The legend is opaque: its cells carry the palette's `surface_elevated` background so text under it does not show through.
+5. **The modal.** While a modal is open the guide boxes `modal-surface` at its rect (the frontend writes it to `husk.geometry.rects` while open) and the callout's key reads the rail item's key then `esc` (`husk.modal.close`'s effective key): `④ Modal · modal-surface · example.files · alt+2, esc`. The modal is drawn below the overlay layer, so the box and callout stay visible over it.
+6. **Colours** come from the palette the guide received in `theme.changed` ([Services](services.md)): boxes and callouts use `accent` on the background of the cell beneath (an opaque overlay cell without a background of its own inherits it), the focused box `border_focused`, the legend `ink` on `surface_elevated`, and `empty` or `hidden` in `ink_muted`. The guide defines no colour of its own.
+7. **Hidden.** When toggled off the guide sends one `surface.update` with `"lines": []`, a fully transparent frame, and sends nothing more until toggled on. It keeps watching State so that the next toggle renders from the current baseline without a round trip.
+8. **Too small.** While `husk.geometry.too_small` is true the host draws nothing of any surface; the guide sends nothing and renders again on the first tick that is not too small.
+
+A frame at 200x60 is at most 60 lines of 200 cells with a few SGR runs each, well inside the 4 MiB line limit.
+
+### What the guide never does
+
+- It never takes focus and never receives `input.key` or `input.mouse`: `app-overlay` is not focusable and not hit-tested ([Cell-buffer compositor](cell-buffer-compositor.md), "Overlay layer"). The keys it shows are information; pressing one does whatever it does without the guide in the way.
+- It never writes any slice but `guide.state`, never contributes to a slot, never emits an event, never fires a hook.
+- It never names a plugin, an action or a key of its own choosing beyond the table above; every string it shows is read from State, from `keys.list` or from the fixed surface vocabulary.
+
+### Failure modes
+
+| Condition | Who detects | What happens | What the user sees |
+| :--- | :--- | :--- | :--- |
+| Another plugin claimed `app-overlay` first | Surfaces engine (first live claim wins, [State](state.md)) | The guide's claim is refused and recorded; its `surface.update` lines are refused with `denied` | `guide.toggle` answers `failed` with `app-overlay is occupied by <plugin>`; the guide logs it once and stays live, so it takes the surface when the occupant leaves |
+| The watch connection is dropped (the guide fell behind, or the Server disconnected it) | the guide, on the socket EOF or on a stdin `state.changed` arriving with no live watch | Reconnects, re-watches, renders from the new baseline; nothing is drawn from the old one | At worst one stale frame for the duration of a reconnect |
+| `keys.list` is refused or fails | the guide | Callouts show `?` in the key field; the rest renders | `?` where a key would be, and a log line |
+| A surface id in State is not in the fixed table (a later minor added one) | the guide | Boxed and numbered with the id as its name and `unbound` as its key | A callout with an id and no humanised name |
+| Terminal below the minimum size | host | No geometry; the guide sends nothing | The host's too-small screen |
+| The guide exits or crashes | Pods | Its claim is vacated, its overlay cleared like every departed plugin's content | The annotations disappear; a `failed` toast if it crashed |
+
+### Limits owned here
+
+| Limit | Value | Reason |
+| :--- | :--- | :--- |
+| Callout fields | 5 (number, name, id, occupant, key) | fits a 40-cell top edge with the id and key, the two a developer needs most |
+| Legend width | `min(64, width - 4)` | one row per surface with all five fields at the default sizes |
+| Renders per tick | 1 | the host coalesces per frame; a second `surface.update` in one tick is wasted |
+
+### Tests
+
+`plugins/guide/main_test.go` drives the binary over pipes, as `plugins/reference/main_test.go` does, with a fake socket server that answers `state.watch` and `keys.list` from fixtures and records `surface.update`:
+
+- a `husk.geometry` fixture with the sidebar, header, stage and panel at 144x40 renders boxes exactly on the four outer rects and nothing else on the frame (every cell outside the rings, callouts and legend is a plain space);
+- numbering follows reading order (`y`, then `x`): the sidebar navigation is `①`, the main header `②`, the sidebar list `③`;
+- an open modal is numbered last and shows the rail item key then `esc`;
+- a hidden sidebar appears in the legend as `hidden` with `husk.sidebar.toggle`'s key;
+- an empty surface shows `empty`; a surface whose claimant is `failed` shows `empty` too;
+- a callout on a 20-cell-wide surface drops fields from the right and keeps the number;
+- toggling off sends `"lines": []` and nothing afterwards; toggling on after a State change renders from the latest baseline without a new `state.get`;
+- a refused claim makes `guide.toggle` answer `failed` and the plugin stay up;
+- a watch connection closed by the fake server is reopened and the next frame uses the new baseline.
+
+## Level 2: Migration from today
+
+Nothing of the guide exists. What the host needs first, each in its owning spec:
+
+1. **`app-overlay` becomes drawable** ([Cell-buffer compositor](cell-buffer-compositor.md), "Overlay layer"; [State](state.md), "Frontend-owned slices"). Today `placeSlots` never gives `app-overlay` a rect, so an occupant's content is never drawn, its claim yields no `surface.resized` with a size, and `husk.geometry.rects` and `husk.surfaces.visible` do not list it. The frontend places it at the full frame and `View` blits it with the transparency rule after the modal and before the toast and palette.
+2. **Plugins may read the host's keys** ([Keybindings](keybindings.md), "`husk keys`"). Today a plugin caller of `keys.list` receives only its own entries; it also receives the effective entries of `husk.*` actions and rail item ids, which the footer, rail and palette already display.
+3. **The footer hint follows liveness** ([Keybindings](keybindings.md), "Rail items, palette and footer"). The frontend filters `Hints` against `husk.pods`.
+
+Then the plugin: `plugins/guide/husk-plugin.json`, `main.go` and `main_test.go`, a Go binary importing `pkg/protocol` and nothing else from Husk, git-ignored like `plugins/reference/reference`. `husk --dump-frame --plugin-dir ./plugins` renders the reference pair and the guide together once `guide.toggle` has been invoked; a `--dump-frame` fixture that toggles it is the regression test for the overlay layer in the host.
+
+## Decisions made here
+
+1. **No new wire method or event.** The layout a plugin needs (rect, occupant, visibility, focus, placement) is already in `husk.geometry`, `husk.surfaces` and `husk.focus`, consistent per tick through one `state.watch`; a `layout.get` would be a fourth copy of the same facts. The two general gaps were elsewhere: an `app-overlay` occupant could not draw, and a plugin could not read the host's keys. Both are fixed in the specs that own them and are smaller than a new method.
+2. **The guide is a plugin, not a host mode.** The host already has a slot explorer; the guide proves the overlay path a third party would take and knows only what the wire tells it.
+3. **`app-overlay`, and nothing else.** It is the surface no layout plugin wants, and the overlay layer is transparent by default, so the guide costs the layout nothing while off.
+4. **The toggle key lives in a keymap layer**, recommended `f2` with hint `guide`, bound by the project scaffolds in their distribution layer. The manifest cannot bind it and the host hard-codes no key.
+5. **Numbers follow reading order of the rects**, modal last, recomputed on every tick, so the legend always matches the screen.
+6. **The legend is opaque and bottom-right**, so it never hides the top-left callouts and can be read against any content.
+7. **`guide.state` holds `shown` and is not persistent.**
+8. **The fixed surface table is the guide's only host knowledge**, limited to the protocol's surface vocabulary and the built-in keymap's action ids.
+
+## Open questions
+
+1. **A second page.** The brief allows "a legend page"; v1 draws the legend beside the callouts. If the legend grows (runtime surfaces, [Protocol](protocol.md) minor 2.2, would add one row each), a second toggle state showing only the legend may be wanted. Recommended: wait for runtime surfaces to land.
+2. **Runtime surfaces.** `husk.surfaces.runtime` (minor 2.2) will list dynamic `<plugin>.<name>` surfaces with rects in `husk.geometry.rects`; the guide should box them with their title as the name and no key. Nothing in this spec prevents it; the fixed table is a fallback, not a filter.
+3. **Should the host's slot explorer be retired** once the guide exists? It is host UI with host keys (`v`, `h`) and fixed descriptions. Recommended: keep it until the guide ships in the scaffolds, then decide with a frame comparison.
