@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"net"
-	"os"
 	"sync"
 	"syscall"
 	"time"
@@ -204,9 +203,6 @@ func (c *Client) send(ctx context.Context, method string, params any) (protocol.
 		var pe *protocol.Error
 		if errors.As(err, &pe) {
 			return protocol.ID{}, output.Usage("%s", pe.Message)
-		}
-		if errors.Is(err, os.ErrDeadlineExceeded) {
-			return protocol.ID{}, output.Transport(context.DeadlineExceeded, "no reply: %v", context.DeadlineExceeded)
 		}
 		return protocol.ID{}, output.Transport(err, "send %s: %v", method, err)
 	}
