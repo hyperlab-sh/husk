@@ -63,6 +63,20 @@ Directions: `manifest` imports the TOML library and nothing from Husk; `shim` im
 
 Why one binary with roles, and not a single Husk plugin: a single plugin would have to declare every Herdr plugin's actions in one static manifest, which means either runtime-declared actions in core (a capability Herdr plugins themselves do not have: "runtime action registration is not part of plugin v1") or regenerating a manifest file on disk before every start. The converter seam gives the same result with no new core wire method: conversion runs at every Husk start and on `husk-herdr sync`, the catalog is as current as Herdr's registry, and each Herdr plugin is a Pod with its own liveness, log, token, `husk plugin remove` and `plugin.add`. Why not a core package: the placement rule above, and the application-agnostic rule that `TestDocsHaveNoApplicationResidue` and `TestHostSourceHasNoApplicationIdentifiers` enforce for the top-level docs and the host source (they do not scan `docs/docs/design/`, so `TestAdapterIsNotImportedByCore` covers the design docs); this file is the one documented exemption.
 
+### Adapter settings
+
+Core's converter seam passes a converter nothing but a path and a subcommand: `--converter <path>` and `husk.plugins.converters` take no arguments, and the converter and the shim both run with no socket, no credential and no view of Husk's settings ([Pods](pods.md), "Executable converters"). The adapter therefore carries its own configuration and asks core for no option surface. One file, `$XDG_CONFIG_HOME/husk-herdr/config.toml` (`~/.config/husk-herdr/config.toml` when the variable is unset), read by every role at process start; a missing file is the defaults, and a malformed one fails conversion of every plugin (`adapter_config_invalid`, naming the line) so the problem is visible in `husk plugin list` rather than in one shim's log.
+
+| Key | Values | Default | Used by |
+|---|---|---|---|
+| `herdr_bin` | absolute path | `herdr` on `PATH` | shim, `doctor` |
+| `session` | Herdr session name | the default session (or `HERDR_SOCKET_PATH`, see attach step 2) | shim, `doctor` |
+| `server` | `attach`, `start` | `attach` | shim (attach step 3) |
+| `hooks` | `auto`, `always`, `never` | `auto` | shim ("Startup and event hooks") |
+| `[plugins."<herdr id>"] hooks` | as `hooks` | the top-level value | shim; one plugin's hooks rule |
+
+The converted `command` is the bare `husk-herdr run <dir>` and carries no option, so a settings change needs no reconversion: the shim re-reads the file when it starts, and `husk plugin remove` plus `husk-herdr sync` (or the next start) applies it. `sync` and `doctor` are user-run and additionally take `--instance <name>`, resolved as the Husk CLI resolves it ([Instances](instances.md)); the roles Husk invokes (`detect`, `convert`, `discover`, `run`) take no flags at all. Environment variables are deliberately not a source: core strips inherited `HUSK_*` variables from every plugin process, and a second spelling of each setting is a support problem.
+
 Why a proxy rather than an environment trick: a Herdr plugin reaches Herdr through `HERDR_BIN_PATH` (the real `herdr` binary) or by writing to `HERDR_SOCKET_PATH`. Both resolve the socket from `HERDR_SOCKET_PATH` when it is set (Herdr's documented resolution order: `--session`, then `HERDR_SOCKET_PATH`, then `HERDR_SESSION`, then the default), so pointing that variable at the shim's socket is enough to see every request without a shim binary in front of `herdr`. A command that passes `--session <name>` explicitly bypasses the proxy; that is the one documented hole (see Limits).
 
 ### The Herdr server
@@ -75,7 +89,7 @@ Herdr plugins are useful only against a running Herdr server: their actions list
 
 | | (A) Attach, stay out of the way | (B) Husk-owned server in a dedicated named session | (C) Hybrid: attach if present, else start |
 |---|---|---|---|
-| What runs underneath | The user's own session (default, or `--session <name>` passed to the adapter). | A session `husk-<instance>` (or a configured name) the adapter starts with `herdr server` and that only Husk uses. | (A) when a server answers `ping`; otherwise the adapter starts the **default** session's server, exactly as the `herdr` command would, and attaches. |
+| What runs underneath | The user's own session (default, or the `session` setting). | A session `husk-<instance>` (or a configured name) the adapter starts with `herdr server` and that only Husk uses. | (A) when a server answers `ping`; otherwise the adapter starts the **default** session's server, exactly as the `herdr` command would, and attaches. |
 | Coexistence | Nothing new runs. | Two servers: the user's and Husk's. Separate sockets and state; shared config and plugin registry. | One server either way. |
 | Whose hooks run where | The user's server already runs every enabled plugin's startup and event hooks. The adapter must not run them again (see "Startup and event hooks": `auto` runs them only for plugins the attached server does not have enabled). | Husk's server runs every enabled plugin's startup hooks a second time at start and their event hooks for Husk's session; the user's server keeps doing the same for theirs. Daemon-style plugins (an animator, a title watcher) start twice and fight over shared files and `config.toml` blocks. | As (A) when attached; when the adapter started the server there was no other server, so hooks run once. |
 | The user's workspaces | Visible to plugins (that is the point: the sidebar plugin lists the user's agents). Pane-opening side effects of plugin commands run by the *server* (event hooks) land in the user's Herdr TUI, as today. | Invisible: plugins see an empty session. A sidebar shows nothing; a mover has nothing to move. | As (A). |
@@ -84,13 +98,13 @@ Herdr plugins are useful only against a running Herdr server: their actions list
 | Versions | The shim reads the server version from `ping` and refuses a plugin whose `min_herdr_version` is newer (`failed`, `herdr_too_old`). The adapter needs a server at or above 0.9 (popup placement, `plugin.pane.open` with `placement`, agent session fields). | Same, plus the adapter must know how to start a server of whatever version is installed. | Same. |
 | Testing | The fake server stands in for the user's server; nothing to start. | Tests must drive a real `herdr server` or fake its start-up sequence and socket layout. | Both paths need tests. |
 
-Decision: **(A) is the default**, (C) is the opt-in `--server start`, and (B) is not offered. (A) honours the operator's reading ("it would probably be enough for the herdr server to be running"), never touches the user's server, shows plugins the user's real workspaces, and runs no hook twice. (B) is wrong for a user who uses Herdr: it duplicates every daemon-style plugin and shows plugins an empty world; it returns only if a user asks for an isolated session, as `--server start --session <name>`, with the duplicate-hooks warning in `doctor`. (C) exists for a user whose only Herdr front is Husk: when no server runs, starting the default session is what they would get by typing `herdr`, and nothing else is on that machine to duplicate. The adapter never passes `server.stop`, `server.reload_config`, `session.stop`, `plugin.link`, `plugin.unlink`, `plugin.enable`, `plugin.disable` or `plugin.install` upstream on its own initiative. A plugin command that sends one is **forwarded unchanged and logged at warning level** naming the plugin and the method, because the plugin could have sent it to the real socket just the same, and the adapter is not a sandbox (neither is Herdr: "Herdr does not review or sandbox plugin code"); the log line is so the user can tell which plugin stopped their server.
+Decision: **(A) is the default**, (C) is the opt-in `server = "start"`, and (B) is not offered. (A) honours the operator's reading ("it would probably be enough for the herdr server to be running"), never touches the user's server, shows plugins the user's real workspaces, and runs no hook twice. (B) is wrong for a user who uses Herdr: it duplicates every daemon-style plugin and shows plugins an empty world; it returns only if a user asks for an isolated session, as `server = "start"` with a `session`, with the duplicate-hooks warning in `doctor`. (C) exists for a user whose only Herdr front is Husk: when no server runs, starting the default session is what they would get by typing `herdr`, and nothing else is on that machine to duplicate. The adapter never passes `server.stop`, `server.reload_config`, `session.stop`, `plugin.link`, `plugin.unlink`, `plugin.enable`, `plugin.disable` or `plugin.install` upstream on its own initiative. A plugin command that sends one is **forwarded unchanged and logged at warning level** naming the plugin and the method, because the plugin could have sent it to the real socket just the same, and the adapter is not a sandbox (neither is Herdr: "Herdr does not review or sandbox plugin code"); the log line is so the user can tell which plugin stopped their server.
 
 Attach sequence, in the shim, before `live` work begins:
 
-1. Resolve the Herdr binary: `--herdr-bin <path>` converter argument, else `herdr` on `PATH`. Missing: `failed`, `last_error` `herdr binary not found`.
-2. Resolve the socket: `--session <name>` converter argument, else `HERDR_SOCKET_PATH` **if Husk itself runs inside a Herdr pane** (the variable then names the user's session; the shim does not strip it from its own environment), else the default session socket under the Herdr config directory (`HERDR_CONFIG_PATH` respected, as Herdr does).
-3. `ping`. A reply is the server; its `version` is recorded. No socket, or no reply within 2 s: with `--server attach` (default) the shim stays up, writes `{"server": "absent"}` to its slice, and retries every 5 s with backoff to 30 s; its actions answer `unavailable` with `data.reason` `herdr_absent` until a server appears. With `--server start`, the shim takes the adapter's start lock (a `flock` on `<husk state dir>/herdr/start.lock`, so twelve shims start one server), runs `herdr server` detached (its own session, stdio to the log) if the lock holder found no server, waits for `ping` up to 10 s, and releases the lock. Failure: `failed`, `last_error` `herdr server did not start`.
+1. Resolve the Herdr binary: the `herdr_bin` setting, else `herdr` on `PATH`. Missing: `failed`, `last_error` `herdr binary not found`.
+2. Resolve the socket: the `session` setting, else `HERDR_SOCKET_PATH` **if Husk itself runs inside a Herdr pane** (the variable then names the user's session; the shim does not strip it from its own environment), else the default session socket under the Herdr config directory (`HERDR_CONFIG_PATH` respected, as Herdr does).
+3. `ping`. A reply is the server; its `version` is recorded. No socket, or no reply within 2 s: with `server = "attach"` (default) the shim stays up, writes `{"server": "absent"}` to its slice, and retries every 5 s with backoff to 30 s; its actions answer `unavailable` with `data.reason` `herdr_absent` until a server appears. With `server = "start"`, the shim takes the adapter's start lock (a `flock` on `<husk state dir>/herdr/start.lock`, so twelve shims start one server), runs `herdr server` detached (its own session, stdio to the log) if the lock holder found no server, waits for `ping` up to 10 s, and releases the lock. Failure: `failed`, `last_error` `herdr server did not start`.
 4. Compare `min_herdr_version` with the server version (semver, Herdr's rule). Older server: `failed`, `herdr_too_old`, nothing else runs.
 5. Read `plugin.list` upstream once: whether this plugin id is **enabled in the server** decides the hooks rule below; the answer is re-read on each reconnect.
 6. Open the event subscription (if the plugin has `[[events]]`), open the proxy socket, run startup hooks (per the rule), then serve.
@@ -112,8 +126,8 @@ Conversion of the top level:
 | `min_herdr_version` | `x-herdr.min_version` | Carried for the shim's check; not a Husk field. Missing: fail (`manifest_invalid`), as Herdr does. |
 | `platforms` | filter | A plugin whose top-level list excludes this OS fails conversion (`platform_unsupported`). Entries carry their own `platforms`; entries excluded for this OS are dropped silently, as Herdr would refuse them with `platform_unsupported` at invocation. |
 | (none) | `protocol: 2`, `manifest_version: 2` | The shim speaks the host's major. |
-| (none) | `command` | `["husk-herdr", "run", "<dir>", <converter args>]`, the same argv Husk used to call the converter plus `run`; absolute path of the converter binary. |
-| (none) | `events.subscribe` | `["services.reloaded"]`, which refreshes the proxy's adapter-run set (see "The proxy"). Herdr events are not Husk events (see "Startup and event hooks"). |
+| (none) | `command` | `["<abs>/husk-herdr", "run", "<dir>"]`: the absolute path of the converter binary, `run`, the plugin directory, nothing else (options live in the adapter settings file). |
+| (none) | `events.subscribe` | `[]`. Herdr events are not Husk events (see "Startup and event hooks"), and the shim needs no Husk event (the adapter-run set is resolved per request, see "The proxy"). |
 | (none) | `state` | Absent: `<id>.state`, instance scope, not persistent. |
 
 Conversion of the entries:
@@ -132,7 +146,7 @@ Conversion of the entries:
 
 Ids inside the plugin follow Herdr's rule (letters, digits, `:`, `_`, `-`, no dots) and Husk's action-name rule (one dot-free segment); both are satisfied by the same string, with `:` mapped as for plugin ids.
 
-**Hot registry changes.** Discovery runs when Husk starts, so a Herdr plugin installed or linked while Husk runs is not in the instance. Core's live `plugin.add` (its own core spec) adds one plugin directory to a running instance for every plugin kind; the adapter adds nothing of its own on top of it. `husk-herdr sync [--instance <name>]` is the user's command for the gap: it runs discovery, lists the instance's plugins, and for every discovered directory whose converted id the instance does not have it requests `plugin.add` for that directory; the result is one line per plugin (`added`, `present`, `refused` with the conversion or launch problem). `sync` never removes: a plugin disabled or uninstalled in Herdr while Husk runs stays loaded until `husk plugin remove <id>` or the next start, and a plugin the user removed with `husk plugin remove` is added again by `sync` only if it is still enabled in the registry, which is the user's call on both sides. `husk-herdr doctor` reports every registry plugin that is enabled for this OS and absent from the instance, with `sync` as the remedy. Nothing watches `plugins.json`: a registry change is the result of a user command, and the user runs `sync` after it.
+**Hot registry changes.** Discovery runs when Husk starts, so a Herdr plugin installed or linked while Husk runs is not in the instance. Core's live `plugin.add` (its own core spec) adds one plugin directory to a running instance for every plugin kind; the adapter adds nothing of its own on top of it. `husk-herdr sync [--instance <name>]` is the user's command for the gap: it runs discovery, lists the instance's plugins, and for every discovered directory whose converted id the instance does not have it requests `plugin.add` for that directory (through the Husk CLI, `husk plugin list --format json` and `husk plugin add <dir>`, so the adapter speaks to the instance as the user, never as a plugin); the result is one line per plugin (`added`, `present`, `refused` with the conversion or launch problem). `sync` never removes: a plugin disabled or uninstalled in Herdr while Husk runs stays loaded until `husk plugin remove <id>` or the next start, and a plugin the user removed with `husk plugin remove` is added again by `sync` only if it is still enabled in the registry, which is the user's call on both sides. `husk-herdr doctor` reports every registry plugin that is enabled for this OS and absent from the instance, with `sync` as the remedy. Nothing watches `plugins.json`: a registry change is the result of a user command, the user runs `sync` after it, and `sync` stays a user command by ruling (a watcher would be one more long-lived process, or one more duty for every shim, and would read a half-written registry mid-install).
 
 ### The shim at run time
 
@@ -163,7 +177,7 @@ The working directory is the plugin directory, as in Herdr. Commands run through
 
 **Actions.** `action.invoke` arrives on stdin with `args` and `caller` ([Message kinds](message-kinds.md)). The shim builds the context, spawns the command, and replies at once with `{"started": true, "pid": <pid>, "log": "<log path>"}`: that is Herdr's contract too (`plugin.action.invoke` "returns the Herdr-built invocation context plus the started command log record"), and a reply at exit would hit Husk's 10 s action timeout for every daemon-style action. A non-zero exit later produces one `toast.show` (`<name>: <action title> exited <status>`) and a log line. `args` are ignored except `placement`, `width`, `height`, `cwd`, `env`, `focus` and `target` on a `pane-*` action, which carry the `plugin.pane.open` parameters (below). An action whose `platforms` exclude this OS was dropped at conversion, so it is `not_found` in Husk, where Herdr would answer `platform_unsupported`.
 
-**Startup and event hooks.** The rule is one setting, `--hooks auto|always|never`:
+**Startup and event hooks.** The rule is one setting, `hooks = "auto" | "always" | "never"` (per plugin under `[plugins."<id>"]`, else the top-level value):
 
 - `auto` (default): run this plugin's `[[startup]]` and `[[events]]` commands only when the attached server does **not** list the plugin as enabled. A server that has the plugin enabled already runs those hooks for that session; running them again would start every daemon twice and double every event reaction. The shim records which way it decided in its slice (`"hooks": "server" | "shim"`).
 - `always`: run them regardless (a user who disabled the plugin's hooks in Herdr some other way, or a test).
@@ -189,14 +203,14 @@ A `modal` surface is a singleton in Husk as a popup is in Herdr: a second open w
 
 | Method | Proxy behaviour |
 |---|---|
-| `plugin.pane.open` | For an entrypoint of this plugin: open it here, answer as above. For another adapter-run plugin: Husk `action.invoke` of that plugin's `pane-<entrypoint>` action with the request's placement fields as `args`, answer from its reply. For a plugin this adapter does not run: forward upstream (the pane opens in Herdr). |
+| `plugin.pane.open` | For an entrypoint of this plugin: open it here, answer as above. For another registry plugin: Husk `action.invoke` of that plugin's `pane-<entrypoint>` action with the request's placement fields as `args`, answer from its reply; `not_found` means the instance does not run it, so forward upstream (the pane opens in Herdr). Not a registry plugin: forward. |
 | `plugin.pane.focus`, `plugin.pane.close` | `husk:` ids are served here; others forwarded. |
 | `popup.close` | This shim's modal if open; else forwarded. |
-| `plugin.action.invoke` | An action of an adapter-run plugin (this one or another): Husk `action.invoke`, context relayed in `args.context`; answer Herdr's shape from the reply. Others forwarded. |
+| `plugin.action.invoke` | An action of a registry plugin (this one or another): Husk `action.invoke`, context relayed in `args.context`; answer Herdr's shape from the reply, or forward upstream on `not_found`. Others forwarded. |
 | `notification.show` | `toast.show`, not forwarded. |
 | everything else | Forwarded byte for byte. |
 
-The adapter-run set is read from Husk's own catalog (`husk action list`, filtered to actions whose declaring document carries `x-herdr`), cached per `services.reloaded`. A connection that fails upstream (server gone) gets Herdr's error shape `{"error": {"code": "unavailable", "message": "herdr server unavailable"}}` for each request it sends, and EOF when it stops.
+The adapter-run set needs no catalog query: `action.list` exposes no declaring-document data, and the adapter asks core for none. The proxy decides per request from what it already has. The target plugin id must be a record in Herdr's registry that is enabled for this OS (the registry is re-read when its mtime changes, so a plugin added by `sync` is routed without a restart); its converted id and action (`<id>.pane-<entrypoint>` or `<id>.<action>`) are then invoked in Husk, and a `not_found` reply means the instance does not run that plugin, so the original request is forwarded upstream unchanged. The registry check comes first so that a Husk-native plugin whose id happens to match a Herdr id is never invoked by a Herdr request; the shim's own plugin is always adapter-run. A connection that fails upstream (server gone) gets Herdr's error shape `{"error": {"code": "unavailable", "message": "herdr server unavailable"}}` for each request it sends, and EOF when it stops.
 
 ### Keys and mouse
 
@@ -236,7 +250,7 @@ Each shim keeps `<id>.state` (instance scope, not persistent, 256 KiB cap) as it
 1. **Core never names Herdr.** No file under `cmd/husk`, `internal/` or `pkg/` imports `adapters/` or contains the string, and no design doc but this one does; the existing docs lint covers the top-level docs, and `TestAdapterIsNotImportedByCore` keeps the import direction and the design docs.
 2. **Unchanged plugins.** The adapter runs the manifest's argv commands with Herdr's documented environment and cwd; it never rewrites a plugin's files, and a plugin that works under Herdr and uses only documented variables and socket methods works under the adapter or fails with a named limit below.
 3. **The user's server is read, never managed.** In the default mode the adapter sends the server nothing a plugin command did not ask for, except `ping`, `plugin.list`, `pane.current`, `workspace.get`, `tab.get` and `events.subscribe`. It never stops, reloads, links, unlinks, enables or disables.
-4. **No hook runs twice because of Husk.** Under `--hooks auto` the shim runs startup and event hooks only for plugins the attached server does not have enabled.
+4. **No hook runs twice because of Husk.** Under `hooks = "auto"` the shim runs startup and event hooks only for plugins the attached server does not have enabled.
 5. **One Pod per Herdr plugin.** Liveness, log, token, slice and removal are Husk's ordinary per-plugin mechanics; the adapter adds no registry of its own.
 6. **Every intercepted method answers Herdr's shape** (success and error objects as Herdr's schema defines them), so a plugin cannot tell the proxy from the server except by the `husk:` pane id form and the limits below.
 7. **Conversion is pure and total over the registry**: a bad manifest fails only itself, every drop is a reported problem, and the same registry always yields the same catalog.
@@ -246,9 +260,9 @@ Each shim keeps `<id>.state` (instance scope, not persistent, 256 KiB cap) as it
 
 | Condition | Who detects | What happens | What the user sees |
 |---|---|---|---|
-| `herdr` binary not on `PATH` and no `--herdr-bin` | shim, attach step 1 | exits 1 | `husk plugin list`: `failed`, `last_error` `herdr binary not found`; one toast per plugin, joined as "N plugins failed" |
+| `herdr` binary not on `PATH` and no `herdr_bin` setting | shim, attach step 1 | exits 1 | `husk plugin list`: `failed`, `last_error` `herdr binary not found`; one toast per plugin, joined as "N plugins failed" |
 | No Herdr server (default mode) | shim, step 3 | stays `live`, slice `server: absent`, retries with backoff | actions answer `unavailable` / `herdr_absent`; palette rows stay, a toast on invoke |
-| No server and `--server start` fails | shim | exits 1 | `failed`, `herdr server did not start` |
+| No server and `server = "start"` fails | shim | exits 1 | `failed`, `herdr server did not start` |
 | Server older than `min_herdr_version` | shim, step 4 | exits 1 | `failed`, `herdr_too_old: needs 0.9.0, server is 0.8.2` |
 | Server older than 0.9 (adapter minimum) | shim | exits 1 | `failed`, `herdr_too_old` naming the adapter's floor |
 | Upstream EOF or `events_lost` | shim | slice `server: lost`; resubscribe and re-read `plugin.list` on reconnect; running terminals continue | nothing unless an action is invoked meanwhile (`unavailable`) |
@@ -256,7 +270,7 @@ Each shim keeps `<id>.state` (instance scope, not persistent, 256 KiB cap) as it
 | Manifest invalid, `min_herdr_version` missing, platform unsupported, id unmappable | converter `convert` | that plugin fails conversion | listed as a refused plugin like any invalid manifest ([Pods](pods.md)) |
 | Entry excluded by its `platforms` | converter | dropped silently | the action is absent, as it would be refused in Herdr |
 | `pattern` not RE2 | converter | handler dropped, `pattern_unsupported` | problem in the log; the URL opens externally instead |
-| Plugin enabled in the server and `--hooks auto` | shim, step 5 | hooks left to the server | slice `hooks: server`; nothing runs twice |
+| Plugin enabled in the server and `hooks = "auto"` | shim, step 5 | hooks left to the server | slice `hooks: server`; nothing runs twice |
 | Action command fails to spawn | shim | reply `failed` with the exec error | error toast with the action title |
 | Action command exits non-zero | shim | log line, `toast.show` | warning toast `<name>: <title> exited 2` |
 | Pane command exits | shim | `surface.close` | the modal or canvas disappears |
@@ -266,7 +280,7 @@ Each shim keeps `<id>.state` (instance scope, not persistent, 256 KiB cap) as it
 | Command passes `--session <name>` to `herdr` | nobody | bypasses the proxy: its UI calls reach the server, its pane opens in Herdr | documented limit |
 | Plugin sends `server.stop`, `session.stop` or `plugin.unlink|disable|enable` through the proxy | proxy | forwarded (the plugin could have done it anyway) and logged at warning level with the plugin id and method | the server stops or the registry changes, as under Herdr; the log says which plugin did it |
 | Herdr plugin installed while Husk runs | nobody until `sync` or `doctor` | `husk-herdr sync` requests `plugin.add` for it | `doctor` lists it as absent from the instance until then |
-| Two Husk instances run the same Herdr plugin | nobody | two shims, two subscriptions; `auto` hooks still defer to the server; with `--hooks always` both run them | same as two Herdr sessions would |
+| Two Husk instances run the same Herdr plugin | nobody | two shims, two subscriptions; `auto` hooks still defer to the server; with `hooks = "always"` both run them | same as two Herdr sessions would |
 | `husk plugin remove <id>` | Husk | the shim gets EOF, stops its commands and PTYs, closes its surfaces | as for any plugin; Herdr's registry is untouched |
 
 ### Limits
@@ -279,7 +293,7 @@ Each shim keeps `<id>.state` (instance scope, not persistent, 256 KiB cap) as it
 | `terminal.write` chunk | 64 KiB raw (about 88 KiB encoded) | well under the 4 MiB line, large enough to drain a busy PTY |
 | Attach retry | 5 s, backoff to 30 s | a user who starts Herdr later gets plugins within half a minute |
 | Attach ping timeout | 2 s | a live server answers `ping` without touching its panes |
-| Server start wait (`--server start`) | 10 s | Herdr restores a session first |
+| Server start wait (`server = "start"`) | 10 s | Herdr restores a session first |
 | Startup hook grace at shim stop | 2 s, then SIGKILL | the stop policy Husk applies to the shim |
 | Link handlers | this shim's surfaces only | Husk has no view of other panes |
 | Registry re-read | at Husk start and on `husk-herdr sync` | the catalog is config; a registry change is a user command, so the user runs `sync` after it |
@@ -303,7 +317,7 @@ All Level 1, none landed; every row but `plugin.add` is specified in the core sp
 
 - **Fixtures.** `adapters/herdr/testdata/manifests/` holds anonymized copies of real manifests covering every section and every quirk seen in the wild: per-platform duplicate entries with `-windows` ids, `default_key`, `contexts`, popup sizes in cells and percentages, relative commands, `sh -c` one-liners, startup hooks that are daemons, event hooks on `pane.focused`. Conversion tests are golden: `convert` output per fixture is committed and diffed.
 - **Fake Herdr server** (`adapters/herdr/fakeherdr`): an in-process Unix socket server speaking Herdr's NDJSON shapes for the methods the adapter touches (`ping`, `plugin.list`, `pane.current`, `workspace.get`, `tab.get`, `events.subscribe` with a test-driven event injector, `popup.close`, `notification.show`, `plugin.pane.open` for non-adapter plugins) plus a passthrough recorder for everything else. Its responses are built from the committed copy of Herdr's API schema so a shape drift fails a test, not a user. It can simulate `events_lost`, a slow `ping`, an older version and a server that is absent then appears. No real `herdr` runs in CI.
-- **Shim tests** drive `husk-herdr run` over pipes the way `plugins/reference/main_test.go` does: a fake Husk host on the other end of stdio and a fake Husk socket; assertions on the commands spawned (a recording `exec` seam with a fake executable that dumps its environment), on `surface.open`/`terminal.*` traffic, and on the slice writes.
+- **Shim tests** drive `husk-herdr run` over pipes the way `plugins/reference/main_test.go` does: a fake Husk host on the other end of stdio and a fake Husk socket; assertions on the commands spawned (a recording `exec` seam with a fake executable that dumps its environment), on `surface.open`/`terminal.*` traffic, and on the slice writes; the settings file is pointed at a temporary directory through `XDG_CONFIG_HOME`, with one case per key and one malformed file.
 - **Proxy tests**: a client that is the real `herdr` CLI when present on the machine (skipped in CI) and a scripted NDJSON client otherwise; interception table rows each have a case; passthrough is byte-exact; a dropped upstream yields the documented error shape.
 - **PTY tests** use a fixed-output program (`printf` of a known escape sequence and `stty size`) and assert the bytes reach `terminal.write` and a resize reaches the PTY.
 - **Host end-to-end** (`internal/host/cli_e2e_test.go` style, in `adapters/herdr`): a real `husk` host with `--converter husk-herdr`, the fake server, two fixture plugins; `husk action list` shows their actions, invoking one spawns the command with the right environment, `husk plugin remove` stops everything. Terminal rendering is covered by core's own golden frames once terminal surfaces land; the adapter asserts only the wire.
@@ -347,7 +361,7 @@ Critical path: C1 → A3 (actions usable), then C2 → C3 → C4 → A4 (panes v
 
 1. **Converter plus shim, one binary, one Pod per Herdr plugin** (the operator's placement ruling). Rejected: a single adapter plugin with a regenerated manifest (stale catalog, one liveness for twelve plugins) and runtime-declared actions in core (Herdr plugins have no runtime registration, so core would gain a capability for nothing).
 2. **Attach to the user's server by default; never manage it.** (B) duplicates every daemon-style plugin and shows plugins an empty session; (C) is opt-in for a Husk-only user and starts the default session, which is what `herdr` would start, and never stops it.
-3. **Hooks follow the server (`--hooks auto`).** A plugin enabled in the attached server already has its startup and event hooks run there; the shim runs them only for plugins the server does not have enabled. Herdr's registry remains the one switch for what runs.
+3. **Hooks follow the server (`hooks = "auto"`).** A plugin enabled in the attached server already has its startup and event hooks run there; the shim runs them only for plugins the server does not have enabled. Herdr's registry remains the one switch for what runs.
 4. **A proxy socket, not a shim binary in front of `herdr`.** Herdr resolves the socket from `HERDR_SOCKET_PATH`, so the real `herdr` binary stays in `HERDR_BIN_PATH` and the interception set stays closed and small.
 5. **Actions reply at spawn, not at exit**, as `plugin.action.invoke` does, so Husk's 10 s action timeout never fires for daemon-style actions; exit status becomes a log line and a toast.
 6. **Panes are runtime terminal surfaces owned by the shim's PTY and emulated by the host.** The host must own the emulator to render into its cell canvas and to encode keys per the application's modes; the process belongs to the party that knows its environment and lifecycle. Rejected: host-spawned PTYs (core would exec a foreign command on a plugin's behalf) and shim-side emulation with `surface.update` lines (loses the cursor, colours beyond a line's SGR, modes and throughput).
@@ -365,7 +379,7 @@ Critical path: C1 → A3 (actions usable), then C2 → C3 → C4 → A4 (panes v
 
 ## Resolved
 
-1. Server mode: attach by default, `--server start` as the opt-in, no Husk-owned named session (decision 2).
+1. Server mode: attach by default, `server = "start"` as the opt-in, no Husk-owned named session (decision 2).
 2. Management methods through the proxy: forwarded, logged at warning level naming the plugin (decision 13).
 3. `split` placement: full canvas until the stacked side-panel dock (C5) lands, then `panel` (decision 8).
 4. Herdr `[[keys.command]]` bindings: not imported; `husk keys` is the way (decision 11).
@@ -374,7 +388,10 @@ Critical path: C1 → A3 (actions usable), then C2 → C3 → C4 → A4 (panes v
 7. `TERM_PROGRAM` in pane processes: `husk` (decision 14).
 8. Hot registry changes: core builds a generic live `plugin.add` before the adapter's pane work; the adapter uses it through `husk-herdr sync`, and `doctor` reports registry plugins absent from the instance (decision 16; the earlier recommendation, waiting for the next start, was overruled).
 9. Shared bridge Pod: no; one connection set per shim (decision 17).
+10. Automatic `sync` on a registry watch: no, ruled manual; `husk-herdr sync` is a user command and nothing watches `plugins.json` (see "Hot registry changes").
+11. Adapter options: carried in the adapter's own settings file, no core option surface for converters (see "Adapter settings").
+12. The adapter-run set: resolved per request from Herdr's registry and a `not_found` reply, no catalog query and no new core method (see "The proxy").
 
 ## Open questions
 
-1. **Should `sync` run by itself?** A watch on Herdr's `plugins.json` (or a Herdr `plugin.*` event, if the server publishes one) could request `plugin.add` without the user typing `husk-herdr sync`. The spec keeps it a user command: a registry change is itself a user command, a watcher is one more long-lived process (or one more duty for every shim), and a half-written registry file would be read mid-install. Recommended: keep it manual until a user asks; if it becomes automatic, it belongs in one process, not in every shim.
+None.
