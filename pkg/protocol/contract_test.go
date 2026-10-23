@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -182,5 +183,59 @@ func TestParamValidation(t *testing.T) {
 		if !surface.Valid() {
 			t.Fatal(surface)
 		}
+	}
+}
+
+func TestSurfaceUpdateCaptureRoundTrip(t *testing.T) {
+	yes, no := true, false
+	for _, tc := range []struct {
+		name string
+		in   string
+		want *bool
+		out  string // the capture member after re-marshalling; "" when absent
+	}{
+		{"absent", `{"surface":"main-stage","lines":[]}`, nil, ""},
+		{"false", `{"surface":"main-stage","lines":[],"capture":false}`, &no, "false"},
+		{"true", `{"surface":"main-stage","lines":[],"capture":true}`, &yes, "true"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var p SurfaceUpdateParams
+			if err := json.Unmarshal([]byte(tc.in), &p); err != nil {
+				t.Fatal(err)
+			}
+			if (p.Capture == nil) != (tc.want == nil) || p.Capture != nil && *p.Capture != *tc.want {
+				t.Fatalf("Capture = %v, want %v", p.Capture, tc.want)
+			}
+			b, err := json.Marshal(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var m map[string]json.RawMessage
+			_ = json.Unmarshal(b, &m)
+			got, has := m["capture"]
+			if tc.out == "" && has || tc.out != "" && string(got) != tc.out {
+				t.Fatalf("re-marshalled capture = %q (present %v), want %q", got, has, tc.out)
+			}
+		})
+	}
+}
+
+func TestWireSchemaCarriesSurfaceUpdateCapture(t *testing.T) {
+	raw := repositoryFile(t, "docs", "docs", "wire-schema-v2.json")
+	var doc struct {
+		Defs map[string]struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+			Required   []string                   `json:"required"`
+		} `json:"$defs"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	def := doc.Defs["SurfaceUpdateParams"]
+	if got := string(def.Properties["capture"]); !strings.Contains(got, `"boolean"`) {
+		t.Fatalf("schema SurfaceUpdateParams.capture = %s", got)
+	}
+	if !slices.Contains(def.Required, "lines") || slices.Contains(def.Required, "capture") {
+		t.Fatalf("required = %v, want lines and not capture", def.Required)
 	}
 }

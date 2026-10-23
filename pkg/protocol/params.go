@@ -107,6 +107,10 @@ type SurfaceUpdateParams struct {
 	Lines      []string       `json:"lines"`
 	HitTargets []RowHitTarget `json:"hit_targets,omitempty"`
 	StatusMeta map[string]any `json:"status_meta,omitempty"`
+	// Capture says whether the surface is taking text input (minor 2.1).
+	// Nil leaves the surface's current value unchanged, false turns it off
+	// and true turns it on.
+	Capture *bool `json:"capture,omitempty"`
 }
 
 // SurfaceCloseParams closes the named dynamic surface.

@@ -26,10 +26,11 @@ func payloads() map[string]payload {
 	hit := []protocol.RowHitTarget{{Line: 3, ID: "r1", Kind: "row", Action: "notes.open", Payload: map[string]string{"k": "v"}}}
 	mods := protocol.ModifierState{Alt: true, Ctrl: true, Shift: true, Super: true}
 	obj := map[string]any{"future": 1}
+	yes := true
 	return map[string]payload{
 		protocol.MethodSessionPing:       {protocol.SessionPingParams{}, protocol.SessionPingResult{ID: "i", PID: 1, ProtocolVersion: protocol.Version, HostVersion: "dev", UptimeMS: 5}},
 		protocol.MethodProtocolError:     {protocol.ProtocolErrorParams{Code: protocol.CodeParseError, Message: "bad", Method: "a.b", Data: json.RawMessage(`{"line":1}`)}, nil},
-		protocol.MethodSurfaceUpdate:     {protocol.SurfaceUpdateParams{PluginID: "notes", Surface: protocol.SurfaceMainStage, Title: "t", Subtitle: "s", Badge: "b", Lines: []string{"x"}, HitTargets: hit, StatusMeta: map[string]any{"n": 1}}, nil},
+		protocol.MethodSurfaceUpdate:     {protocol.SurfaceUpdateParams{PluginID: "notes", Surface: protocol.SurfaceMainStage, Title: "t", Subtitle: "s", Badge: "b", Lines: []string{"x"}, HitTargets: hit, StatusMeta: map[string]any{"n": 1}, Capture: &yes}, nil},
 		protocol.MethodSurfaceClose:      {protocol.SurfaceCloseParams{Surface: protocol.SurfaceModal}, nil},
 		protocol.MethodSurfaceResized:    {protocol.SurfaceResizedParams{Surfaces: []protocol.SurfaceSize{{Surface: protocol.SurfaceMainStage, Width: 80, Height: 24, Focused: true, Visible: true}}}, nil},
 		protocol.MethodInputKey:          {protocol.SurfaceKeyParams{Surface: protocol.SurfaceMainStage, Key: "ctrl+x", Modifiers: mods}, nil},
