@@ -99,18 +99,18 @@ type flushRequest struct {
 	force bool
 }
 
-func openStore(opts Options, runtimeDir func() (string, error)) (*Store, error) {
+// Open resolves private XDG directories, preloads saved values, and starts the
+// persistence worker. The runtime directory comes from the opener
+// (Options.RuntimeDir); Store neither binds sockets, creates registration
+// entries nor creates that directory.
+func Open(opts Options) (*Store, error) {
 	if opts.Instance.ID == "" {
 		opts.Instance.ID = strconv.Itoa(os.Getpid())
 	}
-	if opts.Instance.Named {
-		if !validName(opts.Instance.ID) {
-			return nil, fmt.Errorf("store: invalid instance name")
-		}
-	} else {
+	if !opts.Instance.Named() {
 		n, err := strconv.ParseUint(opts.Instance.ID, 10, 64)
 		if err != nil || n == 0 {
-			return nil, fmt.Errorf("store: invalid pid instance")
+			return nil, fmt.Errorf("store: invalid instance id %q: want a name or a pid", opts.Instance.ID)
 		}
 	}
 	if opts.Clock == nil {
@@ -148,11 +148,10 @@ func openStore(opts Options, runtimeDir func() (string, error)) (*Store, error) 
 	if paths.Data, err = base("XDG_DATA_HOME", ".local/share"); err != nil {
 		return nil, err
 	}
-	if paths.Runtime, err = runtimeDir(); err != nil {
-		return nil, err
-	}
-	if err = privateRuntimeDir(paths.Runtime); err != nil {
-		return nil, err
+	if paths.Runtime = opts.RuntimeDir; paths.Runtime != "" {
+		if err = privateRuntimeDir(paths.Runtime); err != nil {
+			return nil, err
+		}
 	}
 	source, err := NewLocalSource(paths.State)
 	if err != nil {
@@ -179,7 +178,7 @@ func openStore(opts Options, runtimeDir func() (string, error)) (*Store, error) 
 		return nil, err
 	}
 	s.detectFallback()
-	if opts.Instance.Named {
+	if opts.Instance.Named() {
 		if err = s.loadMeta(); err != nil {
 			return nil, err
 		}
@@ -223,7 +222,8 @@ func (s *Store) Paths() Paths { return s.paths }
 // Done is closed once the worker has exited, after Close.
 func (s *Store) Done() <-chan struct{} { return s.done }
 
-// RuntimeDir returns the verified directory resolved by the instance package.
+// RuntimeDir returns the verified runtime directory the opener passed, or ""
+// when there is none.
 func (s *Store) RuntimeDir() string { return s.paths.Runtime }
 
 // OpenPluginLog exclusively creates a private log, trying at most 100 names.

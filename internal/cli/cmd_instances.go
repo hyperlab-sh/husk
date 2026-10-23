@@ -41,10 +41,13 @@ func runInstances(_ context.Context, inv *Invocation, args []string) error {
 	}
 	rows := make([]instanceRow, 0, len(statuses))
 	for _, st := range statuses {
+		if st.Locked {
+			inv.out.Warn(output.WarningUnresponsive, skipWarning(dir, st))
+		}
 		e := st.Entry
 		rows = append(rows, instanceRow{
 			ID: e.ID, PID: e.PID, Socket: e.Socket, StartedAt: e.StartedAt,
-			ProtocolVersion: e.ProtocolVersion, HostVersion: e.HuskVersion, Status: st.Verdict.String(),
+			ProtocolVersion: e.ProtocolVersion, HostVersion: e.HostVersion, Status: st.Verdict.String(),
 		})
 	}
 	if inv.out.Format == output.JSON {

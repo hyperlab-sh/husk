@@ -368,7 +368,13 @@ func TestDiscoveredTargetThatDiesBeforeTheDialIsRemovedSilently(t *testing.T) {
 	dir := shortDir(t)
 	register(t, dir, "ghost", instance.SocketPath(dir, "ghost"), protocol.Version) // entry, no socket
 	h := newHarness(t, dir, nil)
-	h.env.Deps = &instance.Deps{Ping: func(string) error { return nil }} // the survey saw it live
+	pings := 0
+	h.env.Deps = &instance.Deps{Ping: func(string) error { // the survey saw it live; it is gone by recovery
+		if pings++; pings == 1 {
+			return nil
+		}
+		return instance.ErrSocketMissing
+	}}
 	if got := h.run("ping", "--format", "table"); got != output.ExitNoInstance {
 		t.Fatalf("exit = %d, want %d; stderr %q", got, output.ExitNoInstance, h.errb.String())
 	}

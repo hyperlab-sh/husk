@@ -172,7 +172,7 @@ func (c *connection) receive(req protocol.Message) {
 				ProtocolVersion string `json:"protocol_version"`
 				HostVersion     string `json:"host_version"`
 				Uptime          int64  `json:"uptime_ms"`
-			}{e.ID, e.PID, protocol.Version, e.HuskVersion, uptime})
+			}{e.ID, e.PID, protocol.Version, e.HostVersion, uptime})
 			c.respond(protocol.Message{ID: req.ID, Result: data})
 		}
 		return

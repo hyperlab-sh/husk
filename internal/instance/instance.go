@@ -6,7 +6,8 @@
 // ($XDG_RUNTIME_DIR/husk/ or /tmp/husk-<uid>/) as a pair of files, <id>.sock
 // and <id>.json, and removes both on a clean exit. A crash leaves them
 // behind; the liveness check (a ping) classifies such an entry as stale, and
-// any CLI call that meets a stale entry removes it.
+// stale recovery (RecoverStale, under the runtime-directory lock) removes
+// both files wherever a Server or a CLI call meets it.
 //
 // The CLI resolves exactly one socket per command with Resolve, in the
 // order: --socket flag, --instance flag, HUSK_SOCKET_PATH, HUSK_INSTANCE,
@@ -62,26 +63,25 @@ type Entry struct {
 	// the socket.
 	ID string `json:"id"`
 
-	// Name is the instance name, absent for pid instances.
-	Name string `json:"name,omitempty"`
-
 	// PID is the Husk process's pid.
 	PID int `json:"pid"`
 
 	// Socket is the absolute path of the instance's listening socket.
 	Socket string `json:"socket"`
 
-	// StartedAt is when the instance started. RemoveIfStale compares it
+	// StartedAt is when the instance started. RecoverStale compares it
 	// to detect that an entry file still belongs to the instance that was
-	// pinged.
+	// probed.
 	StartedAt time.Time `json:"started_at"`
 
 	// ProtocolVersion is the wire version the instance's Server speaks,
 	// for example "2.0".
 	ProtocolVersion string `json:"protocol_version"`
 
-	// HuskVersion is the Husk build version, informational.
-	HuskVersion string `json:"husk_version,omitempty"`
+	// HostVersion is the Husk build version, informational. Always
+	// present in the file; "" when the build carries no version. It is the
+	// same fact as the host_version member of the session.ping result.
+	HostVersion string `json:"host_version"`
 }
 
 // ValidName reports whether s is a legal instance name: it matches
@@ -93,7 +93,7 @@ func ValidName(s string) error {
 		return nameError(s)
 	}
 	if isAllDigits(s) {
-		return fmt.Errorf("invalid instance name %q: a name of digits only would collide with a pid id", s)
+		return nameError(s)
 	}
 	for i, r := range s {
 		switch {
@@ -249,7 +249,7 @@ func checkDir(st os.FileInfo, dir string, uid int) error {
 }
 
 func nameError(s string) error {
-	return fmt.Errorf("invalid instance name %q: use [a-z0-9][a-z0-9-]*, at most %d bytes", s, MaxNameBytes)
+	return fmt.Errorf("invalid instance name %q: use [a-z0-9][a-z0-9-]*, at most %d bytes, not digits only", s, MaxNameBytes)
 }
 
 func isAllDigits(s string) bool {

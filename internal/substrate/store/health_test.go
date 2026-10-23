@@ -10,7 +10,7 @@ import (
 
 func TestRecoverableHealthOverflowPublishesBoundedSummary(t *testing.T) {
 	e := fixture(t)
-	s := e.open(t, "notes", true, nil)
+	s := e.open(t, "notes", nil)
 	// Drive both inventory and diagnostic text far beyond the core slice cap.
 	for i := 0; i < 60; i++ {
 		s.diagnostic(Problem{Code: "recoverable", Message: strings.Repeat("\x01", state.CoreMaxBytes), File: strings.Repeat("path", 2000)}, strings.Repeat("quarantine-path", 1000))
@@ -49,7 +49,7 @@ func TestRecoverableHealthOverflowPublishesBoundedSummary(t *testing.T) {
 }
 func TestHealthTrimsOnlyOldestQuarantinePathsWhenEnough(t *testing.T) {
 	e := fixture(t)
-	s := e.open(t, "notes", true, nil)
+	s := e.open(t, "notes", nil)
 	for i := 0; i < 50; i++ {
 		s.diagnostic(Problem{Code: "small", Message: "retain all fifty"}, strings.Repeat("path", 1024))
 	}

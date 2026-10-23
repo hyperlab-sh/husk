@@ -67,8 +67,20 @@ func fixture(t *testing.T) *testEnv {
 	t.Helper()
 	return &testEnv{root: t.TempDir(), clock: newClock(), posts: make(chan func(), 128)}
 }
-func (e *testEnv) opts(name string, named bool) Options {
-	return Options{Instance: InstanceRef{ID: name, Named: named}, Clock: e.clock, Env: Env{LookupEnv: func(k string) (string, bool) {
+
+// runtime returns the fixture's private runtime directory, created on first
+// use: the opener's job, since Store creates none.
+func (e *testEnv) runtime() string {
+	path := filepath.Join(e.root, "runtime")
+	if _, err := os.Lstat(path); os.IsNotExist(err) {
+		if err := privateDir(path); err != nil {
+			panic(err)
+		}
+	}
+	return path
+}
+func (e *testEnv) opts(name string) Options {
+	return Options{Instance: InstanceRef{ID: name}, RuntimeDir: e.runtime(), Clock: e.clock, Env: Env{LookupEnv: func(k string) (string, bool) {
 		switch k {
 		case "XDG_CONFIG_HOME":
 			return filepath.Join(e.root, "config"), true
@@ -87,13 +99,13 @@ func (e *testEnv) opts(name string, named bool) Options {
 		}
 	}}
 }
-func (e *testEnv) open(t *testing.T, name string, named bool, change func(*Options)) *Store {
+func (e *testEnv) open(t *testing.T, name string, change func(*Options)) *Store {
 	t.Helper()
-	opts := e.opts(name, named)
+	opts := e.opts(name)
 	if change != nil {
 		change(&opts)
 	}
-	s, err := openStore(opts, func() (string, error) { path := filepath.Join(e.root, "runtime"); return path, privateDir(path) })
+	s, err := Open(opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +180,7 @@ func drainPosts(e *testEnv) {
 
 func TestOpenPathsPermissionsAndLifecycle(t *testing.T) {
 	e := fixture(t)
-	s := e.open(t, "notes", true, nil)
+	s := e.open(t, "notes", nil)
 	for _, p := range []string{s.Paths().Config, s.Paths().State, s.Paths().Data, s.RuntimeDir()} {
 		info, err := os.Lstat(p)
 		if err != nil || info.Mode().Perm() != 0700 {
@@ -196,8 +208,13 @@ func TestOpenPathsPermissionsAndLifecycle(t *testing.T) {
 	if _, err = s.OpenPluginLog("../bad"); err == nil {
 		t.Fatal("unsafe plugin log")
 	}
-	if _, err = openStore(e.opts("123", true), func() (string, error) { t.Fatal("invalid name touched runtime"); return "", nil }); err == nil {
-		t.Fatal("all-digit name accepted")
+	bad := e.opts("Bad_Name")
+	bad.RuntimeDir = filepath.Join(e.root, "untouched")
+	if _, err = Open(bad); err == nil {
+		t.Fatal("invalid id accepted")
+	}
+	if _, err := os.Lstat(bad.RuntimeDir); !os.IsNotExist(err) {
+		t.Fatal("invalid id touched the runtime directory")
 	}
 	st := attach(t, s)
 	if err = s.Attach(st); err == nil {
@@ -221,7 +238,7 @@ func TestOpenPathsPermissionsAndLifecycle(t *testing.T) {
 
 func TestHealthUsesLoopPostAndBoundsDiagnostics(t *testing.T) {
 	e := fixture(t)
-	s := e.open(t, "notes", true, nil)
+	s := e.open(t, "notes", nil)
 	st := attach(t, s)
 	before := st.Snapshot()
 	for i := 0; i < 60; i++ {

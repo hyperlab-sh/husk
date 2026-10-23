@@ -87,8 +87,7 @@ func (inv *Invocation) resolve() (instance.Resolved, error) {
 		return instance.Resolved{}, resolveErr(err)
 	}
 	for _, st := range res.Skipped {
-		inv.out.Warn(output.WarningUnresponsive,
-			fmt.Sprintf("instance %q did not answer within %s; skipped", st.Entry.ID, instance.DiscoveryPingTimeout))
+		inv.out.Warn(output.WarningUnresponsive, skipWarning(inv.dir, st))
 	}
 	return res, nil
 }
@@ -124,13 +123,7 @@ func (inv *Invocation) dialFailure(err error, res instance.Resolved) error {
 		return err
 	}
 	if res.Entry != nil {
-		msg := fmt.Sprintf("instance %q is not running", res.Entry.ID)
-		// Removal is silent for a target found by discovery; only an
-		// explicit target is told its stale entry was removed.
-		if instance.RemoveIfStale(inv.dir, *res.Entry) == nil && res.Source != instance.SourceDiscovery {
-			msg += " (stale entry removed)"
-		}
-		return output.NoInstance(err, "%s", msg)
+		return inv.recoverTarget(err, res)
 	}
 	msg := "nobody is listening on " + res.Socket
 	if res.Source == instance.SourceEnv {
@@ -154,4 +147,42 @@ func versionLabel(v string) string {
 		return fmt.Sprintf("%d.x", major)
 	}
 	return fmt.Sprintf("%q", v)
+}
+
+// skipWarning words the warning for an unresponsive entry discovery skipped:
+// one that is really a stale entry left in place because the directory lock
+// was not acquired names the lock, not the instance's silence.
+func skipWarning(dir string, st instance.Status) string {
+	if st.Locked {
+		return fmt.Sprintf("runtime dir %s is locked; instance %q left as is", dir, st.Entry.ID)
+	}
+	return fmt.Sprintf("instance %q did not answer within %s; skipped", st.Entry.ID, instance.ProbeTimeout)
+}
+
+// recoverTarget runs stale recovery for the entry whose socket refused the
+// connection and words the outcome. Removal is silent for a target found by
+// discovery; only an explicit target is told its stale entry was removed.
+func (inv *Invocation) recoverTarget(cause error, res instance.Resolved) error {
+	id := res.Entry.ID
+	classes, err := instance.RecoverStaleWith(inv.dir, []*instance.Entry{res.Entry}, inv.env.Deps)
+	var notSocket *instance.NotSocketError
+	switch {
+	case errors.Is(err, instance.ErrLocked):
+		return output.Transport(err, "instance %q is not answering and the runtime dir is locked; retry", id)
+	case errors.As(err, &notSocket):
+		return output.NoInstance(err, "instance %q is not running (%s is not a socket)", id, notSocket.Path)
+	case err != nil:
+		return output.Transport(err, "recover stale instance %q: %v", id, err)
+	}
+	switch classes[0] {
+	case instance.VerdictLive:
+		return output.NoInstance(cause, "instance %q started while this command ran; retry", id)
+	case instance.VerdictUnresponsive:
+		return output.Transport(cause, "instance %q did not answer within %s", id, instance.ProbeTimeout)
+	}
+	msg := fmt.Sprintf("instance %q is not running", id)
+	if res.Source != instance.SourceDiscovery {
+		msg += " (stale entry removed)"
+	}
+	return output.NoInstance(cause, "%s", msg)
 }

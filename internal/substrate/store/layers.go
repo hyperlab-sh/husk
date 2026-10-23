@@ -260,7 +260,7 @@ func (s *Store) loadLayers(name DocName, profile string) (layerLoad, error) {
 	if profile != "" {
 		read(LayerProfile, []string{"profiles", profile})
 	}
-	if s.opts.Instance.Named {
+	if s.opts.Instance.Named() {
 		read(LayerInstance, []string{"instances", s.opts.Instance.ID})
 	}
 	if d, ok := s.opts.InstanceDocs[name]; ok {
@@ -447,7 +447,7 @@ func (s *Store) Patch(name DocName, layer Layer, profile string, patch Doc) erro
 		}
 		parts = []string{"profiles", profile}
 	case LayerInstance:
-		if !s.opts.Instance.Named {
+		if !s.opts.Instance.Named() {
 			return ErrInvalidPath
 		}
 		parts = []string{"instances", s.opts.Instance.ID}

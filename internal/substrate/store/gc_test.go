@@ -14,7 +14,7 @@ import (
 
 func TestGCStaleTempsQuarantineLimitsAndCheckOrphans(t *testing.T) {
 	e := fixture(t)
-	s := e.open(t, "notes", true, nil)
+	s := e.open(t, "notes", nil)
 	spec := state.Spec{Namespace: "old.state", Owner: "old", Scope: state.ScopeInstance, Persistent: true, Retention: state.Retention{Policy: state.Manual}}
 	key := s.sliceKey(spec, "current.json")
 	old := e.clock.Now().Add(-100 * 24 * time.Hour)
@@ -67,7 +67,7 @@ func TestGCStaleTempsQuarantineLimitsAndCheckOrphans(t *testing.T) {
 }
 func TestPersistenceFailureCapAndRetryOnChange(t *testing.T) {
 	e := fixture(t)
-	s := e.open(t, "notes", true, nil)
+	s := e.open(t, "notes", nil)
 	st := attach(t, s)
 	h := slice(t, st, state.ScopeInstance, state.Retention{Policy: state.KeepLatest})
 	set(t, h, `{"n":1}`)
@@ -107,12 +107,12 @@ func TestPersistenceFailureCapAndRetryOnChange(t *testing.T) {
 }
 func TestCloseDeadlineAndRuntimeFailure(t *testing.T) {
 	e := fixture(t)
-	opts := e.opts("notes", true)
-	called := false
-	if _, err := openStore(opts, func() (string, error) { called = true; return "", errors.New("unsafe runtime") }); err == nil || !called {
+	opts := e.opts("notes")
+	opts.RuntimeDir = filepath.Join(e.root, "missing-runtime")
+	if _, err := Open(opts); err == nil {
 		t.Fatal("runtime error ignored")
 	}
-	s := e.open(t, "notes", true, nil)
+	s := e.open(t, "notes", nil)
 	st := attach(t, s)
 	h := slice(t, st, state.ScopeInstance, state.Retention{Policy: state.Manual})
 	set(t, h, `{"n":1}`)

@@ -50,7 +50,7 @@ func inertServer(t *testing.T) *SocketServer {
 			t.Error(err)
 		}
 	})
-	s := New(Config{InstanceID: "test", RuntimeDir: dir, Clock: testclock.New(), Entry: instance.Entry{HuskVersion: "test"}})
+	s := New(Config{InstanceID: "test", RuntimeDir: dir, Clock: testclock.New(), Entry: instance.Entry{HostVersion: "test"}})
 	t.Cleanup(func() {
 		if err := s.Close(); err != nil {
 			t.Error(err)

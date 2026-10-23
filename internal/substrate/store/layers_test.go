@@ -24,7 +24,7 @@ func TestMergeTableAndOrigins(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := fixture(t)
-			s := e.open(t, "notes", true, func(o *Options) { o.Distribution = fstest.MapFS{"config.json": {Data: []byte(tc.lower)}} })
+			s := e.open(t, "notes", func(o *Options) { o.Distribution = fstest.MapFS{"config.json": {Data: []byte(tc.lower)}} })
 			writeConfig(t, s, []string{"config.json"}, tc.higher)
 			got, err := s.Resolve("config", "")
 			if err != nil {
@@ -50,7 +50,7 @@ func TestMergeTableAndOrigins(t *testing.T) {
 }
 func TestLayerOrderFlagsTombstonesAndOneDistribution(t *testing.T) {
 	e := fixture(t)
-	s := e.open(t, "notes", true, func(o *Options) {
+	s := e.open(t, "notes", func(o *Options) {
 		o.Distribution = fstest.MapFS{"config.json": {Data: []byte(`{"v":"dist","keep":1}`)}, "profiles/work/config.json": {Data: []byte(`{"v":"dist-profile","dp":true}`)}}
 		o.InstanceDocs = map[DocName]Doc{"config": {"v": "flag", "delete": nil}}
 	})
@@ -95,7 +95,7 @@ func TestLayerOrderFlagsTombstonesAndOneDistribution(t *testing.T) {
 }
 func TestHuJSONPatchAndBadReloadPreservesGood(t *testing.T) {
 	e := fixture(t)
-	s := e.open(t, "notes", true, nil)
+	s := e.open(t, "notes", nil)
 	writeConfig(t, s, []string{"config.json"}, "{\n // preserve this comment\n \"keep\": 1,\n \"nested\": {\"x\": 1},\n \"remove\": true,\n}\n")
 	before, err := s.Resolve("config", "")
 	if err != nil {
@@ -148,7 +148,7 @@ func TestParseDocLimitsAndDeclaredIsolation(t *testing.T) {
 		t.Fatal(d, err)
 	}
 	e := fixture(t)
-	s := e.open(t, "notes", true, nil)
+	s := e.open(t, "notes", nil)
 	input := Doc{"nested": Doc{"n": 1}}
 	s.Declare(DeclaredKeymap, "example.notes", input)
 	input["nested"].(Doc)["n"] = 2

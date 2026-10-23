@@ -12,10 +12,14 @@ import (
 	"time"
 )
 
-// DiscoveryPingTimeout bounds one ping in the discovery fan-out: a live
-// local instance answers in milliseconds, so discovery and stale checks
-// wait no longer than this.
-const DiscoveryPingTimeout = 500 * time.Millisecond
+// ProbeTimeout is the one probe deadline, covering connect, write and read:
+// a live local instance answers in milliseconds, so discovery, `husk
+// instances`, the Server's claim and stale recovery wait no longer than this.
+const ProbeTimeout = 500 * time.Millisecond
+
+// Probe sends one session.ping to the socket at socketPath within
+// ProbeTimeout. It returns nil on a reply; classify the error with ClassOf.
+func Probe(socketPath string) error { return DefaultPing(socketPath, ProbeTimeout) }
 
 // Deps holds the seams tests inject so that no test needs a real socket
 // or real network timing. The zero value is production: pings go out over
@@ -27,10 +31,27 @@ type Deps struct {
 	// ErrSocketMissing or ErrSocketRefused (or a wrapped ENOENT /
 	// ECONNREFUSED / ENOTSOCK) mark the entry stale; anything else marks
 	// it unresponsive. When nil, DefaultPing is used with
-	// DiscoveryPingTimeout.
+	// ProbeTimeout.
 	// Called from multiple goroutines at once.
 	Ping func(socketPath string) error
+
+	// LockWait overrides the stale-recovery lock deadline (LockWait);
+	// zero is the production 2.5 s. Tests shorten it to exercise
+	// contention without waiting.
+	LockWait time.Duration
 }
+
+// lockWait returns the lock deadline, safe on a nil *Deps.
+func (d *Deps) lockWait() time.Duration {
+	if d != nil && d.LockWait > 0 {
+		return d.LockWait
+	}
+	return LockWait
+}
+
+// Class is the liveness class of one registration entry: live, stale or
+// unresponsive. It is the spec's classification; Verdict is its older name.
+type Class = Verdict
 
 // Verdict classifies one registration entry's liveness.
 type Verdict int
@@ -73,27 +94,59 @@ type Status struct {
 	// Verdict is the liveness classification; stale entries never appear
 	// in a Survey result because they are removed first.
 	Verdict Verdict
+
+	// Locked is set on an unresponsive status that is really a stale
+	// entry left in place because the runtime-directory lock was not
+	// acquired in time (spec: listed as unresponsive, with a warning that
+	// names the lock). Nothing was removed.
+	Locked bool
 }
 
-// Survey lists the runtime directory's entries with a liveness verdict,
-// pinging them in parallel, and removes every stale entry it meets — the
-// spec's rule that any CLI call seeing a stale entry removes it, `husk
-// instances` included. Stale entries do not appear in the result;
-// unresponsive ones do, so the CLI can report them. The result is sorted by
-// instance id.
+// Survey lists the runtime directory's entries with a liveness class,
+// probing them in parallel, then runs stale recovery once, under one lock,
+// for the whole stale set. Stale entries are removed and do not appear in
+// the result; live and unresponsive ones do, so the CLI can report them. An
+// entry whose re-probe under the lock found it live or unresponsive is
+// listed as such. If the lock is not acquired in time the stale entries are
+// listed unresponsive with Locked set and nothing is removed. An entry whose
+// socket path is not a socket is skipped. The result is sorted by instance
+// id.
 func Survey(dir string, d *Deps) ([]Status, error) {
 	entries, err := List(dir)
 	if err != nil {
 		return nil, err
 	}
 	statuses := pingAll(entries, d)
+	var stale []*Entry
+	var staleAt []int
+	for i, st := range statuses {
+		if st.Verdict == VerdictStale {
+			e := st.Entry
+			stale = append(stale, &e)
+			staleAt = append(staleAt, i)
+		}
+	}
+	if len(stale) > 0 {
+		classes, err := RecoverStaleWith(dir, stale, d)
+		switch {
+		case errors.Is(err, ErrLocked):
+			for _, i := range staleAt {
+				statuses[i].Verdict, statuses[i].Locked = VerdictUnresponsive, true
+			}
+		case classes == nil:
+			return nil, err
+		default:
+			// A *NotSocketError leaves that entry stale and skipped.
+			for k, i := range staleAt {
+				statuses[i].Verdict = classes[k]
+			}
+		}
+	}
 	out := make([]Status, 0, len(statuses))
 	for _, st := range statuses {
-		if st.Verdict == VerdictStale {
-			_ = RemoveIfStale(dir, st.Entry) // best effort; the entry is skipped regardless
-			continue
+		if st.Verdict != VerdictStale {
+			out = append(out, st)
 		}
-		out = append(out, st)
 	}
 	return out, nil
 }
@@ -134,7 +187,7 @@ func pingAll(entries []Entry, d *Deps) []Status {
 // stale-looking pid says nothing a ping does not say better. Explicit
 // lookups are not probed at all: the CLI's own connection is their check.
 func (d *Deps) classify(e Entry) Verdict {
-	return pingVerdict(d.pingFor(e.Socket, DiscoveryPingTimeout))
+	return pingVerdict(d.pingFor(e.Socket, ProbeTimeout))
 }
 
 // pingFor pings at an explicit timeout: an injected Ping always wins
@@ -220,3 +273,7 @@ func pingVerdict(err error) Verdict {
 		return VerdictUnresponsive
 	}
 }
+
+// ClassOf classifies the outcome of Probe (or DefaultPing): nil is live, a
+// missing or refused socket is stale, anything else is unresponsive.
+func ClassOf(probeErr error) Class { return pingVerdict(probeErr) }

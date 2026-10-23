@@ -17,7 +17,7 @@ func TestDebounceQuietWindowAndMaximum(t *testing.T) {
 	for _, maximum := range []bool{false, true} {
 		t.Run(map[bool]string{false: "quiet", true: "maximum"}[maximum], func(t *testing.T) {
 			e := fixture(t)
-			s := e.open(t, "notes", true, nil)
+			s := e.open(t, "notes", nil)
 			st := attach(t, s)
 			h := slice(t, st, state.ScopeInstance, state.Retention{Policy: state.KeepLatest})
 			set(t, h, `{"n":0}`)
@@ -63,7 +63,7 @@ func TestRetentionPoliciesAndHydrateBeforeOwner(t *testing.T) {
 	for _, r := range []state.Retention{{Policy: state.KeepLatest}, {Policy: state.Manual}, {Policy: state.KeepLastN, N: 3}, {Policy: state.TTL, TTL: time.Minute}} {
 		t.Run(string(r.Policy), func(t *testing.T) {
 			e := fixture(t)
-			s := e.open(t, "notes", true, nil)
+			s := e.open(t, "notes", nil)
 			st := attach(t, s)
 			h := slice(t, st, state.ScopeInstance, r)
 			for i := 1; i <= 5; i++ {
@@ -89,7 +89,7 @@ func TestRetentionPoliciesAndHydrateBeforeOwner(t *testing.T) {
 			if err = s.Close(context.Background()); err != nil {
 				t.Fatal(err)
 			}
-			next := e.open(t, "notes", true, nil)
+			next := e.open(t, "notes", nil)
 			nextState := attach(t, next)
 			owner := slice(t, nextState, state.ScopeInstance, r)
 			entry := nextState.Snapshot().Slices[owner.Namespace()]
@@ -121,8 +121,8 @@ func TestRetentionPoliciesAndHydrateBeforeOwner(t *testing.T) {
 }
 func TestScopeIsolationAnonymousAndWorkspaceBatch(t *testing.T) {
 	e := fixture(t)
-	a := e.open(t, "one", true, nil)
-	b := e.open(t, "two", true, nil)
+	a := e.open(t, "one", nil)
+	b := e.open(t, "two", nil)
 	ast := attach(t, a)
 	bst := attach(t, b)
 	ah := slice(t, ast, state.ScopeWorkspace, state.Retention{Policy: state.KeepLatest})
@@ -163,7 +163,7 @@ func TestScopeIsolationAnonymousAndWorkspaceBatch(t *testing.T) {
 	if err != nil || !coreAfter.Modified.Equal(coreBefore.Modified) {
 		t.Fatal("unchanged workspace peer rewritten", err)
 	}
-	anonymous := e.open(t, "4242", false, nil)
+	anonymous := e.open(t, "4242", nil)
 	anonState := attach(t, anonymous)
 	ih := slice(t, anonState, state.ScopeInstance, state.Retention{Policy: state.Manual})
 	set(t, ih, `{"x":1}`)
@@ -189,7 +189,7 @@ func TestCorruptFutureAndUnknownRetentionSafety(t *testing.T) {
 	for _, kind := range []string{"corrupt", "future", "legacy"} {
 		t.Run(kind, func(t *testing.T) {
 			e := fixture(t)
-			seed := e.open(t, "notes", true, nil)
+			seed := e.open(t, "notes", nil)
 			seed.Close(context.Background())
 			key := Key{Scope: state.ScopeInstance, Instance: "notes", Path: []string{"slices", "plugin.state", "current.json"}}
 			data := []byte("{")
@@ -203,7 +203,7 @@ func TestCorruptFutureAndUnknownRetentionSafety(t *testing.T) {
 			if err := seed.source.Put(context.Background(), key, data); err != nil {
 				t.Fatal(err)
 			}
-			s := e.open(t, "notes", true, nil)
+			s := e.open(t, "notes", nil)
 			st := attach(t, s)
 			h := slice(t, st, state.ScopeInstance, state.Retention{Policy: state.Manual})
 			entry := st.Snapshot().Slices[h.Namespace()]
@@ -241,7 +241,7 @@ func TestCorruptFutureAndUnknownRetentionSafety(t *testing.T) {
 }
 func TestClearUninstallAndUnregistrationRespectPersistence(t *testing.T) {
 	e := fixture(t)
-	s := e.open(t, "notes", true, nil)
+	s := e.open(t, "notes", nil)
 	st := attach(t, s)
 	h := slice(t, st, state.ScopeInstance, state.Retention{Policy: state.Manual})
 	set(t, h, `{"old":true}`)

@@ -13,7 +13,7 @@ import (
 // Findings 1 and 13 also apply while a plugin changes registration scope.
 func TestReviewUnregisteredPendingScopeSurvivesReregistration(t *testing.T) {
 	e := fixture(t)
-	s := e.open(t, "notes", true, nil)
+	s := e.open(t, "notes", nil)
 	st := attach(t, s)
 	h := slice(t, st, state.ScopeInstance, state.Retention{Policy: state.Manual})
 	set(t, h, `{"instance":1}`)
@@ -40,7 +40,7 @@ func TestReviewUnregisteredPendingScopeSurvivesReregistration(t *testing.T) {
 }
 func TestReviewNormalizedHydrationPreservesOriginalFile(t *testing.T) {
 	e := fixture(t)
-	s := e.open(t, "notes", true, nil)
+	s := e.open(t, "notes", nil)
 	s.Close(context.Background())
 	spec := state.Spec{Namespace: "plugin.state", Owner: "plugin", Scope: state.ScopeInstance, Persistent: true, Retention: state.Retention{Policy: state.Manual}}
 	raw, _ := json.Marshal(envelope{Version: 1, Namespace: spec.Namespace, Scope: spec.Scope, Instance: "notes", Value: []byte(` { "z": 9007199254740993, "a": 1 } `)})
@@ -53,7 +53,7 @@ func TestReviewNormalizedHydrationPreservesOriginalFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.clock.Advance(time.Second)
-	next := e.open(t, "notes", true, nil)
+	next := e.open(t, "notes", nil)
 	st := attach(t, next)
 	h := slice(t, st, spec.Scope, spec.Retention)
 	st.Flush()

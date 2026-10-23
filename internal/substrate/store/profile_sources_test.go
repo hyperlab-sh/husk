@@ -7,7 +7,7 @@ import (
 
 func TestProfileSourcesUserOverridesDistributionAndIsDetached(t *testing.T) {
 	e := fixture(t)
-	s := e.open(t, "notes", true, func(o *Options) {
+	s := e.open(t, "notes", func(o *Options) {
 		o.Distribution = fstest.MapFS{"profiles/dist/config.json": {Data: []byte(`{}`)}, "profiles/shared/config.json": {Data: []byte(`{}`)}}
 	})
 	writeConfig(t, s, []string{"profiles", "user", "config.json"}, `{}`)

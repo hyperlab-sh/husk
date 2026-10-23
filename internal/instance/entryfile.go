@@ -31,11 +31,6 @@ func Register(dir string, e Entry) error {
 	if err := ValidID(e.ID); err != nil {
 		return err
 	}
-	if e.Name != "" {
-		if err := ValidName(e.Name); err != nil {
-			return err
-		}
-	}
 	if e.PID <= 0 {
 		return fmt.Errorf("instance %s: entry pid must be positive", e.ID)
 	}
@@ -66,6 +61,9 @@ func Register(dir string, e Entry) error {
 		return fmt.Errorf("instance %s: encode entry: %w", e.ID, err)
 	}
 	data = append(data, '\n')
+	if len(data) > MaxEntryBytes {
+		return fmt.Errorf("instance %s: entry is %d bytes, over the %d-byte limit", e.ID, len(data), MaxEntryBytes)
+	}
 
 	f, err := os.CreateTemp(dir, "."+e.ID+".json.tmp-")
 	if err != nil {
@@ -100,44 +98,34 @@ func Register(dir string, e Entry) error {
 	return nil
 }
 
-// Unregister removes the instance's entry and then its socket. A missing
-// file is not an error, so Unregister is idempotent and safe to call when a
-// crash already removed one of the files. It is the Server's Close step.
-// The id is validated first: ids become file names, so a mangled id must
-// be refused, not joined onto dir.
-func Unregister(dir, id string) error {
+// Unregister removes the instance's entry and then its socket, the socket
+// only when its identity is still ident. A socket at the path with another
+// identity is a replacement bound by its new owner: it is left alone, and so
+// is the entry that owner wrote, because neither is this instance's file. A
+// zero ident never matches, so a Server that did not get to take an identity
+// leaves a socket it cannot recognise. A missing file is not an error, so
+// Unregister is idempotent and safe after a crash already removed one of the
+// files. It is the Server's Close step. The id is validated first: ids become
+// file names, so a mangled id must be refused, not joined onto dir.
+func Unregister(dir, id string, ident Identity) error {
 	if err := ValidID(id); err != nil {
 		return err
 	}
-	for _, path := range []string{EntryPath(dir, id), SocketPath(dir, id)} {
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+	sock := SocketPath(dir, id)
+	cur, err := SocketIdentity(sock)
+	switch {
+	case err == nil && (ident == (Identity{}) || cur != ident):
+		return nil
+	case err != nil && !os.IsNotExist(err):
+		return err
+	}
+	if err := os.Remove(EntryPath(dir, id)); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if err == nil {
+		if err := os.Remove(sock); err != nil && !os.IsNotExist(err) {
 			return err
 		}
-	}
-	return nil
-}
-
-// RemoveIfStale removes e's entry file — only the entry file — if the
-// entry still holds the same pid and the same started timestamp as e.
-// That closes the race where a new instance reuses the name between the
-// failed ping and the unlink: whoever re-registered wrote a different pid
-// or started_at, and this call becomes a no-op. A missing or corrupt file
-// is not an error and is left alone.
-//
-// The socket is never removed here: it belongs to whoever bound it, and
-// after a crash and restart that may be the next instance of the same
-// name. Only an instance removes its own socket, on a clean exit
-// (Unregister).
-func RemoveIfStale(dir string, e Entry) error {
-	cur, err := readEntry(dir, e.ID+".json")
-	if err != nil {
-		return nil // missing or corrupt: nothing that holds e is on disk
-	}
-	if cur.PID != e.PID || !cur.StartedAt.Equal(e.StartedAt) {
-		return nil
-	}
-	if err := os.Remove(EntryPath(dir, e.ID)); err != nil && !os.IsNotExist(err) {
-		return err
 	}
 	return nil
 }

@@ -68,7 +68,7 @@ func (s *Store) prefixes(all bool) ([]Key, error) {
 		} else if !errors.Is(err, fs.ErrNotExist) {
 			return nil, err
 		}
-	} else if s.opts.Instance.Named {
+	} else if s.opts.Instance.Named() {
 		names = append(names, s.opts.Instance.ID)
 	}
 	for _, name := range names {
@@ -242,7 +242,7 @@ func (s *Store) deleteRecord(ctx context.Context, key Key) error {
 // Hydrate is a loop-only, non-I/O lookup of values preloaded by Open. The
 // registration's current policy, including a newly changed TTL, governs reuse.
 func (s *Store) Hydrate(spec state.Spec) (json.RawMessage, bool) {
-	if !spec.Persistent || !state.ValidNamespace(spec.Namespace) || spec.Scope != state.ScopeUser && !s.opts.Instance.Named {
+	if !spec.Persistent || !state.ValidNamespace(spec.Namespace) || spec.Scope != state.ScopeUser && !s.opts.Instance.Named() {
 		return nil, false
 	}
 	k := s.sliceKey(spec, "")
@@ -290,7 +290,7 @@ func (s *Store) onFlush(changes []state.Change, snap *state.Snapshot) {
 			continue
 		}
 		entry, ok := snap.Slices[change.Namespace]
-		if !ok || !entry.Persistent || entry.Scope != state.ScopeUser && !s.opts.Instance.Named {
+		if !ok || !entry.Persistent || entry.Scope != state.ScopeUser && !s.opts.Instance.Named() {
 			continue
 		}
 		k := s.sliceKey(entry.Spec, "")
@@ -371,7 +371,7 @@ func (s *Store) run() {
 			ctx := s.closeCtx
 			s.mu.Unlock()
 			err := s.flushDue(ctx, true)
-			if s.opts.Instance.Named && ctx.Err() == nil {
+			if s.opts.Instance.Named() && ctx.Err() == nil {
 				err = errors.Join(err, s.writeMeta(true))
 			}
 			s.mu.Lock()

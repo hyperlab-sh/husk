@@ -218,10 +218,13 @@ func (s *Store) collectLogs(ctx context.Context, report *GCReport) {
 	if privateExistingDir(root) != nil {
 		return
 	}
-	statuses, err := instance.Survey(s.paths.Runtime, s.opts.InstanceDeps)
-	if err != nil {
-		report.Problems = append(report.Problems, Problem{Code: "unavailable", File: s.paths.Runtime, Message: "log GC skipped: instance liveness unavailable"})
-		return // Fail closed: uncertainty must not destroy another instance's logs.
+	var statuses []instance.Status // no runtime directory: no instance is registered
+	if s.paths.Runtime != "" {
+		var err error
+		if statuses, err = instance.Survey(s.paths.Runtime, s.opts.InstanceDeps); err != nil {
+			report.Problems = append(report.Problems, Problem{Code: "unavailable", File: s.paths.Runtime, Message: "log GC skipped: instance liveness unavailable"})
+			return // Fail closed: uncertainty must not destroy another instance's logs.
+		}
 	}
 	protected := map[string]bool{s.opts.Instance.ID: true}
 	for _, status := range statuses {

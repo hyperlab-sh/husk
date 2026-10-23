@@ -95,9 +95,12 @@ type LayerDoc struct {
 type InstanceRef struct {
 	// ID is a validated name or a positive decimal pid.
 	ID string
-	// Named enables instance/workspace persistence; user scope always persists.
-	Named bool
 }
+
+// Named reports whether the id is a name rather than a pid id, decided by its
+// spelling alone (instance.ValidName). Only a named instance persists
+// instance-scoped and workspace-scoped slices; user scope always persists.
+func (r InstanceRef) Named() bool { return instance.ValidName(r.ID) == nil }
 
 // Env makes environment resolution injectable, without changing process globals.
 type Env struct {
@@ -105,10 +108,6 @@ type Env struct {
 	LookupEnv func(string) (string, bool)
 	// HomeDir defaults to os.UserHomeDir.
 	HomeDir func() (string, error)
-	// RuntimeDir overrides instance.RuntimeDir only for injected environments.
-	// Callers that already resolved the directory through instance.RuntimeDir
-	// (the host root, from its Config) may pass it here; nil resolves it.
-	RuntimeDir func() (string, error)
 }
 
 // Timer is a stoppable clock event used for debounce and periodic collection.
@@ -145,6 +144,13 @@ type Options struct {
 	InstanceDocs map[DocName]Doc
 	// Env supplies XDG lookups and home directory resolution.
 	Env Env
+	// RuntimeDir is the instance runtime directory, resolved once by the
+	// opener: start mode passes what instance.RuntimeDir returned (the same
+	// string the Server gets), a local command passes what
+	// instance.LookupRuntimeDir found. "" means no runtime directory exists,
+	// so no instance is registered and liveness probes find none. Store
+	// never resolves or creates the directory itself.
+	RuntimeDir string
 	// Clock supplies debounce and GC time; nil uses the real clock.
 	Clock Clock
 	// Post enqueues a callback on the loop, returning false after shutdown.

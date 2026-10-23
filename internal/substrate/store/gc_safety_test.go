@@ -14,7 +14,7 @@ import (
 func TestGCDoesNotMistakeNamesForQuarantine(t *testing.T) {
 	e := fixture(t)
 	e.root = filepath.Join(e.root, "parent.corrupt-directory")
-	s := e.open(t, "notes", true, nil)
+	s := e.open(t, "notes", nil)
 	// Neither parent directories nor legitimate secret names identify quarantine files.
 	names := []string{"a.age", "b.age", "c.age", "d.age", "e.age", "token.corrupt-20200101T000000.000000000Z.age"}
 	old := e.clock.Now().Add(-400 * 24 * time.Hour)
@@ -36,7 +36,7 @@ func TestGCDoesNotMistakeNamesForQuarantine(t *testing.T) {
 }
 func TestGCLogAgeAndDirectoryCap(t *testing.T) {
 	e := fixture(t)
-	s := e.open(t, "notes", true, nil)
+	s := e.open(t, "notes", nil)
 	active, err := s.OpenPluginLog("plugin")
 	if err != nil {
 		t.Fatal(err)
@@ -72,7 +72,7 @@ func TestGCLogAgeAndDirectoryCap(t *testing.T) {
 }
 func TestSameInstantCurrentWritesRefreshHydration(t *testing.T) {
 	e := fixture(t)
-	s := e.open(t, "notes", true, nil)
+	s := e.open(t, "notes", nil)
 	st := attach(t, s)
 	r := state.Retention{Policy: state.Manual}
 	h := slice(t, st, state.ScopeInstance, r)

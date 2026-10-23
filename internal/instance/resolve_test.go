@@ -63,9 +63,7 @@ func pidEntry(dir, id string, pid int) Entry {
 }
 
 func namedEntry(dir, name string, pid int) Entry {
-	e := pidEntry(dir, name, pid)
-	e.Name = name
-	return e
+	return pidEntry(dir, name, pid)
 }
 
 func TestResolveSocketFlag(t *testing.T) {
@@ -208,7 +206,7 @@ func TestResolveInstanceFlag(t *testing.T) {
 	if got.Source != SourceFlag || got.Socket != SocketPath(dir, "notes") {
 		t.Fatalf("got %+v, want the notes socket via flag", got)
 	}
-	if got.Entry == nil || got.Entry.PID != 5120 || got.Entry.Name != "notes" {
+	if got.Entry == nil || got.Entry.PID != 5120 {
 		t.Fatalf("entry = %+v, want the notes entry", got.Entry)
 	}
 }
@@ -221,8 +219,8 @@ func TestResolveInstanceFlagByPidID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if got.Entry == nil || got.Entry.PID != 4242 || got.Entry.Name != "" {
-		t.Fatalf("entry = %+v, want the pid entry without a name", got.Entry)
+	if got.Entry == nil || got.Entry.PID != 4242 {
+		t.Fatalf("entry = %+v, want the pid entry", got.Entry)
 	}
 }
 

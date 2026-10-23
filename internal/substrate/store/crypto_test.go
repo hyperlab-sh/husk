@@ -51,7 +51,7 @@ func TestSecretRoundTripRandomCiphertextAndLazyIdentity(t *testing.T) {
 		t.Run(map[bool]string{false: "keyring", true: "fallback"}[fallback], func(t *testing.T) {
 			e := fixture(t)
 			ring := &memoryKeyring{setFailure: fallback}
-			s := e.open(t, "notes", true, func(o *Options) { o.Keyring = ring })
+			s := e.open(t, "notes", func(o *Options) { o.Keyring = ring })
 			doc, err := s.Secrets("secrets")
 			if err != nil {
 				t.Fatal(err)
@@ -96,7 +96,7 @@ func TestSecretRoundTripRandomCiphertextAndLazyIdentity(t *testing.T) {
 			if keys, err := doc.Keys(); err != nil || !reflect.DeepEqual(keys, []string{"git.token"}) {
 				t.Fatal(keys, err)
 			}
-			reopened := e.open(t, "other", true, func(o *Options) { o.Keyring = ring })
+			reopened := e.open(t, "other", func(o *Options) { o.Keyring = ring })
 			other, _ := reopened.Secrets("secrets")
 			if value, ok, err := other.Get("git.token"); err != nil || !ok || !bytes.Equal(value, secret) {
 				t.Fatal("restart failed", err)
@@ -127,7 +127,7 @@ func TestSecretRoundTripRandomCiphertextAndLazyIdentity(t *testing.T) {
 func TestUnreadableSecretsNeverOverwritten(t *testing.T) {
 	e := fixture(t)
 	ring := &memoryKeyring{}
-	s := e.open(t, "notes", true, func(o *Options) { o.Keyring = ring })
+	s := e.open(t, "notes", func(o *Options) { o.Keyring = ring })
 	doc, _ := s.Secrets("secrets")
 	if err := doc.Put("key", []byte("value")); err != nil {
 		t.Fatal(err)
@@ -148,7 +148,7 @@ func TestUnreadableSecretsNeverOverwritten(t *testing.T) {
 	if err := atomicWrite(context.Background(), path, good); err != nil {
 		t.Fatal(err)
 	}
-	wrong := e.open(t, "other", true, func(o *Options) { o.Keyring = &memoryKeyring{} })
+	wrong := e.open(t, "other", func(o *Options) { o.Keyring = &memoryKeyring{} })
 	other, _ := wrong.Secrets("secrets")
 	if err := other.Put("new", []byte("wrong-key")); err == nil {
 		t.Fatal("overwrote without key")
@@ -167,8 +167,8 @@ func TestUnreadableSecretsNeverOverwritten(t *testing.T) {
 func TestConcurrentSecretWritersDoNotLoseKeys(t *testing.T) {
 	e := fixture(t)
 	ring := &memoryKeyring{}
-	a := e.open(t, "one", true, func(o *Options) { o.Keyring = ring })
-	b := e.open(t, "two", true, func(o *Options) { o.Keyring = ring })
+	a := e.open(t, "one", func(o *Options) { o.Keyring = ring })
+	b := e.open(t, "two", func(o *Options) { o.Keyring = ring })
 	ad, _ := a.Secrets("secrets")
 	bd, _ := b.Secrets("secrets")
 	var wg sync.WaitGroup
