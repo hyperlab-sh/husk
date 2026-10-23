@@ -14,8 +14,8 @@ import (
 // is touched.
 type Settings struct {
 	Port contracts.SettingsPort
-	// Limiter is the shared settings.get/secrets.get budget, keyed by plugin
-	// id (services.md, Limits). Register requires it; only a hand-built
+	// Limiter is the one Services budget (every plugin-callable method), keyed
+	// by plugin id (services.md, Limits). Register requires it; only a hand-built
 	// adapter struct can leave it nil, and the guard only defends that.
 	Limiter contracts.Limiter
 }

@@ -463,3 +463,65 @@ func mustJSON(t *testing.T, v any) []byte {
 	}
 	return raw
 }
+
+// One 20-per-second budget per plugin covers all five read methods, malformed
+// requests included; the 21st request in the window is busy/rate_limited
+// whichever method it is, and never reaches a port.
+func TestOneBudgetCoversEveryPluginReadMethod(t *testing.T) {
+	calls := map[string]string{
+		"settings.get":  `{"key":"theme.name"}`,
+		"secrets.get":   `{"name":"token"}`,
+		"secrets.names": `{}`,
+		"theme.get":     `{}`,
+		"keys.list":     `{}`,
+	}
+	methods := []string{"settings.get", "secrets.get", "secrets.names", "theme.get", "keys.list"}
+	for _, spent := range methods {
+		for _, next := range methods {
+			t.Run(spent+" then "+next, func(t *testing.T) {
+				rec := fakes.NewRecorder()
+				clock := fakes.NewClock(time.Unix(0, 0))
+				lim := NewWindowLimiter(clock, contracts.RateLimitPerSecond)
+				serve := map[string]func(protocol.Message) protocol.Message{
+					"settings.get": func(m protocol.Message) protocol.Message {
+						return Settings{Port: fakes.NewSettings(rec), Limiter: lim}.Serve(context.Background(), pluginCaller("files"), m, nil)
+					},
+					"secrets.get": func(m protocol.Message) protocol.Message {
+						return Secrets{Port: fakes.NewSecrets(rec), Limiter: lim}.Serve(context.Background(), pluginCaller("files"), m, nil)
+					},
+					"secrets.names": func(m protocol.Message) protocol.Message {
+						return Secrets{Port: fakes.NewSecrets(rec), Limiter: lim}.Serve(context.Background(), pluginCaller("files"), m, nil)
+					},
+					"theme.get": func(m protocol.Message) protocol.Message {
+						return Theme{Port: fakes.NewTheme(rec), Limiter: lim}.Serve(context.Background(), pluginCaller("files"), m, nil)
+					},
+					"keys.list": func(m protocol.Message) protocol.Message {
+						return Keys{Port: fakes.NewKeybinding(rec), Limiter: lim}.Serve(context.Background(), pluginCaller("files"), m, nil)
+					},
+				}
+				// Malformed params spend budget too (checked before decode).
+				for i := 0; i < contracts.RateLimitPerSecond; i++ {
+					serve[spent](req(t, spent, `[1]`))
+				}
+				before := len(rec.Methods())
+				refused := replyErr(t, serve[next](req(t, next, calls[next])))
+				var data map[string]string
+				if refused.Code != protocol.CodeBusy || json.Unmarshal(refused.Data, &data) != nil || data["reason"] != "rate_limited" {
+					t.Fatalf("%s: code=%s data=%s, want busy/rate_limited", next, refused.Code, refused.Data)
+				}
+				if len(rec.Methods()) != before {
+					t.Fatalf("%s reached the port while rate limited", next)
+				}
+				// The CLI is never limited, and the window resets whole.
+				cliServe := Theme{Port: fakes.NewTheme(rec), Limiter: lim}
+				if r := cliServe.Serve(context.Background(), cliCaller, req(t, "theme.get", `{}`), nil); r.Error != nil {
+					t.Fatalf("CLI limited: %+v", r.Error)
+				}
+				clock.Advance(time.Second)
+				if r := serve[next](req(t, next, calls[next])); r.Error != nil && r.Error.Code == protocol.CodeBusy {
+					t.Fatalf("still busy after the window: %+v", r.Error)
+				}
+			})
+		}
+	}
+}
