@@ -93,6 +93,7 @@ type Options struct {
 	Clock        Clock        // injectable for debounce and GC tests
 	Keyring      Keyring      // nil: OS keyring; injectable for tests
 	InstanceDeps *instance.Deps // nil: real liveness pings; injectable for log GC tests
+	NoBackgroundGC bool // skip the worker's startup and periodic GC; an explicit GC still works (local CLI commands)
 	Post         func(func()) bool // runs f on the Bubble Tea loop; false after shutdown.
 	                               // Store writes its husk.store slice only through it
 	                               // (State writes are loop-only, [State](state.md) invariant 8).

@@ -69,7 +69,7 @@ func run(ctx context.Context, d deps, args []string, o output.Options) error {
 			return err
 		}
 	}
-	s, err := store.Open(store.Options{RuntimeDir: dir, Env: d.env, Keyring: d.keyring, InstanceDeps: d.instance})
+	s, err := store.Open(store.Options{RuntimeDir: dir, Env: d.env, Keyring: d.keyring, NoBackgroundGC: verb != "gc", InstanceDeps: d.instance})
 	if err != nil {
 		return output.Store(err, "%v", err)
 	}

@@ -359,9 +359,18 @@ func (s *Store) nextDelay() time.Duration {
 }
 func (s *Store) run() {
 	defer close(s.done)
-	gcTimer := s.clock.NewTimer(gcInterval)
-	defer func() { gcTimer.Stop() }()
-	_, _ = s.GC(context.Background())
+	var gcTimer Timer
+	var gcC <-chan time.Time // nil blocks forever: no periodic GC
+	if !s.opts.NoBackgroundGC {
+		gcTimer = s.clock.NewTimer(gcInterval)
+		gcC = gcTimer.C()
+		_, _ = s.GC(context.Background())
+	}
+	defer func() {
+		if gcTimer != nil {
+			gcTimer.Stop()
+		}
+	}()
 	for {
 		timer := s.clock.NewTimer(s.nextDelay())
 		select {
@@ -386,10 +395,11 @@ func (s *Store) run() {
 			_ = s.flushDue(context.Background(), false)
 		case <-timer.C():
 			_ = s.flushDue(context.Background(), false)
-		case <-gcTimer.C():
+		case <-gcC:
 			timer.Stop()
 			_, _ = s.GC(context.Background())
 			gcTimer = s.clock.NewTimer(gcInterval)
+			gcC = gcTimer.C()
 		}
 	}
 }

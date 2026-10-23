@@ -393,6 +393,8 @@ func TestResetSecretsRefusedWhileAnInstanceRuns(t *testing.T) {
 func TestResetSecretsWithNoInstanceDeletesSecretsAndNothingElse(t *testing.T) {
 	f := newFx(t)
 	sealed, bystanders := f.sealOne()
+	_, temp, corrupt := f.seedSliceDir() // expired: only a GC would remove them
+	bystanders = append(bystanders, temp, corrupt)
 	f.register("gone") // stale: the probe says nothing listens, Survey removes the entry
 	if err := f.run(output.JSON, "reset-secrets"); err != nil {
 		t.Fatal(err)
