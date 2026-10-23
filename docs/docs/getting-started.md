@@ -70,7 +70,7 @@ A plugin directory contains a `husk-plugin.json`:
 | :--- | :--- |
 | Frame (`border`, `label`, `close`) | `surfaces[].frame` for `main-stage` in `husk-plugin.json` |
 | Published inline slot `go.reference.row-actions` | `published_slots` in the manifest; rows carry the `ESC ] husk;slot=…;key=… ESC \` anchor |
-| Hook `go.reference.before-refresh` | a `gate` declared under `hooks.publish` in the manifest; `r` and the `go.reference.refresh` action (`husk action invoke go.reference.refresh`) fire it with `hook.call` and the outcome (allowed by N, or vetoed by whom) is shown |
+| Hook `go.reference.before-refresh` | a `gate` declared under `hooks.publish` in the manifest; `r` and the `go.reference.refresh` action (`husk action invoke go.reference.refresh`) fire it with `hook.call` and the outcome (allowed by N, or vetoed by whom) is shown in the surface status line, not in the CLI output: the action replies as soon as the call is sent |
 | Event `go.reference.selection-changed` | declared under `events.publish` in the manifest; `j`/`k` emit it with `event.emit` |
 | Width and height | read from `surface.resized`, never hard-coded; it re-renders only when the size or its content changes, not on `input.key_state` |
 

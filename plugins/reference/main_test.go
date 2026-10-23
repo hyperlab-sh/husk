@@ -314,6 +314,22 @@ func TestKeysEmitEventAndCallHook(t *testing.T) {
 	if got := strings.Join(h.update().Lines, "\n"); !strings.Contains(got, "replies: refresh allowed by 0") {
 		t.Errorf("empty outcome not shown: %q", got)
 	}
+	for _, c := range []struct{ name, result, want string }{
+		{"collect outcome", `{"kind":"collect","results":[]}`, `refresh outcome of kind`},
+		{"gate without allowed", `{"kind":"gate","vetoes":[],"results":[]}`, `refresh outcome unreadable`},
+		{"two vetoes", `{"kind":"gate","allowed":false,"vetoes":[{"plugin_id":"a","reason":"x"},{"plugin_id":"b","reason":"y"}],"results":[]}`, `refresh vetoed by a: x (+1 more)`},
+	} {
+		h.key("main-stage", "r")
+		call := h.sockNext(protocol.MethodHookCall)
+		h.toSocket(`{"id":` + call.ID.String() + `,"result":` + c.result + `}`)
+		got := strings.Join(h.update().Lines, "\n")
+		if !strings.Contains(got, c.want) {
+			t.Errorf("%s: want %q in %q", c.name, c.want, got)
+		}
+		if c.name != "two vetoes" && strings.Contains(got, "vetoed") {
+			t.Errorf("%s must not render as a veto: %q", c.name, got)
+		}
+	}
 	h.key("main-stage", "r")
 	c5 := h.sockNext(protocol.MethodHookCall)
 	h.toSocket(`{"id":` + c5.ID.String() + `,"error":{"code":"denied","message":"no"}}`)
