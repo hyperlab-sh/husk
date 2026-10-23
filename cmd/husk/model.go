@@ -1237,7 +1237,7 @@ func (m *WorkbenchModel) openPalette() {
 }
 
 // focusNext moves focus to the next shown surface in tab order. Slots with no
-// rect (a hidden or empty column) are skipped.
+// rect (a hidden column) are skipped.
 func (m *WorkbenchModel) focusNext() {
 	order := []protocol.SurfaceID{
 		protocol.SurfaceSidebarList,

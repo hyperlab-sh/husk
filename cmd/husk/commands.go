@@ -369,8 +369,13 @@ func (m *WorkbenchModel) footerHints() []footerHint {
 	}
 	hints = append(hints, footerHint{resize, "resize"})
 	var docks []string
-	for _, a := range []string{"husk.sidebar.toggle", "husk.sidepanel.toggle", "husk.docks.cycle"} {
-		if k := m.firstKey(a); k != "" {
+	left := m.activePlacement != contracts.PlacementFullCanvas
+	right := m.activePlacement == "" && panelFits(m.width, m.sidebarWidth, m.leftSideShown())
+	for _, a := range []struct {
+		id    string
+		shown bool
+	}{{"husk.sidebar.toggle", left}, {"husk.sidepanel.toggle", right}, {"husk.docks.cycle", left && right}} {
+		if k := m.firstKey(a.id); a.shown && k != "" {
 			docks = append(docks, k)
 		}
 	}

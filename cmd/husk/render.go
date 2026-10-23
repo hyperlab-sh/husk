@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -201,21 +202,28 @@ func (m *WorkbenchModel) drawModal(c *canvas) {
 	m.fillSlotBg(c, rect)
 }
 
-// defaultLayoutLabel names the default placement by the side columns that are
-// actually laid out (see leftSideShown/rightSideShown: dock on, plugin
-// occupied, and it fits), not by a nominal column count.
-func (m *WorkbenchModel) defaultLayoutLabel() string {
+// layoutLabel describes the placement and the side columns actually drawn.
+func (m *WorkbenchModel) layoutLabel() string {
 	_, left := m.slotRects[protocol.SurfaceSidebarList]
 	_, right := m.slotRects[protocol.SurfaceSidePanel]
 	switch {
+	case m.modalOwner().Open():
+		return "Modal"
+	case m.activePlacement == contracts.PlacementFullCanvas:
+		return "Full canvas"
+	case m.activePlacement == contracts.PlacementStage:
+		if left {
+			return "Stage · Left"
+		}
+		return "Stage"
 	case left && right:
-		return " Workbench · Left + Right "
+		return "Workbench · Left + Right"
 	case left:
-		return " Workbench · Left "
+		return "Workbench · Left"
 	case right:
-		return " Workbench · Right "
+		return "Workbench · Right"
 	}
-	return " Workbench "
+	return "Workbench"
 }
 
 func (m *WorkbenchModel) renderTopWorkbenchBar() string {
@@ -226,20 +234,9 @@ func (m *WorkbenchModel) renderTopWorkbenchBar() string {
 		Padding(0, 1).
 		Render("◆ HUSK WORKBENCH")
 
-	modeLabel := m.defaultLayoutLabel()
-	switch m.activePlacement {
-	case contracts.PlacementFullCanvas:
-		modeLabel = "  Full-Canvas Mode "
-	case contracts.PlacementStage:
-		modeLabel = "  Stage-minus-Sidebar Mode "
-	}
-	if m.modalOwner().Open() {
-		modeLabel = "  Modal Overlay Active "
-	}
-
 	sub := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(m.palette.InkMuted)).
-		Render(modeLabel)
+		Render(" " + m.layoutLabel() + " ")
 
 	pluginCountBadge := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(m.palette.Success)).
@@ -357,10 +354,27 @@ func (m *WorkbenchModel) renderBottomKeybindBar() string {
 		Render(fitLineWidth(line, m.width))
 }
 
-// drawSurface draws a slot's region at its rect: plugin content (or blank
-// canvas) wrapped in the frame the occupying plugin declared. Husk adds no
-// chrome of its own; calloutNum/slotName only appear as a label overlay when
-// hotspot badges are toggled on ('h').
+// humanName mechanically names any surface without a catalog lookup.
+func humanName(id protocol.SurfaceID) string {
+	runes := []rune(strings.ReplaceAll(string(id), "-", " "))
+	if len(runes) > 0 {
+		runes[0] = unicode.ToUpper(runes[0])
+	}
+	return string(runes)
+}
+
+func regionSlot(id protocol.SurfaceID) bool {
+	switch id {
+	case protocol.SurfaceActivityRail, protocol.SurfaceSidebarNavigation,
+		protocol.SurfaceSidebarList, protocol.SurfaceSidebarFooter,
+		protocol.SurfaceMainHeader, protocol.SurfaceMainStage, protocol.SurfaceSidePanel:
+		return true
+	}
+	return false
+}
+
+// drawSurface draws occupant content or an empty region's name, then badges
+// and the frame the occupant declared. Placement surfaces never show a name.
 func (m *WorkbenchModel) drawSurface(c *canvas, slotID protocol.SurfaceID, calloutNum, slotName string) {
 	rect, ok := m.slotRects[slotID]
 	if !ok {
@@ -375,7 +389,18 @@ func (m *WorkbenchModel) drawSurface(c *canvas, slotID protocol.SurfaceID, callo
 			label = su.Title
 		}
 	}
-	m.publishedContent(slotID, rect.InnerW, rect.InnerH).draw(c, rect.InnerX, rect.InnerY)
+	if regionSlot(slotID) && m.surfaceOwner(slotID) == "" {
+		if rect.InnerW >= 3 && rect.InnerH > 0 {
+			name := fitLineWidth(humanName(slotID), rect.InnerW)
+			name = strings.TrimRight(name, " ")
+			x := rect.InnerX + (rect.InnerW-ansi.StringWidth(name))/2
+			y := rect.InnerY + (rect.InnerH-1)/2
+			style := lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.InkSubtle)).Background(lipgloss.Color(m.palette.Slot))
+			c.draw(uv.Rect(x, y, ansi.StringWidth(name), 1), style.Render(name))
+		}
+	} else {
+		m.publishedContent(slotID, rect.InnerW, rect.InnerH).draw(c, rect.InnerX, rect.InnerY)
+	}
 	if m.showHotspots && rect.InnerW > 0 && rect.InnerH > 0 {
 		hot := lipgloss.NewStyle().
 			Foreground(lipgloss.Color(m.palette.Warning)).
