@@ -490,9 +490,10 @@ claimant, the yielder immediately re-occupies the surface and receives the
 normal `surface.resized`, even if its dimensions have not changed; this is
 not an error. Release still clears capture and detaches a terminal, even
 on immediate reoccupation. Yield requires occupancy through a layout
-claim; it is not available to an unclaimed or runtime surface (Protocol's
-`invalid_params` naming `yield`). An absent or false `yield` keeps the
-retracting close, and a host force-release always retracts. A refused claim stays
+claim; it is not available to an unclaimed or runtime surface
+(`invalid_params` naming `yield`, [Protocol](protocol.md) "Surface close").
+An absent or false `yield` keeps the retracting close, and a host
+force-release always retracts. A refused claim stays
 recorded in the declaration, the occupant is unchanged, and the refusal is
 counted; a returning plugin's re-registered declarations resolve again,
 first live claim wins among the claims that arrive after the re-registration.
