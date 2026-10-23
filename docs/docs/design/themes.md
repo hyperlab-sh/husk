@@ -183,9 +183,16 @@ What an index role does downstream:
 - **Frontend.** The index map lives in the Theme Service's snapshot beside
   the palette, never inside `theme.Palette` or `protocol.Palette`, which stay
   comparable structs of strings. The frontend seam keeps `Palette()
-  protocol.Palette` unchanged and gains `PaletteANSI() map[string]int` (a
-  detached copy of the serving snapshot's index map, empty for a hex theme).
-  `cmd/husk` reads it to draw an index role as the ANSI basic colour
+  protocol.Palette` unchanged and gains `PaletteANSI() (protocol.Palette,
+  map[string]int)`: the palette and a detached copy of its index map (empty
+  for a hex theme), both taken from one read of the serving snapshot, so a
+  reload between two calls can never pair one generation's palette with
+  another's map. The Theme Service's `WireANSI()` does that single read; the
+  `theme.get` handler and both `theme.changed` pushes use it too. A change
+  that makes the frontend redraw, and a Theme report's `Changed`, compare
+  the palette and the index map (`maps.Equal`): a role going from `7` to
+  `"#c0c0c0"` keeps the same hex in `palette` yet must recolour.
+  `cmd/husk` reads the map to draw an index role as the ANSI basic colour
   `ansi.BasicColor(n)`, never as the hex in `palette`, so the terminal
   renders its own colour N; the popup shadow and the OSC 11 check below read
   the same map.
@@ -761,11 +768,12 @@ blends a hex neighbour in the same shadow band.
 | `Overlay` validates `#RRGGBB` only, and re-derives `slot_background` from `canvas` on every call whose map lacks it | Still hex-only (it only sees resolved hex values and the hex-only overrides), but it **stops deriving `slot_background`**: today the override pass, whose map rarely names the slot, wipes a theme-set slot (`rose-pine` `#21202e` would serve `#201e2b`, `rose-pine-moon` `#2a283e` → `#2b283e`, `base16` `#000000` → a grey while `ansi` says `0`). The build derives the slot once, after the theme and the overrides, only when neither set it ([Services](services.md), build step 4) |
 | `CheckContrast`: an unparsable value is a violation | Unchanged for hex; it takes the index map and skips every pair with an index role on either side |
 | `protocol.Palette` comment: `#RRGGBB` strings | Unchanged: values stay `#rrggbb`. The `theme.get` result and `theme.changed` params gain an optional `ansi` object (role → `0`–`15`), minor 2.4; [Protocol](protocol.md) "ANSI palette roles (minor 2.4)" and the `theme_changed` row, and [Architecture](../architecture.md) "Theme", amended. The wire schema gains it in the change that serves it, generated from `pkg/protocol` |
-| Theme Service snapshot: `gen`, `palette`, `overrides` | Gains the index map (role → `0`–`15`), built with the palette; `Wire()` stays a plain conversion of the palette |
-| `contracts.Frontend` (`internal/host/contracts/frontend.go`): `Palette() protocol.Palette` | Unchanged, plus `PaletteANSI() map[string]int`, a detached copy of the serving snapshot's index map. Any goroutine |
-| `internal/host/frontend.go`: `Root.Palette()` returns `Theme.Wire()` | Plus `Root.PaletteANSI()` returning the Theme Service's index map |
-| Theme handler (`internal/host/handlers/services/theme.go`): `themeGetResult{Palette}` | Gains `ANSI map[string]int` with `json:"ansi,omitempty"`, filled from the same snapshot as the palette; the `theme.changed` pushes (`internal/host/loop.go` at launch, `internal/host/reload_watch.go` on change) fill the params' `ansi` the same way |
-| `cmd/husk` draws every role from its hex | Reads `PaletteANSI()` with `Palette()`: index roles drawn as `ansi.BasicColor(n)`; `castShadow` skips cells with basic or indexed colours; the View's `BackgroundColor` (OSC 11) is set only when `canvas` is not in the map |
+| Theme Service snapshot: `gen`, `palette`, `overrides` | Gains the index map (role → `0`–`15`), built with the palette; `Wire()` stays a plain conversion of the palette, and `WireANSI() (protocol.Palette, map[string]int)` returns the wire palette and a detached copy of the map from one snapshot read |
+| Theme Service `Prepare` (`internal/services/theme/theme.go`): `Changed` when `old.palette != p` | `Changed` when the palette or the index map differs (`maps.Equal`), so `"ink": 7` → `"#c0c0c0"`, same hex, publishes |
+| `contracts.Frontend` (`internal/host/contracts/frontend.go`): `Palette() protocol.Palette` | Unchanged, plus `PaletteANSI() (protocol.Palette, map[string]int)`, the palette and a detached copy of its index map from one snapshot read. Any goroutine |
+| `internal/host/frontend.go`: `Root.Palette()` returns `Theme.Wire()` | Plus `Root.PaletteANSI()` returning `Theme.WireANSI()` |
+| Theme handler (`internal/host/handlers/services/theme.go`): `themeGetResult{Palette}` | Gains `ANSI map[string]int` with `json:"ansi,omitempty"`, the handler fills palette and `ansi` from one `WireANSI()` call; the `theme.changed` pushes (`internal/host/loop.go` at launch, `internal/host/reload_watch.go` on change) take both from one `WireANSI()` call the same way |
+| `cmd/husk` draws every role from its hex | Reads `PaletteANSI()` wherever it needs the map (`Palette()` stays for callers that need only the palette); `refresh` (`cmd/husk/model.go`), which today redraws only when `pal != m.palette`, compares the palette and the map: index roles drawn as `ansi.BasicColor(n)`; `castShadow` skips cells with basic or indexed colours; the View's `BackgroundColor` (OSC 11) is set only when `canvas` is not in the map |
 | `internal/compose` `castShadow` blends every cell's colours | Leaves a cell with an ANSI basic or indexed colour unblended ([Cell-buffer compositor](cell-buffer-compositor.md), "Popup shadow") |
 | `cmd/husk` goldens show `✦ CharmTone` and today's colours | Regenerated once with the chrome spec's colour changes |
 | `AGENTS.md`, `README.md`: "one palette, CharmTone, do not add other themes" | Rewritten by the landing commit to name `charm` and the built-in layer; this spec does not edit them because they describe the code as it is |
