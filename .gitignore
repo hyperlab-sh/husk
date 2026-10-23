@@ -16,4 +16,5 @@ docs/site/
 
 # reference plugin binary
 /plugins/reference/reference
+/plugins/guide/guide
 /husk

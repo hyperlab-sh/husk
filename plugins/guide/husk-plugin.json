@@ -1,0 +1,14 @@
+{
+  "manifest_version": 2,
+  "protocol": 2,
+  "id": "guide",
+  "name": "Layout guide",
+  "version": "0.1.0",
+  "description": "Draws numbered callouts, names, occupants and keys over the live layout; toggle with guide.toggle",
+  "command": ["./guide"],
+  "surfaces": [{"id": "app-overlay"}],
+  "actions": [
+    {"id": "guide.toggle", "title": "Toggle layout guide", "description": "Shows or hides the annotated layout overlay", "public": true}
+  ],
+  "events": {"subscribe": ["state.changed"]}
+}
