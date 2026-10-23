@@ -9,7 +9,6 @@ import (
 	"github.com/hyperlab-sh/husk/internal/services/keybinding"
 	"github.com/hyperlab-sh/husk/internal/services/settings"
 	stheme "github.com/hyperlab-sh/husk/internal/services/theme"
-	"github.com/hyperlab-sh/husk/internal/substrate/state"
 	"github.com/hyperlab-sh/husk/internal/substrate/store"
 	palette "github.com/hyperlab-sh/husk/pkg/theme"
 	"strings"
