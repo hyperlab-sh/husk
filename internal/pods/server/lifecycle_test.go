@@ -16,6 +16,7 @@ import (
 
 func TestCloseCancelsWithoutWaitingForOwnerCooperation(t *testing.T) {
 	s := inertServer(t)
+	clk := s.cfg.Clock.(*testclock.Clock)
 	entered := make(chan context.Context, 1)
 	release := make(chan struct{})
 	finished := make(chan struct{})
@@ -31,12 +32,43 @@ func TestCloseCancelsWithoutWaitingForOwnerCooperation(t *testing.T) {
 	ctx := testclock.Receive(t, entered)
 	closed := make(chan error, 1)
 	go func() { closed <- s.Close() }()
+	// A handler that never returns holds Close only for the drain bound.
+	clk.Await(t, WriteTimeout)
+	clk.Advance(WriteTimeout)
 	if err := testclock.Receive(t, closed); err != nil {
 		t.Fatal(err)
 	}
 	testclock.Receive(t, ctx.Done())
 	close(release)
 	testclock.Receive(t, finished)
+}
+
+// A reply produced by a handler that is still running when Close starts is
+// flushed before the stream closes: this is how `husk action invoke
+// husk.quit` gets its reply.
+func TestCloseFlushesReplyOfRunningHandler(t *testing.T) {
+	s := inertServer(t)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	s.Handle("sample", handlerFunc(func(context.Context, Caller, protocol.Message, Notifier) protocol.Message {
+		close(entered)
+		testclock.Receive(t, release)
+		return protocol.Message{Result: json.RawMessage(`{"ok":true}`)}
+	}))
+	start(t, s)
+	c, r := dial(t, s)
+	write(t, c, `{"id":1,"method":"sample.wait"}`)
+	testclock.Receive(t, entered)
+	closed := make(chan error, 1)
+	go func() { closed <- s.Close() }()
+	close(release)
+	if err := testclock.Receive(t, closed); err != nil {
+		t.Fatal(err)
+	}
+	m := read(t, r)
+	if m.ID.String() != "1" || m.Error != nil || string(m.Result) != `{"ok":true}` {
+		t.Fatalf("reply = %+v", m)
+	}
 }
 
 func TestConnectionCapRejectsNewestBeforeReading(t *testing.T) {

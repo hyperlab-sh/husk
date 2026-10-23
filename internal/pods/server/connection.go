@@ -33,6 +33,10 @@ type connection struct {
 	diagnosticTimer                       protocol.Timer
 	lastDiagnosticPost                    time.Time
 	hasDiagnosticPost                     bool
+	flightMu                              sync.Mutex
+	flight                                int
+	draining                              bool
+	flightIdle                            chan struct{}
 }
 
 type notification struct {
@@ -62,6 +66,54 @@ func (c *connection) close() {
 		_ = c.raw.Close()
 	})
 }
+
+// beginFlight counts a request handler as in flight; false once draining.
+func (c *connection) beginFlight() bool {
+	c.flightMu.Lock()
+	defer c.flightMu.Unlock()
+	if c.draining {
+		return false
+	}
+	c.flight++
+	return true
+}
+
+func (c *connection) endFlight() {
+	c.flightMu.Lock()
+	defer c.flightMu.Unlock()
+	c.flight--
+	if c.flight == 0 && c.flightIdle != nil {
+		close(c.flightIdle)
+		c.flightIdle = nil
+	}
+}
+
+// drain is the graceful end of a connection: it stops taking requests, waits
+// for the request handlers already running to enqueue their replies, lets the
+// writer flush its queue, then closes the connection. A handler or a peer that
+// does not finish within WriteTimeout (on the injected clock) is cut off.
+func (c *connection) drain() {
+	var idle chan struct{}
+	c.flightMu.Lock()
+	c.draining = true
+	if c.flight > 0 {
+		idle = make(chan struct{})
+		c.flightIdle = idle
+	}
+	c.flightMu.Unlock()
+	t := c.server.cfg.Clock.AfterFunc(WriteTimeout, c.close)
+	defer t.Stop()
+	if idle != nil {
+		select {
+		case <-idle:
+		case <-c.ctx.Done():
+		}
+	}
+	_ = c.writer.Close()
+	<-c.writer.Done()
+	c.close()
+}
+
 func (c *connection) run() {
 	defer c.publishDiagnostic()
 	defer c.close()
@@ -198,7 +250,16 @@ func (c *connection) receive(req protocol.Message) {
 	}
 	select {
 	case c.slots <- struct{}{}:
-		go func() { defer func() { <-c.slots }(); c.invoke(h, caller, req) }()
+		if !c.beginFlight() {
+			<-c.slots
+			c.reject(req, protocol.CodeUnavailable, "instance is shutting down", nil)
+			return
+		}
+		go func() {
+			defer func() { <-c.slots }()
+			defer c.endFlight()
+			c.invoke(h, caller, req)
+		}()
 	default:
 		c.reject(req, protocol.CodeBusy, "too many in-flight requests", json.RawMessage(`{"reason":"too_many_in_flight"}`))
 	}
