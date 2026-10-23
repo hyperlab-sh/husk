@@ -93,6 +93,7 @@ func builtins() map[string]command {
 		"state":     stateCommand(),
 		"action":    actionCommand(),
 		"event":     eventCommand(),
+		"plugin":    {usage: "husk plugin list | husk plugin log <id>", timeout: 5 * time.Second, run: runPlugin},
 	}
 }
 
