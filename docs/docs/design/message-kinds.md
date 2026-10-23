@@ -207,7 +207,11 @@ type Dispatcher interface {
     // Invoke returns (immediate failures and host actions).
     Invoke(req ActionRequest)
     // RegisterHost binds an in-process handler for a husk.* action id or a
-    // rail item id. Host handlers run synchronously on the loop.
+    // rail item id. Host handlers run synchronously on the loop. A handler
+    // may answer with ErrDeclined, a host-only sentinel that never crosses
+    // the wire: the Dispatcher returns it unchanged to an in-process caller
+    // (Input treats it as an unbound key, see Keybindings) and maps it to a
+    // successful empty reply for every other caller.
     RegisterHost(action string, h func(ActionRequest) ActionReply)
     // Complete turns Calls results (Resolve, Expire, DropPlugin, Close) into
     // the pending Replies. Results of other requesters are ignored.
