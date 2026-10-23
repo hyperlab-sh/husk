@@ -541,21 +541,16 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 		if l.Layer == store.LayerInstance {
 			continue
 		}
-		// Problems name the file relative to the config directory, never the
-		// Store's absolute path: keymap.json for the user layer and
-		// profiles/<name>/keymap.json for a profile. A layer without a file
-		// (injected documents) gets the same conventional name.
-		file := "keymap.json"
-		if l.Layer == store.LayerProfile {
-			name := ""
-			if in.Profile != nil {
-				name = *in.Profile
-			}
-			file = "profiles/" + name + "/" + file
-			if path := strings.ReplaceAll(l.File, "\\", "/"); path != "" {
-				if at := strings.LastIndex(path, "/profiles/"); at >= 0 {
-					file = path[at+1:]
+		// Store names the file; the conventional fallback serves injected documents.
+		file := l.File
+		if file == "" {
+			file = "keymap.json"
+			if l.Layer == store.LayerProfile {
+				name := ""
+				if in.Profile != nil {
+					name = *in.Profile
 				}
+				file = "profiles/" + name + "/" + file
 			}
 		}
 		layers = append(layers, struct {

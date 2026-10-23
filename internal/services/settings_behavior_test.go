@@ -114,15 +114,59 @@ func TestSettingsUnknownKeyWarnsAndInvalidValueBlocks(t *testing.T) {
 
 	bad := input(`{"dist":{"count":"x"}}`)
 	bad.Doc.Origins = map[string]store.Layer{"dist.count": store.LayerUser}
-	bad.ConfigLayers = []store.LayerDoc{{Layer: store.LayerUser, File: "/cfg/config.json"}}
+	bad.ConfigLayers = []store.LayerDoc{{Layer: store.LayerUser, File: "config.json"}}
 	before := s.Snapshot()
 	cand, r, err := s.Rebuild(context.Background(), bad)
 	p, ok := findProblem(r.Problems, "invalid_value")
-	if err == nil || cand != nil || !ok || p.Severity != "error" || p.Layer != "user" || p.Key != "dist.count" || p.Source.File != "/cfg/config.json" || !strings.Contains(p.Message, "user") || !strings.Contains(p.Message, "dist.count") || !strings.Contains(p.Message, "int") {
+	if err == nil || cand != nil || !ok || p.Severity != "error" || p.Layer != "user" || p.Key != "dist.count" || p.Source.File != "config.json" || !strings.Contains(p.Message, "user") || !strings.Contains(p.Message, "dist.count") || !strings.Contains(p.Message, "int") {
 		t.Fatalf("invalid_value = %+v err=%v", r.Problems, err)
 	}
 	if s.Snapshot() != before {
 		t.Fatal("invalid value published")
+	}
+}
+
+func TestSettingsProblemsKeepLayerFile(t *testing.T) {
+	for _, layer := range []struct {
+		name  string
+		layer store.Layer
+		file  string
+	}{
+		{"user", store.LayerUser, "config.json"},
+		{"profile", store.LayerProfile, "profiles/work/config.json"},
+		{"instance", store.LayerInstance, "instances/t1/config.json"},
+		{"flag instance", store.LayerInstance, ""},
+	} {
+		for _, code := range []string{"unknown_key", "invalid_value", "type_clash", "restart_required"} {
+			t.Run(layer.name+"/"+code, func(t *testing.T) {
+				s := newSet(settings.Options{})
+				apply(t, s, input(`{}`))
+				raw, key := `{"bogus":1}`, "bogus"
+				switch code {
+				case "invalid_value":
+					raw, key = `{"theme":{"name":5}}`, "theme.name"
+				case "type_clash":
+					raw, key = `{"theme":{"name":"work"}}`, "theme.name"
+				case "restart_required":
+					raw, key = `{"husk":{"plugins":{"paths":["one"]}}}`, "husk.plugins.paths"
+				}
+				in := input(raw)
+				in.Doc.Origins = map[string]store.Layer{key: layer.layer}
+				// Include other layers so choosing a file by position cannot pass.
+				in.ConfigLayers = []store.LayerDoc{
+					{Layer: store.LayerDistribution, File: "config.json"},
+					{Layer: layer.layer, File: layer.file},
+				}
+				if code == "type_clash" {
+					in.Doc.Problems = []store.Problem{{Code: code, Path: key, Layer: layer.layer, LowerLayer: store.LayerDistribution}}
+				}
+				_, report, _ := s.Rebuild(context.Background(), in)
+				p, ok := findProblem(report.Problems, code)
+				if !ok || p.Layer != string(layer.layer) || p.Source == nil || p.Source.Layer != string(layer.layer) || p.Source.File != layer.file {
+					t.Fatalf("%s source = %+v; problems = %+v", code, p.Source, report.Problems)
+				}
+			})
+		}
 	}
 }
 

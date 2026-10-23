@@ -206,7 +206,7 @@ func (s *Store) loadLayers(name DocName, profile string) (layerLoad, error) {
 		return layerLoad{}, ErrInvalidPath
 	}
 	var out layerLoad
-	appendDoc := func(layer Layer, file string, b []byte, readErr error) {
+	appendDoc := func(layer Layer, file, name string, b []byte, readErr error) {
 		if errors.Is(readErr, fs.ErrNotExist) {
 			return
 		}
@@ -229,38 +229,41 @@ func (s *Store) loadLayers(name DocName, profile string) (layerLoad, error) {
 			out.problems = append(out.problems, p)
 			return
 		}
-		out.layers = append(out.layers, LayerDoc{Layer: layer, File: file, Doc: d})
+		out.layers = append(out.layers, LayerDoc{Layer: layer, File: name, Doc: d})
 	}
 	if s.opts.Distribution != nil {
 		b, err := fs.ReadFile(s.opts.Distribution, string(name)+".json")
-		appendDoc(LayerDistribution, "", b, err)
+		appendDoc(LayerDistribution, "", string(name)+".json", b, err)
 		// Distribution profiles are defaults inside the same single layer.
 		if profile != "" {
 			b, err = fs.ReadFile(s.opts.Distribution, "profiles/"+profile+"/"+string(name)+".json")
 			if !errors.Is(err, fs.ErrNotExist) {
 				var previous Doc = Doc{}
+				file := "profiles/" + profile + "/" + string(name) + ".json"
 				if len(out.layers) > 0 {
+					file = out.layers[0].File
 					previous = out.layers[0].Doc
 					out.layers = out.layers[:0]
 				}
-				appendDoc(LayerDistribution, "", b, err)
+				appendDoc(LayerDistribution, "", file, b, err)
 				if len(out.layers) > 0 {
 					var ps []Problem
 					mergeDoc(previous, out.layers[0].Doc, LayerDistribution, map[string]Layer{}, &ps, "")
 					out.layers[0].Doc = previous
 				} else if len(previous) > 0 {
-					out.layers = append(out.layers, LayerDoc{Layer: LayerDistribution, Doc: previous})
+					out.layers = append(out.layers, LayerDoc{Layer: LayerDistribution, File: file, Doc: previous})
 				}
 			}
 		}
 	}
 	read := func(layer Layer, parts []string) {
-		p, err := pathInside(s.paths.Config, append(parts, strings.Split(string(name)+".json", "/")...), false)
+		parts = append(parts, strings.Split(string(name)+".json", "/")...)
+		p, err := pathInside(s.paths.Config, parts, false)
 		var b []byte
 		if err == nil {
 			b, _, err = readFile(p, MaxDocBytes, false)
 		}
-		appendDoc(layer, p, b, err)
+		appendDoc(layer, p, strings.Join(parts, "/"), b, err)
 	}
 	read(LayerUser, nil)
 	if profile != "" {

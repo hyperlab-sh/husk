@@ -445,27 +445,38 @@ func TestKeybindingResolvedCapKeepsStrongestLayers(t *testing.T) {
 
 // A key problem names the config-relative file.
 func TestKeybindingProblemsKeepLayerFile(t *testing.T) {
-	kb := keybinding.New()
-	in := input(`{}`)
-	in.Layers = []store.LayerDoc{
-		{Layer: store.LayerUser, File: `C:\cfg\keymap.json`, Doc: doc(`{"version":1,"bind":[{"key":"ctrl+","action":"husk.home"}]}`)},
-		{Layer: store.LayerProfile, File: "/cfg/profiles/work/keymap.json", Doc: doc(`{"version":1,"bind":[{"action":"husk.home"}]}`)},
-		{Layer: store.LayerDistribution, Doc: doc(`{"version":1,"bind":[{"action":"husk.home"}]}`)},
-	}
-	apply(t, kb, in)
-	files := map[keybinding.Layer]string{}
-	for _, p := range kb.Listing().Problems {
-		files[p.Source.Layer] = p.Source.File
-	}
-	want := map[keybinding.Layer]string{
-		keybinding.LayerUser:         "keymap.json",
-		keybinding.LayerProfile:      "profiles/work/keymap.json",
-		keybinding.LayerDistribution: "keymap.json",
-	}
-	for layer, file := range want {
-		if files[layer] != file {
-			t.Errorf("%s problem file = %q, want %q (all %v)", layer, files[layer], file, files)
-		}
+	for _, tc := range []struct {
+		layer      store.Layer
+		file, want string
+	}{
+		{store.LayerUser, "keymap.json", "keymap.json"},
+		{store.LayerProfile, "profiles/work/keymap.json", "profiles/work/keymap.json"},
+		{store.LayerDistribution, "keymap.json", "keymap.json"},
+		{store.LayerUser, "", "keymap.json"},
+		{store.LayerProfile, "", "profiles/work/keymap.json"},
+		{store.LayerDistribution, "", "keymap.json"},
+	} {
+		t.Run(string(tc.layer)+"/"+tc.file, func(t *testing.T) {
+			kb := keybinding.New()
+			in := input(`{}`)
+			profile := "work"
+			in.Profile = &profile
+			in.Layers = []store.LayerDoc{{Layer: tc.layer, File: tc.file, Doc: doc(`{"version":1,"bind":[{"key":"ctrl+","action":"husk.home"}]}`)}}
+			apply(t, kb, in)
+			found := false
+			for _, p := range kb.Listing().Problems {
+				if p.Source.Layer != string(tc.layer) {
+					continue
+				}
+				found = true
+				if p.Source.File != tc.want {
+					t.Errorf("problem file = %q, want %q", p.Source.File, tc.want)
+				}
+			}
+			if !found {
+				t.Fatal("missing layer problem")
+			}
+		})
 	}
 }
 
