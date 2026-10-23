@@ -239,6 +239,12 @@ func TestStateStemCLIAgainstRealHost(t *testing.T) {
 		// the host closes on a later loop turn (cmd/husk posts a quitMsg,
 		// here a goroutine posts a loop turn). The real action lives in
 		// package main and cannot be imported, hence the fake.
+		// Mirrors cmd/husk's husk.home on the home layout: it declines.
+		if err := fe.RegisterHostAction("husk.home", func(map[string]any) (map[string]any, error) {
+			return nil, contracts.ErrDeclined
+		}); err != nil {
+			t.Fatal(err)
+		}
 		if err := fe.RegisterHostAction("husk.quit", func(map[string]any) (map[string]any, error) {
 			go func() { // not h.loop: it calls t.Fatal, which is invalid off the test goroutine
 				_ = h.root.do(context.Background(), func() { _ = h.root.Close() })
@@ -388,6 +394,17 @@ func TestStateStemCLIAgainstRealHost(t *testing.T) {
 		code, _, stderr := cliRun(h, "event", "emit", "state.changed", "--format", "json")
 		if code != output.ExitRemote || !strings.Contains(stderr, `"code":"denied"`) {
 			t.Fatalf("reserved name: exit %d stderr %q", code, stderr)
+		}
+	})
+
+	t.Run("a declined host action is an empty success on the wire", func(t *testing.T) {
+		code, stdout, stderr := cliRun(h, "action", "invoke", "husk.home", "--format", "json")
+		if code != 0 || stdout != "{}\n" || stderr != "" {
+			t.Fatalf("action invoke husk.home: exit %d stdout %q stderr %q, want exit 0 and {}", code, stdout, stderr)
+		}
+		code, stdout, stderr = cliRun(h, "rpc", "action.invoke", `{"action":"husk.home"}`, "--format", "json")
+		if code != 0 || strings.TrimSpace(stdout) != "{}" || stderr != "" {
+			t.Fatalf("rpc action.invoke husk.home: exit %d stdout %q stderr %q, want exit 0 and {}", code, stdout, stderr)
 		}
 	})
 

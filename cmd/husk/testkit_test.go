@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -29,8 +30,9 @@ type fakeFE struct {
 	// Views is every surface view the model committed.
 	Views []contracts.SurfaceView
 	st    *state.State
-	// OnInvoke, when set, answers InvokeAction (a host dispatching a call).
-	OnInvoke func(action string, args map[string]any)
+	// OnInvoke, when set, answers InvokeAction (a host dispatching a call). An
+	// error wrapping contracts.ErrDeclined makes the reply declined.
+	OnInvoke func(action string, args map[string]any) error
 	// SendErr is returned by every Send*.
 	SendErr error
 	// Toast is what ActiveToast reports.
@@ -148,6 +150,9 @@ type keyStateSent struct {
 type invoked struct {
 	Action string
 	Args   map[string]any
+	// Kind and Focus are what the caller passed; Focus is nil for host.
+	Kind  protocol.CallerKind
+	Focus *protocol.FocusContext
 }
 
 func (f *fakeFE) Snapshot() *state.Snapshot { return f.Snap }
@@ -161,17 +166,18 @@ func (f *fakeFE) Hints(ctx contracts.KeyContext) []contracts.KeyHint {
 func (f *fakeFE) Palette() protocol.Palette {
 	return protocol.Palette(theme.Default())
 }
-func (f *fakeFE) InvokeAction(action string, args map[string]any, reply func(map[string]any, error)) {
+func (f *fakeFE) InvokeAction(action string, args map[string]any, kind protocol.CallerKind, focus *protocol.FocusContext, reply func(map[string]any, bool, error)) {
 	f.mu.Lock()
-	f.Invoked = append(f.Invoked, invoked{action, args})
+	f.Invoked = append(f.Invoked, invoked{Action: action, Args: args, Kind: kind, Focus: focus})
 	f.Log = append(f.Log, wireMsg{Plugin: f.owner(action), Type: "invoke", CommandInvoke: &cmdInvoke{CommandID: action, Args: args}})
 	on := f.OnInvoke
 	f.mu.Unlock()
+	var err error
 	if on != nil {
-		on(action, args)
+		err = on(action, args)
 	}
 	if reply != nil {
-		reply(nil, nil)
+		reply(nil, errors.Is(err, contracts.ErrDeclined), nil)
 	}
 }
 func (f *fakeFE) RegisterHostAction(id string, _ contracts.HostActionHandler) error {
@@ -270,12 +276,14 @@ func withFE(m *WorkbenchModel) *fakeFE {
 		return ok || m.actions[action] != nil
 	}
 	m.fe, m.keys = fe, fe
-	fe.OnInvoke = func(action string, args map[string]any) {
+	fe.OnInvoke = func(action string, args map[string]any) error {
 		if h := m.actions[action]; h != nil {
-			_, _ = h(args)
+			_, err := h(args)
+			return err
 		} else if ri, ok := m.railItemByID(action); ok {
 			m.activateRailItem(ri)
 		}
+		return nil
 	}
 	return fe
 }

@@ -405,3 +405,18 @@ func TestNewCallsRequiresDependencies(t *testing.T) {
 	}()
 	stem.NewCalls(nil, nil)
 }
+
+// A host handler's decline has no wire form: the CLI sees the same empty
+// success as for any handler that returns nothing.
+func TestDeclinedHostActionIsAnEmptySuccess(t *testing.T) {
+	r := newRig(t)
+	r.disp.RegisterHost("husk.quit", func(dispatcher.ActionRequest) dispatcher.ActionReply {
+		return dispatcher.ActionReply{Declined: true, Result: map[string]any{"leak": true}}
+	})
+	for _, c := range []contracts.Caller{cli, {Kind: contracts.CallerHost}} {
+		out, err := r.port.ActionInvoke(context.Background(), c, "husk.quit", nil)
+		if err != nil || string(out) != "{}" {
+			t.Errorf("%s: result %s, error %v, want {} and no error", c.Kind, out, err)
+		}
+	}
+}

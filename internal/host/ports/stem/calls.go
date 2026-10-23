@@ -105,6 +105,10 @@ func (p *Calls) ActionInvoke(ctx context.Context, c contracts.Caller, action str
 		return nil, contracts.NewError(protocol.Code(r.Err.Code), r.Err.Message, r.Err.Data)
 	}
 	res := r.Result
+	if r.Declined {
+		// A declined key is a host-only fact; the wire sees an empty success.
+		res = nil
+	}
 	if res == nil {
 		res = map[string]any{}
 	}

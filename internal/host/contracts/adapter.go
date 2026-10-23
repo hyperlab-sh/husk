@@ -62,6 +62,13 @@ type DataError interface {
 // the host is shutting down, as opposed to the caller going away.
 var ErrShutdown = errors.New("host is shutting down")
 
+// ErrDeclined is returned (wrapped or not, matched with errors.Is) by a
+// HostActionHandler that declines a key press: the action has nothing to do
+// and the key belongs to the focused occupant. It is host-only. The host
+// maps it to the Dispatcher's declined reply; it is never a CodedError and
+// never crosses the wire.
+var ErrDeclined = errors.New("host action declined")
+
 // NewError returns a CodedError that also implements DataError. data may be nil.
 func NewError(code protocol.Code, message string, data map[string]any) CodedError {
 	return &codedError{code: string(code), message: message, data: data}

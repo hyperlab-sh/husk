@@ -182,29 +182,53 @@ func (m *WorkbenchModel) keyContext() contracts.KeyContext {
 // resolveKey runs key through the effective keymap, with the prefix typed so
 // far, and reports whether the keymap consumed it (a binding ran, or a longer
 // sequence is pending). A key it did not consume belongs to the focused
-// surface's occupant.
+// surface's occupant: no binding claims it, or the bound host action declined.
 func (m *WorkbenchModel) resolveKey(key string) bool {
 	if key == "esc" && len(m.pendingKeys) > 0 {
-		m.pendingKeys = nil // esc cancels a pending sequence and is consumed
+		m.clearPending() // esc cancels a pending sequence and is consumed
 		return true
 	}
+	ctx := m.keyContext()
 	keys := append(slices.Clone(m.pendingKeys), key)
-	res := m.keys.Resolve(m.keyContext(), keys)
+	res := m.keys.Resolve(ctx, keys)
+	if res.Outcome == contracts.KeyNoMatch && len(m.pendingKeys) > 0 {
+		// The key broke the sequence: the pending keys are gone, and the key is
+		// resolved on its own as if nothing had been pending.
+		m.clearPending()
+		keys = []string{key}
+		res = m.keys.Resolve(ctx, keys)
+	}
 	switch res.Outcome {
 	case contracts.KeyPrefix:
 		m.pendingKeys = keys
+		m.seqGen++
+		m.cmds = append(m.cmds, m.scheduleSequenceTimeout(m.seqGen))
 		return true
 	case contracts.KeyMatch:
-		m.pendingKeys = nil
+		m.clearPending()
 		b := res.Binding
-		if b.Action == "husk.home" && !m.homeApplies() {
-			return false // nothing to leave: the key is the occupant's
-		}
-		m.run(b.Action, b.Args)
-		return true
+		focus := protocol.FocusContext{Surface: ctx.FocusSurface, Owner: ctx.FocusOwner}
+		// A declined action leaves the key to the occupant, never to a
+		// lower-ranked candidate.
+		return !m.invoke(b.Action, b.Args, protocol.CallerInput, &focus)
 	}
-	m.pendingKeys = nil
 	return false
+}
+
+// clearPending discards the keys of a pending sequence, if any, and retires
+// its timer.
+func (m *WorkbenchModel) clearPending() {
+	m.pendingKeys = nil
+	m.seqGen++
+}
+
+// scheduleSequenceTimeout arms the timeout of the sequence of generation gen.
+func (m *WorkbenchModel) scheduleSequenceTimeout(gen uint64) tea.Cmd {
+	msg := sequenceTimeoutMsg{gen: gen}
+	if m.after == nil {
+		return tea.Tick(sequenceTimeout, func(time.Time) tea.Msg { return msg })
+	}
+	return m.after(sequenceTimeout, msg)
 }
 
 // paletteClosesOn reports whether key closes the open palette: esc, ctrl+c
@@ -607,9 +631,7 @@ func (m *WorkbenchModel) handleMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 				case "hotspots":
 					return m.executeCommand("husk.hotspots.toggle_stage")
 				case "palette":
-					m.showPalette = true
-					m.paletteQuery = ""
-					m.paletteCursor, m.paletteTop = 0, 0
+					m.openPalette()
 					return m, nil
 				}
 			}
