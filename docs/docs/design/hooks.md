@@ -825,7 +825,10 @@ or priority. It is the starting point; the changes below extend it.
 - Host root `catalogView`: reads kind, timeout and priority from the declared
   documents, applies the namespace and duplicate rules, adds the host hook
   list, sorts subscribers by priority then plugin id, and implements
-  `Catalog`.
+  `Catalog`. A refused declaration is recorded as a problem on its plugin
+  (`catalogView.Problems`, by plugin id) and logged once when it first
+  appears; a hook whose resolved timeout would be zero is logged once and
+  left out.
 - `internal/host/contracts`: `HookPort.HookCall` returns an outcome instead of
   a slice; `HookPort.HookList` is new; `MethodHomes` narrows `hook.call` to
   `plugin` callers and gains `hook.list` for `cli` and `plugin` callers;
