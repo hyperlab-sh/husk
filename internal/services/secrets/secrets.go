@@ -404,11 +404,11 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 		next.declarations[plugin] = map[string]c.SecretRequest{}
 		for _, req := range cat.SecretRequests {
 			if !validName(req.Name) {
-				c.Issue(&r.Problems, "error", "invalid_secret_name", "plugin:"+plugin, "secret_requests", "invalid secret name")
+				c.Issue(&r.Problems, "warning", "invalid_secret_name", "plugin:"+plugin, "secret_requests", "invalid secret name")
 				continue
 			}
 			if _, duplicate := next.declarations[plugin][req.Name]; duplicate {
-				c.Issue(&r.Problems, "error", "duplicate_secret_declaration", "plugin:"+plugin, req.Name, "duplicate secret declaration")
+				c.Issue(&r.Problems, "warning", "duplicate_secret", "plugin:"+plugin, req.Name, "duplicate secret declaration")
 				continue
 			}
 			next.declarations[plugin][req.Name] = req
