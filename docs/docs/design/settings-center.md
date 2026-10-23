@@ -92,18 +92,26 @@ The closed key set, by focused part:
 
 | Part | Key | Effect |
 | :--- | :--- | :--- |
-| any | `esc`, `ctrl+c` | close, discarding dirty fields (while a profile Select, a Remove confirm or the Store surface Select is open, `esc` closes that first) |
-| any | `tab`, `shift+tab` | move focus between parts, as above |
+| any | `esc`, `ctrl+c` | close, discarding dirty fields (while a profile Select, a Remove confirm or the Store surface Select is open, `esc` closes only that dialog; `ctrl+c` always closes the whole center) |
+| any | `tab`, `shift+tab` | move focus between parts, as above; while one of those dialogs is open, first dismiss it without answering (the profile Select makes no call, the Remove confirm removes nothing, the surface Select restores its previous surface), then move focus |
 | tab list | `up`, `down`, `ctrl+k`, `ctrl+j` | move the marker; `Plugins` is skipped |
 | tab list | `enter`, `right` | activate the marked tab and focus the content |
 | tab list | `1`, `2`, `3`, `4`, `5` | activate General, Keys, Theme, Store, Installed; digits jump only while the tab list has focus, so a digit typed into a field stays a digit |
 | content | everything else | the tab's own keys ("Tabs"); in the General tab the individual huh field's keys |
+| Installed or Store content | `up`, `down`, `ctrl+k`, `ctrl+j` | move the cursor one row (Installed: the table row; Store: the highlighted entry, whose detail pane follows) |
+| Installed or Store content | `home`, `end` | move the cursor to the first or last row |
+| Installed or Store content | `pgup`, `pgdown` | move the cursor by half the content height |
+| Installed content | `enter`, `x` | open the Remove confirm for the cursor row ("Plugins → Installed") |
+| Store content | `enter` | open the surface Select of the filter row; it never acts on the highlighted entry (the Store installs nothing) |
+| Store content | a printable rune, `backspace` | append it to the text query, or remove the query's last rune; every printable rune is text here, digits and `x` included |
+| Remove confirm open | `left`, `right`, `h`, `l`, `y`, `n`, `up`, `down` | move between `yes` and `no` (huh `Confirm`); `enter` answers with the chosen button; `esc` returns to the table |
+| surface Select open | `up`, `down`, `ctrl+k`, `ctrl+j`, `home`, `end` | move the highlighted option and apply it to the list at once; `enter` commits it; `esc` restores the surface chosen before the Select opened |
 | General content | `ctrl+s` | save dirty fields ("General") |
 | General content | `enter`, `space` on a plugin group heading | expand or collapse that group |
 | General content | `enter` on any field but a `strings` `Text` | move to the next target, as `tab` (from the last target, to the profile corner); a `Text` field keeps huh's own new-line keys |
 | profile corner | `enter`, `space` | open the profile Select ("The profile corner") |
 
-Mouse: a click on a tab row activates it; a click in the content focuses it and is handed to the tab's list rows. General field clicks focus only (they do not toggle a Confirm or pick a Select option); its plugin-heading clicks expand or collapse the group, and its wheel steps between field/group targets, bringing the active target into view. Other tabs scroll their focused part with the wheel. A click on the profile corner opens the Select; a click outside the modal closes the center, except on the theme pill ("Opening and closing"). Dismissing a plugin confirmation or surface Select with an outside click lets that same click activate the visible tab or control underneath. Every other key is ignored; nothing reaches `Resolve` or a plugin.
+Mouse: a click on a tab row activates it; a click in the content focuses it and is handed to the tab's list rows. General field clicks focus only (they do not toggle a Confirm or pick a Select option); its plugin-heading clicks expand or collapse the group, and its wheel steps between field/group targets, bringing the active target into view. Other tabs scroll their focused part with the wheel. In the Store tab a click on the filter row opens the surface Select and a click on a list row highlights that entry. While a Remove confirm or the surface Select is open, the wheel acts as `up`/`down` on it; a click on the confirm's `yes` or `no` answers it, and any other click inside it does nothing; a click inside the open surface Select dismisses it, restoring its previous surface, without picking the option under the pointer (options are picked with the keys). A click on the profile corner opens the Select; a click outside the modal closes the center, except on the theme pill ("Opening and closing"). Dismissing a plugin confirmation or surface Select with an outside click lets that same click activate the visible tab or control underneath. Every other key is ignored; nothing reaches `Resolve` or a plugin.
 
 ### Tabs
 
@@ -169,7 +177,7 @@ The live plugins of this instance: one row per entry of `husk.pods.plugins` in t
 
 A **catalog view**: what plugins exist that the user could add, from the `catalog` document ("The catalog document"), read through the seam `Catalog()`. It never downloads, builds or runs anything.
 
-Layout: a **filter row** with a huh `Select` over `any surface` plus the twelve surface ids ([Protocol](protocol.md) `SurfaceID`, in registry order) and the palette's query line for text; `enter` commits the surface choice and `esc` restores its previous value. A **list** of the entries that pass both filters, sorted by name then id, each row `name` in `ink`, `id` and the claimed surfaces in `ink_muted`, tags after; and a **detail pane** under the list for the highlighted entry: the description (wrapped), the surfaces, the tags, the source, and the **install command**:
+Layout: a **filter row** with a huh `Select` over `any surface` plus the twelve surface ids ([Protocol](protocol.md) `SurfaceID`, in registry order) and the palette's query line for text. The text query keeps entries whose id, name, description or one of whose tags contains it, case-insensitively (an empty query keeps every entry); the surface Select keeps entries whose `surfaces` include the chosen id (`any surface` keeps every entry). The Select opens on `enter` in the Store content or a click on the filter row, and its keys and dismissal are in "Focus and keys". A **list** of the entries that pass both filters, sorted by name then id, each row `name` in `ink`, `id` and the claimed surfaces in `ink_muted`, tags after; and a **detail pane** under the list for the highlighted entry: the description (wrapped), the surfaces, the tags, the source, and the **install command**:
 
 - a `source` that is an absolute path or starts with `~/`: `husk plugin add <source>` (`~/` is shown as written; the shell expands it);
 - a `source` that is a URL: the URL, then the line `fetch it, then: husk plugin add <directory>`, since `plugin.add` takes a local path only ([Pods](pods.md), "Adding a plugin").
