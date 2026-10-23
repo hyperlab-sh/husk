@@ -52,6 +52,7 @@ func TestImportsStayWithinAllowList(t *testing.T) {
 			return true
 		}
 		for _, ok := range []string{
+			"github.com/charmbracelet/ultraviolet",
 			"github.com/hyperlab-sh/husk/pkg/protocol",
 			"github.com/hyperlab-sh/husk/internal/substrate/state",
 			"github.com/hyperlab-sh/husk/internal/instance",
@@ -89,6 +90,7 @@ var portTypes = map[string]reflect.Type{
 	"HookPort":       reflect.TypeFor[contracts.HookPort](),
 	"StatePort":      reflect.TypeFor[contracts.StatePort](),
 	"SurfacePort":    reflect.TypeFor[contracts.SurfacePort](),
+	"TerminalPort":   reflect.TypeFor[contracts.TerminalPort](),
 	"PluginPort":     reflect.TypeFor[contracts.PluginPort](),
 	"SettingsPort":   reflect.TypeFor[contracts.SettingsPort](),
 	"SecretsPort":    reflect.TypeFor[contracts.SecretsPort](),

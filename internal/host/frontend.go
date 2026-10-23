@@ -154,6 +154,9 @@ func (r *Root) SendKey(plugin string, params protocol.SurfaceKeyParams) error {
 	if err := params.Validate(); err != nil {
 		return invalidParams(err)
 	}
+	if r.engine.Terminal(params.Surface) != nil {
+		return nil
+	}
 	return r.deliver(plugin, protocol.MethodInputKey, params)
 }
 
@@ -162,6 +165,9 @@ func (r *Root) SendMouse(plugin string, params protocol.SurfaceMouseParams) erro
 	if !params.Surface.Valid() {
 		return contracts.NewError(protocol.CodeInvalidParams, fmt.Sprintf("mouse delivery requires a valid surface, got %q", params.Surface), nil)
 	}
+	if r.engine.Terminal(params.Surface) != nil {
+		return nil
+	}
 	return r.deliver(plugin, protocol.MethodInputMouse, params)
 }
 
@@ -169,6 +175,16 @@ func (r *Root) SendMouse(plugin string, params protocol.SurfaceMouseParams) erro
 func (r *Root) SendKeyState(plugin string, params protocol.KeyStateParams) error {
 	if err := params.Validate(); err != nil {
 		return invalidParams(err)
+	}
+	if params.Surface != "" && r.engine.Terminal(params.Surface) != nil {
+		return nil
+	}
+	if params.Surface == "" {
+		for _, size := range r.occupiedSizes(plugin) {
+			if r.engine.Terminal(size.Surface) != nil {
+				return nil
+			}
+		}
 	}
 	return r.deliver(plugin, protocol.MethodInputKeyState, params)
 }

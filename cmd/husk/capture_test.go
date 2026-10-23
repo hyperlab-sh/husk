@@ -21,24 +21,24 @@ func TestKeyContextCarriesCapture(t *testing.T) {
 	m := goldenModel()
 	addPlugin(m, "p", map[protocol.SurfaceID][]string{protocol.SurfaceMainStage: {"x"}, protocol.SurfaceSidebarList: {"y"}})
 	m.setFocus(protocol.SurfaceMainStage)
-	if m.keyContext().Capture {
+	if m.keyContext().Capture != protocol.CaptureNone {
 		t.Fatal("capture set with nothing captured")
 	}
-	m.catalog.Capture[protocol.SurfaceMainStage] = true
-	if ctx := m.keyContext(); !ctx.Capture || ctx.FocusSurface != "main-stage" {
+	m.catalog.Capture[protocol.SurfaceMainStage] = protocol.CaptureText
+	if ctx := m.keyContext(); ctx.Capture != protocol.CaptureText || ctx.FocusSurface != "main-stage" {
 		t.Fatalf("focused capture not carried: %+v", ctx)
 	}
 	m.setFocus(protocol.SurfaceSidebarList)
-	if m.keyContext().Capture {
+	if m.keyContext().Capture != protocol.CaptureNone {
 		t.Fatal("capture of main-stage leaked to a focused sidebar-list")
 	}
 
 	m.openModal("p", "p.open")
-	if m.keyContext().Capture {
+	if m.keyContext().Capture != protocol.CaptureNone {
 		t.Fatal("capture of main-stage leaked to the modal")
 	}
-	m.catalog.Capture[protocol.SurfaceModal] = true
-	if ctx := m.keyContext(); !ctx.Capture || !ctx.ModalOpen || ctx.FocusSurface != "modal-surface" {
+	m.catalog.Capture[protocol.SurfaceModal] = protocol.CaptureText
+	if ctx := m.keyContext(); ctx.Capture != protocol.CaptureText || !ctx.ModalOpen || ctx.FocusSurface != "modal-surface" {
 		t.Fatalf("modal capture not carried: %+v", ctx)
 	}
 }
@@ -51,15 +51,15 @@ func TestRefreshReadsCaptureFromState(t *testing.T) {
 	fe.seq++
 	res := surfaces.Surfaces{
 		Occupants: map[protocol.SurfaceID]contracts.Occupant{protocol.SurfaceMainStage: {Surface: protocol.SurfaceMainStage, Plugin: "p"}},
-		Capture:   map[protocol.SurfaceID]bool{protocol.SurfaceMainStage: true},
+		Capture:   map[protocol.SurfaceID]protocol.CaptureMode{protocol.SurfaceMainStage: protocol.CaptureText},
 	}
 	fe.Snap = snapshot(fe.seq, fe.pods, res)
 	m.refresh()
-	if !m.catalog.Capture[protocol.SurfaceMainStage] {
+	if m.catalog.Capture[protocol.SurfaceMainStage] != protocol.CaptureText {
 		t.Fatalf("capture not read: %v", m.catalog.Capture)
 	}
 
-	res.Capture = map[protocol.SurfaceID]bool{}
+	res.Capture = map[protocol.SurfaceID]protocol.CaptureMode{}
 	fe.seq++
 	fe.Snap = snapshot(fe.seq, fe.pods, res)
 	m.refresh()
@@ -75,7 +75,7 @@ func captureModel(t *testing.T) (*WorkbenchModel, *fakeFE, *pluginWire, *pluginW
 	_, stage := addPublicationTestPlugin(m, hello{PluginID: "stage", Slots: []protocol.SurfaceID{protocol.SurfaceMainStage}})
 	fe := withFE(m)
 	m.setFocus(protocol.SurfaceMainStage)
-	m.catalog.Capture[protocol.SurfaceMainStage] = true
+	m.catalog.Capture[protocol.SurfaceMainStage] = protocol.CaptureText
 	resetAll(side, stage)
 	return m, fe, side, stage
 }
@@ -138,7 +138,7 @@ func TestDefaultKeysMirrorTheCaptureFilter(t *testing.T) {
 		}
 		return ""
 	}
-	cap := contracts.KeyContext{FocusSurface: "main-stage", Capture: true}
+	cap := contracts.KeyContext{FocusSurface: "main-stage", Capture: protocol.CaptureText}
 	for _, tc := range []struct {
 		key  string
 		want string
@@ -150,14 +150,14 @@ func TestDefaultKeysMirrorTheCaptureFilter(t *testing.T) {
 			t.Errorf("capturing %q = %q, want %q", tc.key, got, tc.want)
 		}
 	}
-	modal := contracts.KeyContext{FocusSurface: "modal-surface", ModalOpen: true, ModalAction: "p.open", Capture: true}
+	modal := contracts.KeyContext{FocusSurface: "modal-surface", ModalOpen: true, ModalAction: "p.open", Capture: protocol.CaptureText}
 	for key, want := range map[string]string{"n": "p.open", "esc": "husk.modal.close", "q": ""} {
 		if got := resolve(modal, key); got != want {
 			t.Errorf("modal+capture %q = %q, want %q", key, got, want)
 		}
 	}
 	// No modal open: the modal's action key has no exemption.
-	if got := resolve(contracts.KeyContext{FocusSurface: "main-stage", Capture: true, ModalAction: "p.open"}, "n"); got != "" {
+	if got := resolve(contracts.KeyContext{FocusSurface: "main-stage", Capture: protocol.CaptureText, ModalAction: "p.open"}, "n"); got != "" {
 		t.Errorf("n with no modal open = %q, want none", got)
 	}
 	if got := resolve(contracts.KeyContext{FocusSurface: "main-stage"}, "q"); got != "husk.quit" {

@@ -14,6 +14,7 @@ import (
 	"github.com/hyperlab-sh/husk/internal/services/theme"
 	"github.com/hyperlab-sh/husk/internal/substrate/state"
 	"github.com/hyperlab-sh/husk/internal/substrate/store"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
 func TestThemeGetOpenToPluginsCheckUserOnly(t *testing.T) {
@@ -270,7 +271,7 @@ func TestKeysResolveHonoursCapture(t *testing.T) {
 	if r := port.Resolve(ctx, []string{"q"}); r.Outcome != host.KeyMatch || r.Binding == nil || r.Binding.Action != "husk.quit" {
 		t.Fatalf("free q = %+v, want match husk.quit", r)
 	}
-	ctx.Capture = true
+	ctx.Capture = protocol.CaptureText
 	if r := port.Resolve(ctx, []string{"q"}); r.Outcome != host.KeyNoMatch {
 		t.Fatalf("capturing q = %+v, want no match", r)
 	}

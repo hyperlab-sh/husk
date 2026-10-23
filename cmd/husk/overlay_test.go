@@ -127,7 +127,7 @@ func TestOverlayNotInteractive(t *testing.T) {
 	fe := withFE(m)
 	addPlugin(m, "stage", map[protocol.SurfaceID][]string{protocol.SurfaceMainStage: {"stage"}})
 	addPlugin(m, "annotation", map[protocol.SurfaceID][]string{protocol.SurfaceAppOverlay: {"overlay"}})
-	m.catalog.Capture[protocol.SurfaceAppOverlay] = true
+	m.catalog.Capture[protocol.SurfaceAppOverlay] = protocol.CaptureText
 	m.catalog.Frames["annotation"] = map[protocol.SurfaceID]protocol.FrameSpec{protocol.SurfaceAppOverlay: {Border: true, Close: true}}
 	addSlot(m, "annotation.region", "annotation", "region", &contracts.PublishedRect{Surface: protocol.SurfaceAppOverlay, X: 0, Y: 0, Width: m.width, Height: m.height})
 	contribute(m, "annotation.region", contribution{PluginID: "annotation", ID: "click", Content: "region", OnClick: "annotation.click"})
@@ -184,7 +184,7 @@ func TestOverlayNotInteractive(t *testing.T) {
 			t.Fatal("overlay received key")
 		}
 	}
-	if m.keyContext().Capture {
+	if m.keyContext().Capture != protocol.CaptureNone {
 		t.Fatal("overlay capture affected stage")
 	}
 }

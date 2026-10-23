@@ -772,6 +772,9 @@ func (r *Root) shutdown() error {
 			if r.table != nil {
 				r.complete(r.table.Close())
 			}
+			if r.engine != nil {
+				r.engine.CloseTerminals()
+			}
 			if r.pods != nil {
 				stop = r.pods.Stop()
 			}

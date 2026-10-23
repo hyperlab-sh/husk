@@ -74,7 +74,7 @@ func (d defaultKeys) Resolve(ctx contracts.KeyContext, keys []string) contracts.
 			continue
 		}
 		modalClose := b.action == "husk.modal.close" || ctx.ModalAction != "" && b.action == ctx.ModalAction
-		if ctx.Capture && b.focus == "" && keyspelling.IsTextKey(b.key) && !(ctx.ModalOpen && modalClose) {
+		if ctx.Capture == protocol.CaptureText && b.focus == "" && keyspelling.IsTextKey(b.key) && !(ctx.ModalOpen && modalClose) {
 			continue
 		}
 		if ctx.ModalOpen && b.focus == "" && b.action != "husk.modal.close" && (ctx.ModalAction == "" || b.action != ctx.ModalAction) {

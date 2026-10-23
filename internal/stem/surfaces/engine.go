@@ -168,8 +168,9 @@ type Engine struct {
 	slotWatchers   map[string]map[*watcher]struct{}
 	pluginWatchers map[string]map[*watcher]struct{}
 
-	toasts []Toast
-	stats  Stats
+	toasts    []Toast
+	stats     Stats
+	terminals map[protocol.SurfaceID]attachment
 }
 
 // New creates the engine on st, registering husk.surfaces and the State
@@ -270,6 +271,7 @@ func (e *Engine) CatalogChanged() {
 // with no declaration changes does no work. State writes happen here, on the
 // loop, never inside the State listener.
 func (e *Engine) Flush() {
+	e.flushTerminals()
 	if !e.dirty {
 		return
 	}
@@ -331,7 +333,7 @@ func (e *Engine) Flush() {
 		res.Contributions = Contributions{}
 	}
 	if res.Capture == nil {
-		res.Capture = map[protocol.SurfaceID]bool{}
+		res.Capture = map[protocol.SurfaceID]protocol.CaptureMode{}
 	}
 	changedSlots := map[string]bool{}
 	occupiedBefore := make(map[protocol.SurfaceID]string, len(res.Occupants))
@@ -434,6 +436,14 @@ func (e *Engine) Flush() {
 	for surface := range res.Capture {
 		if was := occupiedBefore[surface]; was == "" || res.Occupants[surface].Plugin != was {
 			delete(res.Capture, surface)
+		}
+	}
+
+	for surface, a := range e.terminals {
+		if res.Occupants[surface].Plugin != a.plugin {
+			a.term.Close()
+			delete(e.terminals, surface)
+			delete(res.Terminals, surface)
 		}
 	}
 
@@ -698,6 +708,10 @@ func (e *Engine) Resized(sizes []protocol.SurfaceSize) {
 	res := e.slice.Get()
 	byPlugin := map[string][]protocol.SurfaceSize{}
 	for _, size := range sizes {
+		if a, ok := e.terminals[size.Surface]; ok {
+			a.term.Resize(size.Width, size.Height)
+			a.term.Focus(size.Focused && size.Visible)
+		}
 		if occupant := res.Occupants[size.Surface].Plugin; occupant != "" {
 			byPlugin[occupant] = append(byPlugin[occupant], size)
 		}
@@ -736,16 +750,22 @@ func (e *Engine) SurfaceUpdate(plugin string, p protocol.SurfaceUpdateParams) er
 		}
 		return errf(protocol.CodeDenied, "surface %q is occupied by %s", p.Surface, occupant)
 	}
-	if p.Capture == nil || e.slice.Get().Capture[p.Surface] == *p.Capture {
+	if _, ok := e.terminals[p.Surface]; ok {
+		return &Error{Code: protocol.CodeInvalidParams, Message: "surface has a terminal attached", Data: map[string]any{"reason": "terminal_attached"}}
+	}
+	if p.Capture != nil && !p.Capture.Valid() {
+		return errf(protocol.CodeInvalidParams, "invalid capture value")
+	}
+	if p.Capture == nil || e.slice.Get().Capture[p.Surface] == p.Capture.Mode() {
 		return nil
 	}
 	e.absorbForeign()
 	if err := e.slice.Update(func(v *Surfaces) {
-		if *p.Capture {
+		if p.Capture.Mode() != protocol.CaptureNone {
 			if v.Capture == nil {
-				v.Capture = map[protocol.SurfaceID]bool{}
+				v.Capture = map[protocol.SurfaceID]protocol.CaptureMode{}
 			}
-			v.Capture[p.Surface] = true
+			v.Capture[p.Surface] = p.Capture.Mode()
 		} else {
 			delete(v.Capture, p.Surface)
 		}
@@ -786,6 +806,7 @@ func (e *Engine) release(surface protocol.SurfaceID, only string) error {
 		}
 		return errf(protocol.CodeDenied, "surface %q is occupied by %s", surface, occupant)
 	}
+	e.detachTerminal(surface)
 	e.absorbForeign()
 	if err := e.slice.Update(func(v *Surfaces) {
 		delete(v.Occupants, surface)

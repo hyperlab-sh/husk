@@ -73,11 +73,10 @@ type Surfaces struct {
 	// within one tick, by namespace then by the declaring plugin's entry
 	// position. A removed owner's slot entries are dropped.
 	Contributions map[string][]Contribution `json:"contributions"`
-	// Capture holds a true entry for each surface whose occupant said it is
-	// taking text input. Only the engine writes it; the frontend reads it
-	// into the key context. It is always present, empty when no surface
-	// captures.
-	Capture map[protocol.SurfaceID]bool `json:"capture"`
+	// Capture holds each occupant's normalized key policy; none is absent.
+	Capture map[protocol.SurfaceID]protocol.CaptureMode `json:"capture"`
+	// Terminals contains metadata only, never screen cells.
+	Terminals map[protocol.SurfaceID]contracts.TerminalMetadata `json:"terminals"`
 	// Visible lists the surfaces the layout currently shows.
 	Visible []protocol.SurfaceID `json:"visible"`
 	// Placement is the active placement.

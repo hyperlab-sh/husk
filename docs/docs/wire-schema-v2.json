@@ -635,7 +635,18 @@
           "type": "string"
         },
         "capture": {
-          "type": "boolean"
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "enum": [
+                "text",
+                "all"
+              ],
+              "type": "string"
+            }
+          ]
         },
         "hit_targets": {
           "items": {
@@ -678,6 +689,79 @@
       "required": [
         "surface",
         "lines"
+      ],
+      "type": "object"
+    },
+    "TerminalAttachParams": {
+      "properties": {
+        "capture": {
+          "type": "string"
+        },
+        "scrollback": {
+          "type": "integer"
+        },
+        "surface": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "surface"
+      ],
+      "type": "object"
+    },
+    "TerminalAttachResult": {
+      "properties": {
+        "height": {
+          "type": "integer"
+        },
+        "width": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "width",
+        "height"
+      ],
+      "type": "object"
+    },
+    "TerminalDetachParams": {
+      "properties": {
+        "surface": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "surface"
+      ],
+      "type": "object"
+    },
+    "TerminalInputParams": {
+      "properties": {
+        "data": {
+          "type": "string"
+        },
+        "surface": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "surface",
+        "data"
+      ],
+      "type": "object"
+    },
+    "TerminalWriteParams": {
+      "properties": {
+        "data": {
+          "type": "string"
+        },
+        "surface": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "surface",
+        "data"
       ],
       "type": "object"
     },
@@ -1036,6 +1120,30 @@
     "surface.update.result": {
       "description": "Result owned by design/protocol.md; no additional field constraints specified here."
     },
+    "terminal.attach.params": {
+      "$ref": "#/$defs/TerminalAttachParams"
+    },
+    "terminal.attach.result": {
+      "$ref": "#/$defs/TerminalAttachResult"
+    },
+    "terminal.detach.params": {
+      "$ref": "#/$defs/TerminalDetachParams"
+    },
+    "terminal.detach.result": {
+      "description": "Result owned by design/protocol.md; no additional field constraints specified here."
+    },
+    "terminal.input.params": {
+      "$ref": "#/$defs/TerminalInputParams"
+    },
+    "terminal.input.result": {
+      "description": "Result owned by design/protocol.md; no additional field constraints specified here."
+    },
+    "terminal.write.params": {
+      "$ref": "#/$defs/TerminalWriteParams"
+    },
+    "terminal.write.result": {
+      "description": "Result owned by design/protocol.md; no additional field constraints specified here."
+    },
     "theme.changed.params": {
       "$ref": "#/$defs/ThemeChangedParams"
     },
@@ -1073,7 +1181,7 @@
   "$id": "https://github.com/hyperlab-sh/husk/blob/main/docs/docs/wire-schema-v2.json",
   "$ref": "#/$defs/Message",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "One UTF-8 JSON object per line, at most 4194304 bytes. Protocol 2.4. Generated from pkg/protocol; do not edit. x-methods indexes payload schemas; unknown fields are accepted.",
+  "description": "One UTF-8 JSON object per line, at most 4194304 bytes. Protocol 2.5. Generated from pkg/protocol; do not edit. x-methods indexes payload schemas; unknown fields are accepted.",
   "title": "Husk wire protocol v2",
   "x-methods": {
     "action.invoke": {
@@ -1461,6 +1569,42 @@
       },
       "result": {
         "$ref": "#/$defs/surface.update.result"
+      }
+    },
+    "terminal.attach": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/terminal.attach.params"
+      },
+      "result": {
+        "$ref": "#/$defs/terminal.attach.result"
+      }
+    },
+    "terminal.detach": {
+      "form": "notification",
+      "params": {
+        "$ref": "#/$defs/terminal.detach.params"
+      },
+      "result": {
+        "$ref": "#/$defs/terminal.detach.result"
+      }
+    },
+    "terminal.input": {
+      "form": "notification",
+      "params": {
+        "$ref": "#/$defs/terminal.input.params"
+      },
+      "result": {
+        "$ref": "#/$defs/terminal.input.result"
+      }
+    },
+    "terminal.write": {
+      "form": "notification",
+      "params": {
+        "$ref": "#/$defs/terminal.write.params"
+      },
+      "result": {
+        "$ref": "#/$defs/terminal.write.result"
       }
     },
     "theme.changed": {

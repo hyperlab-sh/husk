@@ -1364,12 +1364,22 @@ func TestLiveOccupantIsNotPreemptedWhenEarlierClaimantComesBack(t *testing.T) {
 	}
 }
 
-func bptr(b bool) *bool { return &b }
+func bptr(b bool) *protocol.CaptureValue {
+	v := protocol.CaptureFalse
+	if b {
+		v = protocol.CaptureTrue
+	}
+	return &v
+}
 
 // captureOn reports the committed capture map of husk.surfaces.
 func captureOn(t *testing.T, st *state.State) map[protocol.SurfaceID]bool {
 	t.Helper()
-	return resolution(t, st).Capture
+	out := map[protocol.SurfaceID]bool{}
+	for id, mode := range resolution(t, st).Capture {
+		out[id] = mode != protocol.CaptureNone
+	}
+	return out
 }
 
 func TestCaptureLifecycle(t *testing.T) {

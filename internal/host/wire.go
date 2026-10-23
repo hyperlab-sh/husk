@@ -16,6 +16,7 @@ import (
 	portsstem "github.com/hyperlab-sh/husk/internal/host/ports/stem"
 	"github.com/hyperlab-sh/husk/internal/pods"
 	"github.com/hyperlab-sh/husk/internal/pods/server"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
 // storeCleaner adapts Store's state.clear deletion to the State port.
@@ -91,6 +92,25 @@ func (r *Root) buildServer() error {
 		Config:   portsservices.Config{Co: co},
 		Limiter:  servicesh.NewWindowLimiter(r.clock, contracts.RateLimitPerSecond),
 	})
+	mux.Register("terminal", stemh.Terminal{Port: portsstem.TerminalPort{
+		Engine: r.engine, Loop: r.loopSeam, Content: r.cfg.Content,
+		Size: func(plugin string, id protocol.SurfaceID) protocol.TerminalAttachResult {
+			for _, size := range r.occupiedSizes(plugin) {
+				if size.Surface == id {
+					return protocol.TerminalAttachResult{Width: size.Width, Height: size.Height}
+				}
+			}
+			return protocol.TerminalAttachResult{}
+		},
+		Sender: func(plugin string) func(protocol.Message) error {
+			if pod, ok := r.pods.Pod(plugin); ok {
+				return pod.QueueSender()
+			}
+			return func(protocol.Message) error {
+				return contracts.NewError(protocol.CodeUnavailable, "plugin is not live", nil)
+			}
+		},
+	}})
 	mux.Register("plugin", pluginh.Plugin{Port: r.pods})
 	r.mux = mux
 

@@ -144,7 +144,7 @@ func TestVersionMatrix(t *testing.T) {
 			}
 		})
 	}
-	if Version != "2.4" || Major != 2 {
+	if Version != "2.5" || Major != 2 {
 		t.Fatal("unexpected version")
 	}
 }
@@ -187,16 +187,19 @@ func TestParamValidation(t *testing.T) {
 }
 
 func TestSurfaceUpdateCaptureRoundTrip(t *testing.T) {
-	yes, no := true, false
+	yes, no := CaptureTrue, CaptureFalse
+	text, all := CaptureValueText, CaptureValueAll
 	for _, tc := range []struct {
 		name string
 		in   string
-		want *bool
+		want *CaptureValue
 		out  string // the capture member after re-marshalling; "" when absent
 	}{
 		{"absent", `{"surface":"main-stage","lines":[]}`, nil, ""},
 		{"false", `{"surface":"main-stage","lines":[],"capture":false}`, &no, "false"},
 		{"true", `{"surface":"main-stage","lines":[],"capture":true}`, &yes, "true"},
+		{"text", `{"surface":"main-stage","lines":[],"capture":"text"}`, &text, `"text"`},
+		{"all", `{"surface":"main-stage","lines":[],"capture":"all"}`, &all, `"all"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var p SurfaceUpdateParams
