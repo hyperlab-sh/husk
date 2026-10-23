@@ -22,38 +22,95 @@ func (m *WorkbenchModel) settingsKeysKey(msg tea.KeyPressMsg) {
 		}
 		s.keyTop = 0
 	case "up", "ctrl+k":
-		s.keyTop = max(0, s.keyTop-1)
+		s.keyTop--
 	case "down", "ctrl+j":
 		s.keyTop++
 	case "pgup":
-		s.keyTop = max(0, s.keyTop-m.settingsContentRect().Dy()+3)
+		s.keyTop -= max(1, m.settingsContentRect().Dy()-3)
 	case "pgdown":
 		s.keyTop += max(1, m.settingsContentRect().Dy()-3)
 	case "home":
 		s.keyTop = 0
 	case "end":
-		s.keyTop = len(m.settingsKeyRows())
+		s.keyTop = m.settingsKeysMaxTop()
 	default:
 		if paletteTextFor(msg, key) {
 			s.keyQuery += key
 			s.keyTop = 0
 		}
 	}
+	m.clampSettingsKeysTop()
 }
 func (m *WorkbenchModel) settingsKeyRows() []contracts.KeyEntry {
 	s := m.settings
 	query := strings.ToLower(s.keyQuery)
 	var rows []contracts.KeyEntry
 	for _, entry := range s.keyListing.Entries {
-		if strings.Contains(strings.ToLower(strings.Join(entry.Keys, " ")+" "+entry.Action+" "+entry.Plugin+" "+entry.Source.Plugin), query) {
-			rows = append(rows, entry)
+		for _, field := range []string{strings.Join(entry.Keys, " "), entry.Action, entry.Plugin, entry.Source.Plugin} {
+			if strings.Contains(strings.ToLower(field), query) {
+				rows = append(rows, entry)
+				break
+			}
 		}
 	}
 	return rows
 }
 
-// settingsKeysLines is pure: widths and clipping are derived locally, including
-// the clamped scroll offset when a reload removes rows under the old viewport.
+// The filter, blank row and table header are fixed. Both Update and View use
+// these exact body/viewport counts, including bounded diagnostics and no-match.
+func (m *WorkbenchModel) settingsKeysExtent(rowCount int) (body, height int) {
+	problems := len(m.settings.keyListing.Problems)
+	body = max(1, rowCount) + min(20, problems)
+	if problems > 20 {
+		body++
+	}
+	return body, max(1, m.settingsContentRect().Dy()-3)
+}
+func (m *WorkbenchModel) settingsKeysMaxTop() int {
+	body, height := m.settingsKeysExtent(len(m.settingsKeyRows()))
+	return max(0, body-height)
+}
+func (m *WorkbenchModel) clampSettingsKeysTop() {
+	s := m.settings
+	s.keyTop = max(0, min(s.keyTop, m.settingsKeysMaxTop()))
+}
+
+func settingsKeyWidths(cells [][]string, width int) []int {
+	widths := make([]int, len(cells[0]))
+	for _, row := range cells {
+		for i, cell := range row {
+			widths[i] = max(widths[i], min(width, ansi.StringWidth(plainText(cell))))
+		}
+	}
+	total := 2 * (len(widths) - 1)
+	for _, w := range widths {
+		total += w
+	}
+	for total > width {
+		chosen := -1
+		// Preserve scope and source identity until the flexible columns have
+		// exhausted their room. Within each tier shrink the widest first.
+		for _, tier := range [][]int{{2, 4, 0}, {1, 3}} {
+			for _, i := range tier {
+				if widths[i] > ansi.StringWidth(cells[0][i]) && (chosen < 0 || widths[i] > widths[chosen]) {
+					chosen = i
+				}
+			}
+			if chosen >= 0 {
+				break
+			}
+		}
+		if chosen < 0 {
+			break
+		}
+		widths[chosen]--
+		total--
+	}
+	return widths
+}
+
+// settingsKeysLines is pure. State is clamped on input, reload and resize;
+// local clamping also keeps a standalone View safe without mutating the model.
 func (m *WorkbenchModel) settingsKeysLines() []string {
 	s := m.settings
 	width := m.settingsContentRect().Dx()
@@ -70,8 +127,7 @@ func (m *WorkbenchModel) settingsKeysLines() []string {
 		scope := entry.Focus
 		if scope == "" {
 			scope = "global"
-		}
-		if entry.Plugin != "" {
+		} else if entry.Plugin != "" {
 			scope += " (" + entry.Plugin + ")"
 		}
 		action := entry.Action
@@ -91,9 +147,7 @@ func (m *WorkbenchModel) settingsKeysLines() []string {
 		}
 		cells = append(cells, []string{strings.Join(entry.Keys, " "), scope, action, layer, state})
 	}
-	// Reserve space for every column even at the minimum terminal size.
-	widths := []int{max(8, width/6), max(8, width/6), max(12, width/4), max(7, width/8), 0}
-	widths[4] = max(5, width-8-widths[0]-widths[1]-widths[2]-widths[3])
+	widths := settingsKeyWidths(cells, width)
 	render := func(values []string, style lipgloss.Style) string {
 		parts := make([]string, len(values))
 		for i, value := range values {
@@ -120,7 +174,7 @@ func (m *WorkbenchModel) settingsKeysLines() []string {
 	if n := len(s.keyListing.Problems) - 20; n > 0 {
 		body = append(body, muted.Render(fmt.Sprintf("and %d more", n)))
 	}
-	height := max(1, m.settingsContentRect().Dy()-len(lines))
+	_, height := m.settingsKeysExtent(len(rows))
 	top := max(0, min(s.keyTop, len(body)-height))
 	return append(lines, body[top:min(len(body), top+height)]...)
 }

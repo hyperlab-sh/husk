@@ -49,6 +49,10 @@ type settingsCenter struct {
 	keyListing       contracts.KeyListing
 	keyQuery         string
 	keyTop           int
+	sourcesRead      bool
+	servicesRevision uint64
+	keysRead         bool
+	readTab          string
 }
 
 func (s *settingsCenter) dirty() bool {
@@ -184,9 +188,23 @@ func (m *WorkbenchModel) refreshSettings() {
 		s.profileTop = settingsListTop(s.profileTop, max(0, slices.Index(s.profileNames, s.profileChoice)), len(s.profileNames), r.Dy()-1)
 	}
 	s.top = settingsListTop(s.top, s.cursor, len(s.themes), m.settingsContentRect().Dy()-4)
-	m.refreshSettingsGeneral()
 	if m.fe != nil {
-		s.keyListing = m.fe.KeyListing()
+		revision := m.fe.ServicesRevision()
+		reloaded := !s.sourcesRead || revision != s.servicesRevision
+		if reloaded {
+			m.refreshSettingsGeneral()
+			s.keysRead = false
+			s.sourcesRead, s.servicesRevision = true, revision
+		}
+		if s.tab == "keys" && (!s.keysRead || s.readTab != "keys") {
+			s.keyListing = m.fe.KeyListing()
+			s.keysRead = true
+		}
+	}
+	s.readTab = s.tab
+	m.updateSettingsGeneralView()
+	if s.tab == "keys" {
+		m.clampSettingsKeysTop()
 	}
 }
 
@@ -251,12 +269,18 @@ func (m *WorkbenchModel) settingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		s.focus = (s.focus + 1) % 3
+		if s.focus == settingsContentFocus {
+			m.enterSettingsGeneral(false)
+		}
 		return m, nil
 	case "shift+tab":
 		if s.focus == settingsContentFocus && s.tab == "general" && m.settingsGeneralTab(true) {
 			return m, nil
 		}
 		s.focus = (s.focus + 2) % 3
+		if s.focus == settingsContentFocus {
+			m.enterSettingsGeneral(true)
+		}
 		return m, nil
 	}
 	switch s.focus {
@@ -422,6 +446,7 @@ func (m *WorkbenchModel) useSettingsProfile() {
 			s.profileError = settingsError(err)
 			return
 		}
+		s.sourcesRead = false
 		m.refreshSettings()
 		s.active = result.Active
 	})
@@ -515,6 +540,7 @@ func (m *WorkbenchModel) settingsMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) 
 			} else {
 				s.keyTop++
 			}
+			m.clampSettingsKeysTop()
 			return m, nil
 		}
 		if mouse.Button == tea.MouseWheelUp {

@@ -29,6 +29,9 @@ type fakeFE struct {
 	Invoked   []invoked
 	Registers []string
 	// Writer calls retain their callbacks until a test explicitly delivers a reply.
+	ServiceRev                                 uint64
+	SchemaReads, SettingReads, KeyListingReads int
+
 	SchemaRows     []contracts.SettingEntry
 	SettingValues  map[string]contracts.SettingValue
 	KeyRows        contracts.KeyListing
@@ -173,8 +176,13 @@ func (f *fakeFE) Snapshot() *state.Snapshot                { return f.Snap }
 func (f *fakeFE) StartupReports() []contracts.ReloadReport { return nil }
 func (f *fakeFE) Catalog() contracts.CatalogResult         { return contracts.CatalogResult{} }
 func (f *fakeFE) Themes() []contracts.ThemeEntry           { return slices.Clone(f.ThemeRows) }
-func (f *fakeFE) SettingsSchema() []contracts.SettingEntry { return slices.Clone(f.SchemaRows) }
+func (f *fakeFE) ServicesRevision() uint64                 { return f.ServiceRev }
+func (f *fakeFE) SettingsSchema() []contracts.SettingEntry {
+	f.SchemaReads++
+	return slices.Clone(f.SchemaRows)
+}
 func (f *fakeFE) Setting(key string) (any, string, error) {
+	f.SettingReads++
 	if value, ok := f.SettingValues[key]; ok {
 		return value.Value, value.Source, nil
 	}
@@ -185,7 +193,7 @@ func (f *fakeFE) Setting(key string) (any, string, error) {
 	}
 	return nil, "", contracts.NewError(protocol.CodeNotFound, "unknown setting", nil)
 }
-func (f *fakeFE) KeyListing() contracts.KeyListing  { return f.KeyRows }
+func (f *fakeFE) KeyListing() contracts.KeyListing  { f.KeyListingReads++; return f.KeyRows }
 func (f *fakeFE) Profiles() []contracts.ProfileInfo { return slices.Clone(f.ProfileRows) }
 func (f *fakeFE) ConfigDir() string                 { return "" }
 

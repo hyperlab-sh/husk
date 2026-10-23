@@ -40,6 +40,10 @@ type Frontend interface {
 	// Themes returns the serving theme.list entries. Any goroutine.
 	Themes() []ThemeEntry
 
+	// ServicesRevision advances on each services.reloaded event delivered on
+	// the loop, including unchanged or failed reloads. Any goroutine; no I/O.
+	ServicesRevision() uint64
+
 	// SettingsSchema returns every registered schema entry. Any goroutine.
 	SettingsSchema() []SettingEntry
 

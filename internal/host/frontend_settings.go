@@ -19,6 +19,9 @@ func (r *Root) Themes() []contracts.ThemeEntry {
 	return themes
 }
 
+// ServicesRevision implements contracts.Frontend. Any goroutine; atomic read.
+func (r *Root) ServicesRevision() uint64 { return r.servicesRevision.Load() }
+
 // SettingsSchema implements contracts.Frontend. Any goroutine; snapshot only.
 func (r *Root) SettingsSchema() []contracts.SettingEntry {
 	entries, err := (ports.Settings{Svc: r.rt.Settings}).Schema(context.Background(), contracts.Caller{Kind: protocol.CallerHost}, "")

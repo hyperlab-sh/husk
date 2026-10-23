@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"reflect"
 	"slices"
 	"strings"
@@ -30,7 +31,7 @@ func editGeneral(m *WorkbenchModel, key, text string) {
 	m.cacheSettingsGeneral()
 }
 func TestSettingsGeneralGroupingOrderAndCollapsedPlugins(t *testing.T) {
-	m, _ := generalFixture(t,
+	m, fe := generalFixture(t,
 		contracts.SettingEntry{Key: "plugins.Z.nested.z", Type: "string", Default: "z", Owner: "plugin:Z"},
 		contracts.SettingEntry{Key: "dist.tools.z", Type: "string", Default: "z", Owner: "dist"},
 		contracts.SettingEntry{Key: "theme.name", Type: "string", Default: theme.Default().Name, Owner: "husk"},
@@ -38,6 +39,12 @@ func TestSettingsGeneralGroupingOrderAndCollapsedPlugins(t *testing.T) {
 		contracts.SettingEntry{Key: "husk.bundle", Type: "string", Default: "", Owner: "husk"},
 		contracts.SettingEntry{Key: "plugins.A.x", Type: "string", Default: "x", Owner: "plugin:A"},
 		contracts.SettingEntry{Key: "plugins.Z.a", Type: "string", Default: "a", Owner: "plugin:Z"})
+	// A live Pod with retained raw values is not a settings schema.
+	fe.pods = map[string]string{"ghost": "live"}
+	fe.publish()
+	fe.SettingValues = map[string]contracts.SettingValue{"ghost.x": {Value: "raw", Source: "user"}}
+	fe.ServiceRev++
+	m.settle()
 	g := m.settings.general
 	var names []string
 	for _, group := range g.groups {
@@ -54,8 +61,8 @@ func TestSettingsGeneralGroupingOrderAndCollapsedPlugins(t *testing.T) {
 			t.Fatal("plugin field initially expanded")
 		}
 	}
-	if slices.Contains(names, "plugins.unregistered") {
-		t.Fatal("unregistered group")
+	if slices.Contains(names, "plugins.ghost") || strings.Contains(strings.Join(g.targets(), " "), "ghost") {
+		t.Fatal("loaded plugin or raw values manufactured an unregistered group/target")
 	}
 	g.active = "@plugins.Z"
 	m.settings.focus = settingsContentFocus
@@ -75,10 +82,17 @@ func TestSettingsGeneralFieldTypesAndValues(t *testing.T) {
 		initial any
 		edit    string
 		want    any
+		shown   string
 	}{
-		{"string", "before", "after", "after"}, {"bool", false, "", true}, {"enum", "one", "two", "two"},
-		{"int", int64(2), "42", int64(42)}, {"duration", 1500 * time.Microsecond, "20", int64(20)},
-		{"strings", []string{"one", "two"}, "  alpha \n\n beta \n", []string{"alpha", "beta"}},
+		{"string", "before", "after", "after", "before"}, {"bool", false, "", true, ""}, {"enum", "one", "two", "two", "one"},
+		{"int", int64(2), "42", int64(42), "2"}, {"duration", 1500 * time.Microsecond, "20", int64(20), "1"},
+		{"int", float64(1_000_000), "1000001", int64(1_000_001), "1000000"},
+		{"int", json.Number("1.5e3"), "1501", int64(1501), "1500"},
+		{"int", int(1000000), "1000001", int64(1000001), "1000000"},
+		{"int", json.Number("1000000"), "1000001", int64(1000001), "1000000"},
+		{"duration", float64(1_000_000), "1000001", int64(1_000_001), "1000000"},
+		{"duration", json.Number("1.5e3"), "1501", int64(1501), "1500"},
+		{"strings", []string{"one", "two"}, "  alpha \n\n beta \n", []string{"alpha", "beta"}, "one\ntwo"},
 	} {
 		t.Run(tc.kind, func(t *testing.T) {
 			m, fe := generalFixture(t, contracts.SettingEntry{Key: "husk.value", Type: tc.kind, Default: tc.initial, Enum: []string{"one", "two"}, Owner: "husk"})
@@ -100,8 +114,8 @@ func TestSettingsGeneralFieldTypesAndValues(t *testing.T) {
 			if !good {
 				t.Fatalf("wrong widget %T", f.widget)
 			}
-			if tc.kind == "duration" && f.text != "1" {
-				t.Fatalf("duration not truncated to integral ms: %q", f.text)
+			if f.text != tc.shown || f.dirty() {
+				t.Fatalf("initial value %#v: text %q want %q, dirty %v", tc.initial, f.text, tc.shown, f.dirty())
 			}
 			m.settings.focus = settingsContentFocus
 			m.cacheSettingsGeneral()
@@ -181,7 +195,11 @@ func TestSettingsGeneralRestartInvalidValueAndStoreErrorContinue(t *testing.T) {
 			if failure == "report" {
 				result.Reports = []contracts.ReloadReport{{Service: "settings", Problems: []protocol.Problem{{Key: "husk.a", Severity: "error", Code: "invalid_value", Message: "refused"}}}}
 			} else {
-				err = contracts.NewError(protocol.CodeUnavailable, "refused", map[string]any{"reason": failure})
+				code := protocol.CodeUnavailable
+				if failure == "invalid_value" {
+					code = protocol.CodeInvalidParams
+				}
+				err = contracts.NewError(code, "refused", map[string]any{"reason": failure})
 			}
 			fe.replySetting(0, result, err)
 			if len(fe.SettingWrites) != 2 || !m.settings.general.fields["husk.a"].dirty() {
@@ -233,6 +251,7 @@ func TestSettingsGeneralReloadRefreshesCleanAndKeepsDirtyAndFocus(t *testing.T) 
 	editGeneral(m, "husk.a", "dirty")
 	g.active = "husk.b"
 	fe.SettingValues = map[string]contracts.SettingValue{"husk.a": {Value: "reload a", Source: "profile"}, "husk.b": {Value: "reload b", Source: "distribution"}}
+	fe.ServiceRev++
 	m.settle()
 	if g.fields["husk.a"].text != "dirty" || g.fields["husk.a"].widget != original || g.fields["husk.b"].text != "reload b" || g.fields["husk.b"].dirty() || g.active != "husk.b" {
 		t.Fatal("reload lost edits/clean update/focus or unnecessarily rebuilt fields")
@@ -241,6 +260,7 @@ func TestSettingsGeneralReloadRefreshesCleanAndKeepsDirtyAndFocus(t *testing.T) 
 		t.Fatal("missing source annotation")
 	}
 	fe.SchemaRows = append(fe.SchemaRows, contracts.SettingEntry{Key: "plugins.new.a", Type: "bool", Default: false, Owner: "plugin:new"})
+	fe.ServiceRev++
 	m.settle()
 	if g.active != "husk.b" || g.fields["husk.a"].text != "dirty" || len(g.groups) != 2 {
 		t.Fatal("schema reload lost edits/focus")
@@ -264,7 +284,17 @@ func TestSettingsGeneralFieldTraversalAndDigitInput(t *testing.T) {
 	if m.settings.focus != settingsProfileFocus {
 		t.Fatal("last field did not leave form")
 	}
-	settingsPress(m, "shift+tab")
+	settingsPress(m, "tab") // profile -> tab list
+	settingsPress(m, "tab") // tab list -> first field, not the previous last field
+	if g.active != "husk.a" || m.settings.focus != settingsContentFocus {
+		t.Fatal("forward entry skipped the first field")
+	}
+	corner := m.settingsCornerRect()
+	m.Update(tea.MouseClickMsg{X: corner.Min.X, Y: corner.Min.Y, Button: tea.MouseLeft})
+	settingsPress(m, "shift+tab") // dismiss the Select and enter at the last field
+	if g.active != "husk.b" || m.settings.focus != settingsContentFocus {
+		t.Fatal("reverse entry skipped the last field")
+	}
 	settingsPress(m, "shift+tab")
 	settingsPress(m, "shift+tab")
 	if m.settings.focus != settingsTabsFocus || g.fields["husk.a"].widget != first || len(fe.SettingWrites) != 0 {

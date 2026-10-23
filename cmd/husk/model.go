@@ -623,7 +623,7 @@ func (m *WorkbenchModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			s.profileView = s.profileForm.View()
 			return m, cmd
 		}
-		if s.general != nil && s.tab == "general" {
+		if s.general != nil && s.tab == "general" && s.focus == settingsContentFocus {
 			return m, m.settingsGeneralKey(msg)
 		}
 	}
