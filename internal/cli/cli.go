@@ -69,7 +69,8 @@ func isTerminal(f *os.File) bool { return term.IsTerminal(int(f.Fd())) }
 // command is one subcommand of the table.
 type command struct {
 	// usage is the one-line synopsis shown in the usage text.
-	usage  string
+	usage string
+	// hidden omits the command from the general usage listing.
 	hidden bool
 	// timeout is the default --timeout; zero means none.
 	timeout time.Duration
