@@ -449,7 +449,12 @@ live claimant in namespace order; a live occupant is never preempted by a
 claimant that goes live later. The host marks the engine on every
 `husk.pods` write (`Engine.LivenessChanged`), so the hand-over lands in the
 same tick, and the new occupant is told its size like any new occupant. The
-engine also keeps `capture`, a map from surface id to `"text"` or `"all"` for each capturing surface. A `surface.update` from the occupant with `capture: true` or `"text"` sets text capture, `"all"` sets full capture, `false` removes it, and an absent field changes nothing ([Protocol](protocol.md) 2.5). The engine
+engine also keeps `capture`, a map from surface id to `"text"` or `"all"`
+for each capturing surface. A `surface.update` from the occupant with
+`capture: true` or `"text"` sets text capture, `"all"` sets full capture,
+`false` removes it, and an absent field changes nothing
+([Protocol](protocol.md) 2.5); `terminal.attach` sets it too (see "Runtime
+and terminal surfaces"). The engine
 removes the entry whenever the surface's occupant changes, releases or closes
 the surface, or its Pod leaves `live`, so a dead or departed plugin never
 leaves a surface capturing (D93). An unoccupied surface has no entry, and the
@@ -481,9 +486,9 @@ first live claim wins among the claims that arrive after the re-registration.
 
 - `runtime`, a map from dynamic surface id (`<plugin_id>.<name>`) to `{"plugin", "placement", "title", "width", "height"}` for every surface a `surface.open` created and nothing has closed. Such a surface also appears in `occupants` (the opener is its occupant from the reply on) and in the frontend's `visible` while shown, and its rect in `husk.geometry.rects`, so a consumer that only knows the layout surfaces still sees it as occupied space. `capture`, `visible` and `rects` are keyed by the same dynamic id. The engine removes the entry on `surface.close`, on the host's close, and when the opener's Pod leaves `live`; a runtime surface is never handed to another claimant (there is no declaration to resolve).
 - `terminals`, a map from surface id to `{"title", "alt_screen", "mouse", "scrollback"}` for every attached surface: the title the application set (OSC 0/2), whether it is on the alternate screen, whether it enabled mouse reporting (so Input knows whether a wheel scrolls the application or the host's scrollback) and the scrollback line count. The engine updates it from the emulator's callbacks, coalesced per tick; the screen contents themselves are not State (see "What is not State"), exactly as `surface.update` lines are not.
-- `capture` values become `"text"` or `"all"` instead of `true` (`true` on the wire is recorded as `"text"`); `terminal.attach` records `"all"` unless the request said `"text"`. A 2.1 reader that tests the entry for presence is unchanged.
+- `capture` values become `"text"` or `"all"` instead of `true` (`true` on the wire is recorded as `"text"`); `terminal.attach` records `"all"` unless the request said `true` or `"text"` (recorded as `"text"`) or `false` (no entry). A 2.1 reader that tests the entry for presence is unchanged.
 
-`overlays.modal` gains `surface`: the id of the modal's surface, `modal-surface` for a rail item and the dynamic id for a runtime modal, so the frontend's `FocusSurface` while a modal is open is whichever of the two it is. The example value above becomes `"overlays":{"modal":{"plugin":"","rail_item":"","surface":""},...}` and `"runtime":{}`, `"terminals":{}` are always present, `{}` when empty, like `capture`.
+With runtime surfaces (not landed), `overlays.modal` gains `surface`: the id of the modal's surface, `modal-surface` for a rail item and the dynamic id for a runtime modal, so the frontend's `FocusSurface` while a modal is open is whichever of the two it is. The example value above becomes `"overlays":{"modal":{"plugin":"","rail_item":"","surface":""},...}` and `"runtime":{}` is always present, `{}` when empty, like `capture` and the landed `terminals`.
 
 `overlays` carries the landed `settings_center` (string, with the Settings center of [Settings center](settings-center.md), whose Theme tab is the theme selector of [Services](services.md), "The theme selector"): the id of the active tab (`general`, `keys`, `theme`, `store`, `installed`) while the frontend's Settings center modal is open, `""` while it is closed. It is written by the frontend through `UpdateSurfaceView` like `palette` and `slot_explorer`, rewritten on every tab switch, read by Input (the center consumes every key while open, [Keybindings](keybindings.md) context filters) and by `husk state get husk.surfaces`, and is `""` whenever the center is closed by any path. There is no separate `theme_selector` flag: the selector is a tab, as shown in the `husk.surfaces` example above.
 
