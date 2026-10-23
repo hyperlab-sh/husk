@@ -719,6 +719,13 @@ ever).
 | `husk hook list [--owner <id>]` | `hook.list` | one row per hook: id, owner, kind, timeout, subscribers with priority and `live` | 0 |
 | `husk state clear <namespace> [--force]` | `state.clear` | per State | 1 with the vetoes when the gate was not allowed |
 
+`hook list` prints the reply's `hooks` array sorted by id in JSON mode, the
+table in table mode (hook, owner, kind, timeout, subscribers with priority and
+whether each is live); `--owner` filters in the CLI. A vetoed `state clear`
+exits 1 with the `denied` reply: JSON mode prints the error object with
+`data.vetoes`, table mode adds one `plugin_id: reason` line per veto to the
+message on stderr.
+
 There is no `husk hook call`: the CLI is not at any owner's point, and a
 diagnostic that fires a hook from outside would make every subscriber act on
 an operation that is not happening. To see a hook fire, invoke the owner's
