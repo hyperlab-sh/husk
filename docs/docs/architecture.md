@@ -165,7 +165,7 @@ A rejected message has no effect. Each rejection is logged. A peer never answers
 
 Frame declarations live in the manifest (`surfaces[].frame`) and on rail items (`frame`). Both are optional: a plugin that omits them renders as a blank canvas.
 
-`theme.changed` carries generic colour roles only (`canvas`, `slot_background`, `surface*`, `border*`, `ink*`, `accent*`, `success`, `warning`, `danger`, `info`). Values are `#RRGGBB` strings (CharmTone). `slot_background` is the colour Husk paints under slot content; a plugin that wants its own background to blend with the slot, rather than cut out of it, can use it, and one that ignores it is unaffected. A plugin that needs its own colour set, such as one colour per entity, defines it itself.
+`theme.changed` carries generic colour roles only (`canvas`, `slot_background`, `surface*`, `border*`, `ink*`, `accent*`, `success`, `warning`, `danger`, `info`). Values are `#rrggbb` strings (the default theme is `charm`; the planned built-in `base16` theme carries ANSI index strings `"0"`–`"15"` instead, see [Built-in themes](design/themes.md)). `slot_background` is the colour Husk paints under slot content; a plugin that wants its own background to blend with the slot, rather than cut out of it, can use it, and one that ignores it is unaffected. A plugin that needs its own colour set, such as one colour per entity, defines it itself.
 
 ## Input routing
 
