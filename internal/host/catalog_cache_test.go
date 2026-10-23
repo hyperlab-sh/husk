@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
+	portsservices "github.com/hyperlab-sh/husk/internal/host/ports/services"
 	"github.com/hyperlab-sh/husk/internal/services"
 	"github.com/hyperlab-sh/husk/internal/substrate/store"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
@@ -140,9 +141,10 @@ func TestBrokenCatalogDoesNotFailOrDelayReload(t *testing.T) {
 func TestCatalogUsesServingProfile(t *testing.T) {
 	spy := &catalogSpy{}
 	dir := t.TempDir()
-	config := filepath.Join(dir, "config", "husk", "profiles", "work")
-	if err := os.MkdirAll(config, 0o700); err != nil {
-		t.Fatal(err)
+	for _, name := range []string{"work", "dev"} {
+		if err := os.MkdirAll(filepath.Join(dir, "config", "husk", "profiles", name), 0o700); err != nil {
+			t.Fatal(err)
+		}
 	}
 	h, err := bootIn(t, dir, func(c *contracts.Config) { name := "work"; c.ProfileFlag = &name }, func(o *options) { o.catalogReader = spy })
 	if err != nil {
@@ -151,8 +153,22 @@ func TestCatalogUsesServingProfile(t *testing.T) {
 	h.root.wg.Wait()
 	h.loop(func() {})
 	spy.mu.Lock()
+	initial := append([]string(nil), spy.calls...)
+	spy.mu.Unlock()
+	if !reflect.DeepEqual(initial, []string{"resolve:catalog:work", "layers:catalog:work"}) {
+		t.Fatal(initial)
+	}
+	result, err := (portsservices.Profile{Svc: h.root.rt.Profile}).Use(t.Context(), protocol.Caller{Kind: protocol.CallerCLI}, "dev")
+	if err != nil || result.Active != "dev" {
+		t.Fatalf("profile.use: %+v, %v", result, err)
+	}
+	h.loop(func() {})
+	h.loop(func() {}) // the preceding Update's event flush has finished
+	h.root.wg.Wait()
+	h.loop(func() {})
+	spy.mu.Lock()
 	defer spy.mu.Unlock()
-	if !reflect.DeepEqual(spy.calls, []string{"resolve:catalog:work", "layers:catalog:work"}) {
+	if len(spy.calls) != 4 || !reflect.DeepEqual(spy.calls[len(spy.calls)-2:], []string{"resolve:catalog:dev", "layers:catalog:dev"}) {
 		t.Fatal(spy.calls)
 	}
 }

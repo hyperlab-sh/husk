@@ -23,6 +23,7 @@ var _ contracts.Notifier = reloadWatcher{}
 
 // Notify implements contracts.Notifier.
 func (w reloadWatcher) Notify(n protocol.Message) error {
+	w.r.warmCatalog()
 	var p struct {
 		Data struct {
 			Reason  string `json:"reason"`
@@ -38,7 +39,6 @@ func (w reloadWatcher) Notify(n protocol.Message) error {
 	if err := json.Unmarshal(n.Params, &p); err != nil {
 		return err
 	}
-	w.r.warmCatalog()
 	errCount := 0
 	themeChanged := false
 	for _, rep := range p.Data.Reports {
