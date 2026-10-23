@@ -120,7 +120,7 @@ Problem: `q`, `h`, `v`, `?`, `tab` and the other unmodified host keys fire while
 - While `Capture` is true, a text key that no surface-scoped binding claims goes to the occupant unchanged, whatever any global layer binds. A person who wants a plain letter to stay a shortcut even while typing writes it as a surface-scoped entry.
 - `esc` and every modified key (`ctrl+`, `alt+`, `super+`, `meta+`, `hyper+`) resolve as usual, so quit (`ctrl+c`), the palette (`ctrl+p`), home (`alt+1`, `f1`) and focus cycling (`shift+tab`) stay reachable through the built-in keymap while typing.
 - Capture is not focus: it changes which keys resolve, not which surface receives them.
-- Closing the modal overlay is not a release, so it does not clear `capture` for `modal-surface`; a reopened modal starts with the old value until its occupant sends `capture: false`. An occupant that captures in the modal sends `capture: false` before it closes.
+- Closing the modal overlay is not a release, so it does not clear `capture` for `modal-surface`; a modal the same occupant reopens starts with the old value until that occupant sends `capture: false` (another plugin taking `modal-surface` clears it as any occupant change does). An occupant that captures in the modal sends `capture: false` before it closes.
 
 ### Key spelling
 
