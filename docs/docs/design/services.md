@@ -206,7 +206,7 @@ Selection runs in the coordinator's step 2, before the one `Store.Resolve`, so t
 
 1. `--profile <name>` was given: that name, on the `startup` flight only. On every later flight the flag is already in the slice (next step).
 2. The `husk.profile` slice is present (hydrated for a named instance, or written by `--profile`, `profile.use` or an earlier flight): its value, `""` included. `{"active":""}` is an explicit no profile and selection stops here; `profile.default` is not consulted.
-3. `profile.default` is set in the `user` layer: that name. The `distribution`, `profile` and `instance` layers cannot set it (a profile choosing a profile is circular; a distribution ships a default profile by shipping one profile directory, not by setting this key). A `profile.default` present in any other layer is a `warning` problem `profile_default_ignored` (message `profile.default is honoured from the user layer only`) and is ignored.
+3. The slice is absent and `profile.default` is set in the `user` layer: that name. It is read fresh on every flight, so a change is live for as long as no profile has been chosen (apply: live; never `restart_required`). The `distribution`, `profile` and `instance` layers cannot set it (a profile choosing a profile is circular; a distribution ships a default profile by shipping one profile directory, not by setting this key). A `profile.default` present in any other layer is a `warning` problem `profile_default_ignored` (message `profile.default is honoured from the user layer only`) and is ignored.
 4. Otherwise `""`.
 
 A name that `Store.Profiles()` does not list is not activated: Profile reports a `warning` problem `unknown_profile` (message `profile <name> does not exist; using no profile`) and the active profile is `""`.
