@@ -21,11 +21,11 @@ values stay `#rrggbb` (see "Role values").
 
 ## Level 0: What and why
 
-Husk has one palette today, named `CharmTone`, and the chrome draws with
-every role in it: the footer keys are accent-coloured, the Alt badges are
-yellow, the drag pill is green, the toast border takes the toast's colour.
-The result is a frame that uses too many colours, several of them vibrant.
-Two things fix that, and they are separate:
+Before the built-in layer, Husk had one palette, named `CharmTone`, and the
+chrome drew with every role in it: the footer keys were accent-coloured, the
+Alt badges were yellow, the drag pill was green, the toast border took the
+toast's colour. The result was a frame that used too many colours, several
+of them vibrant. Two things fix that, and they are separate:
 
 1. **Fewer colours in the frame**, whatever the theme. That is a drawing
    rule, not a palette: [Workbench chrome](chrome.md), "Colour discipline".
@@ -137,8 +137,10 @@ Anything else (a string index such as `"4"`, `#rgb`, a named colour, an
 integer outside `0`–`15`, a fraction) is not a role value, and the
 definition is dropped with `invalid_theme` ([Services](services.md), "Named
 themes", rule 4). The `theme.palette.<role>` settings overrides are not the
-`themes` document and stay `#RRGGBB` only (`invalid_color` otherwise): an
-override is a single colour the user is fitting to the measured floor.
+`themes` document and stay `#RRGGBB` only: Settings rejects a non-string
+(including an integer) with `invalid_value` before Theme runs; Theme rejects
+a malformed hex string with `invalid_color`. An override is a single colour
+the user is fitting to the measured floor.
 
 **Theme resolves an index** when it builds the palette. The role's value in
 the served `Palette` is the index's **xterm default**, the colour
@@ -695,12 +697,14 @@ role and no `name` (its name is its key).
 | `theme.name` names `base16` and a plugin ignores `ansi` (a client older than minor 2.4, or one that does not read it) | The plugin draws the xterm defaults in `palette`: a reasonable approximation, not the user's terminal colours. Not an error; `palette` is valid `#rrggbb` either way |
 | A layered theme writes an index as a string (`"4"`) or an integer outside `0`–`15` | Not a role value: the definition is dropped with `invalid_theme` (Services rule 4), as for any malformed colour |
 | A `theme.palette.<role>` override is applied on top of `base16` | The override is hex; it replaces that role's index, which leaves the `ansi` map. Pairs with an index on either side stay unmeasurable and skipped, so only pairs between two hex roles (in practice override against override) are enforced |
-| A `theme.palette.<role>` override is written as an integer | `invalid_color`: overrides are `#RRGGBB` only |
+| A `theme.palette.<role>` override is written as an integer | Settings reports `invalid_value` for the non-string; no Settings candidate is published and Theme is skipped (`settings_unchanged`). Overrides are `#RRGGBB` strings only |
 | The terminal has no truecolor | Unchanged: Bubble Tea downsamples hex values; ANSI basic colours pass through |
 
 ### Tests
 
-In `pkg/theme`, each named for what it pins:
+In `pkg/theme`, each named for what it pins, except `TestThemeValueGrammar`,
+`TestOverrideKeepsThemeSlot` and `TestIndexCanvasSlot`, which run in the Theme
+Service where the build lives:
 
 - `TestBuiltInThemesMatchDocument`: the embedded document decodes to nine
   themes with exactly these names and values, every role set, no `name`
@@ -711,10 +715,13 @@ In `pkg/theme`, each named for what it pins:
 - `TestThemeValueGrammar`: in a layered theme an integer `0`–`15` is
   accepted in any layer; `"4"`, `16`, `-1`, `4.5` and `#fff` each drop the
   definition with `invalid_theme`; an integer `theme.palette.<role>`
-  override is `invalid_color`.
+  override is rejected by a real Settings rebuild with `invalid_value`;
+  the coordinator skips Theme and no index enters the serving snapshot.
 - `TestIndexResolvesToXtermDefault`: each index `0`–`15` resolves to the
-  table's hex, equal to `ansi.BasicColor(n)`, and is recorded in the index
-  map; a hex override of an index role removes it from the map.
+  table's hex, equal to `ansi.BasicColor(n)`. The Theme Service's
+  `TestThemeIndexSnapshot` checks index-map recording, and
+  `TestOverrideKeepsThemeSlot` checks that a hex override removes the role's
+  index-map entry.
 - `TestBuiltInThemesContrast`: `CheckContrast` reports nothing for the eight
   hex themes; for `base16` every pair has an index side, so all are skipped
   and none is reported.
@@ -725,6 +732,8 @@ In `pkg/theme`, each named for what it pins:
 - `TestDefaultIsCharm`: `Default()` equals the `charm` entry, with `name`
   `charm`, so the frontend's fallback palette (used before the first reload)
   and the Theme Service's base agree.
+- `TestDefaultUsesCachedValue`: repeated calls allocate nothing after the
+  first decode; mutating a returned value cannot change the cached palette.
 - `TestOverrideKeepsThemeSlot`: `rose-pine` with a `theme.palette.accent`
   override still serves `slot_background` `#21202e` (the theme's value, not
   the derived `#201e2b`); `base16` with an override keeps `slot_background`

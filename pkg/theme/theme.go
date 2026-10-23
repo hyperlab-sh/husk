@@ -1,6 +1,9 @@
 package theme
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"sync"
+)
 
 // Palette is a flat colour token set shared by the workbench and its plugins.
 // Values are lowercase "#rrggbb" strings resolved from the built-in themes
@@ -30,13 +33,16 @@ type Palette struct {
 	Info            string `json:"info"`
 }
 
-// Default returns charm from the built-in themes layer. Every text and border
-// pairing is contrast-checked (text 4.5:1, borders and other non-text 3:1).
-func Default() Palette {
+var defaultPalette = sync.OnceValue(func() Palette {
 	entry := BuiltIn()["themes"].(map[string]any)["charm"].(map[string]any)["palette"]
 	b, _ := json.Marshal(entry)
 	var p Palette
 	json.Unmarshal(b, &p)
 	p.Name = "charm"
 	return p
-}
+})
+
+// Default returns a value copy of charm, decoded once from the built-in themes
+// layer. Every text and border pairing is contrast-checked (text 4.5:1, borders
+// and other non-text 3:1).
+func Default() Palette { return defaultPalette() }

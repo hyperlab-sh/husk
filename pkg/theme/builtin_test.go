@@ -180,3 +180,18 @@ func TestDefaultIsCharm(t *testing.T) {
 		t.Fatalf("default=%+v want=%+v", got, p)
 	}
 }
+
+func TestDefaultUsesCachedValue(t *testing.T) {
+	want := Default()
+	got := want
+	if allocations := testing.AllocsPerRun(100, func() { got = Default() }); allocations != 0 {
+		t.Fatalf("Default allocated %.0f times per call after initialization", allocations)
+	}
+	if got != want {
+		t.Fatal("cached default changed")
+	}
+	got.Name, got.Ink = "changed", ""
+	if Default() != want {
+		t.Fatal("mutating a returned palette changed the cached default")
+	}
+}

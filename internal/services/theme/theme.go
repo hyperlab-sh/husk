@@ -47,8 +47,9 @@ func (s *Service) WireANSI() (protocol.Palette, map[string]int) {
 	return protocol.Palette(snap.palette), maps.Clone(snap.indices)
 }
 
-// Overrides returns the detached roles applied over the built-in: the selected
-// theme's roles, then theme.palette overrides, and the resolved theme name.
+// Overrides returns the detached resolved role map before Overlay: charm (or
+// its replacement), then the selected theme, then theme.palette overrides and
+// the resolved theme name. Index roles appear as their xterm hex.
 func (s *Service) Overrides() map[string]string { return c.Clone(s.current.Load().overrides) }
 
 // Get implements theme.get for every authenticated caller.
@@ -78,18 +79,20 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 	if in.Settings == nil {
 		return nil, r, c.Failure("unavailable", "settings_missing")
 	}
+	builtIn := palette.Default()
+	defaultName := builtIn.Name
 	themes := resolveThemes(in.Themes, &r.Problems)
 	name := in.Settings.String("theme.name")
 	if name == "" {
-		name = palette.Default().Name
+		name = defaultName
 	}
 	if _, exists := themes[name]; !exists {
 		layer := in.Settings.Source("theme.name")
-		r.Problems = append(r.Problems, c.Problem{Severity: "warning", Code: "unknown_theme", Layer: layer, Key: "theme.name", Message: fmt.Sprintf("theme %s does not exist; using %s", name, palette.Default().Name), Source: &protocol.Source{Layer: layer, File: configFile(in, layer)}})
-		name = palette.Default().Name
+		r.Problems = append(r.Problems, c.Problem{Severity: "warning", Code: "unknown_theme", Layer: layer, Key: "theme.name", Message: fmt.Sprintf("theme %s does not exist; using %s", name, defaultName), Source: &protocol.Source{Layer: layer, File: configFile(in, layer)}})
+		name = defaultName
 	}
 	selected := themes[name]
-	base := themes[palette.Default().Name]
+	base := themes[defaultName]
 	// A higher-layer charm replaces the inheritance base too. Definitions are
 	// still whole units: missing roles fall back to the embedded charm.
 	overrides := c.Clone(base.roles)
@@ -101,7 +104,7 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 			indices[role] = index
 		}
 	}
-	for role := range palette.Roles(palette.Default()) {
+	for role := range palette.Roles(builtIn) {
 		if role == "name" {
 			continue
 		}
@@ -119,7 +122,7 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 	if err := c.Invalid(r.Problems); err != nil {
 		return nil, r, err
 	}
-	p, err := palette.Overlay(palette.Default(), overrides)
+	p, err := palette.Overlay(builtIn, overrides)
 	if err != nil {
 		c.Issue(&r.Problems, "error", "invalid_color", "user", "theme.palette", err.Error())
 		return nil, r, c.Invalid(r.Problems)
