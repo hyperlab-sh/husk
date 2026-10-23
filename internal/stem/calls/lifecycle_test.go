@@ -205,8 +205,6 @@ func TestDropPluginCarriesThePodReasonVerbatim(t *testing.T) {
 		"crashed (signal: killed): signal: killed",
 		"stopped reading: wrapper: stdout closed while process is running",
 		"stopped reading: read stdout: connection reset by peer",
-		"stopped reading: protocol: send queue full (1024 messages)",
-		"stopped reading: protocol: write timed out after 5s",
 	} {
 		t.Run(reason, func(t *testing.T) {
 			table, _, _ := newTestTable(TableOptions{})

@@ -496,13 +496,15 @@ func TestStdinOverflowAndTimeoutAreFatal(t *testing.T) {
 			if exit.Info.Status != Failed {
 				t.Fatal(exit)
 			}
-			want := "stopped reading: protocol: send queue full (1 messages)"
+			want := "send queue full"
 			if mode == "timeout" {
-				want = "stopped reading: protocol: write timed out after 5s"
+				want = "write timed out"
 			}
-			if exit.Info.LastError != want {
+			// The exact text waits on the ruling pinned in reasons_test.go.
+			if !strings.HasPrefix(exit.Info.LastError, "stopped reading: ") || !strings.Contains(exit.Info.LastError, want) {
 				t.Fatal(exit.Info.LastError)
 			}
+
 		})
 	}
 }

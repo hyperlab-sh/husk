@@ -348,11 +348,9 @@ func TestRealProcessFailureTextsReachHuskPods(t *testing.T) {
 			}
 			cancel, _ := runHost(t, ready, h)
 			defer cancel()
-			for i := 0; ; i++ {
-				if h.podStatus("gamma") == "failed" {
-					break
-				}
-				if i > 20000 {
+			deadline := time.Now().Add(failBound)
+			for h.podStatus("gamma") != "failed" {
+				if time.Now().After(deadline) {
 					t.Fatalf("gamma never failed (status %q)", h.podStatus("gamma"))
 				}
 				runtime.Gosched()
