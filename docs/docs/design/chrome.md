@@ -164,8 +164,9 @@ shows: hiding a key hides a hint, never a binding.
 
 ### Empty surfaces
 
-A drawn, empty surface (a region slot with no occupant) shows its humanised
-name, and nothing else:
+The activity rail is drawn by the host as rail buttons and never shows its
+humanised name. Every other drawn, empty region slot (one with no occupant)
+shows its humanised name, and nothing else:
 
 - The name is drawn in one line, centred horizontally and vertically in the
   surface's inner rect (the rect itself, since an empty surface has no
