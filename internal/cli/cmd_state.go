@@ -209,7 +209,7 @@ func listVetoes(inv *Invocation, err error) error {
 	}
 	listed := *oe
 	for _, v := range data.Vetoes {
-		listed.Message += "\n  " + v.Plugin + ": " + v.Reason
+		listed.Message += "\n  " + output.Text(v.Plugin) + ": " + output.Text(v.Reason)
 	}
 	return &listed
 }

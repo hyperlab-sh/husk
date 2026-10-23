@@ -194,20 +194,34 @@ func TestStateClearForceSendsForceTrueAndOnlyThen(t *testing.T) {
 
 func TestStateClearVetoedExitsOneWithTheVetoes(t *testing.T) {
 	t.Run("table lists each plugin_id: reason on stderr", func(t *testing.T) {
-		_, h := hookServer(t, vetoed)
+		srv, h := hookServer(t, vetoed)
 		if got := h.run("state", "clear", "p.state", "--format", "table"); got != output.ExitRemote {
 			t.Fatalf("exit %d: %s", got, h.errb.String())
 		}
 		if h.out.Len() != 0 {
 			t.Fatalf("stdout = %q", h.out.String())
 		}
-		for _, want := range []string{"notes: unsaved edits", "sync: "} {
-			if !strings.Contains(h.errb.String(), want) {
-				t.Fatalf("stderr lacks %q:\n%s", want, h.errb.String())
-			}
+		assertJSONEqual(t, lastRequest(t, srv).Params, `{"namespace":"p.state"}`)
+		if want := "husk: state.clear vetoed\n  notes: unsaved edits\n  sync: \n"; h.errb.String() != want {
+			t.Fatalf("stderr = %q, want %q", h.errb.String(), want)
 		}
-		if lines := strings.Split(strings.TrimRight(h.errb.String(), "\n"), "\n"); len(lines) != 3 {
-			t.Fatalf("stderr:\n%s", h.errb.String())
+	})
+	t.Run("a reason with control characters stays on one line", func(t *testing.T) {
+		_, h := hookServer(t, func(c *srvConn, req protocol.Message) {
+			c.send(protocol.Message{ID: req.ID, Error: &protocol.Error{Code: protocol.CodeDenied, Message: "state.clear vetoed",
+				Data: json.RawMessage(`{"reason":"vetoed","vetoes":[{"plugin_id":"notes","reason":"line1\n\u001b[31mred"},{"plugin_id":"sync","reason":"ok"}]}`)}})
+		})
+		if got := h.run("state", "clear", "p.state", "--format", "table"); got != output.ExitRemote {
+			t.Fatalf("exit %d", got)
+		}
+		if n := len(strings.Split(strings.TrimRight(h.errb.String(), "\n"), "\n")); n != 3 {
+			t.Fatalf("stderr has %d lines:\n%q", n, h.errb.String())
+		}
+		if strings.ContainsRune(h.errb.String(), 0x1b) {
+			t.Fatalf("raw ESC in stderr: %q", h.errb.String())
+		}
+		if !strings.Contains(h.errb.String(), `notes: "line1\n\u001b[31mred"`) {
+			t.Fatalf("stderr = %q", h.errb.String())
 		}
 	})
 	t.Run("json prints the error object with data.vetoes", func(t *testing.T) {

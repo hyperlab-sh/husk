@@ -183,3 +183,19 @@ func TestParseFormat(t *testing.T) {
 		}
 	}
 }
+
+func TestTextQuotesControlCharactersOnly(t *testing.T) {
+	for in, want := range map[string]string{
+		"plain":         "plain",
+		"":              "",
+		"a b: c":        "a b: c",
+		"l1\nl2":        `"l1\nl2"`,
+		"\x1b[31mred":   `"\u001b[31mred"`,
+		"tab\there":     `"tab\there"`,
+		"<html> & café": "<html> & café",
+	} {
+		if got := Text(in); got != want {
+			t.Errorf("Text(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
