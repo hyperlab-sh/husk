@@ -707,13 +707,15 @@ secrets. Explicit `GC` and `ResetSecrets` still do what they say.
 3. Services register their slices; each persistent one is hydrated inside
    `Register`.
 4. The composition root runs the synchronous `startup` flight, reading no
-   declared plugin documents ([Services](services.md), "Reload").
+   declared plugin documents ([Services](services.md), "Reload"). A failed
+   flight aborts the start.
 5. The root reads `husk.plugins.*` from that flight's Settings snapshot and
-   converts manifests, then builds Stem and Pods, which register their slices
-   (hydrated the same way). Pods `Declare` the plugin documents, register each
-   plugin's slices and request one `plugin` flight for the batch. Only after
-   it completes do the Wrappers launch the processes (the launch gate,
-   [Pods](pods.md)).
+   converts manifests (an invalid value of either key, or an entry it cannot
+   honour, aborts the start), then builds Stem and Pods, which register their
+   slices (hydrated the same way). Pods `Declare` the plugin documents,
+   register each plugin's slices and request one `plugin` flight for the
+   batch. Only after it completes do the Wrappers launch the processes (the
+   launch gate, [Pods](pods.md)).
 6. GC runs once in the background (start mode only; a passive `Open`
    schedules no GC).
 7. Exit: the Calls table closes ([Calls](calls.md)), the Server stops
