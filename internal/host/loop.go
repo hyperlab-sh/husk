@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/hyperlab-sh/husk/internal/host/contracts"
+	portsservices "github.com/hyperlab-sh/husk/internal/host/ports/services"
 	"github.com/hyperlab-sh/husk/internal/pods"
 	"github.com/hyperlab-sh/husk/internal/pods/server"
 	"github.com/hyperlab-sh/husk/internal/stem/calls"
@@ -137,14 +139,6 @@ func (r *Root) Update(msg any) bool {
 		r.complete(r.table.Sweep())
 	case server.Notice:
 		r.log(pods.LogMsg{Level: noticeLevel(m.Level), Message: "server: " + m.Message})
-	case pods.TeardownMsg:
-		// An unknown or already-removed id is a no-op for Pods; it must not
-		// undeclare and reload Services either.
-		_, existed := r.pods.Pod(m.PluginID)
-		r.pods.Handle(m)
-		if existed {
-			r.teardownPod(m.PluginID)
-		}
 	case pods.PreparedMsg, pods.RegisterSlicesMsg:
 		r.pods.Handle(m)
 		r.refreshCatalog()
@@ -207,11 +201,17 @@ func (r *Root) refreshCatalog() {
 	}
 }
 
-// teardownPod is the host half of Pod teardown (pods.md): the declaration
-// slices go with the Pod, its declared documents are removed and Services
-// reload without them. Occupant entries of the removed owner drop at the
-// engine's next flush, which tick runs.
-func (r *Root) teardownPod(id string) {
+// remover is the host half of plugin.remove for the Pods Host (pods.Remover).
+type remover struct{ r *Root }
+
+var _ pods.Remover = remover{}
+
+// Undeclare is steps 5 and 6's host half, in the teardown tick: the
+// declaration slices go with the Pod, its declared documents are removed and
+// every reader derived from them refreshes before the reload. Occupant entries
+// of the removed owner drop at the engine's flush, which tick runs.
+func (m remover) Undeclare(id string) {
+	r := m.r
 	if cancel := r.podWatch[id]; cancel != nil {
 		cancel()
 		delete(r.podWatch, id)
@@ -219,11 +219,21 @@ func (r *Root) teardownPod(id string) {
 	r.decl.drop(id)
 	r.store.Undeclare(id)
 	r.refreshCatalog()
-	r.spawn(func() tea.Msg {
-		_, _ = r.rt.Coordinator.Reload(r.ctx, servicesReasonPlugin)
-		return nil
-	})
 }
+
+// Reload is step 7's reload: reason plugin under the Host's context. The
+// Coordinator hands back its reports with the aggregate incomplete error, so
+// the reports are the answer whenever there are any.
+func (m remover) Reload(ctx context.Context) ([]contracts.ReloadReport, error) {
+	reports, err := m.r.rt.Coordinator.Reload(ctx, servicesReasonPlugin)
+	if len(reports) > 0 {
+		return portsservices.Reports(reports), nil
+	}
+	return nil, err
+}
+
+// Go starts a tracked worker (refused once shutdown began).
+func (m remover) Go(cmd tea.Cmd) { m.r.spawn(cmd) }
 
 // opening builds the notifications a Pod queues before anything else:
 // theme.changed, one surface.resized with every surface the plugin occupies,

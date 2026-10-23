@@ -341,13 +341,31 @@ type PluginInfo struct {
 	Log         string    `json:"log"`
 }
 
-// PluginPort serves plugin.list and plugin.log. Both are CLI methods: a
-// plugin caller gets denied.
+// PluginRemoval is the plugin.remove answer: the plugin's last husk.pods
+// status (never live), the log path plugin.log would have answered ("" when
+// no log was opened) and the one reload's reports, the same type
+// config.reload returns.
+type PluginRemoval struct {
+	Plugin  string         `json:"plugin"`
+	Status  PodStatus      `json:"status"`
+	Log     string         `json:"log"`
+	Reports []ReloadReport `json:"reports"`
+}
+
+// PluginPort serves plugin.list, plugin.log and plugin.remove. All three are
+// CLI methods: a plugin caller gets denied.
 type PluginPort interface {
 	// List serves plugin.list.
 	List(ctx context.Context, c Caller) ([]PluginInfo, error)
 	// Log serves plugin.log: the log file path for a plugin id, or not_found.
 	Log(ctx context.Context, c Caller, pluginID string) (string, error)
+	// Remove serves plugin.remove: it unloads one plugin from this instance
+	// and answers once the Services reload that no longer sees it has
+	// completed. Unknown ids are not_found, a closing host is unavailable
+	// (data.reason shutdown), and a shutdown during the removal is cancelled
+	// (data.reason shutdown). ctx ending only detaches the caller: the
+	// removal runs to completion.
+	Remove(ctx context.Context, c Caller, pluginID string) (PluginRemoval, error)
 }
 
 // SurfacePort serves the plugin-originated notifications and requests that

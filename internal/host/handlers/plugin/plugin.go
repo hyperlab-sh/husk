@@ -9,13 +9,16 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
-// Plugin adapts contracts.PluginPort for plugin.list and plugin.log. Both are
-// CLI methods; a plugin caller is denied before the port is touched. The
+// Plugin adapts contracts.PluginPort for plugin.list, plugin.log and plugin.remove. All
+// are CLI methods; a plugin caller is denied before the port is touched. The
 // params and result shapes are specified in docs/docs/design/pods.md, section
 // "plugin.* wire shapes".
 type Plugin struct {
 	Port contracts.PluginPort
 }
+
+// removeParams names the plugin to unload.
+type removeParams = logParams
 
 // logParams names the plugin whose host-side stderr log is wanted.
 type logParams struct {
@@ -55,6 +58,22 @@ func (h Plugin) Serve(ctx context.Context, c contracts.Caller, req protocol.Mess
 			return handlers.ErrorReply(req, err)
 		}
 		return handlers.Reply(req, logResult{Path: path})
+	case protocol.MethodPluginRemove:
+		var p removeParams
+		if bad := handlers.DecodeParams(req, &p); bad != nil {
+			return *bad
+		}
+		if bad := handlers.RequireString(req, "params.plugin", p.Plugin); bad != nil {
+			return *bad
+		}
+		res, err := h.Port.Remove(ctx, c, p.Plugin)
+		if err != nil {
+			return handlers.ErrorReply(req, err)
+		}
+		if res.Reports == nil {
+			res.Reports = []contracts.ReloadReport{}
+		}
+		return handlers.Reply(req, res)
 	}
 	return handlers.UnknownMethod(req)
 }

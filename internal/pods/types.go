@@ -67,12 +67,28 @@ type Registered struct {
 	Failed  map[string]error
 }
 
-// TeardownMsg tears one Pod down on the loop: revokes its credential,
-// unregisters its State slice through the stored owner handle and releases
-// the registry id. The process must already have exited or been stopped by
-// the shared shutdown; Store undeclaration and the follow-up reload stay
-// with the composition root (pods.md teardown).
-type TeardownMsg struct{ PluginID string }
+// TeardownMsg is the stop worker's completion in a plugin.remove, handled on
+// the loop (pods.md "Removing a plugin", step 5): the handler revokes the
+// Pod's credential, unregisters its State slice through the stored owner
+// handle, releases the registry id, records the reply's status and log,
+// undeclares the plugin and starts the reload worker. It runs only for an id
+// with a removing entry and never after the shutdown mark; any other
+// TeardownMsg is stale and ignored. Unreaped says the process survived
+// SIGKILL past the kill wait.
+type TeardownMsg struct {
+	PluginID string
+	Unreaped bool
+}
+
+// RemoveDoneMsg is the reload worker's completion in a plugin.remove (step
+// 7). The handler records the reports, or the cancellation when the reload
+// was cut short with no report, closes the removing entry's completion channel
+// and deletes the entry. A message for an id with no entry is stale.
+type RemoveDoneMsg struct {
+	PluginID string
+	Reports  []contracts.ReloadReport
+	Err      error
+}
 
 // PreparedMsg is a preparation command's completion, handled on the loop.
 type PreparedMsg struct {
@@ -116,6 +132,28 @@ type Publisher interface {
 // fails; its payload is the Pod's husk.pods entry plus `plugin_id`.
 const PluginExitedEvent = "pods.plugin-exited"
 
+// PluginRemovedEvent is the name of the event published after a plugin.remove
+// undeclared the plugin; its payload is {plugin_id, status}.
+const PluginRemovedEvent = "pods.plugin-removed"
+
+// Remover is the composition root's half of plugin.remove: what the teardown
+// tick needs beyond Pods' own state, and the workers that follow it. Without
+// one, teardown undeclares nothing, workers are plain goroutines posting
+// through Loop.Post, and the reload reports are empty.
+type Remover interface {
+	// Undeclare runs on the loop inside the teardown tick, after the Pod's
+	// slices are unregistered: it removes the plugin's declared documents
+	// (Store.Undeclare) and refreshes every reader derived from them.
+	Undeclare(pluginID string)
+	// Reload runs in the reload worker: one Services reload with reason
+	// plugin, under ctx. Reports come back whether or not every service
+	// applied; the error is set only when no reload completed (cancelled).
+	Reload(ctx context.Context) ([]contracts.ReloadReport, error)
+	// Go starts cmd as a tracked worker and posts the message it returns. It
+	// does nothing once shutdown began.
+	Go(cmd tea.Cmd)
+}
+
 // Factory constructs real or fake process wrappers before token registration.
 type Factory func(manifest.Spec, wrapper.Options) (wrapper.Process, error)
 
@@ -132,8 +170,11 @@ type Options struct {
 	// Starter, when set, starts processes after the launch gate instead of
 	// the built-in Factory/Wrapper path (Host.Start).
 	Starter contracts.WrapperStarter
-	// Publisher receives `pods.plugin-exited` from Handle.
+	// Publisher receives `pods.plugin-exited` and `pods.plugin-removed` from
+	// Handle.
 	Publisher Publisher
+	// Remover supplies the composition root's half of plugin.remove.
+	Remover Remover
 }
 
 var _ contracts.WrapperStarter = (*Host)(nil)

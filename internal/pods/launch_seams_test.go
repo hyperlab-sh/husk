@@ -296,6 +296,7 @@ func TestTeardownUnregistersHandleAndReleasesId(t *testing.T) {
 	registry := fakes.NewPods(fakes.NewRecorder())
 	h.opts.Registry = registry
 
+	markRemoving(h, "files")
 	if !h.Handle(TeardownMsg{PluginID: "files"}) {
 		t.Fatal("unhandled teardown")
 	}
@@ -311,7 +312,7 @@ func TestTeardownUnregistersHandleAndReleasesId(t *testing.T) {
 	if _, ok := registry.Entry("files"); ok {
 		t.Fatal("registry id kept after teardown")
 	}
-	if !h.Handle(TeardownMsg{PluginID: "files"}) {
+	if !h.Handle(TeardownMsg{PluginID: "files"}) { // the Pod is gone: stale
 		t.Fatal("second teardown not handled")
 	}
 	if good.unregistered != true { // still exactly one unregister
@@ -447,6 +448,7 @@ func TestHandlesCrossingIsGuarded(t *testing.T) {
 		h.Handle(RegisterSlicesMsg{Register: map[string]func() (contracts.SliceHandle, error){
 			"files": func() (contracts.SliceHandle, error) { return &fakeHandle{namespace: "files.state"}, nil },
 		}, Done: done})
+		markRemoving(h, "files")
 		h.Handle(TeardownMsg{PluginID: "files"})
 		addPod(t, h, "files")
 	}
@@ -475,6 +477,7 @@ func TestTeardownWhileGatePendingSkipsRemoved(t *testing.T) {
 
 	cmd := h.Prepare()
 	msg := cmd()
+	markRemoving(h, "files")
 	h.Handle(TeardownMsg{PluginID: "files"})
 	if !h.Handle(msg) {
 		t.Fatal("prepared message unhandled")
@@ -522,6 +525,7 @@ func TestRegisterSlicesAfterTeardownRefused(t *testing.T) {
 		},
 	}
 	done := make(chan Registered, 1)
+	markRemoving(h, "files")
 	h.Handle(TeardownMsg{PluginID: "files"})
 	h.Handle(RegisterSlicesMsg{Gate: gate, Register: register, Done: done})
 	reg := testclock.Receive(t, done)
@@ -575,6 +579,7 @@ func TestStaleRegistrationFromPriorLaunchRefused(t *testing.T) {
 	addPod(t, h, "files")
 	gate1 := h.nextGate + 1
 	h.Prepare() // launch 1: worker1 goes off-loop with gate1
+	markRemoving(h, "files")
 	h.Handle(TeardownMsg{PluginID: "files"})
 
 	addPod(t, h, "files") // same id, new Pod
@@ -616,4 +621,10 @@ func TestStaleRegistrationFromPriorLaunchRefused(t *testing.T) {
 	if reg := testclock.Receive(t, staleDone2); reg.Failed["files"] == nil {
 		t.Fatal("late stale retry accepted")
 	}
+}
+
+// markRemoving stands in for plugin.remove's step 2: the teardown handler runs
+// only for an id with a removing entry.
+func markRemoving(h *Host, id string) {
+	h.removing[id] = &removal{done: make(chan struct{})}
 }
