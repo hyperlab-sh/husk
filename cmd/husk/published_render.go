@@ -126,6 +126,8 @@ func (r *surfaceCatalog) layoutPublished(surface protocol.SurfaceID, owner strin
 		var rowHits []contributionHit
 		l.Rows[y], rowHits = r.replaceAnchors(owner, line, width, y)
 		// Clip with the "…" tail; the canvas blanks the rest of the row.
+		// The overlay is not truncated: an ellipsis would be an opaque cell
+		// painted over the frame edge; the canvas clip drops the overflow instead.
 		if surface != protocol.SurfaceAppOverlay && ansi.StringWidth(l.Rows[y]) > width {
 			l.Rows[y] = ansi.Truncate(l.Rows[y], width, "…")
 		}

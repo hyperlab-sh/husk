@@ -136,9 +136,12 @@ func TestKeysListScopesThePluginView(t *testing.T) {
 	svc := keybinding.New()
 	in := services.ReloadInput{
 		Doc:    store.Resolved{Doc: doc(t, `{}`), Origins: map[string]store.Layer{}},
-		Layers: []store.LayerDoc{{Layer: store.LayerUser, Doc: doc(t, `{"version":1,"bind":[{"key":"g","action":"husk.home"},{"key":"t","action":"files.tree","plugin":"files","focus":"stage"}]}`)}},
+		Layers: []store.LayerDoc{{Layer: store.LayerUser, Doc: doc(t, `{"version":1,"bind":[{"key":"g","action":"husk.home"},{"key":"t","action":"files.tree","plugin":"files","focus":"stage"},{"key":"o","action":"other.run"}]}`)}},
 		Declared: map[store.DocName]map[string]store.Doc{
-			store.DeclaredPlugins: {"files": doc(t, `{"id":"files","actions":[{"id":"files.tree"}],"surfaces":[{"id":"stage"}]}`)},
+			store.DeclaredPlugins: {
+				"files": doc(t, `{"id":"files","actions":[{"id":"files.tree"}],"surfaces":[{"id":"stage"}]}`),
+				"other": doc(t, `{"id":"other","actions":[{"id":"other.run"}]}`),
+			},
 		},
 	}
 	applyTo(t, svc, in)
@@ -149,7 +152,7 @@ func TestKeysListScopesThePluginView(t *testing.T) {
 	if err != nil || len(full.Entries) == 0 || len(full.Problems) != 0 {
 		t.Fatalf("user list = %d entries, %d problems, err=%v", len(full.Entries), len(full.Problems), err)
 	}
-	var ownAction, hostAction bool
+	var ownAction, hostAction, foreignAction bool
 	for _, e := range full.Entries {
 		if e.Action == "files.tree" && e.Plugin == "files" {
 			ownAction = true
@@ -157,20 +160,29 @@ func TestKeysListScopesThePluginView(t *testing.T) {
 		if e.Action == "husk.home" {
 			hostAction = true
 		}
+		if e.Action == "other.run" {
+			foreignAction = true
+		}
 	}
-	if !ownAction || !hostAction {
-		t.Fatalf("user listing misses entries: own=%v host=%v", ownAction, hostAction)
+	if !ownAction || !hostAction || !foreignAction {
+		t.Fatalf("user listing misses entries: own=%v host=%v foreign=%v", ownAction, hostAction, foreignAction)
 	}
-	// This fixture contains only own entries and effective host bindings, so
-	// the plugin and the Stem both see every row.
+	// Plugins see their own entries and effective host bindings, but not
+	// another plugin's action. The Stem still sees the full listing.
 	own, err := port.List(ctx, filesCaller)
-	if err != nil || len(own.Entries) != len(full.Entries) {
+	if err != nil || len(own.Entries) != len(full.Entries)-1 {
 		t.Fatalf("plugin list = %+v err=%v", own, err)
 	}
-	for i, e := range own.Entries {
-		if e.Action != full.Entries[i].Action || e.State != full.Entries[i].State {
-			t.Fatalf("plugin entry %d = %+v, want %+v", i, e, full.Entries[i])
+	ownAction, hostAction = false, false
+	for _, e := range own.Entries {
+		if e.Action == "other.run" {
+			t.Fatal("plugin listing exposes another plugin's action")
 		}
+		ownAction = ownAction || e.Action == "files.tree"
+		hostAction = hostAction || e.Action == "husk.home"
+	}
+	if !ownAction || !hostAction {
+		t.Fatalf("plugin listing misses entries: own=%v host=%v", ownAction, hostAction)
 	}
 	stem, err := port.List(ctx, stemHost)
 	if err != nil || len(stem.Entries) != len(full.Entries) {

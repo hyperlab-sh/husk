@@ -346,10 +346,10 @@ func Catalogs(in ReloadInput) (map[string]Catalog, []Problem) {
 		}
 		if err := Decode(doc, &rails); err != nil {
 			ps = append(ps, Problem{Severity: "warning", Code: "invalid_plugin_catalog", Layer: "plugin:" + id, Message: "invalid rail item catalog", Source: &Source{Layer: "plugin:" + id, Plugin: id}})
-			continue
-		}
-		for _, item := range rails.Items {
-			c.RailItems = append(c.RailItems, item.ID)
+		} else {
+			for _, item := range rails.Items {
+				c.RailItems = append(c.RailItems, item.ID)
+			}
 		}
 		out[id] = c
 	}
