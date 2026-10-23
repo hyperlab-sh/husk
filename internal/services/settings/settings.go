@@ -74,6 +74,7 @@ func Builtins() []Entry {
 		{Key: "profile.default", Type: TypeString, Default: "", Owner: "husk", Apply: "live"},
 		{Key: "theme.name", Type: TypeString, Default: palette.Default().Name, Owner: "husk", Apply: "live"},
 		{Key: "theme.allow_low_contrast", Type: TypeBool, Default: false, Owner: "husk", Apply: "live"},
+		{Key: "husk.bundle", Type: TypeString, Default: "", Owner: "husk", Apply: "restart", Doc: "Bundle directory loaded once at start, from user and instance layers only."},
 		{Key: "husk.plugins.paths", Type: TypeStrings, Default: []string{}, Owner: "husk", Apply: "restart", Doc: "Plugin arguments loaded once at start, interpreted like --plugin; --plugin is the instance layer on top."},
 		{Key: "husk.plugins.dirs", Type: TypeStrings, Default: []string{}, Owner: "husk", Apply: "restart", Doc: "Plugin directories loaded once at start, interpreted like --plugin-dir; --plugin-dir is the instance layer on top."},
 	}
@@ -361,6 +362,35 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 	}
 	flat := map[string]any{}
 	flatten("", in.Doc.Doc, schema, flat)
+	// A profile or distribution cannot choose the distribution's own source.
+	// Read the allowed layers independently: an ignored higher value must not
+	// hide the user value or manufacture a restart_required warning.
+	delete(flat, "husk.bundle")
+	bundleLayer := "default"
+	for _, l := range in.ConfigLayers {
+		raw, present := c.Dotted(l.Doc, "husk.bundle")
+		if l.Layer != store.LayerUser && l.Layer != store.LayerInstance {
+			if present {
+				r.Problems = append(r.Problems, c.Problem{Severity: "warning", Code: "bundle_setting_ignored", Layer: string(l.Layer), Key: "husk.bundle", Message: "husk.bundle is honoured from the user and instance layers only", Source: &c.Source{Layer: string(l.Layer), File: l.File}})
+			}
+			continue
+		}
+		if husk, exists := l.Doc["husk"]; exists {
+			if _, object := husk.(map[string]any); !object {
+				delete(flat, "husk.bundle")
+				bundleLayer = "default"
+			}
+		}
+		if present {
+			if raw == nil {
+				delete(flat, "husk.bundle")
+				bundleLayer = "default"
+			} else {
+				flat["husk.bundle"] = raw
+				bundleLayer = string(l.Layer)
+			}
+		}
+	}
 	// Store reports a clash at an object node as often as at a leaf; the Key is
 	// set only when settings.get accepts it.
 	for _, p := range in.Doc.Problems {
@@ -380,6 +410,9 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 	}
 	for key, raw := range flat {
 		layer := originOf(in.Doc.Origins, key)
+		if key == "husk.bundle" {
+			layer = bundleLayer
+		}
 		e, known := schema[key]
 		if !known {
 			r.Problems = append(r.Problems, c.Problem{Severity: "warning", Code: "unknown_key", Layer: layer, Key: key, Message: key + ": no schema entry; the value is kept and no plugin sees it", Source: sourceOf(layer, layerFiles)})
