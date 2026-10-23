@@ -47,6 +47,7 @@ func (r *Root) buildServer() error {
 		RuntimeDir: r.cfg.RuntimeDir,
 		Entry:      entry,
 		Tokens:     r.pods,
+		Legacy:     r.pods,
 		Post:       r.cfg.Post,
 		Clock:      r.clock,
 	}
