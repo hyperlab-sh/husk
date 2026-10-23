@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -208,20 +209,20 @@ func TestSettingsNewRejectsBadSchemas(t *testing.T) {
 // value stays and the message carries both values.
 func TestSettingsRestartRequiredOnSecondLoadOnly(t *testing.T) {
 	s := newSet(settings.Options{})
-	r := apply(t, s, input(`{"profile":{"default":"one"}}`))
+	r := apply(t, s, input(`{"husk":{"plugins":{"paths":["one"]}}}`))
 	if _, ok := findProblem(r.Problems, "restart_required"); ok {
 		t.Fatal("restart_required on the first load", r.Problems)
 	}
-	r = apply(t, s, input(`{"profile":{"default":"two"}}`))
+	r = apply(t, s, input(`{"husk":{"plugins":{"paths":["two"]}}}`))
 	p, ok := findProblem(r.Problems, "restart_required")
-	if !ok || p.Severity != "warning" || p.Key != "profile.default" || !strings.Contains(p.Message, "one") || !strings.Contains(p.Message, "two") {
+	if !ok || p.Severity != "warning" || p.Key != "husk.plugins.paths" || !strings.Contains(p.Message, "one") || !strings.Contains(p.Message, "two") {
 		t.Fatalf("restart_required = %+v", r.Problems)
 	}
-	if s.Snapshot().String("profile.default") != "one" {
+	if fmt.Sprint(s.Snapshot().Strings("husk.plugins.paths")) != "[one]" {
 		t.Fatal("in-force value changed")
 	}
 	// An unchanged value on a later load is quiet.
-	r = apply(t, s, input(`{"profile":{"default":"one"}}`))
+	r = apply(t, s, input(`{"husk":{"plugins":{"paths":["one"]}}}`))
 	if _, ok := findProblem(r.Problems, "restart_required"); ok {
 		t.Fatal("restart_required for an unchanged value", r.Problems)
 	}
@@ -306,5 +307,16 @@ func TestSettingsWrongShapeForKnownKey(t *testing.T) {
 				t.Fatalf("wrong-shape value also reported as unknown leaves: %+v", r.Problems)
 			}
 		})
+	}
+}
+
+// profile.default is read fresh by every profile selection, so it is live:
+// a later change applies at once and never asks for a restart.
+func TestSettingsProfileDefaultIsLive(t *testing.T) {
+	s := newSet(settings.Options{})
+	apply(t, s, input(`{"profile":{"default":"one"}}`))
+	r := apply(t, s, input(`{"profile":{"default":"two"}}`))
+	if _, ok := findProblem(r.Problems, "restart_required"); ok || s.Snapshot().String("profile.default") != "two" {
+		t.Fatalf("profile.default = %q, problems %+v", s.Snapshot().String("profile.default"), r.Problems)
 	}
 }

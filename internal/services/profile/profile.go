@@ -43,12 +43,11 @@ type Reloader interface {
 // Flag is the --profile start flag: a selection input of the startup flight,
 // never written to State by itself.
 type Options struct {
-	Store   StoreReader
-	State   c.Tree
-	Post    c.Post
-	Flag    *string
-	Default string
-	Source  func(string) string
+	Store  StoreReader
+	State  c.Tree
+	Post   c.Post
+	Flag   *string
+	Source func(string) string
 }
 
 // Service owns only its profile handle and a replaceable read snapshot.
@@ -67,25 +66,30 @@ type snapshot struct {
 // New registers husk.profile on the loop, retaining any usable hydration warning.
 func New(opts Options) (*Service, error) {
 	s := &Service{opts: opts}
-	raw, _ := json.Marshal(map[string]string{"active": opts.Default})
-	h, err := opts.State.Register(state.Spec{Namespace: state.ProfileNamespace, Owner: state.OwnerHusk, Scope: state.ScopeInstance, Persistent: true, Retention: state.Retention{Policy: state.KeepLatest}, Initial: raw})
+	h, err := opts.State.Register(state.Spec{Namespace: state.ProfileNamespace, Owner: state.OwnerHusk, Scope: state.ScopeInstance, Persistent: true, Retention: state.Retention{Policy: state.KeepLatest}})
 	if h == nil {
 		return nil, err
 	}
 	s.handle = h
-	s.current.Store(&snapshot{active: s.stateActive()})
+	active, _ := s.stateActive()
+	s.current.Store(&snapshot{active: active})
 	return s, err
 }
 
 // Bind connects the coordinator; call it once, before the first profile.use.
 func (s *Service) Bind(r Reloader) { s.reloader = r }
 
-func (s *Service) stateActive() string {
+// stateActive reads the slice: its name and whether it is present. An absent
+// slice has no active key; {"active":""} is present and means no profile.
+func (s *Service) stateActive() (string, bool) {
 	var v struct {
-		Active string `json:"active"`
+		Active *string `json:"active"`
 	}
 	json.Unmarshal(s.opts.State.Snapshot().Slices[state.ProfileNamespace].Value, &v)
-	return v.Active
+	if v.Active == nil {
+		return "", false
+	}
+	return *v.Active, true
 }
 
 // Active is the last applied profile selection.
@@ -163,19 +167,20 @@ func (s *Service) Use(ctx context.Context, caller c.Caller, name string) (string
 // Select is step 2's profile choice, before the one Store.Resolve. layers are
 // the unmerged config layers read without a profile; only the user layer's
 // profile.default counts. First match wins: the --profile flag (startup flight
-// only), a name in the husk.profile slice (an empty slice written after
-// registration is an explicit "no profile"), the user-layer default, none. A
-// name Store does not list is not activated: unknown_profile and "".
-func (s *Service) Select(startup bool, layers []store.LayerDoc, names []string) (string, []c.Problem) {
-	name, layer, key := "", "", ""
-	entry := s.opts.State.Snapshot().Slices[state.ProfileNamespace]
-	switch active := s.stateActive(); {
+// only), a present husk.profile slice (its value, "" included: an explicit no
+// profile ends selection), the user-layer default while the slice is absent,
+// none. A name Store does not list is not activated: unknown_profile and "".
+// write reports a selection the slice must record: a --profile choice, or a
+// present slice naming a vanished profile. A default selection writes nothing.
+func (s *Service) Select(startup bool, layers []store.LayerDoc, names []string) (name string, problems []c.Problem, write bool) {
+	layer, key := "", ""
+	fromFlag, fromSlice := false, false
+	slice, present := s.stateActive()
+	switch {
 	case startup && s.opts.Flag != nil:
-		name = *s.opts.Flag
-	case active != "":
-		name = active
-	case entry.Revision > 1:
-		// profile.use "" or a write-back of "": the user chose no profile.
+		name, fromFlag = *s.opts.Flag, true
+	case present:
+		name, fromSlice = slice, true
 	default:
 		for _, l := range layers {
 			if v, ok := c.Dotted(l.Doc, "profile.default"); ok && l.Layer == store.LayerUser {
@@ -185,14 +190,14 @@ func (s *Service) Select(startup bool, layers []store.LayerDoc, names []string) 
 		}
 	}
 	if name == "" {
-		return "", nil
+		return "", nil, false
 	}
 	for _, n := range names {
 		if n == name {
-			return name, nil
+			return name, nil, fromFlag
 		}
 	}
-	return "", []c.Problem{{Severity: "warning", Code: "unknown_profile", Layer: layer, Key: key, Message: fmt.Sprintf("profile %s does not exist; using no profile", name)}}
+	return "", []c.Problem{{Severity: "warning", Code: "unknown_profile", Layer: layer, Key: key, Message: fmt.Sprintf("profile %s does not exist; using no profile", name)}}, fromFlag || fromSlice
 }
 
 // Rebuild prepares the profile list for the selection the coordinator made. It
@@ -204,7 +209,7 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 	if ctx.Err() != nil {
 		return c.ContextError(ctx, r)
 	}
-	original := s.stateActive()
+	original, wasPresent := s.stateActive()
 	active := original
 	if in.Profile != nil {
 		active = *in.Profile
@@ -247,9 +252,9 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 		if !s.current.CompareAndSwap(old, next) {
 			return false
 		}
-		if next.active != s.stateActive() && s.opts.Post != nil {
+		if cur, present := s.stateActive(); in.ProfileWrite && (!present || cur != next.active) && s.opts.Post != nil {
 			s.opts.Post(func() {
-				if s.stateActive() == original {
+				if cur, present := s.stateActive(); cur == original && present == wasPresent {
 					b, _ := json.Marshal(map[string]string{"active": next.active})
 					s.handle.Set(b)
 				}

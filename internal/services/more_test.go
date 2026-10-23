@@ -370,10 +370,10 @@ func TestProfileProvenanceAndStartupFlagOverHydration(t *testing.T) {
 		t.Fatal(err)
 	}
 	apply(t, p, input(`{}`))
-	if name, problems := p.Select(true, nil, []string{"app", "work"}); name != "work" || len(problems) != 0 {
+	if name, problems, write := p.Select(true, nil, []string{"app", "work"}); name != "work" || len(problems) != 0 || !write {
 		t.Fatal("flag lost to hydration", name, problems)
 	}
-	if name, _ := p.Select(false, nil, []string{"app", "work"}); name != "app" {
+	if name, _, write := p.Select(false, nil, []string{"app", "work"}); name != "app" || write {
 		t.Fatal("flag applied outside the startup flight", name)
 	}
 	list := p.List()

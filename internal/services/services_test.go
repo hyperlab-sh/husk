@@ -86,15 +86,15 @@ func TestSettingsAtomicValidationAndAccess(t *testing.T) {
 func TestSettingsRestartSchemaRawAndSecretRejection(t *testing.T) {
 	s := newSet(settings.Options{})
 	in := catalog("files")
-	in.Doc.Doc = doc(`{"profile":{"default":"one"}}`)
+	in.Doc.Doc = doc(`{"husk":{"plugins":{"paths":["one"]}}}`)
 	apply(t, s, in)
-	in.Doc.Doc = doc(`{"profile":{"default":"two"}}`)
+	in.Doc.Doc = doc(`{"husk":{"plugins":{"paths":["two"]}}}`)
 	r := apply(t, s, in)
-	if s.Snapshot().String("profile.default") != "one" || len(r.Problems) != 1 {
+	if fmt.Sprint(s.Snapshot().Strings("husk.plugins.paths")) != "[one]" || len(r.Problems) != 1 {
 		t.Fatal("restart not held")
 	}
-	raw, _ := s.Snapshot().Raw("profile.default")
-	if raw != "one" {
+	raw, _ := s.Snapshot().Raw("husk.plugins.paths")
+	if fmt.Sprint(raw) != "[one]" {
 		t.Fatal("raw follows the in-force value on a held restart key")
 	}
 	in.Doc.Doc = doc(`{"git":{"token":"DO_NOT_REPORT_VALUE"}}`)

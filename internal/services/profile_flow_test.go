@@ -103,6 +103,14 @@ func (r *rig) slice(t *testing.T) string {
 	return v.Active
 }
 
+// present reports whether the slice holds an active key at all.
+func (r *rig) present() bool {
+	var v map[string]json.RawMessage
+	json.Unmarshal(r.tree.Snapshot().Slices[state.ProfileNamespace].Value, &v)
+	_, ok := v["active"]
+	return ok
+}
+
 func (r *rig) idle() bool {
 	co := r.rt.Coordinator
 	co.mu.Lock()
@@ -131,13 +139,14 @@ func TestProfileSelectionAtStartup(t *testing.T) {
 		flag     *string
 		want     string
 		code     string // a problem the flight must carry, or ""
+		written  bool   // the flight records a choice in the slice
 	}{
-		{"user default", []string{"work", "other"}, []store.LayerDoc{userLayer(`{"profile":{"default":"work"}}`)}, nil, "work", ""},
-		{"flag beats default", []string{"work", "other"}, []store.LayerDoc{userLayer(`{"profile":{"default":"work"}}`)}, str("other"), "other", ""},
-		{"no input", []string{"work"}, nil, nil, "", ""},
-		{"unknown default", []string{"work"}, []store.LayerDoc{userLayer(`{"profile":{"default":"missing"}}`)}, nil, "", "unknown_profile"},
-		{"unknown flag", []string{"work"}, nil, str("missing"), "", "unknown_profile"},
-		{"default in another layer", []string{"work"}, []store.LayerDoc{{Layer: store.LayerProfile, File: "/cfg/p.json", Doc: doc(`{"profile":{"default":"work"}}`)}}, nil, "", "profile_default_ignored"},
+		{"user default", []string{"work", "other"}, []store.LayerDoc{userLayer(`{"profile":{"default":"work"}}`)}, nil, "work", "", false},
+		{"flag beats default", []string{"work", "other"}, []store.LayerDoc{userLayer(`{"profile":{"default":"work"}}`)}, str("other"), "other", "", true},
+		{"no input", []string{"work"}, nil, nil, "", "", false},
+		{"unknown default", []string{"work"}, []store.LayerDoc{userLayer(`{"profile":{"default":"missing"}}`)}, nil, "", "unknown_profile", false},
+		{"unknown flag persists none", []string{"work"}, nil, str("missing"), "", "unknown_profile", true},
+		{"default in another layer", []string{"work"}, []store.LayerDoc{{Layer: store.LayerProfile, File: "/cfg/p.json", Doc: doc(`{"profile":{"default":"work"}}`)}}, nil, "", "profile_default_ignored", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -162,8 +171,8 @@ func TestProfileSelectionAtStartup(t *testing.T) {
 				}
 			}
 			r.settle()
-			if r.slice(t) != tc.want {
-				t.Fatalf("slice = %q, want %q", r.slice(t), tc.want)
+			if (tc.written && r.slice(t) != tc.want) || r.present() != tc.written {
+				t.Fatalf("slice = %q present=%v, want %q present=%v", r.slice(t), r.present(), tc.want, tc.written)
 			}
 			// The write-back follows the selection and starts no second flight.
 			if !r.idle() || len(st.Resolved()) != 1 {
@@ -444,5 +453,101 @@ func TestAwaitProfileMarkDoesNotOutliveTheTick(t *testing.T) {
 	co.mu.Unlock()
 	if left {
 		t.Fatal("expect mark survived the tick")
+	}
+}
+
+func defaultRig(t *testing.T, opts state.Options, def string) (*rig, *recStore) {
+	t.Helper()
+	st := &recStore{fakeStore: fakeStore{profiles: []string{"work", "other"}, resolved: store.Resolved{Doc: doc(`{}`)}}}
+	if def != "" {
+		st.layers = []store.LayerDoc{userLayer(`{"profile":{"default":"` + def + `"}}`)}
+	}
+	return newRigWith(t, st, nil, opts), st
+}
+
+// An absent slice follows profile.default, writes nothing, and picks up a
+// changed default on the next flight.
+func TestProfileAbsentSliceFollowsDefaultLive(t *testing.T) {
+	r, st := defaultRig(t, state.Options{}, "work")
+	if _, err := r.rt.Coordinator.Reload(context.Background(), ReasonStartup); err != nil {
+		t.Fatal(err)
+	}
+	r.settle()
+	if r.present() || r.rt.Profile.Active() != "work" {
+		t.Fatalf("present=%v active=%q after a default selection", r.present(), r.rt.Profile.Active())
+	}
+	st.set(func() { st.layers = []store.LayerDoc{userLayer(`{"profile":{"default":"other"}}`)} })
+	if _, err := r.rt.Coordinator.Reload(context.Background(), ReasonCLI); err != nil {
+		t.Fatal(err)
+	}
+	r.settle()
+	if got := st.Resolved(); len(got) != 2 || got[1] != "other" || r.present() || r.rt.Profile.Active() != "other" {
+		t.Fatalf("Resolve calls = %q present=%v active=%q", got, r.present(), r.rt.Profile.Active())
+	}
+}
+
+// {"active":""} is an explicit no profile: a default never overrides it,
+// including after a restart of a named instance that persisted it.
+func TestProfileExplicitNoneBeatsDefault(t *testing.T) {
+	r, st := defaultRig(t, state.Options{Hydrator: profileHydratorOf("")}, "work")
+	if _, err := r.rt.Coordinator.Reload(context.Background(), ReasonStartup); err != nil {
+		t.Fatal(err)
+	}
+	r.settle()
+	if got := st.Resolved(); len(got) != 1 || got[0] != "" || !r.present() || r.rt.Profile.Active() != "" {
+		t.Fatalf("Resolve calls = %q present=%v active=%q", got, r.present(), r.rt.Profile.Active())
+	}
+}
+
+// profile.use "" and then a default appearing still gives no profile.
+func TestProfileUseNoneThenDefaultStaysNone(t *testing.T) {
+	r, st := defaultRig(t, state.Options{}, "")
+	if _, err := r.rt.Coordinator.Reload(context.Background(), ReasonStartup); err != nil {
+		t.Fatal(err)
+	}
+	r.settle()
+	got := r.use("other")
+	(<-r.posts)()
+	r.tree.Flush()
+	r.rt.Coordinator.Tick()
+	<-got
+	r.settle()
+	got = r.use("")
+	(<-r.posts)()
+	r.tree.Flush()
+	r.rt.Coordinator.Tick()
+	if res := <-got; res.err != nil || res.active != "" {
+		t.Fatalf("use \"\" = %+v", res)
+	}
+	r.settle()
+	st.set(func() { st.layers = []store.LayerDoc{userLayer(`{"profile":{"default":"work"}}`)} })
+	if _, err := r.rt.Coordinator.Reload(context.Background(), ReasonCLI); err != nil {
+		t.Fatal(err)
+	}
+	if last := st.Resolved(); last[len(last)-1] != "" || r.rt.Profile.Active() != "" {
+		t.Fatalf("Resolve calls = %q active=%q", last, r.rt.Profile.Active())
+	}
+}
+
+// A state clear returns the slice to absent, and the next flight follows the
+// default again.
+func TestProfileStateClearFollowsDefaultAgain(t *testing.T) {
+	r, st := defaultRig(t, state.Options{Hydrator: profileHydratorOf("")}, "work")
+	if _, err := r.rt.Coordinator.Reload(context.Background(), ReasonStartup); err != nil {
+		t.Fatal(err)
+	}
+	r.settle()
+	if _, err := r.tree.Clear(state.ProfileNamespace); err != nil {
+		t.Fatal(err)
+	}
+	r.tree.Flush()
+	r.rt.Coordinator.Tick()
+	// The clear itself starts the profile flight; wait for it through a joiner.
+	if _, err := r.rt.Coordinator.Reload(context.Background(), ReasonCLI); err != nil {
+		t.Fatal(err)
+	}
+	r.settle()
+	if last := st.Resolved(); last[len(last)-1] != "work" || r.present() || r.rt.Profile.Active() != "work" {
+		t.Fatalf("Resolve calls = %q present=%v active=%q", last, r.present(), r.rt.Profile.Active())
 	}
 }

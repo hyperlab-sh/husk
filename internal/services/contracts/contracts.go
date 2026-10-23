@@ -57,6 +57,9 @@ type ReloadInput struct {
 	// ProfileProblems are the selection warnings the coordinator's step 2
 	// raised (unknown_profile); Profile adds them to its report.
 	ProfileProblems []Problem
+	// ProfileWrite says the selection is a choice the slice must record: the
+	// startup --profile, or a present slice naming a vanished profile.
+	ProfileWrite bool
 }
 
 // Candidate holds an unpublished immutable snapshot. Apply is called at most
