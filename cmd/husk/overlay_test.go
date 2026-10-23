@@ -213,9 +213,9 @@ func TestGoldenFrameOverlay(t *testing.T) {
 	rows[10] = strings.Repeat(" ", 12) + style.Render("└────────────────┘")
 	goldenPlugin(m, "annotation", map[protocol.SurfaceID][]string{protocol.SurfaceAppOverlay: rows})
 	// Keep plugin and traffic counters identical: only the layer's pixels change.
-	m.slotUpdates[protocol.SurfaceAppOverlay].Lines = nil
+	delete(m.catalog.Occupants, protocol.SurfaceAppOverlay)
 	before := runGolden(t, m)
-	m.slotUpdates[protocol.SurfaceAppOverlay].Lines = rows
+	m.catalog.Occupants[protocol.SurfaceAppOverlay] = "annotation"
 	after := runGolden(t, m)
 	requireFrameGeometry(t, after)
 	base, over := frameCells(before), frameCells(after)
