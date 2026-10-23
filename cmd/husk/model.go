@@ -765,13 +765,12 @@ func (m *WorkbenchModel) noteConfigNotices() {
 	m.pendingConfig = fmt.Sprintf("%d configuration problems; run husk config reload", last.Errors)
 }
 
-// toastFailures shows the failures noted since the last call, and the config
-// notice raised in the same settle: with failures it is the last line of the
-// failure toast, so neither replaces the other; alone it is its own toast. A failure that
-// arrives while the failure toast is still up joins it instead of replacing
-// it (refusals land at boot, launch failures in later Updates), so the toast
-// lists every failure shown so far and is re-armed; once it expires the next
-// failure starts a fresh one. The log holds each failure in full.
+// toastFailures combines failure lines and the config line in one joinable
+// toast. Whichever arrives next while it is up, in the same settle or a later
+// one, joins it and re-arms it. A later config notice replaces the shown config
+// line, which stays last; alone it is its own "Configuration" toast. Once the
+// toast expires, the next arrival starts a fresh one. The log holds each
+// failure in full.
 func (m *WorkbenchModel) toastFailures() {
 	cfg := m.pendingConfig
 	m.pendingConfig = ""
