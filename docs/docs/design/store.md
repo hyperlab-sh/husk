@@ -226,7 +226,7 @@ and optional `hint` and scalar-object `args`. The declaring plugin is implicit:
 `plugin` and `disable` are not accepted. Focus ownership is checked against
 `surfaces[].id`; action ownership follows [Keybindings](keybindings.md).
 Focus-local actions may target the declaring plugin's actions or `husk.*`.
-Pods conversion drops foreign/unscoped bindings. It passes key spellings through
+Pods conversion drops foreign, unscoped and over-limit (`too_many`) bindings. It passes key spellings through
 unchanged: Keybinding is the single key parser and drops invalid spellings with
 `unparsable_key` in layer `plugin:<source>`. Optional `problems` is an array of
 `{index,code,message}` objects, where index is the original zero-based manifest
