@@ -72,6 +72,8 @@ func runPluginAdd(ctx context.Context, inv *Invocation, args []string) error {
 			failed = append(failed, added.Plugin)
 		}
 	}
+	// A failed admitted launch did not fulfill the request to run that plugin.
+	// Refusals and reload reports are not failed launch outcomes.
 	if len(failed) > 0 {
 		return &output.Error{Exit: output.ExitRemote, Code: string(protocol.CodeFailed), Message: "plugins failed to launch: " + strings.Join(failed, ", ")}
 	}
