@@ -477,6 +477,16 @@ recorded in the declaration, the occupant is unchanged, and the refusal is
 counted; a returning plugin's re-registered declarations resolve again,
 first live claim wins among the claims that arrive after the re-registration.
 
+#### Runtime and terminal surfaces
+
+**Level 1: specified, not landed** (protocol minor 2.2, [Protocol](protocol.md), "Runtime and terminal surfaces"). `husk.surfaces` gains three facts, all written by the Surfaces engine like the rest of its half:
+
+- `runtime`, a map from dynamic surface id (`<plugin_id>.<name>`) to `{"plugin", "placement", "title", "width", "height"}` for every surface a `surface.open` created and nothing has closed. Such a surface also appears in `occupants` (the opener is its occupant from the reply on) and in the frontend's `visible` while shown, and its rect in `husk.geometry.rects`, so a consumer that only knows the layout surfaces still sees it as occupied space. `capture`, `visible` and `rects` are keyed by the same dynamic id. The engine removes the entry on `surface.close`, on the host's close, and when the opener's Pod leaves `live`; a runtime surface is never handed to another claimant (there is no declaration to resolve).
+- `terminals`, a map from surface id to `{"title", "alt_screen", "mouse", "scrollback"}` for every attached surface: the title the application set (OSC 0/2), whether it is on the alternate screen, whether it enabled mouse reporting (so Input knows whether a wheel scrolls the application or the host's scrollback) and the scrollback line count. The engine updates it from the emulator's callbacks, coalesced per tick; the screen contents themselves are not State (see "What is not State"), exactly as `surface.update` lines are not.
+- `capture` values become `"text"` or `"all"` instead of `true` (`true` on the wire is recorded as `"text"`); `terminal.attach` records `"all"` unless the request said `"text"`. A 2.1 reader that tests the entry for presence is unchanged.
+
+`overlays.modal` gains `surface`: the id of the modal's surface, `modal-surface` for a rail item and the dynamic id for a runtime modal, so the frontend's `FocusSurface` while a modal is open is whichever of the two it is. The example value above becomes `"overlays":{"modal":{"plugin":"","rail_item":"","surface":""},...}` and `"runtime":{}`, `"terminals":{}` are always present, `{}` when empty, like `capture`.
+
 #### Frontend-owned slices
 
 `husk.layout`, `husk.geometry`, `husk.focus` and the view half of
@@ -741,3 +751,11 @@ With one:
 5. **Test harness access to render buffers.** A harness may want surface lines
    from `husk state`. Recommendation: no; it uses the existing frame dump path,
    keeping frame-rate data out of State.
+6. **Runtime `stage` and `panel` placements.** `surface.open` (Level 1) offers
+   `modal` and `canvas`; a plugin that wants to sit in the main stage or the
+   side panel beside the layout occupant has no placement yet. Recommendation:
+   add both in a later minor with one stack rule: the newest runtime surface
+   in a slot shows, the layout occupant and older runtime surfaces are hidden
+   (told `visible: false`) and return when it closes, and `husk.surfaces.runtime`
+   gains a `slot` field. A split that resizes the occupant is not offered: the
+   frontend's layout is fixed slots, not a tree.
