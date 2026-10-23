@@ -327,3 +327,47 @@ func TestRailItemValidation(t *testing.T) {
 		}
 	})
 }
+
+// secrets.* and services.* events reach cli watchers only: a manifest that
+// subscribes to one loses just that pattern, with one subscription_ignored
+// warning per drop, and keeps the rest.
+func TestCLIOnlySubscriptionsAreDropped(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		subs    string
+		want    []string
+		dropped []int
+	}{
+		{"none", `["p.changed"]`, []string{"p.changed"}, nil},
+		{"secrets wildcard", `["p.changed","secrets.*"]`, []string{"p.changed"}, []int{1}},
+		{"services exact", `["services.reloaded","p.other"]`, []string{"p.other"}, []int{0}},
+		{"secrets exact and both", `["secrets.read","services.*","p.a"]`, []string{"p.a"}, []int{0, 1}},
+		{"lookalike prefix kept", `["secretsx.read","servicesy.*"]`, []string{"secretsx.read", "servicesy.*"}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := `{"manifest_version":2,"protocol":2,"id":"p","name":"P","version":"1","command":["plugin"],"events":{"subscribe":` + tc.subs + `}}`
+			spec, warns, err := convertBytes(t, raw, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Join(spec.Subscriptions, ",") != strings.Join(tc.want, ",") {
+				t.Fatalf("subscriptions = %v, want %v", spec.Subscriptions, tc.want)
+			}
+			var got []int
+			for _, w := range warns {
+				if w.Code != "subscription_ignored" || w.Field != "subscriptions" {
+					t.Fatalf("unexpected warning %+v", w)
+				}
+				got = append(got, w.Index)
+			}
+			if len(got) != len(tc.dropped) {
+				t.Fatalf("warning indexes = %v, want %v", got, tc.dropped)
+			}
+			for i := range got {
+				if got[i] != tc.dropped[i] {
+					t.Fatalf("warning indexes = %v, want %v", got, tc.dropped)
+				}
+			}
+		})
+	}
+}

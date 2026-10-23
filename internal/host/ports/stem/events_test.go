@@ -237,3 +237,33 @@ func TestEmitWrapsWrappedCodedLoopError(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+// secrets.* and services.* events are delivered to cli watchers only: a
+// plugin watching one is denied and registers nothing, a cli watch of the same
+// pattern is accepted, and a lookalike prefix is an ordinary pattern.
+func TestWatchOfCLIOnlyEventsIsPluginDenied(t *testing.T) {
+	for _, pat := range []string{"secrets.*", "secrets.read", "services.*", "services.reloaded"} {
+		t.Run(pat, func(t *testing.T) {
+			b := &recBus{}
+			p := stem.NewEvents(b, &fakeLoop{})
+			err := p.Watch(context.Background(), plugin, pat, fakes.NewNotifier(nil))
+			if contracts.CodeOf(err) != "denied" {
+				t.Fatalf("plugin watch: %v, want denied", err)
+			}
+			if len(b.subs) != 0 {
+				t.Fatal("denied watch registered")
+			}
+			if err := p.Watch(context.Background(), cli, pat, fakes.NewNotifier(nil)); err != nil {
+				t.Fatalf("cli watch: %v", err)
+			}
+			if b.subs[pat] != 1 {
+				t.Fatal("cli watch not registered")
+			}
+		})
+	}
+	b := &recBus{}
+	p := stem.NewEvents(b, &fakeLoop{})
+	if err := p.Watch(context.Background(), plugin, "servicesy.*", fakes.NewNotifier(nil)); err != nil {
+		t.Fatalf("lookalike prefix denied: %v", err)
+	}
+}
