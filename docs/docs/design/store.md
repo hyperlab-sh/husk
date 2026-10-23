@@ -339,10 +339,12 @@ embedding application's `Options.Distribution` files, then the bundle's
 in `Origins`, `Problems` and `LayerDoc`; a `LayerDoc.File` for a document both
 parts supply is `""`, as for the flag-folded instance layer. `Profiles` and
 `ProfileSources` list profile directories from both parts as `distribution`.
-Either part may be nil.
+Either part may be nil. With an active profile the order is embedded base,
+embedded profile, bundle base, bundle profile, so the bundle wins over every
+embedded default.
 
 One setting must be known before Store opens, because it names what the
-distribution layer is made of: `husk.bundle`. `cmd/husk` reads it with
+distribution layer is made of: `husk.bundle`. The composition root reads it with
 `ReadBootstrap`, which is the one Store read that happens before `Open`:
 
 ```go
