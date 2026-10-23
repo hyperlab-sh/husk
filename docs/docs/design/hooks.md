@@ -261,12 +261,10 @@ fields, under the `husk` owner. The one in v1 is `husk.before-state-clear`
 ### Shared types
 
 ```go
-// Caller is Message kinds' Caller: set by the accepting module, never read
-// from params.
-type Caller struct {
-    Kind     CallerKind // CallerPlugin | CallerHost (CallerCLI is denied)
-    PluginID string     // set only when Kind == CallerPlugin
-}
+// Caller is protocol.Caller ([Protocol](protocol.md), "Caller"), the one
+// caller-identity type: set by the accepting module, never read from params.
+// The hook runner accepts CallerPlugin and CallerHost; CallerCLI is denied.
+type Caller = protocol.Caller
 
 type Kind string
 const (

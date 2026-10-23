@@ -454,8 +454,9 @@ reserved: `state.changed`, `pods.plugin-exited`, `services.reloaded` and
 subscriber ([Services](services.md)). The mechanism is at subscription time,
 not delivery: manifest conversion rejects a plugin pattern that would match a
 `secrets.` or `services.` name (an exact name, or a prefix pattern at or above
-them, `secrets.*` included; the plugin's subscriptions are dropped and reported
-like a malformed pattern), and `event.watch` from a plugin caller answers
+them, `secrets.*` included; only that pattern is dropped, with a `problems`
+entry on the plugin's declared document, the way conversion treats a bad
+binding; the plugin's other subscriptions are applied), and `event.watch` from a plugin caller answers
 `denied` for such a pattern. A plugin may declare
 events in its manifest for introspection
 (`"events": {"publish": [{"name": "notes.saved", "title": "...", "coalesce": false}]}`).

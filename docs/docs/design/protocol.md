@@ -121,8 +121,8 @@ type CallerKind string
 const (
     CallerCLI    CallerKind = "cli"    // socket request with no token: the user's own shell
     CallerPlugin CallerKind = "plugin" // socket request with a valid per-launch token
-    CallerInput  CallerKind = "input"  // a key binding resolved by Input, in process
-    CallerHost   CallerKind = "host"   // any other in-process host code (palette, renderer, CLI-less host calls)
+    CallerInput  CallerKind = "input"  // a key binding resolved by Input, however it reaches the Dispatcher (directly, or relayed through Frontend.InvokeAction, which carries the kind)
+    CallerHost   CallerKind = "host"   // an action the host starts itself: the palette, a rail item, Stem internals
 )
 ```
 
