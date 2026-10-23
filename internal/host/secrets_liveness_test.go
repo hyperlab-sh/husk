@@ -21,7 +21,7 @@ func TestPodLeavingLiveDropsSecretDialog(t *testing.T) {
 	answers := make(chan secrets.Answer)
 	closed := make(chan struct{}, 2)
 	hook, ready := readyHook("")
-	h, err := boot(t, func(c *contracts.Config) { c.Plugins = []string{alpha} },
+	h, err := boot(t, func(c *contracts.Config) { pluginSettings(c)["paths"] = []string{alpha} },
 		withHook(hook), WithFactory(f.factory),
 		func(o *options) { o.keyring = &memRing{m: map[string]string{}} },
 		WithPrompt(func(ctx context.Context, p secrets.Prompt) secrets.Answer {
