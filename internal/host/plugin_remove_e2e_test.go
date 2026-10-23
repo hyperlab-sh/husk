@@ -1,7 +1,6 @@
 package host
 
 import (
-	tea "charm.land/bubbletea/v2"
 	"encoding/json"
 	"errors"
 	"io"
@@ -15,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
 	"github.com/hyperlab-sh/husk/internal/instance"
 	"github.com/hyperlab-sh/husk/internal/pods/manifest"
@@ -128,9 +128,11 @@ func TestPluginRemoveAgainstRealHostAndProcess(t *testing.T) {
 	// Invariants 2 and 3: pods.plugin-exited, then the three plugin slices
 	// removed and husk.pods without the plugin (one flush, so contiguous and
 	// before anything else), then pods.plugin-removed, then
-	// services.reloaded. A husk.pods change that still lists the plugin (the
-	// exit's own write) is not part of the removal.
+	// services.reloaded. A husk.pods change that still lists the plugin before
+	// the removal (the exit's own write) is not part of it; one that lists it
+	// again afterwards is a re-add and fails the test.
 	var order []string
+	var podsUnlisted bool
 	_ = w.c.SetReadDeadline(time.Now().Add(failBound))
 	for len(order) == 0 || order[len(order)-1] != "services.reloaded" {
 		line, err := w.r.ReadBytes('\n')
@@ -154,7 +156,12 @@ func TestPluginRemoveAgainstRealHostAndProcess(t *testing.T) {
 					Plugins map[string]json.RawMessage `json:"plugins"`
 				}
 				_ = json.Unmarshal(c.Value, &doc)
-				if _, listed := doc.Plugins["alpha"]; !listed {
+				_, listed := doc.Plugins["alpha"]
+				record, err := observePodsChange(listed, &podsUnlisted)
+				if err != nil {
+					t.Fatalf("after %v: %v", order, err)
+				}
+				if record {
 					order = append(order, "slice:husk.pods")
 				}
 			case c.Removed:
@@ -183,6 +190,54 @@ func TestPluginRemoveAgainstRealHostAndProcess(t *testing.T) {
 	sort.Strings(slices)
 	if want := []string{"slice:alpha.contributions", "slice:alpha.occupants", "slice:alpha.state", "slice:husk.pods"}; !reflect.DeepEqual(slices, want) {
 		t.Fatalf("slice changes between exited and removed = %v, want %v", slices, want)
+	}
+}
+
+// observePodsChange folds one husk.pods change into the removal check: listed
+// is whether it still lists the removed plugin, unlisted is true once a change
+// without it was seen. The first change without the plugin is the one to
+// record; a change listing it after that is a late re-add.
+func observePodsChange(listed bool, unlisted *bool) (record bool, err error) {
+	switch {
+	case listed && *unlisted:
+		return false, errors.New("husk.pods lists the removed plugin again after its removal")
+	case listed, *unlisted:
+		return false, nil
+	}
+	*unlisted = true
+	return true, nil
+}
+
+func TestObservePodsChange(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		changes    []bool // listed, per husk.pods change
+		wantRecord []bool
+		wantErrAt  int // index of the failing change, -1 for none
+	}{
+		{"exit write then removal", []bool{true, false}, []bool{false, true}, -1},
+		{"removal only", []bool{false}, []bool{true}, -1},
+		{"a second unlisted change is not recorded again", []bool{false, false}, []bool{true, false}, -1},
+		{"late re-add after the removal", []bool{true, false, true}, []bool{false, true, false}, 2},
+		{"re-add right after the removal", []bool{false, true}, []bool{true, false}, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var unlisted bool
+			errAt := -1
+			for i, listed := range tc.changes {
+				record, err := observePodsChange(listed, &unlisted)
+				if err != nil {
+					errAt = i
+					break
+				}
+				if record != tc.wantRecord[i] {
+					t.Fatalf("change %d: record = %v, want %v", i, record, tc.wantRecord[i])
+				}
+			}
+			if errAt != tc.wantErrAt {
+				t.Fatalf("error at change %d, want %d", errAt, tc.wantErrAt)
+			}
+		})
 	}
 }
 

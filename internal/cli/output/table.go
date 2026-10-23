@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+
+	"github.com/mattn/go-runewidth"
 )
 
 // WriteTable prints a header row and rows in aligned columns: columns are
@@ -80,7 +82,7 @@ func Generic(w io.Writer, raw json.RawMessage) error {
 		sort.Strings(keys)
 		rows := make([][]string, 0, len(keys))
 		for _, k := range keys {
-			rows = append(rows, []string{k, cell(t[k])})
+			rows = append(rows, []string{cell(k), cell(t[k])})
 		}
 		return WriteRows(w, rows)
 	case []any:
@@ -135,9 +137,10 @@ func recordRows(items []any) (headers []string, rows [][]string, ok bool) {
 	return headers, rows, true
 }
 
-// cell renders one value: strings bare, numbers as written, booleans as
-// true/false, everything else (null, nested objects and arrays) as compact
-// JSON.
+// cell renders one value: strings bare unless they hold a control character
+// (then their JSON form, quoted and escaped), numbers as written, everything
+// else (booleans, null, nested objects and arrays) as compact JSON. Object
+// keys go through it too.
 func cell(v any) string {
 	switch t := v.(type) {
 	case string:
@@ -164,29 +167,5 @@ func compactJSON(v any) string {
 
 // displayWidth is the number of terminal columns s occupies: combining and
 // format marks take none, East Asian wide and fullwidth characters and emoji
-// take two. The package stays standard-library only, so this is a compact
-// range check rather than a full Unicode width table.
-func displayWidth(s string) int {
-	n := 0
-	for _, r := range s {
-		switch {
-		case unicode.In(r, unicode.Mn, unicode.Me, unicode.Cf):
-		case isWide(r):
-			n += 2
-		default:
-			n++
-		}
-	}
-	return n
-}
-
-func isWide(r rune) bool {
-	return r >= 0x1100 && (r <= 0x115F || // Hangul Jamo
-		r >= 0x2E80 && r <= 0xA4CF && r != 0x303F || // CJK radicals .. Yi
-		r >= 0xAC00 && r <= 0xD7A3 || // Hangul syllables
-		r >= 0xF900 && r <= 0xFAFF || // CJK compatibility ideographs
-		r >= 0xFE30 && r <= 0xFE6F || // CJK compatibility forms
-		r >= 0xFF00 && r <= 0xFF60 || r >= 0xFFE0 && r <= 0xFFE6 || // fullwidth forms
-		r >= 0x1F300 && r <= 0x1F64F || r >= 0x1F900 && r <= 0x1F9FF || // emoji
-		r >= 0x20000 && r <= 0x3FFFD) // CJK extensions
-}
+// take two. The width rules come from go-runewidth.
+func displayWidth(s string) int { return runewidth.StringWidth(s) }

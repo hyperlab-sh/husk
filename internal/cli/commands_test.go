@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync/atomic"
+	"sync"
 	"testing"
 	"time"
 
@@ -890,20 +890,58 @@ func TestTimeoutStartsAfterTheDialReturns(t *testing.T) {
 	dir := shortDir(t)
 	srv := serve(t, dir, "a", pingOK("a", func(c *srvConn, req protocol.Message) { c.reply(req, map[string]any{"ok": true}) }))
 	real := dialSocket
-	var dialHadDeadline atomic.Bool
+	var (
+		mu              sync.Mutex
+		dialHadDeadline bool
+		dialReturned    time.Time
+		writeDeadline   time.Time
+	)
 	dialSocket = func(ctx context.Context, socket string) (net.Conn, error) {
 		_, has := ctx.Deadline()
-		dialHadDeadline.Store(has)
-		return real(ctx, socket)
+		conn, err := real(ctx, socket)
+		mu.Lock()
+		dialHadDeadline, dialReturned = has, time.Now()
+		mu.Unlock()
+		if err != nil {
+			return nil, err
+		}
+		return &deadlineConn{Conn: conn, set: func(t time.Time) {
+			mu.Lock()
+			writeDeadline = t
+			mu.Unlock()
+		}}, err
 	}
 	t.Cleanup(func() { dialSocket = real })
 	h := newHarness(t, dir, nil)
-	if got := h.run("rpc", "x.y", "--socket", srv.Socket, "--timeout", "30s"); got != 0 {
+	const timeout = 30 * time.Second
+	if got := h.run("rpc", "x.y", "--socket", srv.Socket, "--timeout", timeout.String()); got != 0 {
 		t.Fatalf("exit = %d; stderr %q", got, h.errb.String())
 	}
-	if dialHadDeadline.Load() {
+	mu.Lock()
+	defer mu.Unlock()
+	if dialHadDeadline {
 		t.Fatal("the dial ran under --timeout: the timeout must start after connecting")
 	}
+	// The request is sent under the command's own context, whose deadline the
+	// client copies to the write deadline: it must be --timeout after the
+	// dial returned, not before it.
+	if writeDeadline.IsZero() {
+		t.Fatal("the command's context carries no deadline: --timeout was not applied")
+	}
+	if writeDeadline.Before(dialReturned.Add(timeout)) || writeDeadline.After(dialReturned.Add(timeout+10*time.Second)) {
+		t.Fatalf("deadline %v is not within %v after the dial returned at %v", writeDeadline, timeout, dialReturned)
+	}
+}
+
+// deadlineConn reports the write deadlines set on it.
+type deadlineConn struct {
+	net.Conn
+	set func(time.Time)
+}
+
+func (c *deadlineConn) SetWriteDeadline(t time.Time) error {
+	c.set(t)
+	return c.Conn.SetWriteDeadline(t)
 }
 
 func TestTimeoutExpiryIsTransportExit(t *testing.T) {
