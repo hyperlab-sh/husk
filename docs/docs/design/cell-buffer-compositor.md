@@ -292,6 +292,15 @@ off-screen; it is not flipped).
   background against `Canvas`, the colours the app background pass would give
   them. The pass runs before that background fill, and its cells then carry an
   explicit background, so the fill leaves them alone.
+- A cell whose resolved `Fg`, `Bg` or underline colour is an ANSI basic
+  (`0`–`15`) or 256-colour indexed colour is left exactly as it is, all three
+  colours unblended. The terminal decides what an indexed colour looks like,
+  so blending its xterm default toward black would show a colour the
+  terminal never drew. This covers the resolution step too: under a theme
+  whose `ink` or `canvas` is an ANSI index ([Built-in themes](themes.md),
+  "Role values"; the built-in `base16`), an unstyled cell resolves to that
+  basic colour and is left alone, so such a theme shows no shadow. Truecolor
+  cells beside it in the same band still blend.
 - A wide glyph is darkened whole when the shadow covers either of its cells.
 - Cells carry their own colours, so nothing leaks into neighbours when the
   frame is serialized.

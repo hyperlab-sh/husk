@@ -11,8 +11,10 @@ themes": the layer and the default), and the name the frontend shows
 ([Workbench chrome](chrome.md), "The bottom bar"). The rules for which role
 the chrome may draw with are in [Workbench chrome](chrome.md), "Colour
 discipline"; this spec only supplies the colours. Wire: the default palette
-name changes, `theme.list` returns nine `built-in` entries, and one theme
-(`base16`) puts ANSI indices in palette values (see "Role values").
+name changes, `theme.list` returns nine `built-in` entries, and minor 2.4
+adds an optional `ansi` object beside `palette` on `theme.get` and
+`theme.changed` for themes that use ANSI indices, as `base16` does; palette
+values stay `#rrggbb` (see "Role values").
 
 ## Level 0: What and why
 
@@ -89,7 +91,7 @@ consequences:
 4. **`theme.list` order.** The nine built-in names first, in the order of
    the table below, each with the layer that won it as `source`
    (`built-in` unless a higher layer redefined the name); then every other
-   theme sorted by name. The frontend's theme selector shows this order.
+   theme sorted by name. The Settings center's Theme tab shows this order.
 5. **The served palette's `name`** is the selected theme's key, so with
    `theme.name` unset `theme.get`, `theme.changed` and the bottom bar carry
    `charm`.
@@ -118,42 +120,81 @@ colour in v1 and has no light/dark switch; see Open questions.
 
 ### Role values
 
-A palette role's value is one of:
+**In the `themes` document**, in every layer (the built-in one and the
+`distribution`, `user`, `profile` and `instance` files alike), a role's value
+is one of:
 
-- `#rrggbb`: a 24-bit colour, case-insensitive on input, emitted lower case.
-  This is the only form the Named themes rules accept from a `distribution`,
-  `user`, `profile` or `instance` theme or from a `theme.palette.<role>`
-  override, as today (`invalid_color` otherwise), because the contrast floor
-  cannot be computed for anything else.
-- An **ANSI index**: the decimal string `"0"` to `"15"`, no sign, no leading
-  zero. Only the built-in layer holds indices, and only `base16` uses them.
-  An index means "the terminal's colour N": the terminal's own palette shows
-  through, which is the point of that theme.
+- a JSON string `#rrggbb`: a 24-bit colour, case-insensitive on input,
+  emitted lower case;
+- a JSON integer from `0` to `15`: an **ANSI index**, "the terminal's colour
+  N". The terminal's own palette shows through, which is the point of a
+  theme like `base16`.
 
-What an index does where a hex value is expected:
+Anything else (a string index such as `"4"`, `#rgb`, a named colour, an
+integer outside `0`–`15`, a fraction) is not a role value, and the
+definition is dropped with `invalid_theme` ([Services](services.md), "Named
+themes", rule 4). The `theme.palette.<role>` settings overrides are not the
+`themes` document and stay `#RRGGBB` only (`invalid_color` otherwise): an
+override is a single colour the user is fitting to the measured floor.
 
-- On the wire (`theme.get`, `theme.changed`) the value is the index string,
-  unchanged. A plugin must accept both forms: a value that does not start
-  with `#` is an index. The host emits an index only while `base16` is the
-  selected theme; every other theme is hex throughout. The `Palette` wire
-  type's documentation and the `theme_changed` row of [Protocol](protocol.md)
-  are amended to say so; the field types do not change.
-- `SlotBackground` returns an index unchanged (it already does for anything
-  it cannot parse), so `slot_background` equals `canvas` and the slot panel
-  is not painted differently from the canvas. `base16` sets
-  `slot_background` to `"0"` explicitly.
-- `CheckContrast` cannot measure a pair with an index on either side. For a
-  built-in theme such a pair is **unmeasurable** and skipped, not a
-  violation; `base16` is therefore the one built-in theme the contrast
-  floor does not vouch for, and the spec says so where its table is. No new
-  problem code: user themes cannot contain indices.
-- The compositor's popup shadow blends the colours of the cells beneath a
-  popup toward black ([Cell-buffer compositor](cell-buffer-compositor.md)). A
-  cell whose foreground or background is an index cannot be blended and is
-  left as it is; under `base16` the shadow is therefore absent. The popup
+**Theme resolves an index** when it builds the palette. The role's value in
+the served `Palette` is the index's **xterm default**, the colour
+`ansi.BasicColor(n)` resolves to, and the role is recorded with its index in
+the palette's **index map** (role → integer):
+
+| Index | xterm default | Index | xterm default |
+| :--- | :--- | :--- | :--- |
+| `0` | `#000000` | `8` | `#808080` |
+| `1` | `#800000` | `9` | `#ff0000` |
+| `2` | `#008000` | `10` | `#00ff00` |
+| `3` | `#808000` | `11` | `#ffff00` |
+| `4` | `#000080` | `12` | `#0000ff` |
+| `5` | `#800080` | `13` | `#ff00ff` |
+| `6` | `#008080` | `14` | `#00ffff` |
+| `7` | `#c0c0c0` | `15` | `#ffffff` |
+
+So every value that reaches `Overlay`, `CheckContrast`, `SlotBackground` and
+the wire is `#rrggbb`, and `Overlay` keeps its hex-only grammar. A
+`theme.palette.<role>` override of an index role replaces it with the
+override's hex and removes the role from the index map. When the canvas is an
+index and neither the theme nor an override sets `slot_background`, step 4 of
+the build gives `slot_background` the canvas's index (the slot panel is not
+painted differently from the canvas) instead of deriving it from the xterm
+default; `base16` sets `slot_background` to `0` explicitly.
+
+What an index role does downstream:
+
+- **Wire.** `palette` values are `#rrggbb` always: an index role is sent as
+  its xterm default, so a plugin that knows nothing of indices draws a
+  reasonable approximation. From minor 2.4 the `theme.get` result and the
+  `theme.changed` params carry an optional `ansi` object beside `palette`,
+  the index map: each key a role name (a JSON tag of `Palette`, never
+  `name`), each value an integer `0`–`15`. It is absent when no role is an
+  index, so every hex theme's payload is unchanged. A plugin that reads it
+  draws those roles as the terminal's colours ([Protocol](protocol.md),
+  "ANSI palette roles (minor 2.4)").
+- **Contrast.** The runtime check skips every pair with an index role on
+  either side: the pair is **unmeasurable**, not a violation, because the
+  xterm default is not what the user sees. Pairs between two hex roles are
+  still enforced, overrides on top of an index theme included. `base16` is
+  therefore a theme the contrast floor does not vouch for, and its table
+  says so; the same holds for any user theme that uses indices, which is the
+  user's choice.
+- **Frontend.** `cmd/husk` draws an index role as the ANSI basic colour
+  `ansi.BasicColor(n)`, never as the hex in `palette`, so the terminal
+  renders its own colour N.
+- **Popup shadow.** The shadow leaves a cell whose resolved foreground,
+  background or underline colour is an ANSI basic or 256-colour indexed
+  colour exactly as it is: the terminal decides what that colour looks like,
+  so blending its xterm default toward black would show a colour the
+  terminal never drew ([Cell-buffer compositor](cell-buffer-compositor.md),
+  "Popup shadow"). Under `base16` the shadow is therefore absent; the popup
   itself is unaffected.
-- The frontend hands every value to `lipgloss.Color`, which accepts both
-  forms; nothing in `cmd/husk` parses a colour.
+- **Terminal background.** The frontend asks the terminal to use the canvas
+  as its background (OSC 11) only when the canvas is hex. When the canvas is
+  an index it sets no background colour, so the user's terminal background
+  is not overwritten with `#000000`; cells the app background pass fills take
+  the basic colour, which a Base16 scheme makes the terminal's background.
 
 ### How the sources were mapped
 
@@ -245,8 +286,10 @@ adjustment.
 ### The themes
 
 Each table lists every role with its value and where it came from.
-"derived" means rule 3 or 4; "adjusted from X" means the contrast rule moved
-X to the value shown; everything else is the source's literal value.
+"derived" means rule 3 or 4, or, where the row says so, a grey of the
+xterm-256 ramp that the source does not name, picked to keep the ladder and
+the floor; "adjusted from X" means the contrast rule moved X to the value
+shown; everything else is the source's literal value.
 
 #### `charm` (default)
 
@@ -259,19 +302,31 @@ theme's fuchsia, green and red all fall under 4.5:1; one step down, the
 ladder `234`/`236`/`237` holds every source colour but the red, which moves
 by one step. The result is close to today's `Pepper` (`#201F26`) canvas.
 
+**`huh` v1 and v2.** `huh` v2's `ThemeCharm(isDark)` builds its adaptive
+colours with `lipgloss.LightDark(isDark)`, whose function takes its
+arguments in the order `(light, dark)`. Two of its calls pass v1's pairs the
+other way round: the text colour is `lightDark("252", "235")` and the
+blurred-button background `lightDark("237", "252")`, where v1 wrote
+`AdaptiveColor{Light: "235", Dark: "252"}` and `AdaptiveColor{Light: "252",
+Dark: "237"}`. Read literally, v2 draws grey 235 text on a dark terminal.
+The values here follow v1's intent: on the dark side the text is 252 and the
+blurred button 237, on the light side the text is 235 and the blurred button
+252. The other pairs (indigo, green, red, the placeholder `248`/`238`, the
+description `243`) are in the same order in both versions.
+
 | Role | Value | From |
 | :--- | :--- | :--- |
 | `canvas` | `#1c1c1c` | grey 234 (rule 1) |
 | `surface` | `#1c1c1c` | = canvas |
-| `surface_elevated` | `#303030` | grey 236 |
-| `surface_selected` | `#3a3a3a` | grey 237 (`huh`'s blurred-button background) |
+| `surface_elevated` | `#303030` | derived: grey 236, not named by the theme |
+| `surface_selected` | `#3a3a3a` | grey 237 (`huh`'s blurred-button background, dark side by v1's intent) |
 | `surface_hover` | `#303030` | = elevated |
 | `slot_background` | `#232323` | derived |
 | `border` | `#797979` | adjusted from grey 243 `#767676` (`huh`'s description grey; 2.9:1 on elevated) |
 | `border_subtle` | `#444444` | grey 238 (`huh`'s border) |
 | `border_focused` | `#7571f9` | indigo (dark side) |
-| `ink` | `#d0d0d0` | grey 252 (`huh`'s text) |
-| `ink_muted` | `#a8a8a8` | grey 248 (`huh`'s placeholder grey) |
+| `ink` | `#d0d0d0` | grey 252 (`huh`'s text, dark side by v1's intent) |
+| `ink_muted` | `#a8a8a8` | derived: grey 248, a ramp grey between `ink` and `ink_subtle` (`huh`'s dark-side placeholder is 238, too dark for text; 248 is its light-side one) |
 | `ink_subtle` | `#979797` | adjusted from grey 243 `#767676` (3.3:1 on elevated) |
 | `accent` | `#f780e2` | fuchsia (the focused button's background and the selector) |
 | `accent_secondary` | `#9c98ff` | adjusted from indigo `#7571f9` (2.97:1 on selected) |
@@ -294,16 +349,16 @@ moved, the yellow to a brown and the fuchsia to a deep magenta.
 | :--- | :--- | :--- |
 | `canvas` | `#fffdf5` | cream |
 | `surface` | `#fffdf5` | = canvas |
-| `surface_elevated` | `#e4e4e4` | grey 254 |
-| `surface_selected` | `#dadada` | grey 253 |
+| `surface_elevated` | `#e4e4e4` | derived: grey 254, not named by the theme |
+| `surface_selected` | `#dadada` | derived: grey 253, not named by the theme |
 | `surface_hover` | `#e4e4e4` | = elevated |
 | `slot_background` | `#f5f3eb` | derived |
 | `border` | `#828282` | adjusted from grey 248 `#a8a8a8` (1.9:1 on elevated) |
-| `border_subtle` | `#d0d0d0` | grey 252 (`huh`'s blurred-button background, light side) |
+| `border_subtle` | `#d0d0d0` | grey 252 (`huh`'s blurred-button background, light side by v1's intent) |
 | `border_focused` | `#5a56e0` | indigo (light side) |
-| `ink` | `#262626` | grey 235 (`huh`'s text, light side) |
-| `ink_muted` | `#4e4e4e` | grey 239 |
-| `ink_subtle` | `#626262` | grey 241 |
+| `ink` | `#262626` | grey 235 (`huh`'s text, light side by v1's intent) |
+| `ink_muted` | `#4e4e4e` | derived: grey 239, not named by the theme |
+| `ink_subtle` | `#626262` | derived: grey 241, not named by the theme |
 | `accent` | `#a32c8e` | adjusted from fuchsia `#f780e2` (1.6:1 on selected) |
 | `accent_secondary` | `#4f4bd5` | adjusted from indigo `#5a56e0` (3.9:1 on selected) |
 | `accent_soft` | `#7571f9` | indigo, dark side |
@@ -322,9 +377,15 @@ together than on the dark theme by construction.
 `huh` `ThemeDracula`: eight literal colours (background, selection,
 foreground, comment, green, purple, red, yellow). The theme has one raised
 neutral, `selection`, which is the selected surface; the raised step is
-derived. The comment colour serves as border, muted ink and soft accent; as
-text it is 3:1 on the background, so the two inks that come from it are
-lightened. Dracula has no blue and no second accent in `huh`'s file: `info`
+derived. The comment colour serves as border, focused border, muted ink and
+soft accent; as text it is 3:1 on the background, so the two inks that come
+from it are lightened, and as a border it is 2.4:1 on the raised step, so
+both borders lighten by the same rule to the same value. `border_focused` is
+the comment colour rather than the purple (rule 6's second accent) because
+Dracula's purple is also its accent: a purple frame edge around every
+focused surface is the loudness the discipline rule removes. The cost is
+stated plainly: with both borders on one value, a focused frame's edge under
+Dracula is the same colour as an unfocused one. Dracula has no blue and no second accent in `huh`'s file: `info`
 and `accent_secondary` are the Dracula specification's cyan and pink.
 
 | Role | Value | From |
@@ -337,7 +398,7 @@ and `accent_secondary` are the Dracula specification's cyan and pink.
 | `slot_background` | `#30323e` | derived |
 | `border` | `#7383b5` | adjusted from comment `#6272a4` (2.4:1 on elevated) |
 | `border_subtle` | `#44475a` | selection |
-| `border_focused` | `#bd93f9` | purple |
+| `border_focused` | `#7383b5` | adjusted from comment `#6272a4` (2.4:1 on elevated); = border |
 | `ink` | `#f8f8f2` | foreground |
 | `ink_muted` | `#a5b5e7` | adjusted from comment `#6272a4` (1.9:1 on selected) |
 | `ink_subtle` | `#93a3d5` | adjusted from comment `#6272a4` (2.4:1 on elevated) |
@@ -353,7 +414,9 @@ and `accent_secondary` are the Dracula specification's cyan and pink.
 
 `huh` `ThemeBase16`: every colour is an ANSI index, so the terminal's own
 palette decides what the user sees. Husk keeps that: the values below are
-indices (see "Role values"), and no pair of this theme is contrast-checked.
+integer indices in the document (see "Role values"); the served palette
+carries each one's xterm default and the `ansi` map carries the index, and no
+pair of this theme is contrast-checked.
 Indices `0` to `8` and `15` are used, never `9` to `14`: in Base16 terminal
 schemes the bright colours repeat the normal ones by design, so a role on
 `12` would not be distinct from one on `4`. Nineteen roles on ten slots
@@ -363,25 +426,25 @@ is both `info` and `accent_soft`.
 
 | Role | Value | From |
 | :--- | :--- | :--- |
-| `canvas` | `"0"` | terminal background (Base16 `base00`) |
-| `surface` | `"0"` | = canvas |
-| `surface_elevated` | `"0"` | = canvas (no third neutral) |
-| `surface_selected` | `"8"` | `huh`'s border and description colour (`base03`) |
-| `surface_hover` | `"8"` | = selected |
-| `slot_background` | `"0"` | explicit: an index derives to itself |
-| `border` | `"8"` | `huh`'s border |
-| `border_subtle` | `"8"` | = border |
-| `border_focused` | `"5"` | `huh`'s focused-button background |
-| `ink` | `"15"` | bright foreground (`base07`) |
-| `ink_muted` | `"7"` | `huh`'s option text |
-| `ink_subtle` | `"8"` | `huh`'s description |
-| `accent` | `"5"` | `huh`'s focused-button background |
-| `accent_secondary` | `"6"` | `huh`'s title |
-| `accent_soft` | `"4"` | blue |
-| `success` | `"2"` | `huh`'s selected option |
-| `warning` | `"3"` | `huh`'s selector |
-| `danger` | `"1"` | red (`huh` uses the bright `9`; see above) |
-| `info` | `"4"` | blue |
+| `canvas` | `0` | terminal background (Base16 `base00`) |
+| `surface` | `0` | = canvas |
+| `surface_elevated` | `0` | = canvas (no third neutral) |
+| `surface_selected` | `8` | `huh`'s border and description colour (`base03`) |
+| `surface_hover` | `8` | = selected |
+| `slot_background` | `0` | explicit: the canvas's index, so the slot panel is the canvas |
+| `border` | `8` | `huh`'s border |
+| `border_subtle` | `8` | = border |
+| `border_focused` | `5` | `huh`'s focused-button background |
+| `ink` | `15` | bright foreground (`base07`) |
+| `ink_muted` | `7` | `huh`'s option text |
+| `ink_subtle` | `8` | `huh`'s description |
+| `accent` | `5` | `huh`'s focused-button background |
+| `accent_secondary` | `6` | `huh`'s title |
+| `accent_soft` | `4` | blue |
+| `success` | `2` | `huh`'s selected option |
+| `warning` | `3` | `huh`'s selector |
+| `danger` | `1` | red (`huh` uses the bright `9`; see above) |
+| `info` | `4` | blue |
 
 #### `catppuccin-mocha`
 
@@ -557,16 +620,16 @@ role and no `name` (its name is its key).
     "success": "#006f39", "warning": "#686200", "danger": "#ca0d3d", "info": "#0065c0"}},
   "dracula": {"palette": {
     "canvas": "#282a36", "surface": "#282a36", "surface_elevated": "#383a46", "surface_selected": "#44475a", "surface_hover": "#383a46", "slot_background": "#30323e",
-    "border": "#7383b5", "border_subtle": "#44475a", "border_focused": "#bd93f9",
+    "border": "#7383b5", "border_subtle": "#44475a", "border_focused": "#7383b5",
     "ink": "#f8f8f2", "ink_muted": "#a5b5e7", "ink_subtle": "#93a3d5",
     "accent": "#cea4ff", "accent_secondary": "#ff91de", "accent_soft": "#6272a4",
     "success": "#50fa7b", "warning": "#f1fa8c", "danger": "#ff7c7c", "info": "#8be9fd"}},
   "base16": {"palette": {
-    "canvas": "0", "surface": "0", "surface_elevated": "0", "surface_selected": "8", "surface_hover": "8", "slot_background": "0",
-    "border": "8", "border_subtle": "8", "border_focused": "5",
-    "ink": "15", "ink_muted": "7", "ink_subtle": "8",
-    "accent": "5", "accent_secondary": "6", "accent_soft": "4",
-    "success": "2", "warning": "3", "danger": "1", "info": "4"}},
+    "canvas": 0, "surface": 0, "surface_elevated": 0, "surface_selected": 8, "surface_hover": 8, "slot_background": 0,
+    "border": 8, "border_subtle": 8, "border_focused": 5,
+    "ink": 15, "ink_muted": 7, "ink_subtle": 8,
+    "accent": 5, "accent_secondary": 6, "accent_soft": 4,
+    "success": 2, "warning": 3, "danger": 1, "info": 4}},
   "catppuccin-mocha": {"palette": {
     "canvas": "#1e1e2e", "surface": "#1e1e2e", "surface_elevated": "#313244", "surface_selected": "#45475a", "surface_hover": "#313244", "slot_background": "#252536",
     "border": "#7f849c", "border_subtle": "#585b70", "border_focused": "#b4befe",
@@ -607,9 +670,11 @@ role and no `name` (its name is its key).
 | The embedded document fails to parse or a built-in theme fails validation | A build error, not a runtime problem: `TestBuiltInThemesValidate` fails. The embedded document is a compile-time constant, so this cannot happen in a shipped binary |
 | A higher layer redefines a built-in name | Rule 3: the higher definition replaces it whole; `theme.list` shows that layer as `source`; no problem is reported |
 | A higher layer redefines `charm` with a failing palette | The ordinary `low_contrast` error; the previous palette keeps serving; partial user themes still inherit from the replaced `charm`, which is what the user asked for |
-| `theme.name` names `base16` and a plugin treats palette values as hex | The plugin's bug: the value grammar is documented on the wire type. The host emits exactly what the document holds |
-| A `theme.palette.<role>` override is applied on top of `base16` | The override is hex and is checked; every pair with an index on the other side is unmeasurable and skipped, so only override-against-override pairs are enforced. `husk theme check` reports what it could measure |
-| The terminal has no truecolor | Unchanged: Bubble Tea downsamples hex values; indices pass through |
+| `theme.name` names `base16` and a plugin ignores `ansi` (a client older than minor 2.4, or one that does not read it) | The plugin draws the xterm defaults in `palette`: a reasonable approximation, not the user's terminal colours. Not an error; `palette` is valid `#rrggbb` either way |
+| A layered theme writes an index as a string (`"4"`) or an integer outside `0`–`15` | Not a role value: the definition is dropped with `invalid_theme` (Services rule 4), as for any malformed colour |
+| A `theme.palette.<role>` override is applied on top of `base16` | The override is hex; it replaces that role's index, which leaves the `ansi` map. Pairs with an index on either side stay unmeasurable and skipped, so only pairs between two hex roles (in practice override against override) are enforced |
+| A `theme.palette.<role>` override is written as an integer | `invalid_color`: overrides are `#RRGGBB` only |
+| The terminal has no truecolor | Unchanged: Bubble Tea downsamples hex values; ANSI basic colours pass through |
 
 ### Tests
 
@@ -619,17 +684,26 @@ In `pkg/theme`, each named for what it pins:
   themes with exactly these names and values, every role set, no `name`
   field.
 - `TestBuiltInThemesValidate`: each definition passes the Named themes rules
-  (name grammar, known roles, value grammar: hex, or an index only in
-  `base16`).
+  (name grammar, known roles, value grammar: `#rrggbb` or an integer
+  `0`–`15`); only `base16` uses integers, and it uses them for every role.
+- `TestThemeValueGrammar`: in a layered theme an integer `0`–`15` is
+  accepted in any layer; `"4"`, `16`, `-1`, `4.5` and `#fff` each drop the
+  definition with `invalid_theme`; an integer `theme.palette.<role>`
+  override is `invalid_color`.
+- `TestIndexResolvesToXtermDefault`: each index `0`–`15` resolves to the
+  table's hex, equal to `ansi.BasicColor(n)`, and is recorded in the index
+  map; a hex override of an index role removes it from the map.
 - `TestBuiltInThemesContrast`: `CheckContrast` reports nothing for the eight
-  hex themes; for `base16` every pair is unmeasurable and none is reported
-  as a violation.
+  hex themes; for `base16` every pair has an index side, so all are skipped
+  and none is reported.
 - `TestBuiltInThemesLadder`: the ladder rule over the eight hex themes, in
   both directions.
 - `TestDefaultIsCharm`: `Default()` equals the `charm` entry, with `name`
   `charm`, so the frontend's fallback palette (used before the first reload)
   and the Theme Service's base agree.
-- `TestSlotBackgroundIndexPassesThrough`: `SlotBackground("0")` is `"0"`.
+- `TestIndexCanvasSlot`: a theme whose canvas is an index and which leaves
+  `slot_background` unset builds `slot_background` with the canvas's index
+  (same hex, same `ansi` entry), not a value derived from the xterm default.
 - The existing `TestDefaultPaletteContrast`, `TestDefaultPaletteIsHex`,
   `TestDefaultPaletteSurfacesAreOrdered` and `TestSurfaceLadderSeparation`
   keep running on `Default()` and stay green with `charm`'s values.
@@ -639,11 +713,20 @@ user `dracula` wins over the built-in one and lists as `user`; `theme.list`
 lists the nine first in document order; `theme.name` unset serves `name`
 `charm`; a partial user theme inherits from `charm`, not from the built-in
 palette of today; `reserved_theme_name` is gone from the code list and no
-name is refused.
+name is refused. Selecting `base16` publishes: `theme.name` set to `base16`
+emits `theme.changed` whose `palette` holds only `#rrggbb` values (the
+xterm defaults), whose `ansi` object has all nineteen roles with the table's
+indices, and no `low_contrast` problem is raised; `theme.get` returns the
+same pair; switching back to `charm` emits a `theme.changed` with no `ansi`.
 
 In `cmd/husk`: the bottom bar shows `charm` with `theme.name` unset (the
 chrome spec's test, renamed); the goldens are regenerated once for the new
-values (the chrome spec's "Tests and goldens" owns the mechanics).
+values (the chrome spec's "Tests and goldens" owns the mechanics). Under
+`base16` the frontend draws each index role as `ansi.BasicColor(n)`; the
+View's `BackgroundColor` is nil when the canvas is an index and set to the
+canvas otherwise (no OSC 11 for an index canvas). In `internal/compose`: the
+shadow leaves a cell with a basic or indexed colour unchanged and still
+blends a hex neighbour in the same shadow band.
 
 ## Level 2: Migration from today
 
@@ -655,9 +738,12 @@ values (the chrome spec's "Tests and goldens" owns the mechanics).
 | Theme Service build step 1: "start from the built-in palette" | Start from `charm` |
 | `theme.name` default `CharmTone` ([Services](services.md), Settings) | Default `charm` |
 | `theme.list`: built-in first, then by name | The nine in document order, then by name |
-| `Overlay` validates `#RRGGBB` only | Unchanged for layered themes and overrides; the built-in document is validated by its own test, and the index form is accepted only when loading the embedded document |
-| `CheckContrast`: an unparsable value is a violation | Unchanged for layered themes and overrides (hex-only, so never hit); the built-in test treats index pairs as unmeasurable |
-| `protocol.Palette` comment: `#RRGGBB` strings | `#rrggbb`, or an ANSI index `"0"`–`"15"` as a decimal string when the selected theme is `base16`; [Protocol](protocol.md) `theme_changed` row and [Architecture](../architecture.md) "Theme" amended |
+| `themes` document role values: `#RRGGBB` strings only | `#rrggbb` or an integer `0`–`15` in every layer; Theme resolves an integer to its xterm default and records it in the index map (Services, "Named themes", rule 2) |
+| `Overlay` validates `#RRGGBB` only | Unchanged: it only ever sees resolved hex values and the hex-only overrides |
+| `CheckContrast`: an unparsable value is a violation | Unchanged for hex; it takes the index map and skips every pair with an index role on either side |
+| `protocol.Palette` comment: `#RRGGBB` strings | Unchanged: values stay `#rrggbb`. The `theme.get` result and `theme.changed` params gain an optional `ansi` object (role → `0`–`15`), minor 2.4; [Protocol](protocol.md) "ANSI palette roles (minor 2.4)" and the `theme_changed` row, and [Architecture](../architecture.md) "Theme", amended. The wire schema gains it in the change that serves it, generated from `pkg/protocol` |
+| `cmd/husk` draws every role from its hex | Index roles drawn as `ansi.BasicColor(n)`; the View's `BackgroundColor` (OSC 11) is set only for a hex canvas |
+| `internal/compose` `castShadow` blends every cell's colours | Leaves a cell with an ANSI basic or indexed colour unblended ([Cell-buffer compositor](cell-buffer-compositor.md), "Popup shadow") |
 | `cmd/husk` goldens show `✦ CharmTone` and today's colours | Regenerated once with the chrome spec's colour changes |
 | `AGENTS.md`, `README.md`: "one palette, CharmTone, do not add other themes" | Rewritten by the landing commit to name `charm` and the built-in layer; this spec does not edit them because they describe the code as it is |
 
@@ -673,11 +759,12 @@ values (the chrome spec's "Tests and goldens" owns the mechanics).
 3. **Partial themes inherit from `charm`, not from a frozen "built-in
    palette".** There is one base, and it is the default theme; a
    distribution that replaces `charm` changes that base knowingly.
-4. **Charm's canvas is grey 234, one below the ramp the brief names.** With
-   `235` as canvas the raised steps fall where the theme's own fuchsia,
-   green and red fail 4.5:1 and would all have to move; one step down, only
-   the red moves, and the canvas stays close to today's. The brief's greys
-   `237`, `238`, `243`, `248` and `252` are all used.
+4. **Charm's canvas is grey 234, one below the ramp the brief names;
+   accepted.** With `235` as canvas the raised steps fall where the theme's
+   own fuchsia, green and red fail 4.5:1 and would all have to move; one
+   step down, only the red moves, and the canvas stays close to today's. The
+   brief's greys `237`, `238`, `243`, `248` and `252` are all used. The step
+   was reviewed and accepted as the theme's canvas.
 5. **One mechanical adjustment rule** (Lab lightness, hue fixed, away from
    the canvas) rather than hand-picked substitutes, so every adjusted value
    is reproducible from its source and the floor is the same for all
@@ -690,10 +777,10 @@ values (the chrome spec's "Tests and goldens" owns the mechanics).
    colour elsewhere; `border_focused` is the second accent. A focused frame
    edge in the accent would be the loudest thing on screen, which is what
    the discipline rule is removing.
-8. **Base16 stays ANSI** and is unmeasurable. Translating it to hex would
-   defeat the theme; measuring it is impossible; so it is the one theme the
-   floor does not vouch for, stated plainly. Indices `9`–`14` are avoided
-   because Base16 schemes repeat them.
+8. **Base16 stays ANSI** and is unmeasurable. Translating it to fixed hex
+   would defeat the theme; measuring it is impossible; so it is the one
+   built-in theme the floor does not vouch for, stated plainly. Indices
+   `9`–`14` are avoided because Base16 schemes repeat them.
 9. **Rosé Pine's `success` and `info` are allowed to end close.** The
    palette's own terminal mapping says green is pine and blue is foam;
    lightening pine to 4.5:1 lands it beside foam. Remapping `info` to iris
@@ -702,6 +789,37 @@ values (the chrome spec's "Tests and goldens" owns the mechanics).
     of settings; a user picks `charm-light` the way they pick `dracula`.
 11. **`rose-pine-moon-dark` is not shipped**: it is one renderer's pairing
     of Moon's colours with main's base, not a Rosé Pine variant.
+12. **Palette values on the wire are always `#rrggbb`; indices travel in a
+    separate optional `ansi` object (minor 2.4).** Putting `"4"` in a
+    `#RRGGBB` field would break every plugin that parses the palette as
+    hex; sending the xterm default keeps old clients correct-ish, and the
+    `ansi` object lets a new client draw the terminal's own colour. It is
+    absent for hex themes, so their payload does not change.
+13. **The integer form is allowed in every layer, not only the built-in
+    one.** One grammar for all `themes` files; a user writing their own
+    Base16-style theme gets what `base16` gets, including the unmeasured
+    floor, which is the user's choice. A string index is malformed, so the
+    two forms cannot be confused.
+14. **`theme.palette.<role>` overrides stay `#RRGGBB`.** An override is a
+    single colour fitted to the measured floor; an index there would only
+    remove a pair from the check.
+15. **The popup shadow and the terminal background respect indices.** The
+    shadow leaves basic and indexed colours unblended, and no OSC 11 is sent
+    for an index canvas: blending or painting an xterm default would show a
+    colour the user's terminal never chose.
+16. **An index canvas carries its index into an unset `slot_background`.**
+    Deriving the slot from the xterm default would put a fixed hex panel in
+    a theme whose point is the terminal's own colours.
+17. **Charm follows v1 `huh`'s intent, not v2's literal colours.** `huh` v2
+    replaced `AdaptiveColor{Light, Dark}` with `lightDark(dark, light)`
+    calls that swap the pair; read literally, v2 draws light-theme greys on
+    a dark terminal. The tables mark each value taken "by v1's intent".
+18. **Dracula's `border_focused` is `#7383b5`, the adjusted comment, equal
+    to `border`.** The specification's comment `#6272a4` is 2.4:1 on the
+    elevated surface and fails the 3:1 floor for borders; the adjustment
+    lands on the same value as `border`. The cost is that a focused frame
+    edge is not distinguished from an unfocused one under Dracula; focus
+    still shows through the selected and accent roles.
 
 ## Open questions
 
@@ -711,9 +829,7 @@ values (the chrome spec's "Tests and goldens" owns the mechanics).
    under some multiplexers, and a theme that changes under the user without
    a setting changing is a mode. A later spec may add a `theme.auto`
    setting naming a dark and a light theme.
-2. **Index values outside the built-in layer.** A user who wants their own
-   ANSI theme cannot write one (the floor is unmeasurable). Allowing it
-   under `theme.allow_low_contrast` is a small rule for a later spec.
-3. **Preview in the selector.** The theme selector has no live preview
-   ([Services](services.md), "The theme selector"); with nine themes the
-   case for a frontend-only preview is stronger. Unchanged here.
+2. **Preview in the Theme tab.** The Settings center's Theme tab has no
+   live preview ([Settings center](settings-center.md), "Tabs", "Theme");
+   with nine themes the case for a frontend-only preview is stronger.
+   Unchanged here.
