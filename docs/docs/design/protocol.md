@@ -361,7 +361,7 @@ Why the host emulates: the host owns the cell canvas and the key encoder, so a t
 
 ### Theme selection and the settings write (minor 2.3)
 
-**Level 1: specified, not landed.** As with minor 2.2: nothing below exists in `pkg/protocol`, and the method table above, `pkg/protocol/methods.go` and the generated schema gain these rows, constants and payload types in the change that serves the first of them. This section owns only the names, forms and directions; params, results and errors are [Services](services.md)'s ("Theme", "Settings").
+**Both methods are served; the version stamp is pending minor 2.2.** The method table above, `pkg/protocol/methods.go` and the generated schema contain these rows, constants and payload shapes. `protocol.Version` remains `2.1` until the preceding minor lands; the subsequent stamp to `2.3` changes no payload. This section owns only the names, forms and directions; params, results and errors are [Services](services.md)'s ("Theme", "Settings").
 
 | Namespace | Method | Form | Direction |
 | :--- | :--- | :--- | :--- |
