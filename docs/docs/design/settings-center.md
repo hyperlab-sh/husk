@@ -57,23 +57,26 @@ Closing: `esc`, `ctrl+c` (closes the center, never quits, as for the palette), a
 The modal follows the placement rules of the frontend layout for a host modal (centred on the frame, over the default layout, the layout label reads `Modal`). Its size is the smaller of the terminal less two cells each side and 100 by 32 cells; at the 84 by 24 minimum it is 80 by 20. Inside the border:
 
 ```
-┌ Settings ────────────────────────────────────── profile: work ▾ ┐
-│ General   │ husk.plugins                                        │
-│ Keys      │   paths      [/home/u/plugins/alpha              ]  │
-│ Theme     │   dirs       [                                   ]  │
-│ Plugins   │              restart required                       │
-│   Store   │ husk.layout                                         │
-│ ▸ Installed│  rail       ( ) ""  (•) modal  ( ) full-canvas ... │
-│           │ husk.input                                          │
-│           │   hold_alt   [ ] no                                 │
-│           │ theme                                               │
-│           │   ...                                               │
+┌ Settings ─────────────────────────────────────── profile: work ▾ ┐
+│ General    │ husk                                                │
+│ Keys       │   bundle               [                            ]│
+│ Theme      │ husk.plugins                                        │
+│ Plugins    │   paths                [/home/u/plugins/alpha       ]│
+│   Store    │                        restart required             │
+│ ▸ Installed│   dirs                 [                            ]│
+│            │                        restart required             │
+│            │ profile                                             │
+│            │   default              [work                        ]│
+│            │ theme                                               │
+│            │   name                 [evening                     ]│
+│            │   allow_low_contrast   [ ] no                       │
+│            │   palette.accent       [#7d56f4                     ]│
 │ tab/shift+tab focus · 1-5 tabs · ctrl+s save · esc close         │
-└────────────────────────────────────────────────────────────────┘
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 - **Title row.** The word `Settings` at the left of the top border; the **profile corner** at the right: `profile: <name> ▾`, where `<name>` is the entry of `profile.list` with `active: true`, or `default` when none is active (an empty active profile is what [Services](services.md) calls "no profile"; the corner shows `default` because that is what a user reads it as). The corner is always drawn, on every tab, clipped to 24 cells with a `…` tail.
-- **Tab list.** 12 cells wide, one row per tab: `General`, `Keys`, `Theme`, `Plugins`, then `Store` and `Installed` indented under it. `Plugins` is a heading, not a tab: moving onto it lands on `Store`. The active tab is drawn with `surface_selected` and a `▸` marker; the list has focus when its row text is `accent`.
+- **Tab list.** 13 cells wide (one cell of margin, the marker, a space, the longest name `Installed` at 9, then its divider), one row per tab: `General`, `Keys`, `Theme`, `Plugins`, then `Store` and `Installed` indented under it. `Plugins` is a heading, not a tab: moving onto it lands on `Store`. The active tab is drawn with `surface_selected` and a `▸` marker; the list has focus when its row text is `accent`.
 - **Content.** The rest of the width, the tab's pane ("Tabs"). It scrolls when taller than the modal; the scroll position is per tab and resets on close.
 - **Footer.** The last inner row: the key hints for the focused part, in the palette's style (key in `accent`, description in `ink_muted`).
 
@@ -81,7 +84,7 @@ Colours are palette roles ([Protocol](protocol.md) `Palette`): the modal is `sur
 
 ### Focus and keys
 
-The center is a modal in the palette's key model: while it is open `Resolve` is not called and the center consumes every key ([Keybindings](keybindings.md), context filters). Three parts can hold focus: the **tab list**, the **content** and the **profile corner**. `tab` moves focus tab list → content → profile corner → tab list; `shift+tab` the other way. Inside the content, huh's own `tab` moves between fields; the frontend hands `tab` to the form first and takes it as a focus move only when the form reports it has left its last field (huh's group completion), so the form's fields and the center's parts form one tab order.
+The center is a modal in the palette's key model: while it is open `Resolve` is not called and the center consumes every key ([Keybindings](keybindings.md), context filters). Three parts can hold focus: the **tab list**, the **content** and the **profile corner**. `tab` moves focus tab list → content → profile corner → tab list; `shift+tab` the other way. Inside the General content, huh's own `tab` and `shift+tab` move between fields; the center intercepts `tab` on the form's **last** field (focus moves to the profile corner) and `shift+tab` on its **first** field (focus returns to the tab list) **before** huh sees them, so huh never completes the group and the form's fields and the center's parts form one tab order. The form is therefore never submitted in huh's sense: it stays live for the life of the tab, and is rebuilt (keeping the active field by key when it still exists) only when a reload changed the schema or when a save finished, never on completion.
 
 The closed key set, by focused part:
 
@@ -102,7 +105,7 @@ Mouse: a click on a tab row activates it; a click in the content focuses it and 
 
 #### General
 
-Every settings key with a schema entry, as `settings.schema` lists them, edited in a huh form. The rows are **grouped by prefix**: the group of a key is the key minus its last segment (`husk.plugins`, `husk.layout`, `husk.input`, `theme`, `theme.palette`, `profile`, `dist`, `dist.<x>`, ...), groups sorted by name and keys sorted inside each; the group name is a heading and the field label is the last segment, with the entry's `Doc` line in `ink_muted` under it. Host keys (`husk.*`, `theme.*`, `profile.*`) come first, then the distribution's `dist.*` groups (same mechanics; the user may write them and `settings.set` accepts them, so leaving them out would hide keys the user owns), then one **collapsible group per plugin**, `plugins.<id>`, collapsed by default and showing only the keys that plugin's schema declares (a plugin whose schema was not registered has no group; its raw keys are `settings.list`'s business). `theme.name` is listed like any string key; the Theme tab is the comfortable way to change it, the field is the exact one.
+Every settings key with a schema entry, as `settings.schema` lists them, edited in a huh form. The rows are **grouped by prefix**: the group of a key is the key minus its last segment (`husk`, `husk.plugins`, `theme`, `theme.palette`, `profile`, `dist`, `dist.<x>`, ...), groups sorted by name and keys sorted inside each; the group name is a heading and the field label is the last segment, with the entry's `Doc` line in `ink_muted` under it. Host keys (`husk.*`, `theme.*`, `profile.*`) come first, then the distribution's `dist.*` groups (same mechanics; the user may write them and `settings.set` accepts them, so leaving them out would hide keys the user owns), then one **collapsible group per plugin**, `plugins.<id>`, collapsed by default and showing only the keys that plugin's schema declares (a plugin whose schema was not registered has no group; its raw keys are `settings.list`'s business). `theme.name` is listed like any string key; the Theme tab is the comfortable way to change it, the field is the exact one.
 
 The huh field for each schema type:
 
@@ -128,7 +131,7 @@ Not in v1, said so the implementer does not add it: a Save button (the key is en
 
 #### Keys
 
-Read-only. One row per entry of `keys.list` (the full listing, as a `cli` caller sees it, through the seam `KeyListing()`), in the listing's order, with the columns `KEY`, `SCOPE`, `ACTION`, `LAYER` (the owner: `husk`, `distribution`, `user`, `profile`, `focus-local` with the plugin id) and `STATE` (`effective`, `shadowed by <source>`, `disabled`, `unavailable`, `unknown_action`; the handler's states, [Keybindings](keybindings.md) "`husk keys`"). Shadowed entries are **shown** (the center is where a user wonders why a key does nothing), in `ink_muted`. A **filter box** above the table (the palette's query line component, not a huh field, because it filters as the user types) keeps rows whose key spelling, action or plugin contains the text, case-insensitive. The listing's problems are shown under the table, `severity: code: message`, at most 20 with `and <n> more`.
+Read-only. One row per entry of `keys.list` (the full listing, as a `cli` caller sees it, through the seam `KeyListing()`), in the listing's order, with the columns `KEY` (a sequence space-joined, `ctrl+k ctrl+s`, as `husk keys` prints it), `SCOPE`, `ACTION`, `LAYER` (the owner: `husk`, `distribution`, `user`, `profile`, `instance`, `focus-local` with the plugin id) and `STATE` (`effective`, `shadowed by <source>`, `disabled`, `unavailable`, `unknown_action`; the handler's states, [Keybindings](keybindings.md) "`husk keys`"). Shadowed entries are **shown** (the center is where a user wonders why a key does nothing), in `ink_muted`. A **filter box** above the table (the palette's query line component, not a huh field, because it filters as the user types) keeps rows whose key spelling, action or plugin contains the text, case-insensitive. The listing's problems are shown under the table, `severity: code: message`, at most 20 with `and <n> more`.
 
 No editing: no method writes a keymap layer in v1. A user who wants a different key edits `keymap.json` and reloads; the tab's footer says so (`edit keymap.json to change a key`). The follow-up is a `keymap.set` sibling of `settings.set` (Open questions).
 
@@ -143,7 +146,7 @@ The theme selector of [Services](services.md) ("The theme selector"), as a tab. 
 
 #### Plugins → Installed
 
-The live plugins of this instance: one row per entry of `husk.pods.plugins` in the State snapshot, sorted by id, with `id`, `status` (`starting`, `live`, `exited`, `failed`, coloured `success`, `ink`, `ink_muted`, `danger`), the **claimed surfaces** (the keys of the plugin's `<id>.occupants` declaration slice, with the ones it currently holds, present in `husk.surfaces.occupants` with this plugin, in `ink` and the refused or pending ones in `ink_muted`; `none` when it claims nothing), and the **source path**: the plugin's directory as the converter resolved it, from the new `dir` field of the `husk.pods` entry ("Changes to other specs"), or `(command line)` when the plugin was given as an executable with arguments and has no directory. `last_error` is shown under a `failed` row. The table refreshes from every `husk.pods` and `husk.surfaces` change while the tab is open.
+The live plugins of this instance: one row per entry of `husk.pods.plugins` in the State snapshot, sorted by id, with `id`, `status` (coloured by value: `live` in `success`, `starting` in `ink`, `exited` in `ink_muted`, `failed` in `danger`), the **claimed surfaces** (the keys of the plugin's `<id>.occupants` declaration slice, with the ones it currently holds, present in `husk.surfaces.occupants` with this plugin, in `ink` and the refused or pending ones in `ink_muted`; `none` when it claims nothing), and the **source path**: the plugin's directory as the converter resolved it, from the new `dir` field of the `husk.pods` entry ("Changes to other specs"), or `(command line)` when the plugin was given as an executable with arguments and has no directory. `last_error` is shown under a `failed` row. The table refreshes from every `husk.pods` and `husk.surfaces` change while the tab is open.
 
 **Remove.** `enter` or `x` on a row (or a click on its `Remove` cell) opens a huh `Confirm` in the content: `Remove <id> from this instance? It is unloaded, not uninstalled: its files, settings and saved state stay, and the next start loads it again.` Confirming calls `plugin.remove` through the seam `RemovePlugin(id, reply)` with a `host` caller; the row shows `removing…` until the reply or until the `husk.pods` entry disappears, whichever comes first. The reply's `status` and `log` are not shown (the row is gone); an error reply (`not_found` because the plugin went away meanwhile, `conflict`, `unavailable` `shutdown`, `cancelled`) is shown under the table as `<code>: <message>` until the next key. A second Remove of the same id while one is pending joins it, as the method does. `esc` or `no` on the Confirm returns to the table.
 
@@ -198,7 +201,7 @@ The catalog is a layered Store document named **`catalog`**, file `catalog.json`
 
 | Field | Type | Required | Rule |
 | :--- | :--- | :--- | :--- |
-| `version` | integer | yes | Must be `1`; anything else drops the layer with `invalid_catalog_version` |
+| `version` | integer | yes | Must be `1`; anything else drops the layer with `invalid_value` on `catalog.version` |
 | `entries` | object | yes | Keys are entry ids; `{}` is a valid empty catalog |
 | `<id>` (key) | string | | The plugin id rule, `[A-Za-z0-9][A-Za-z0-9._-]{0,63}` ([Pods](pods.md) rule 3), matched exactly; the id of the plugin the entry describes, so `installed` can be computed |
 | `name` | string | no | At most 128 runes; defaults to the id |
@@ -210,21 +213,21 @@ The catalog is a layered Store document named **`catalog`**, file `catalog.json`
 Rules:
 
 1. An entry is a **unit** across layers: a higher layer defining the same id replaces the lower definition whole; the center shows the winning layer as the entry's `source_layer`. Unknown fields in an entry are ignored (forward growth, as for a bundle manifest).
-2. An entry that does not validate (bad id, a field of the wrong type or over its limit, an unknown surface, a `source` of another shape) is **dropped** with one `warning` `invalid_catalog_entry` (layer: the defining layer; `Key`: `catalog.<id>`; message names the id and the first reason; `Source` names the file). The layer's other entries stand.
-3. At most **256** entries per layer; the 257th in document order is dropped with `too_many_catalog_entries`.
-4. A `catalog.json` that does not parse, or whose `version` is not `1`, drops that layer alone with `invalid_catalog_version` or Store's parse problem; other layers stand.
-5. The catalog is **not** a Service input and no reload report carries its problems: nothing in the host changes because of it. It is read on demand by the seam, re-read when Store is invalidated (a reload) and cached between, and its problems are returned beside its entries for the tab to show. `husk store check` does not inspect it beyond parsing, as for any layer file.
+2. An entry that does not validate (bad id, a field of the wrong type or over its limit, an unknown surface, a `source` of another shape) is **dropped** with one `warning` `invalid_value` (layer: the defining layer; `Key`: `catalog.<id>` for a bad id, `catalog.<id>.<field>` for a bad field; message names the first reason; `Source` names the file). The layer's other entries stand.
+3. At most **256** entries per layer; the 257th and later in document order are dropped with one `invalid_value` on `catalog.entries`.
+4. A `catalog.json` that does not parse, is over a Store limit or whose `version` is not `1` drops that layer alone; other layers stand. The reader never gives up on the whole catalog.
+5. The catalog is **not** a Service input and no reload report carries its problems: nothing in the host changes because of it. It is read **off the loop**, never on it ([Store](store.md) invariant 6: Store never runs on the Bubble Tea loop): the host warms a catalog cache on a worker at startup, after the `startup` flight, and again after every `services.reloaded` event (a reload is the only thing that changes the layers, and `Store.Invalidate()` ran at its capture), posting the result to the loop; the `Catalog()` seam returns that cache and performs no I/O, so the center on the loop sees the catalog as of the last reload, exactly as it sees `Themes()`. Its problems are returned beside its entries for the tab to show. `husk store check` does not inspect it beyond parsing, as for any layer file.
 6. Husk never acts on a `source`: no fetch, no clone, no build, no `plugin.add`. The tab prints a command; the user runs it.
 
-Codes, the closed set: `invalid_catalog_version`, `invalid_catalog_entry`, `too_many_catalog_entries`. Each is a `protocol.Problem` with `Severity` `warning`, so a broken catalog can never be more than a line in the Store tab.
+Problems are `protocol.Problem` values produced through the **one** Store-to-Problem conversion in `services/settings` ([Store](store.md): Services convert load problems into `protocol.Problem` in one place), and they use **existing codes only**; this spec adds no code. A layer file that does not parse or is over a Store limit is `store_error` (the message names the config-relative file, as the coordinator's `store_error` does). Everything the catalog rules above reject is `invalid_value`, with `Key` the path in the document (`catalog.version` for a wrong version; `catalog.<id>` for a bad id; `catalog.<id>.<field>` for a bad field; `catalog.entries` for the 257th entry, message `more than 256 entries; the rest ignored`), `Layer` the defining layer and `Source` the file. Every catalog problem is `warning` severity, whatever the code's severity means in a reload report, so a broken catalog can never be more than a line in the Store tab.
 
-The built-in catalog is empty: the host embeds no `catalog.json`. A distribution supplies one in its distribution layer (an embedding application's `fs.FS`, or a bundle's files once that spec lands, which is the same layer), a user in `catalog.json` of the user layer.
+The built-in catalog is empty: the host embeds no `catalog.json`. A distribution supplies one in its distribution layer (an embedding application's `fs.FS`, or a bundle's files, which are the same layer, [Bundles](bundles.md)), a user in `catalog.json` of the user layer.
 
 ### huh
 
 Forms are built with **`charm.land/huh/v2`** (the canonical vanity path, like `charm.land/bubbletea/v2`; not the old GitHub module path), the line of huh that targets Bubble Tea v2, because Husk is on Bubble Tea v2 (`charmbracelet/x/exp/teatest/v2`, `charmbracelet/ultraviolet` in `go.mod`); the v1 module targets Bubble Tea v1 and cannot be mixed in.
 
-**The compatibility check comes first.** Before writing a field, the implementer adds the dependency and builds `cmd/husk` with the **pinned** `ultraviolet` and Bubble Tea v2 versions in `go.mod`: huh v2 must build against them without moving either pin, and a `tea.Program` with a huh form inside the workbench model must render under `teatest/v2`. If it builds only by bumping a pin, the bump is a separate commit that the golden frames pass on; if it does not build at all, or the bump breaks the compositor, huh is **not** used and the fallback below is.
+**The compatibility check comes first.** Before writing a field, the implementer adds the dependency and builds `cmd/husk` with the **pinned** `ultraviolet` and Bubble Tea v2 versions in `go.mod`: huh v2 must build against them without moving either pin, and a `tea.Program` with a huh form inside the workbench model must render under `teatest/v2`. huh v2 brings `charm.land/bubbles/v2` (its text inputs and lists) into `go.mod` as a new direct-use dependency, which core does not use today; the check records that the bubbles module builds against the same pins and that nothing outside the center imports it (the same import test as for huh). If it builds only by bumping a pin, the bump is a separate commit that the golden frames pass on; if it does not build at all, or the bump breaks the compositor, huh is **not** used and the fallback below is.
 
 **Fallback.** The same forms rendered with Husk's own field components, bounded to exactly the fields the tables above need: `Input` (one line of text with a cursor, which is the palette's query line component), `Text` (several lines; `Input` rows with `enter` adding a line), `Select` (a vertical list with a marker, which is the theme list component), `Confirm` (a two-option `Select`). No other widget is needed by any tab. Whichever path is taken, the spec's behaviour is the same; the tests do not depend on huh types.
 
@@ -244,7 +247,7 @@ The center drives the host through `contracts.Frontend` ([Pods](pods.md), "Front
 | `Profiles()` | `profile.list` | any |
 | `UseProfile(name, reply)` | `profile.use`; answers on the loop exactly once with `{active, reports}` or a `CodedError` | call from the loop; reply on the loop |
 | `RemovePlugin(id, reply)` | `plugin.remove` with a `host` caller ("Changes to other specs"); answers on the loop exactly once with `{plugin, status, log, reports}` or a `CodedError` | call from the loop; reply on the loop |
-| `Catalog()` | `Store.Layers("catalog", profile)` validated by the rules above: `{entries, problems}` | any; cached per Store invalidation |
+| `Catalog()` | the catalog cache: `Store.Layers("catalog", profile)` read and validated by the rules above on a host worker, at startup and after every `services.reloaded`, posted to the loop; `{entries, problems}` | any; a cache read, never I/O |
 | `ConfigDir()` | the user layer's config directory, for the empty-catalog message | any |
 
 None of them blocks the loop: the writers run their method off the loop and post the reply, like `SetSetting`. The frontend never imports Services, Pods or Store.
@@ -254,7 +257,7 @@ None of them blocks the loop: the writers run their method off the loop and post
 1. The center writes configuration only through `settings.set`, switches profiles only through `profile.use`, and unloads only through `plugin.remove`; it holds no state that those methods do not also show. Closing it loses only unsaved edits.
 2. While the center is open, no key reaches `Resolve` or a plugin, and `overlays.settings_center` names the active tab; it is `""` whenever the center is closed, by any path.
 3. A save writes exactly the dirty fields, one `settings.set` each, sequentially; a field is clean only after a reply with no `error` problem for its key.
-4. The Store tab never performs a network or filesystem action other than reading `catalog.json` through Store; `plugin.add` is never called by the center.
+4. The Store tab never performs a network or filesystem action; the catalog is read through Store on a host worker, never on the loop, and `plugin.add` is never called by the center. Nothing the center does on the loop touches Store.
 5. The profile corner shows the name `profile.list` marks active (or `default`), on every tab, at every size the modal can have.
 6. huh is imported by the center's files only.
 7. The Theme tab's selection semantics are those of [Services](services.md), "The theme selector", unchanged: same `theme.list` order, same `settings.set theme.name`, same close-on-applied and stay-open-on-problem rules.
@@ -272,8 +275,9 @@ None of them blocks the loop: the writers run their method off the loop and post
 | `profile.use` of a profile whose directory vanished | Profile | No switch | `unknown_profile: <message>` in the corner; the name is unchanged |
 | `plugin.remove` for a plugin that already left | Pods | Nothing | `not_found: <message>` under the table; the row is already gone |
 | Shutdown during a pending call | host | The reply is `cancelled` `shutdown` or never arrives | The TUI is exiting; nothing is drawn |
-| `catalog.json` does not parse or has a wrong `version` | the `Catalog()` seam | That layer dropped | `warning: invalid_catalog_version: ...` or the parse problem under the Store list |
-| A catalog entry is invalid | the `Catalog()` seam | That entry dropped | `warning: invalid_catalog_entry: <id>: <reason>` |
+| `catalog.json` does not parse or is over a Store limit | the catalog reader, off the loop | That layer dropped | `warning: store_error: <file>: <reason>` under the Store list |
+| `catalog.json` has a wrong `version` | the catalog reader | That layer dropped | `warning: invalid_value: catalog.version: want 1` |
+| A catalog entry is invalid, or past the 256th | the catalog reader | That entry dropped | `warning: invalid_value: catalog.<id>...: <reason>` |
 | No catalog anywhere | the `Catalog()` seam | Empty list | `No catalog ...` with the file path and an example |
 | A reload publishes while a field is dirty | frontend | Clean fields refresh; dirty ones keep their edit | The dirty marker stays; a later save writes the edit |
 | Terminal becomes frozen (below 84x24) | frontend | The center closes, edits discarded | The too-small screen |
@@ -311,10 +315,11 @@ Each named for the behaviour it pins, in `cmd/husk` on the recording fake fronte
 - Theme: the selector's tests ([Services](services.md)) pass unchanged with the selector opened as this tab; a successful selection closes the center;
 - Installed lists `husk.pods` entries with claimed and held surfaces and the `dir`; Remove asks, calls `RemovePlugin` once on `yes` and not on `no`; the row leaves when `husk.pods` drops it;
 - Store with no catalog shows the empty message with the config path; with a fixture shows entries filtered by surface and text; an entry whose id is a Pod is `installed`; a path source shows `husk plugin add <source>`, a URL source shows the fetch line; invalid entries are dropped and listed;
-- the catalog reader: a table over every field rule and limit, layer replacement by id, `too_many_catalog_entries` at 257, a layer with `version: 2` dropped alone;
+- the catalog reader: a table over every field rule and limit, layer replacement by id, the 257th entry dropped with `invalid_value` on `catalog.entries`, a layer with `version: 2` dropped alone with `invalid_value` on `catalog.version`, an unparsable layer dropped alone with `store_error` from the shared conversion;
+- the center does no Store I/O on the loop: a Store fake that fails any call made on the loop goroutine, with the catalog warmed by the worker at startup and after a `services.reloaded`, and `Catalog()` answering from the cache;
 - the profile corner shows the active name or `default`, opens the Select, calls `UseProfile` once with the chosen name (`""` for `(none)`), and shows the error for a failed switch;
 - huh is imported only from the center's files (an import test like `TestImportsStayWithinAllowList`);
-- golden frames: the center open on General (empty workbench, 144x40), on Keys with a filter, on Store with the empty catalog, on Installed with one plugin and the Remove confirm, and the General tab with one `restart required` and one error line; regenerated once with `go test ./cmd/husk -run TestGoldenFrame -update` in the commit that lands them.
+- golden frames: the center open on General (empty workbench, 144x40), on Keys with a filter, on Store with the empty catalog, on Store with a fixture catalog (two entries, one `installed`, the detail pane showing a path source's command), on Installed with one plugin and the Remove confirm, the General tab with one `restart required` and one error line, and the profile Select open over the corner; regenerated once with `go test ./cmd/husk -run TestGoldenFrame -update` in the commit that lands them.
 
 ## Level 2: Migration from today
 
@@ -322,7 +327,7 @@ Nothing of the center exists; the theme selector it absorbs is itself specified 
 
 1. **huh compatibility check**, as "huh" says, deciding huh v2 or the fallback. One commit, no behaviour.
 2. **Seams.** `contracts.Frontend` gains `SettingsSchema`, `Setting`, `KeyListing`, `Profiles`, `UseProfile`, `RemovePlugin`, `Catalog` and `ConfigDir`; the root implements them over the Services ports and Pods, with the `keys.list` join moved into a shared function. `plugin.remove` admits a `host` caller ("Changes to other specs"). `husk.pods` entries and `plugin.list` gain `dir`.
-3. **The catalog reader**, a small package under `internal/` with the rules of "The catalog document", standard library and `pkg/protocol` only, tested on fixtures.
+3. **The catalog reader**, a small package beside Services (`internal/services/catalog`), with the rules of "The catalog document", importing `pkg/protocol`, Store's layer types and the shared Store-to-Problem conversion in `services/settings`, and nothing else; tested on fixtures. The host warms its cache on a worker at startup and after each `services.reloaded` and posts the result to the loop.
 4. **The center** in `cmd/husk`: the modal, the tab list, the five tabs, the profile corner, the host actions `husk.settings.open` and `husk.theme.select`, the State write, the bottom-bar click, the goldens. The theme selector is implemented **as the Theme tab**, never as a standalone modal.
 
 The specs this one amends, each with the minimal consistent edit: [Services](services.md) ("The theme selector" becomes the Theme tab's contract; the toast rule names the center), [State](state.md) (`overlays.settings_center` replaces `overlays.theme_selector`; `husk.pods` gains `dir`), [Keybindings](keybindings.md) (`husk.settings.open` joins the host actions; the context filter row), [Store](store.md) (the `catalog` document in the document list and the directory tree), [Protocol](protocol.md) (`plugin.remove` admits the host; `plugin.list` gains `dir` in minor 2.3), [Pods](pods.md) (the same, and the seams), [Workbench chrome](chrome.md) (the theme pill's click runs `husk.settings.open` with `tab: theme`), [Bundles](bundles.md) (`themes` and `catalog` join the document names a bundle may ship).
@@ -330,7 +335,7 @@ The specs this one amends, each with the minimal consistent edit: [Services](ser
 ### Changes to other specs
 
 - **`plugin.remove` admits a `host` caller.** Until now the four `plugin.*` methods were CLI-only. The Installed tab is the user acting through the frontend, the same trust as the CLI, so `plugin.remove` admits `cli` and `host` (an `input` caller cannot reach it: no key binds a method) and stays `denied` for `plugin`; `plugin.list`, `plugin.log` and `plugin.add` stay CLI-only, because the center reads the Pod set from State and never adds. The frontend reaches `PluginPort.Remove` through the `RemovePlugin` seam, not through the socket adapter, so on the wire `plugin.remove` stays homed `cliOnly` in `MethodHomes`, as `settings.set` does; the port itself admits `cli` and `host`. The sequence under [Pods](pods.md), "Removing a plugin", is unchanged: step 1 admits the two kinds and everything after it is caller-blind.
-- **`husk.pods` entries and `plugin.list` gain `dir`.** The plugin's directory as the converter resolved it (the directory holding `husk-plugin.json`, or the directory a bare executable or manifest file was found in), `""` for a plugin given as an implicit command line. Written by the Pod at `starting` and never changed; additive to a State slice and to a result, so a reader that ignores it is unaffected. It lands with protocol minor 2.3. It answers "where did this plugin come from" for every load path, bundle or not.
+- **`husk.pods` entries and `plugin.list` gain `dir`.** The plugin's directory as the converter resolved it (the directory holding `husk-plugin.json`, or the directory a bare executable or manifest file was found in), `""` for a plugin given as an implicit command line. Written by the Pod at `starting` and never changed; additive to a State slice and to a result, so a reader that ignores it is unaffected. It is a minor-2.3 item: `protocol.Version` moves to `2.3` with whichever 2.3 item lands first ([Protocol](protocol.md), rule 5 of Versioning), and `dir` may land before or after the methods. It answers "where did this plugin come from" for every load path, bundle or not.
 - **`overlays.settings_center`** (string: `""` or a tab id) replaces the specified-not-landed `overlays.theme_selector` (bool) in `husk.surfaces`; Input's context filter reads the new field.
 - **`catalog`** joins `config`, `keymap` and `themes` as a layered Store document name.
 
@@ -344,7 +349,7 @@ The specs this one amends, each with the minimal consistent edit: [Services](ser
 6. **The Keys filter is the palette's query line, not a huh Input**, because it must filter on every keystroke; huh fields commit on `enter`. The same component serves the Store text filter.
 7. **Installed reads State, not `plugin.list`**: `husk.pods` is already in the snapshot and updates on every change, so the tab needs no polling and no new read seam; `dir` is added to the slice (and to `plugin.list`, so the two stay one shape) rather than reading the Pod map through a new seam.
 8. **`plugin.remove` admits `host`**, the smallest change that lets the Installed tab remove; `plugin.add` stays CLI-only by ruling and the tab prints the command.
-9. **The catalog is a layered document keyed by id, replaced whole per entry**, modelled on `themes`: a user can override one entry of a distribution's catalog without copying the rest, and `source_layer` tells where an entry came from. It is read by a seam, not a Service: no reload depends on it, so making it one would add a sixth report for nothing.
+9. **The catalog is a layered document keyed by id, replaced whole per entry**, modelled on `themes`: a user can override one entry of a distribution's catalog without copying the rest, and `source_layer` tells where an entry came from. It is read by a seam, not a Service: no reload depends on it, so making it one would add a sixth report for nothing. It is still read off the loop, warmed after each reload, because Store never runs on the loop; and its problems reuse the existing codes through the one shared conversion, because a catalog typo is the same kind of thing as a config typo and deserves no vocabulary of its own.
 10. **`source` is a path or a URL, and Husk acts on neither.** A path becomes a copyable `husk plugin add`; a URL is shown with a line saying to fetch it first. Rejected: a `plugin.add` button (CLI-only by ruling), any fetch (framework rule: the distribution decides how plugins arrive).
 11. **Catalog problems are warnings shown in the tab**, never in a reload report or a toast: nothing in the host changes because of a catalog, so nothing should alarm.
 12. **The profile corner uses `profile.use` without saving**, and says so in its footer. Persisting is `profile.use --save`, left open in [Services](services.md).
