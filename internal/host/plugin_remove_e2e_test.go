@@ -132,6 +132,7 @@ func TestPluginRemoveAgainstRealHostAndProcess(t *testing.T) {
 	// the removal (the exit's own write) is not part of it; one that lists it
 	// again afterwards is a re-add and fails the test.
 	var order, busOrder []string
+	busPodRevisions := map[int]uint64{}
 	var removalRevision uint64
 	var podsUnlisted bool
 	_ = w.c.SetReadDeadline(time.Now().Add(failBound))
@@ -191,12 +192,24 @@ func TestPluginRemoveAgainstRealHostAndProcess(t *testing.T) {
 			order = append(order, p.Name)
 			busOrder = append(busOrder, p.Name)
 		case "state.changed":
-			if (p.Data.Slice == "husk.pods" && p.Data.Revision == removalRevision) ||
-				(p.Data.Removed && (p.Data.Slice == "alpha.state" || p.Data.Slice == "alpha.occupants" || p.Data.Slice == "alpha.contributions")) {
+			if p.Data.Slice == "husk.pods" {
+				busPodRevisions[len(busOrder)] = p.Data.Revision
+				busOrder = append(busOrder, "slice:husk.pods")
+			} else if p.Data.Removed && (p.Data.Slice == "alpha.state" || p.Data.Slice == "alpha.occupants" || p.Data.Slice == "alpha.contributions") {
 				busOrder = append(busOrder, "slice:"+p.Data.Slice)
 			}
 		}
 	}
+	// Correlate revisions only after consuming both streams: the bus may
+	// deliver its metadata before state.watch delivers that flush's value.
+	var correlated []string
+	for i, fact := range busOrder {
+		if revision, ok := busPodRevisions[i]; ok && revision != removalRevision {
+			continue
+		}
+		correlated = append(correlated, fact)
+	}
+	busOrder = correlated
 	for source, facts := range map[string][]string{"state watch": order, "event bus": busOrder} {
 		if len(facts) != 7 || facts[0] != "pods.plugin-exited" || facts[5] != "pods.plugin-removed" || facts[6] != "services.reloaded" {
 			t.Fatalf("%s order = %v", source, facts)
