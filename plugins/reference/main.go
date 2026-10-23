@@ -366,8 +366,11 @@ func (p *plugin) request(m protocol.Message) error {
 }
 
 // secretCheck asks the host for the declared secret and answers the action once
-// the read is decided. The read blocks on the user's dialog, so the reply waits
-// for complete. The value is never replied or logged.
+// the read is decided. The value is never replied or logged. Answer the dialog
+// within the host's 10 s action timeout: the dialog itself can wait 60 s, but a
+// late action reply is ignored. A longer CLI --timeout (for example 70s) only
+// extends the client's wait, not the host's action deadline; use esc to exercise
+// dismissal before that deadline.
 func (p *plugin) secretCheck(req protocol.Message) error {
 	raw, err := json.Marshal(struct {
 		Name string `json:"name"`

@@ -85,6 +85,20 @@ Husk binds no application keys. A rail item opens from a rail click or the `shor
 
 Plugins can publish namespaced slots, hooks and events for other plugins to attach to. Inline slots expand at row anchors; region slots reserve a rectangle. Husk clips contributions and routes their clicks to the contributor, fans out asynchronous hooks, and delivers events only to subscribers. Try `husk --dump-frame --demo pubslots` for a self-contained two-plugin frame, or read [`plugins/reference`](plugins/reference/main.go): a small Go plugin that declares a frame, a published slot, a hook and an event and sizes itself from `surface.resized`, paired with `plugins/reference-actions`, which fills its slot. See [Architecture](docs/docs/architecture.md#published-slots-hooks-and-events) for message shapes and lifecycle.
 
+### Reference secret check
+
+The reference plugin declares the optional secret `go.reference.token` and the
+`go.reference.secret-check` action. After storing a value with `secrets.set`,
+invoke the action to exercise the consent dialog. It replies with `{"set":true}`
+or an error code and reason, never the value.
+
+Answer the dialog within the host's **10 s action timeout** (and before any
+shorter CLI `--timeout`). The dialog's own timeout is 60 s, so waiting for it
+makes the action time out first; the host ignores the plugin's late reply.
+`husk action invoke --timeout 70s go.reference.secret-check` extends only the
+CLI's wait, **not** the host's action deadline. Use `esc` within 10 s to test a
+dismissal with `user_denied`; the next invocation prompts again.
+
 ### Surfaces and frames
 
 A **surface** is a slot's region on screen, and it is a blank canvas: Husk renders plugin content with no border, title or decoration of its own. A **frame** is the chrome a plugin asks for around its content — `border`, `label` (title) and `close` (close button), each independently on or off. Husk draws the frame; the plugin only declares what it wants in its manifest (`frame` on a `surfaces` entry) or on a rail item (`frame`). An absent declaration means no chrome at all. Clicking a declared close button closes a modal / full-canvas / stage surface exactly like `esc`.
