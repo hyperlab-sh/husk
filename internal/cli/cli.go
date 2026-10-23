@@ -33,6 +33,10 @@ type Env struct {
 	Stdin          io.Reader
 	// StdoutIsTTY picks the default output format.
 	StdoutIsTTY bool
+	// StdinIsTTY enables the no-echo secret reader; ReadPassword is injected
+	// so callers never need a real terminal in tests.
+	StdinIsTTY   bool
+	ReadPassword func() ([]byte, error)
 	// Getenv reads an environment variable.
 	Getenv func(string) string
 	// RuntimeDir looks up the runtime directory without creating it: the
@@ -45,12 +49,14 @@ type Env struct {
 // OSEnv is the Env of the running process.
 func OSEnv() Env {
 	return Env{
-		Stdout:      os.Stdout,
-		Stderr:      os.Stderr,
-		Stdin:       os.Stdin,
-		StdoutIsTTY: isTerminal(os.Stdout),
-		Getenv:      os.Getenv,
-		RuntimeDir:  instance.LookupRuntimeDir,
+		Stdout:       os.Stdout,
+		Stderr:       os.Stderr,
+		Stdin:        os.Stdin,
+		StdoutIsTTY:  isTerminal(os.Stdout),
+		StdinIsTTY:   isTerminal(os.Stdin),
+		ReadPassword: func() ([]byte, error) { return term.ReadPassword(int(os.Stdin.Fd())) },
+		Getenv:       os.Getenv,
+		RuntimeDir:   instance.LookupRuntimeDir,
 	}
 }
 
@@ -94,6 +100,7 @@ func builtins() map[string]command {
 		"event":     eventCommand(),
 		"plugin":    pluginCommand(),
 		"hook":      hookCommand(),
+		"settings":  settingsCommand(),
 	}
 }
 
@@ -152,6 +159,8 @@ type Invocation struct {
 	owner, argsJSON, data, ifRevision string
 	args                              []string
 	force                             bool
+	action, focus                     string
+	shadowed, problems, source        bool
 	flagSet                           map[string]bool
 }
 
@@ -201,6 +210,11 @@ func Main(ctx context.Context, args []string, env Env) int {
 	fs.StringVar(&inv.data, "data", "", "")
 	fs.StringVar(&inv.ifRevision, "if-revision", "", "")
 	fs.BoolVar(&inv.force, "force", false, "")
+	fs.StringVar(&inv.action, "action", "", "")
+	fs.StringVar(&inv.focus, "focus", "", "")
+	fs.BoolVar(&inv.shadowed, "shadowed", false, "")
+	fs.BoolVar(&inv.problems, "problems", false, "")
+	fs.BoolVar(&inv.source, "source", false, "")
 	fs.Func("arg", "", func(v string) error { inv.args = append(inv.args, v); return nil })
 	pos, err := parseInterspersed(fs, args[1:])
 	if err != nil {
@@ -372,7 +386,7 @@ func synopses(cmd command) []string {
 	return out
 }
 
-func commandUsage(w io.Writer, cmd command, noun string) {
+func commandUsage(w io.Writer, cmd command, _ string) {
 	for i, line := range synopses(cmd) {
 		prefix := "usage: "
 		if i > 0 {
