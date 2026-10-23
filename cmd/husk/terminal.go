@@ -50,7 +50,7 @@ func (m *WorkbenchModel) terminalLabel(id protocol.SurfaceID, fallback string) s
 }
 
 func (m *WorkbenchModel) terminalCursor() *tea.Cursor {
-	if m.showPalette || m.secretPrompt != nil || m.blurred {
+	if m.showPalette || m.settings != nil || m.secretPrompt != nil || m.blurred {
 		return nil
 	}
 	id := m.focusedSlot
