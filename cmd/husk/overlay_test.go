@@ -13,11 +13,13 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/golden"
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
+	"github.com/hyperlab-sh/husk/internal/services/secrets"
 	"github.com/hyperlab-sh/husk/pkg/frame"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
 func TestOverlayPlacement(t *testing.T) {
+	const marker = "OVERLAY_TOO_SMALL_MARK"
 	for _, mode := range []contracts.RailPlacement{"", contracts.PlacementFullCanvas, contracts.PlacementStage} {
 		for _, size := range [][2]int{{144, 40}, {84, 24}, {200, 60}} {
 			for _, occupied := range []bool{false, true} {
@@ -26,7 +28,7 @@ func TestOverlayPlacement(t *testing.T) {
 					m.width, m.height = size[0], size[1]
 					m.activePlacement = mode
 					if occupied {
-						addPlugin(m, "annotation", map[protocol.SurfaceID][]string{protocol.SurfaceAppOverlay: {"X"}})
+						addPlugin(m, "annotation", map[protocol.SurfaceID][]string{protocol.SurfaceAppOverlay: {marker}})
 					}
 					m.catalog.Frames["annotation"] = map[protocol.SurfaceID]protocol.FrameSpec{protocol.SurfaceAppOverlay: {Border: true, Label: "ignored", Close: true}}
 					for _, demo := range []bool{false, true} {
@@ -51,12 +53,15 @@ func TestOverlayPlacement(t *testing.T) {
 						if !slices.Contains(m.surfaceView().Visible, protocol.SurfaceAppOverlay) {
 							t.Fatal("overlay absent from visible")
 						}
+						if occupied && !strings.Contains(ansi.Strip(m.View().Content), marker) {
+							t.Fatal("overlay marker missing before shrinking")
+						}
 						m.width, m.height = 40, 10
 						m.recomputeLayout()
 						if m.slotRects[protocol.SurfaceAppOverlay] != want {
 							t.Fatal("small terminal changed frozen overlay rect")
 						}
-						if strings.Contains(m.View().Content, "annotation") {
+						if strings.Contains(ansi.Strip(m.View().Content), marker) {
 							t.Fatal("overlay drawn on too-small screen")
 						}
 						m.width, m.height = size[0], size[1]
@@ -89,10 +94,11 @@ func TestOverlayZOrder(t *testing.T) {
 	// popup glyphs must still own their cells while every surrounding cell is O.
 	m.activeToast = &contracts.Toast{Title: "NOTICE", Message: "topmost toast"}
 	m.showPalette = true
+	m.secretPrompt = &secretPromptState{prompt: secrets.Prompt{Plugin: "stage", Name: "token", Purpose: "test confirmation"}}
 	got := frameCells(m.View().Content)
 	delete(m.catalog.Occupants, protocol.SurfaceAppOverlay)
 	base := frameCells(m.View().Content)
-	for _, text := range []string{"NOTICE", "COMMAND PALETTE"} {
+	for _, text := range []string{"NOTICE", "COMMAND PALETTE", "SECRET ACCESS REQUEST"} {
 		found := false
 		for y := range base {
 			var row strings.Builder

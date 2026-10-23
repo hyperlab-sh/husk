@@ -11,9 +11,9 @@ import (
 // Keys implements contracts.KeybindingPort over the keybinding service. The
 // service scopes ListFor to the caller: plugins see their own entries and
 // problems plus effective host and declared rail-item bindings; users see the
-// full merged listing. It
-// returns an already-detached clone, so the wrapper is a shape translation,
-// not another deep copy: no slice or map is shared with the service.
+// full merged listing. It returns an already-detached clone, so the wrapper is
+// a shape translation, not another deep copy: no slice or map is shared with
+// the service.
 type Keys struct {
 	Svc *keybinding.Service
 }
