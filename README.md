@@ -63,9 +63,30 @@ husk action list [--owner <id>]       # the action catalog
 husk action invoke <action-id> [--arg k=v]... [--args-json '<json>']
 husk event emit <name> [--data '<json>']
 husk event watch '<pattern>'          # one JSON line per matching event, e.g. 'user.*'
+husk hook list [--owner <id>]        # hook catalog; only the owner can fire a hook
+
+husk keys [--action <id>] [--focus <surface>] [--shadowed] [--problems]
+husk settings get <key>
+husk settings list [--source]
+husk settings schema [--owner <owner>]
+husk settings validate
+husk theme show                       # serving palette, one ROLE/COLOR row per role
+husk theme roles                      # sorted role names
+husk theme check                      # dry-run contrast diagnostics from disk
+husk profile list
+husk profile current                  # active entry; null in JSON when none is active
+husk profile use <name>               # an empty string clears the selection
+husk secrets list                     # storage status and metadata, never values
+husk secrets set <name>               # value from stdin only; terminal input is not echoed
+husk secrets grant <plugin> <name>
+husk secrets revoke <plugin> <name>
+husk secrets reveal <name>            # audited read; table format prints the bare value
+husk config reload                    # Service reports; 10s default timeout
 ```
 
 JSON arguments (`<json>`, `--args-json`, `--data`) must be objects; `-` reads one from stdin. `--arg` pairs build an object of strings and exclude `--args-json`. `state watch` and `event watch` print the opening reply and then one JSON line per notification until a signal ends them; they reject `--timeout`, bound the opening at 5 s, and exit 5 (`instance went away`) when the instance exits. The CLI checks syntax only: ownership, namespace and permission rules are the instance's and come back as exit 1 with its message.
+
+The Services commands and `keys` default to 5 s, except `config reload` (10 s). They validate syntax only. A validation result with `ok:false` or a reload report with `applied:false` is still exit 0; an error reply is exit 1. Keys filters apply in both formats, shadowed entries are hidden by default, and `--problems` cannot be combined with `--action` or `--focus`. `settings schema --owner` is sent to the instance unchanged. Secret input strips exactly one trailing LF or CRLF; empty input is valid, and malformed UTF-8 is rejected before connecting. With table output, grant/revoke/set print nothing and reveal prints just the value; JSON retains the instance's result.
 
 Global flags follow the subcommand (`husk ping --format json`); before it they would reach the instance's own flag parser. `ping` and `rpc` take `--instance <id>` or `--socket <path>` (not both), `--format json|table` (default `table` on a terminal, `json` otherwise) and `--timeout <duration>`; the flags may come before or after the arguments. `plugin` is a socket command (`plugin list`, `plugin log <id>`, 5s default). `instances` and `store` are local: `instances` reads the registry only, and `store` opens Store without an instance (it creates its config, state and data directories like any start, never the runtime directory; `reset-secrets` exits 1 `store` naming the instances while `Survey` finds any live or unresponsive one). Both take `--format` and reject `--instance`, `--socket` and `--timeout` (exit 2). Explicit targets (`--socket`, `--instance`, `HUSK_SOCKET_PATH`, `HUSK_INSTANCE`) are never probed; only discovery (no target, so the registry is surveyed) probes, 500 ms per entry. With exactly one live instance, that one is used; unresponsive entries are reported as `unresponsive` warnings. The client opens one connection and sends `session.ping` first to check the protocol major, then the command's request. `--timeout` starts after connecting (`ping` 2s, `rpc` 30s by default; `0` means the default, a negative value is a usage error). `husk` installs no signal handlers, so SIGINT, SIGTERM and SIGPIPE end it by the signal. An absent runtime directory is an empty registry (`husk instances` lists nothing, discovery exits 3); an unusable one (not private to the user, or a symlink) exits 7.
 
