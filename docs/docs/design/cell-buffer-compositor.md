@@ -1,9 +1,8 @@
 # Cell-buffer compositor
 
-Status: implemented (see "Implementation notes"), except the "Overlay layer"
-section, which is planned. Scope: `cmd/husk` rendering only. No wire, manifest or
-plugin-visible change, except that the overlay layer makes an `app-overlay`
-occupant's content visible under the rules stated there.
+Status: implemented (see "Implementation notes"). Scope: `cmd/husk` rendering
+only. No wire, manifest or plugin-visible change, except that the overlay layer
+makes an `app-overlay` occupant's content visible under the rules stated there.
 
 ## Problem
 
@@ -272,6 +271,10 @@ Where the code differs from the plan above:
   canvas clears the rest of each row instead.
 - `BenchmarkIdleTickView/view` at 120x40 went from about 0.40 ms/op before
   slice 1 to about 0.30 ms/op after slice 5.
+- `canvas.blitOverlay` in `compose.go` implements the overlay layer's transparent
+  cell composition, inherited backgrounds, wide-glyph handling and opaque region
+  cells. `TestBlitOverlay` covers those rules; `TestGoldenFrameOverlay` pins the
+  full frame and checks unchanged cells against an absent overlay.
 
 ## Popup shadow
 
@@ -310,16 +313,15 @@ off-screen; it is not flipped).
 
 ## Overlay layer
 
-Status: planned (architecture v2). Scope: how the occupant of the
+Status: implemented (architecture v2). Scope: how the occupant of the
 `app-overlay` surface is drawn. Wire, manifest and State changes are
 named here and owned by [State](state.md) ("Frontend-owned slices").
 
-`app-overlay` is the one surface whose purpose is to lie over the others, yet
-today `placeSlots` gives it no rect, so a plugin that claims it is never
-drawn and never told a size. The rules below make it a drawable layer for any
-plugin that annotates, tours or debugs the layout, with one transparency rule
-so that such a plugin covers only the cells it paints. No plugin kind is named
-here.
+`app-overlay` is the one surface whose purpose is to lie over the others.
+`placeSlots` gives it a whole-frame rect, and an occupant is drawn and told its
+size under the rules below. It is a drawable layer for any plugin that
+annotates, tours or debugs the layout, with one transparency rule so that such a
+plugin covers only the cells it paints. No plugin kind is named here.
 
 - **Rect.** The overlay surface's rect is the whole frame: `(0, 0, width,
   height)` with the terminal's own width and height (not the minimum-clamped
@@ -375,7 +377,7 @@ here.
 - **Too small.** Nothing is drawn, like every surface; the occupant gets no
   `surface.resized` until the layout returns.
 
-Implementation sketch, `cmd/husk`: `placeSlots` adds `app-overlay` to
+Implementation, `cmd/husk`: `placeSlots` adds `app-overlay` to
 `slotRects` at the full frame before its early returns for the full-canvas
 and stage placements, as a plain `SlotRect` with the inner rect equal to the
 rect (not through `frameRect`); `frameFor` returns the zero `frame.Spec` for
@@ -386,10 +388,10 @@ which also keeps it out of `View`'s surface loop and out of
 `blitOverlay` that lays the occupant's content out on a scratch canvas of the
 frame's size (as `renderPublished` does) and copies onto the frame only the
 opaque cells and region cells, merging backgrounds as above; `drawSurface` is
-not used for it (no chrome, no slot background). A golden frame with an overlay fixture that
-paints a box and a label over an occupied stage pins the rules: ring and
-label cells carry the overlay's foreground and the stage's background, every
-other cell is byte-identical to the frame without the overlay.
+not used for it (no chrome, no slot background). `TestGoldenFrameOverlay` uses
+an overlay fixture that paints a box and a label over an occupied stage to pin
+the rules: ring and label cells carry the overlay's foreground and the stage's
+background, every other cell is byte-identical to the frame without the overlay.
 
 ## Out of scope
 
