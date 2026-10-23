@@ -168,6 +168,6 @@ Then the plugin: an importable library in `plugins/guide/`, with the manifest, p
 
 ## Open questions
 
-1. **A second page.** The brief allows "a legend page"; v1 draws the legend beside the callouts. If the legend grows (runtime surfaces, [Protocol](protocol.md) minor 2.2, would add one row each), a second toggle state showing only the legend may be wanted. Recommended: wait for runtime surfaces to land.
-2. **Runtime surfaces.** `husk.surfaces.runtime` (minor 2.2) will list dynamic `<plugin>.<name>` surfaces with rects in `husk.geometry.rects`; the guide should box them with their title as the name and no key. Nothing in this spec prevents it; the fixed table is a fallback, not a filter.
+1. **A second page.** The brief allows "a legend page"; v1 draws the legend beside the callouts. If the legend grows (runtime surfaces, [Protocol](protocol.md), not landed, would add one row each), a second toggle state showing only the legend may be wanted. Recommended: wait for runtime surfaces to land.
+2. **Runtime surfaces.** `husk.surfaces.runtime` (a later minor) will list dynamic `<plugin>.<name>` surfaces with rects in `husk.geometry.rects`; the guide should box them with their title as the name and no key. Nothing in this spec prevents it; the fixed table is a fallback, not a filter.
 3. **Should the host's slot explorer be retired** once the guide exists? It is host UI with host keys (`v`, `h`) and fixed descriptions. Recommended: keep it until the guide ships in the scaffolds, then decide with a frame comparison.
