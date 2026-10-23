@@ -272,13 +272,18 @@ func discover(opts ResolveOptions) (Resolved, error) {
 	if err != nil {
 		return Resolved{}, &Error{Kind: KindTransport, Message: "read runtime dir: " + err.Error(), Err: err}
 	}
-	var live, skipped []Status
+	var live, skipped, unresponsive []Status
 	for _, st := range statuses {
+		if st.NotSocket != "" {
+			skipped = append(skipped, st) // warned about, never a candidate
+			continue
+		}
 		switch st.Verdict {
 		case VerdictLive:
 			live = append(live, st)
 		case VerdictUnresponsive:
 			skipped = append(skipped, st)
+			unresponsive = append(unresponsive, st)
 		}
 	}
 	switch len(live) {
@@ -286,11 +291,11 @@ func discover(opts ResolveOptions) (Resolved, error) {
 		e := live[0].Entry
 		return Resolved{Entry: &e, Socket: e.Socket, Source: SourceDiscovery, Skipped: skipped}, nil
 	case 0:
-		if len(skipped) == 0 {
-			return Resolved{}, &Error{Kind: KindNoInstance, Message: "no instance is running"}
+		if len(unresponsive) == 0 {
+			return Resolved{}, &Error{Kind: KindNoInstance, Message: "no instance is running", Skipped: skipped}
 		}
-		ids := make([]string, len(skipped))
-		for i, st := range skipped {
+		ids := make([]string, len(unresponsive))
+		for i, st := range unresponsive {
 			ids[i] = st.Entry.ID
 		}
 		noun := "instances are"

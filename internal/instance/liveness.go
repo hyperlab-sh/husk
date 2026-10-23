@@ -100,6 +100,12 @@ type Status struct {
 	// acquired in time (spec: listed as unresponsive, with a warning that
 	// names the lock). Nothing was removed.
 	Locked bool
+
+	// NotSocket is the socket path when the entry's path holds something
+	// that is not a socket. Recovery refuses to unlink that path (the entry
+	// is removed like any stale one), so the status stays in the result,
+	// classed stale; callers skip it and warn naming the path.
+	NotSocket string
 }
 
 // Survey lists the runtime directory's entries with a liveness class,
@@ -109,7 +115,8 @@ type Status struct {
 // entry whose re-probe under the lock found it live or unresponsive is
 // listed as such. If the lock is not acquired in time the stale entries are
 // listed unresponsive with Locked set and nothing is removed. An entry whose
-// socket path is not a socket is skipped. The result is sorted by instance
+// socket path is not a socket is skipped: it stays in the result as a
+// stale status with NotSocket set, and the path itself is left alone. The result is sorted by instance
 // id.
 func Survey(dir string, d *Deps) ([]Status, error) {
 	entries, err := List(dir)
@@ -136,19 +143,49 @@ func Survey(dir string, d *Deps) ([]Status, error) {
 		case classes == nil:
 			return nil, err
 		default:
-			// A *NotSocketError leaves that entry stale and skipped.
 			for k, i := range staleAt {
 				statuses[i].Verdict = classes[k]
+			}
+			// A *NotSocketError leaves that entry stale; carry its path out
+			// so the caller can warn. Other removal errors are not
+			// attributable to an entry and leave it stale and skipped.
+			for _, ns := range notSocketErrors(err) {
+				for _, i := range staleAt {
+					if statuses[i].Verdict == VerdictStale && SocketPath(dir, statuses[i].Entry.ID) == ns.Path {
+						statuses[i].NotSocket = ns.Path
+					}
+				}
 			}
 		}
 	}
 	out := make([]Status, 0, len(statuses))
 	for _, st := range statuses {
-		if st.Verdict != VerdictStale {
+		if st.Verdict != VerdictStale || st.NotSocket != "" {
 			out = append(out, st)
 		}
 	}
 	return out, nil
+}
+
+// notSocketErrors collects every *NotSocketError in a joined error.
+func notSocketErrors(err error) []*NotSocketError {
+	var out []*NotSocketError
+	var walk func(error)
+	walk = func(err error) {
+		switch e := err.(type) {
+		case nil:
+		case *NotSocketError:
+			out = append(out, e)
+		case interface{ Unwrap() []error }:
+			for _, c := range e.Unwrap() {
+				walk(c)
+			}
+		case interface{ Unwrap() error }:
+			walk(e.Unwrap())
+		}
+	}
+	walk(err)
+	return out
 }
 
 // pingAll classifies every entry, pinging concurrently: discovery must not

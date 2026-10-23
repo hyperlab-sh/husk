@@ -74,14 +74,17 @@ func TestSurveyRemovesStaleKeepsOthers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Survey: %v", err)
 	}
-	if len(got) != 2 {
-		t.Fatalf("Survey = %+v, want the live and the unresponsive entry", got)
+	if len(got) != 3 {
+		t.Fatalf("Survey = %+v, want the live, the non-socket and the unresponsive entry", got)
 	}
 	if got[0].Entry.ID != "a" || got[0].Verdict != VerdictLive {
 		t.Fatalf("first row = %+v, want live a", got[0])
 	}
-	if got[1].Entry.ID != "c" || got[1].Verdict != VerdictUnresponsive {
-		t.Fatalf("second row = %+v, want unresponsive c", got[1])
+	if got[1].Entry.ID != "b" || got[1].NotSocket != SocketPath(dir, "b") {
+		t.Fatalf("second row = %+v, want b flagged NotSocket", got[1])
+	}
+	if got[2].Entry.ID != "c" || got[2].Verdict != VerdictUnresponsive {
+		t.Fatalf("third row = %+v, want unresponsive c", got[2])
 	}
 	if _, err := os.Lstat(EntryPath(dir, "b")); err == nil {
 		t.Error("stale entry should have been removed")

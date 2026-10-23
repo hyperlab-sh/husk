@@ -84,6 +84,15 @@ func (inv *Invocation) resolve() (instance.Resolved, error) {
 	}
 	res, err := instance.Resolve(opts)
 	if err != nil {
+		var ie *instance.Error
+		if errors.As(err, &ie) {
+			for _, st := range ie.Skipped {
+				if st.NotSocket == "" {
+					continue // the error already names unresponsive entries
+				}
+				inv.out.Warn(output.WarningUnresponsive, skipWarning(inv.dir, st))
+			}
+		}
 		return instance.Resolved{}, resolveErr(err)
 	}
 	for _, st := range res.Skipped {
@@ -153,6 +162,9 @@ func versionLabel(v string) string {
 // one that is really a stale entry left in place because the directory lock
 // was not acquired names the lock, not the instance's silence.
 func skipWarning(dir string, st instance.Status) string {
+	if st.NotSocket != "" {
+		return fmt.Sprintf("%s is not a socket; instance %q skipped", st.NotSocket, st.Entry.ID)
+	}
 	if st.Locked {
 		return fmt.Sprintf("runtime dir %s is locked; instance %q left as is", dir, st.Entry.ID)
 	}
@@ -172,7 +184,7 @@ func (inv *Invocation) recoverTarget(cause error, res instance.Resolved) error {
 	case errors.As(err, &notSocket):
 		return output.NoInstance(err, "instance %q is not running (%s is not a socket)", id, notSocket.Path)
 	case err != nil:
-		return output.Transport(err, "recover stale instance %q: %v", id, err)
+		return output.Transport(err, "recover stale instance %q", id)
 	}
 	switch classes[0] {
 	case instance.VerdictLive:

@@ -95,6 +95,12 @@ func main() {
 	demo := flag.String("demo", "", "In-process frame demo: pubslots (requires --dump-frame)")
 	instanceName := flag.String("instance", "", "Name this instance (a-z, 0-9 and -, not digits only); default is the pid. Command mode's --instance targets one instead")
 	flag.Parse()
+	// Subcommands come first; a positional left over here is a misplaced one
+	// (`husk --instance notes ping`) and must not start an instance.
+	if flag.NArg() > 0 {
+		fmt.Fprintf(os.Stderr, "husk: unexpected argument %q; subcommands come first (husk <noun> [flags])\n", flag.Arg(0))
+		os.Exit(2)
+	}
 	// The name is validated before anything touches the filesystem.
 	id, err := startInstanceID(*instanceName, flagSet("instance"), os.Getpid())
 	if err != nil {

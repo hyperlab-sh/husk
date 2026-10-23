@@ -70,3 +70,38 @@ func TestInvalidInstanceFlagExits2AndCreatesNothing(t *testing.T) {
 		})
 	}
 }
+
+// A positional after the start-mode flags is a misplaced subcommand: exit 2,
+// nothing created, no instance started.
+func TestLeftoverPositionalExits2AndCreatesNothing(t *testing.T) {
+	xdg, err := os.MkdirTemp("/tmp", "hk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(xdg)
+	cmd := exec.Command(os.Args[0], "--instance", "notes", "ping")
+	cmd.Env = append(os.Environ(), "HUSK_TEST_RUN_MAIN=1", "XDG_RUNTIME_DIR="+xdg, "HOME="+xdg)
+	out, err := cmd.CombinedOutput()
+	var ee *exec.ExitError
+	if !errors.As(err, &ee) || ee.ExitCode() != 2 {
+		t.Fatalf("err = %v, output = %s; want exit 2", err, out)
+	}
+	if !strings.Contains(string(out), `husk: unexpected argument "ping"; subcommands come first`) {
+		t.Fatalf("output = %s", out)
+	}
+	if entries, err := os.ReadDir(xdg); err != nil || len(entries) != 0 {
+		t.Fatalf("created %v (err %v)", entries, err)
+	}
+}
+
+func TestBuildVersion(t *testing.T) {
+	defer func(v string) { version = v }(version)
+	version = "1.2.3"
+	if got := buildVersion(); got != "1.2.3" {
+		t.Errorf("buildVersion() = %q, want the ldflags version", got)
+	}
+	version = ""
+	if got := buildVersion(); got == "(devel)" {
+		t.Errorf("buildVersion() = %q; a devel build carries no version", got)
+	}
+}
