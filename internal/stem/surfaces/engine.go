@@ -330,6 +330,9 @@ func (e *Engine) Flush() {
 	if res.Contributions == nil {
 		res.Contributions = Contributions{}
 	}
+	if res.Capture == nil {
+		res.Capture = map[protocol.SurfaceID]bool{}
+	}
 	changedSlots := map[string]bool{}
 	occupiedBefore := make(map[protocol.SurfaceID]string, len(res.Occupants))
 	for surface, occ := range res.Occupants {
@@ -421,6 +424,16 @@ func (e *Engine) Flush() {
 				res.Occupants[surface] = Occupant{Surface: surface, Plugin: plugin}
 				e.log.Printf("surfaces: %s free; live claim by %s resolves", surface, plugin)
 			}
+		}
+	}
+
+	// Capture belongs to one occupant's tenure: an entry survives the pass
+	// only if the surface is held by the same non-empty plugin as before it.
+	// A changed, vacated or dropped occupant, a hand-over in the same pass
+	// and a Pod that left `live` all fail that test (D93).
+	for surface := range res.Capture {
+		if was := occupiedBefore[surface]; was == "" || res.Occupants[surface].Plugin != was {
+			delete(res.Capture, surface)
 		}
 	}
 
@@ -707,7 +720,9 @@ func (e *Engine) Resized(sizes []protocol.SurfaceSize) {
 
 // SurfaceUpdate serves surface.update. Only the occupant of p.Surface may
 // render to it; a surface the caller does not occupy is denied. Content
-// itself is routed to the host renderer: buffers are not State.
+// itself is routed to the host renderer: buffers are not State. A refused
+// update sets nothing; an accepted one records p.Capture when present (nil
+// leaves the value unchanged, false removes the entry, true sets it).
 func (e *Engine) SurfaceUpdate(plugin string, p protocol.SurfaceUpdateParams) error {
 	if plugin == "" {
 		return errf(protocol.CodeDenied, "surface.update requires a plugin caller")
@@ -721,6 +736,23 @@ func (e *Engine) SurfaceUpdate(plugin string, p protocol.SurfaceUpdateParams) er
 		}
 		return errf(protocol.CodeDenied, "surface %q is occupied by %s", p.Surface, occupant)
 	}
+	if p.Capture == nil || e.slice.Get().Capture[p.Surface] == *p.Capture {
+		return nil
+	}
+	e.absorbForeign()
+	if err := e.slice.Update(func(v *Surfaces) {
+		if *p.Capture {
+			if v.Capture == nil {
+				v.Capture = map[protocol.SurfaceID]bool{}
+			}
+			v.Capture[p.Surface] = true
+		} else {
+			delete(v.Capture, p.Surface)
+		}
+	}); err != nil {
+		return err
+	}
+	e.markRev()
 	return nil
 }
 
@@ -755,7 +787,10 @@ func (e *Engine) release(surface protocol.SurfaceID, only string) error {
 		return errf(protocol.CodeDenied, "surface %q is occupied by %s", surface, occupant)
 	}
 	e.absorbForeign()
-	if err := e.slice.Update(func(v *Surfaces) { delete(v.Occupants, surface) }); err != nil {
+	if err := e.slice.Update(func(v *Surfaces) {
+		delete(v.Occupants, surface)
+		delete(v.Capture, surface)
+	}); err != nil {
 		return err
 	}
 	e.markRev()

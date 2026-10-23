@@ -439,6 +439,7 @@ func TestSurfacesResolutionSlice(t *testing.T) {
 				{Slot: "example.editor.toolbar", ID: "example.git.branch", Plugin: pluginGit, Label: "main"},
 			},
 		},
+		Capture:   map[protocol.SurfaceID]bool{protocol.SurfaceMainStage: true},
 		Visible:   []protocol.SurfaceID{protocol.SurfaceActivityRail, protocol.SurfaceSidebarList, protocol.SurfaceMainHeader, protocol.SurfaceMainStage},
 		Placement: surfaces.Placement{RailItem: "", Kind: ""},
 		Overlays:  surfaces.Overlays{},
@@ -451,6 +452,7 @@ func TestSurfacesResolutionSlice(t *testing.T) {
 	}
 	want := `{"occupants":{"main-stage":{"surface":"main-stage","plugin":"example.editor"}},` +
 		`"contributions":{"example.editor.toolbar":[{"slot":"example.editor.toolbar","id":"example.git.branch","plugin":"example.git","label":"main"}]},` +
+		`"capture":{"main-stage":true},` +
 		`"visible":["activity-rail","sidebar-list","main-header","main-stage"],` +
 		`"placement":{"rail_item":"","kind":""},` +
 		`"overlays":{"modal":{"plugin":"","rail_item":""},"palette":false,"slot_explorer":false}}`
