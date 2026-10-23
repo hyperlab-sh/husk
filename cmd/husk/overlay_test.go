@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/golden"
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
 	"github.com/hyperlab-sh/husk/pkg/frame"
@@ -188,7 +189,7 @@ func TestOverlayClearedOnDeparture(t *testing.T) {
 	fe.publish()
 	m.refresh()
 	setContent(m, "annotation", protocol.SurfaceUpdateParams{Surface: protocol.SurfaceAppOverlay, Lines: []string{"OVERLAY_MARK"}})
-	if !strings.Contains(m.View().Content, "OVERLAY_MARK") {
+	if !strings.Contains(ansi.Strip(m.View().Content), "OVERLAY_MARK") {
 		t.Fatal("live overlay missing")
 	}
 	fe.pods["annotation"] = "exited"
@@ -198,7 +199,7 @@ func TestOverlayClearedOnDeparture(t *testing.T) {
 	if m.slotUpdates[protocol.SurfaceAppOverlay] != nil {
 		t.Fatal("departed frame retained")
 	}
-	if strings.Contains(m.View().Content, "OVERLAY_MARK") {
+	if strings.Contains(ansi.Strip(m.View().Content), "OVERLAY_MARK") {
 		t.Fatal("departed overlay rendered")
 	}
 }
