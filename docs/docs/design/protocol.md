@@ -315,6 +315,42 @@ Direction rule: stdin carries Husk's requests and notifications; stdout carries 
 
 Each entry names the surface and its inner content dimensions in cells, focus and visibility. In moved surface and input params, the host-surface identifier field is `surface`, never the legacy `slot`. Published extension points still use `slot_id`; they are not host surfaces.
 
+### Runtime and terminal surfaces (minor 2.2)
+
+**Level 1: specified, not landed.** Nothing below exists in `pkg/protocol`; `protocol.Version` stays `2.1` until the first of these methods is served, and the method table above, `pkg/protocol/methods.go` and the generated schema gain the rows, constants and payload types in that same change. The host-side contracts (ports, `MethodHomes`, the Surfaces engine) are named in [Pods](pods.md) and [State](state.md); this section owns only the wire.
+
+Two capabilities a manifest cannot express motivate the minor: a plugin that decides at run time that it needs a modal or the whole canvas (a dialog, a viewer), and a plugin whose content is a terminal, a byte stream from a process, rather than lines of text. Both are generic: no plugin kind is named here.
+
+| Namespace | Method | Form | Direction |
+| :--- | :--- | :--- | :--- |
+| `surface` | `surface.open` | request | plugin to Husk (socket) |
+| `terminal` | `terminal.attach` | request | plugin to Husk (socket) |
+| | `terminal.write`, `terminal.detach` | notification | plugin to Husk (socket) |
+| | `terminal.input`, `terminal.link` | notification | Husk to the attached plugin (stdin) |
+
+**`surface.open`** asks the host for a surface the manifest did not claim. Params: `placement` (`modal` or `canvas`; `stage` and `panel` are reserved for a later minor, [State](state.md) open questions), `name` (dot-free, `[a-z0-9_-]{1,32}`), optional `title`, `width` and `height` (cells, or a string percentage `"NN%"` of the terminal; honoured for `modal`, ignored otherwise; clamped to the host's minimum and the terminal), and an optional `frame` (`FrameSpec`). Result: `{"surface": "<plugin_id>.<name>"}`. The surface id is dynamic: it is the plugin id and the name, which cannot collide with the twelve layout surface ids because those contain no dot, and `SurfaceID.Valid()` accepts the two forms. The opened surface is occupied by the caller from the reply on, receives `surface.resized` like a claimed surface, takes `surface.update`, `surface.close` and the `input.*` deliveries, and is released by `surface.close`, by the host (the frame's close, the modal's close key, `plugin.remove`) or by the plugin's Pod leaving `live`, in which case the plugin is told with `surface.resized` carrying `visible: false` and then nothing more. A `modal` surface is a singleton: while one plugin's modal is open, any `surface.open` with `placement: "modal"` answers `busy` with `data.reason` `modal_open`, including the same plugin's. A `name` the plugin already has open answers `conflict`. A plugin may hold at most 8 runtime surfaces (`busy`, `too_many_surfaces`).
+
+```json
+{"id":"o1","method":"surface.open","params":{"placement":"modal","name":"picker","title":"Pick one","width":"60%","height":20,"frame":{"border":true,"label":true,"close":true}}}
+{"id":"o1","result":{"surface":"example.files.picker"}}
+```
+
+**`terminal.attach`** turns a surface the caller occupies (claimed or runtime) into a terminal surface: the host allocates a terminal emulator of the surface's inner size and from then on renders the emulator's screen instead of `surface.update` lines, which answer `invalid_params` (`terminal_attached`) until `terminal.detach`. Params: `surface`, and optional `capture` (`"text"` or `"all"`, default `"all"`, see `capture` below) and `scrollback` (lines, default 2000, max 20000). Result: `{"width", "height"}`, the emulator's size in cells, the same numbers the next `surface.resized` carries. A surface already attached answers `conflict`.
+
+**`terminal.write`** carries bytes from the plugin to the emulator: `surface` and `data`, base64, at most 64 KiB decoded per notification. The host decodes, feeds the emulator and redraws on its own schedule (writes are coalesced per frame; a plugin never waits for a paint). A write to a surface the caller does not occupy or has not attached is logged and dropped, like a refused `surface.update`.
+
+**`terminal.detach`** returns the surface to line rendering with an empty frame; the emulator and its scrollback are discarded. `surface.close` on an attached surface detaches implicitly.
+
+**`terminal.input`** carries bytes from the emulator to the plugin: `surface` and `data`, base64. The host's emulator encodes every key, mouse event and paste it receives for the application's current modes (cursor-key mode, bracketed paste, mouse reporting, keyboard protocol flags) and the host sends the encoded bytes here; the plugin writes them to its process verbatim. Key and mouse events on an attached surface are never delivered as `input.key` or `input.mouse` (`input.key_state` is not sent to an attached surface either); which keys reach the emulator at all is the keybinding policy's `all` capture mode ([Keybindings](keybindings.md), "Capture modes").
+
+**`terminal.link`** reports a modified click (the host's link modifier, `ctrl` by default) on a URL in an attached surface: `surface`, `url` (an OSC 8 hyperlink target, or a `[a-z][a-z0-9+.-]*://` run detected in the screen text), `row`, `col`. It is informational: the host opens nothing itself.
+
+**`capture`** on `surface.update` (and on `terminal.attach`) accepts, from this minor, `true`, `false`, `"text"` or `"all"`: `true` means `"text"` and `false` means none, so 2.1 plugins are unchanged. `"all"` says the occupant takes every key except the host's release key ([Keybindings](keybindings.md)). The host records the mode in `husk.surfaces.capture` ([State](state.md)).
+
+Limits owned here: `terminal.write` 64 KiB decoded per notification; runtime surfaces 8 per plugin; `surface.open` `name` 32 bytes; `title` 80 runes; scrollback 20,000 lines.
+
+Why the host emulates: the host owns the cell canvas and the key encoder, so a terminal that lives in the host renders into the canvas like every other surface, keeps its cursor, colours and modes, and encodes keys the way the application asked; a plugin-side emulator would have to send a screen as `lines` every frame and could not learn the application's keyboard mode. Why the plugin owns the process: the host executes nothing on a plugin's behalf; the bytes are the whole contract, so a plugin may attach a PTY, a network stream or a recording.
+
 ### Mapping from today's message types
 
 | Today (`type`) | Target | Form | Notes |
@@ -414,3 +450,5 @@ Done in the cutover and retirement: `pkg/huskipc` and `pkg/manifest` are deleted
 3. Aggregating `hook.call` into one reply (decision 11) delays the caller to the slowest subscriber, up to the hook's timeout. Settled in [Hooks](hooks.md): accepted; a publisher bounds the wait with `timeout_ms`, and streaming can come back as a minor addition if a plugin needs it.
 4. Resolved (no shim): should Husk keep a major-1 compatibility shim for the external plugin crate that exists today? Recommended: no; update it in step with the change and rely on the one-line major-1 rejection to tell stale builds what happened.
 5. Resolved: `pkg/huskipc` was deleted; the only known importers were in this repository.
+6. **Minor 2.2 (runtime and terminal surfaces) is specified before any of it is built.** The constants, homes and payload types land with the first served method so that `pkg/protocol` never names a method the host answers `unknown_method` to. Recommended: land `surface.open` first (it needs no emulator), then the `terminal.*` family together.
+7. **Should `terminal.input` be framed per event** (one notification per key, with the key name beside the bytes) rather than as an opaque byte stream? The stream is what a PTY wants and keeps the host's encoder authoritative; per-event framing would let a plugin see key names it cannot otherwise learn. Recommended: the stream; a plugin that wants key names keeps a line surface and `input.key`.

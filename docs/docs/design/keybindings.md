@@ -122,6 +122,23 @@ Problem: `q`, `h`, `v`, `?`, `tab` and the other unmodified host keys fire while
 - Capture is not focus: it changes which keys resolve, not which surface receives them.
 - Closing the modal overlay is not a release, so it does not clear `capture` for `modal-surface`; a modal the same occupant reopens starts with the old value until that occupant sends `capture: false` (another plugin taking `modal-surface` clears it as any occupant change does). An occupant that captures in the modal sends `capture: false` before it closes.
 
+### Capture modes
+
+**Level 1: specified, not landed.** The capture bit above becomes a three-valued mode with protocol minor 2.2 ([Protocol](protocol.md), "Runtime and terminal surfaces"); everything in "Text capture" is the `text` mode and is unchanged.
+
+| Mode | Set by | Effect on candidates |
+|---|---|---|
+| `none` | default; `capture: false` | No filter. |
+| `text` | `capture: true` or `"text"` | "Text capture" above: global candidates on text keys are removed. |
+| `all` | `capture: "all"`; implied by `terminal.attach` | Every global candidate is removed, from every layer, modified keys, function keys and `esc` included, except candidates whose action is `husk.capture.release`, and tombstones. Surface-scoped candidates remain, so an occupant can still declare its own keys. Keys that then yield `NoMatch` go to the occupant: for a terminal surface as encoded bytes (`terminal.input`), for a line surface as `input.key`. |
+
+An application running inside a terminal surface expects the whole keyboard (`esc`, `ctrl+c`, `ctrl+p`, `tab`), so `text` is not enough for it and a plugin must be able to say "all of it". The cost is that the host's own keys vanish while such a surface has focus, which is why one key is held back: the **release key**.
+
+- `husk.capture.release` is a host action bound in the built-in keymap to `ctrl+]` (the one key no terminal application needs often; it is `GS`, which `telnet` chose for the same reason). Under `all` it is the only global binding that fires. It suspends capture for the **next key only**: `ctrl+] ctrl+p` opens the palette from inside a terminal, `ctrl+] tab` cycles focus, `ctrl+] ctrl+]` sends a literal `ctrl+]` to the occupant, and any key with no global binding is forwarded as it would have been. The suspension lasts until that next key or 1500 ms (the sequence timeout), whichever comes first, and the footer shows `release` while it is pending. Under `text` and `none` the action fires and does nothing beyond the one-key suspension, which changes nothing there.
+- Mouse events on a surface in `all` capture go to the occupant whole (click, release, motion, wheel) with no host handling except divider drags on the frame ring and clicks outside the surface, which change focus as usual; a wheel event on a terminal surface whose application has not enabled mouse reporting scrolls the host's scrollback instead. Paste goes to the occupant (bracketed when the application asked). The palette, when open, still consumes everything (Invariant 9).
+- `KeyContext.Capture` becomes `Capture CaptureMode` (`none`, `text`, `all`); the frontend reads `husk.surfaces.capture[FocusSurface]`, whose values become `"text"` or `"all"` ([State](state.md)). `Resolve` applies the `all` filter before the `text` filter; both compose with `Frozen` (which still leaves only `husk.quit`) and with the modal filter (a modal in `all` capture closes on `husk.modal.close` only through the release key, so a terminal in a modal can use `esc`).
+- The Surfaces engine clears the mode as it clears the bit today (occupant change, release, close, Pod leaving `live`), and `terminal.detach` returns an attached surface to `none` unless the plugin set a mode explicitly.
+
 ### Key spelling
 
 Keys use the frontend's wire spelling, the one plugins receive in `input.key`. The loader normalizes each spelling with the shared `keyspelling.Normalize` and rejects what cannot match a real key press.
@@ -377,6 +394,8 @@ The host hard-codes no workbench key. The embedded file reproduces today's keys 
 
 Host actions: `husk.quit`, `husk.home`, `husk.palette.open`, `husk.hotspots.toggle_stage`, `husk.hotspots.badges`, `husk.sidebar.toggle`, `husk.sidepanel.toggle`, `husk.docks.cycle`, `husk.layout.reset`, `husk.sidebar.narrower`, `husk.sidebar.wider`, `husk.focus.next`, `husk.modifiers.toggle_alt_latch`, `husk.modal.close`. The set is closed by this file; adding a host key means adding an entry here and a catalog entry in the frontend.
 
+Level 1, not landed: with "Capture modes" the file gains `{"key": "ctrl+]", "action": "husk.capture.release"}` after the `husk.modal.close` entry, and `husk.capture.release` joins the host actions. It is appended, not inserted, so `KeysFor` order for every existing action is unchanged.
+
 The unmodified letters and symbols (`q`, `h`, `v`, `?`, `[`, `]`, `/`, `=`, `<`, `>`, `,`, `.`, `:`) stay for a behavior-neutral migration (D83). Text capture keeps them out of a plugin's typing; a distribution that wants none of them overrides or drops the layer.
 
 Widget-local keys are not keymap entries. The command palette and the slot inspector (hotspots stage) are host-owned surfaces; each handles the keys that reach it itself, as a plugin surface does. The closed sets: the palette's `up`, `down`, `ctrl+j`, `ctrl+k`, `tab`, `enter`, `backspace`, `ctrl+c`, text entry, and its close keys, which are `esc`, `ctrl+c` (which closes the palette rather than quits, as today), and every single-key, global, non-text-key spelling in `KeysFor("husk.palette.open")`, so `ctrl+p` and `alt+p` close it, `:` is typed into the query, a surface-scoped or multi-key opener never closes it, and the key that opens the palette still closes it after a rebind to a modified key; the inspector's `j`, `k`, `up`, `down`.
@@ -531,6 +550,7 @@ This is the complete list of loader codes, plus `invalid_plugin_catalog`, raised
 | Footer hints | 4 | Unchanged from today. |
 | `args` size | 1 KiB serialized, scalars only | Params for an action, not a payload. |
 | `Resolve` budget | 1 ms | It runs on the UI loop for every key. The index is a map keyed by first key. |
+| Release suspension (Level 1, "Capture modes") | one key or 1500 ms | The release key frees exactly the next key; a forgotten release must not leave a terminal half-captured. |
 
 ### Dependency directions
 
@@ -558,6 +578,7 @@ This is the complete list of loader codes, plus `invalid_plugin_catalog`, raised
 | `cmd/husk/input.go`: `husk.home` falls through by a special case (`homeApplies`); `ActionReply` has no decline carrier; `contracts.Frontend.InvokeAction` takes no caller kind or focus (every call is the Stem caller with State's focus) and its callback is `reply func(result map[string]any, err error)`, with no promise of a synchronous callback for host actions | `ActionReply` gains `Declined bool`; `Frontend.InvokeAction` becomes `InvokeAction(action, args, kind protocol.CallerKind, focus *protocol.FocusContext, reply)` with Input passing `CallerInput` and its own focus snapshot and host-started actions passing `CallerHost` and nil ([Pods](pods.md), Frontend seams); its callback becomes `reply func(result map[string]any, declined bool, err error)` and carries the flag; the `husk.home` handler sets it; the Dispatcher runs host handlers inline so the `InvokeAction` callback fires before it returns for host actions, and maps `Declined` to an empty success reply for wire callers; Input treats a declined reply as `NoMatch`. **Landed**: `husk.home` declines through `contracts.ErrDeclined`, `Input` has no `husk.home` special case, and the wire mapping lives in the Calls port, not the Dispatcher. |
 | `cmd/husk/input.go`: the palette closes on `esc`, `ctrl+p`, `ctrl+c` | The palette closes on `esc`, `ctrl+c` and every single-key, global, non-text-key spelling in `KeysFor("husk.palette.open")`. **Landed**: Input asks `Resolve` with an empty context, which admits only global candidates. |
 | Built-in keymap has no `shift+tab` | Add `shift+tab` → `husk.focus.next`. **Landed.** |
+| `KeyContext.Capture` is a bool; `husk.surfaces.capture` holds `true`; no release key; mouse on a surface is routed by the frontend's own hit rules | `Capture` becomes `CaptureMode` (`none`, `text`, `all`); `capture` on the wire accepts `"text"`/`"all"` (minor 2.2) and the slice stores the mode; `husk.capture.release` and its one-key suspension; mouse and paste on an `all` surface go whole to the occupant (a terminal surface's emulator encodes them). **Level 1, not landed** ("Capture modes"). |
 | `cmd/husk/commands.go`: `builtinCommands` lists six host actions | List every action the built-in keymap names, with titles. **Landed**; a test pins the rows to the embedded file. |
 | Loader reports a document over 256 KiB as `too_many` | Report `too_large`. **Landed**; a missing `bind` also names the key `bind`. |
 | Conversion accepts `focus_bindings` as an alias of `keybindings` | Accept `keybindings` only. **Landed**: a manifest that still spells `focus_bindings` gets an `ignored_field` warning and binds nothing. The declared `plugins` catalog field is `keybindings` too. The service no longer re-checks focus-local ownership, scope or the 128-entry cap; conversion owns them. |
@@ -598,3 +619,6 @@ Behavior changes users can notice, compared with the layer-first draft of this s
 ## Open questions
 
 1. **Modes.** D82 keeps Husk mode-free and puts the editing fact in one capture bit set by the occupant. The operator asked about normal/insert modes (Q21); if Husk should own modes, capture is replaced by a mode fact in `KeyContext` and the text-key filter keys off the mode. Until then "Text capture" is the contract.
+2. **The release key's spelling.** `ctrl+]` follows `telnet` and is free in the built-in keymap; `ctrl+\`` is the other common choice (it is `NUL` on some terminals and unreliable under tmux) and a prefix key such as `ctrl+b` would collide with the multiplexers people run Husk inside. Recommended: `ctrl+]`, rebindable like every host key.
+3. **Should `all` capture also hold `husk.quit`'s `ctrl+c`?** The spec says yes: a terminal application needs `ctrl+c` for its own interrupt, and `ctrl+] ctrl+c` still quits. Recommended: yes; the alternative, a hard-coded exception, is a second release key by another name.
+4. **Focus-local bindings on runtime surfaces.** A manifest `keymap` entry's `focus` names a layout surface id; a runtime surface's id is not known at conversion. Recommended: allow `focus: "<plugin_id>.*"` (any of the plugin's own runtime surfaces) as the one pattern form, when the first plugin needs it.
