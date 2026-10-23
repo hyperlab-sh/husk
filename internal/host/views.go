@@ -17,7 +17,6 @@ import (
 	"github.com/hyperlab-sh/husk/internal/pods/manifest"
 	"github.com/hyperlab-sh/husk/internal/services"
 	svccontracts "github.com/hyperlab-sh/husk/internal/services/contracts"
-	"github.com/hyperlab-sh/husk/internal/services/secrets"
 	"github.com/hyperlab-sh/husk/internal/stem/calls"
 	"github.com/hyperlab-sh/husk/internal/stem/eventbus"
 	"github.com/hyperlab-sh/husk/internal/stem/hooks"
@@ -135,12 +134,6 @@ type chanTimer struct {
 
 func (t *chanTimer) C() <-chan time.Time { return t.ch }
 func (t *chanTimer) Stop() bool          { return t.t.Stop() }
-
-func denyPrompt(secrets.Prompt) <-chan bool {
-	ch := make(chan bool, 1)
-	ch <- false
-	return ch
-}
 
 // lateOutbox lets the Calls table be built before the Pod host exists.
 type lateOutbox struct{ r *Root }

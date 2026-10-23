@@ -184,8 +184,8 @@ func TestPortsRecordCallerAndReturn(t *testing.T) {
 		t.Fatal(v)
 	}
 	sc := fakes.NewSecrets(rec)
-	sc.Value = []byte("v")
-	if v, _ := sc.Reveal(ctx, cli, "n"); string(v) != "v" {
+	sc.Value = "v"
+	if v, _ := sc.Reveal(ctx, cli, "n"); v != "v" {
 		t.Fatal(v)
 	}
 	pf := fakes.NewProfile(rec)

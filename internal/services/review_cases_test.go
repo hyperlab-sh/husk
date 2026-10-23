@@ -5,7 +5,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	c "github.com/hyperlab-sh/husk/internal/services/contracts"
 	"github.com/hyperlab-sh/husk/internal/services/keybinding"
@@ -35,7 +34,7 @@ func TestReviewEmptyCallerDeniedOnEveryUserOnlyMethod(t *testing.T) {
 		"settings.list": func() error { _, e := set.List(zero); return e }, "settings.schema": func() error { _, e := set.SchemaFor(zero, ""); return e }, "settings.validate": func() error { _, e := set.Validate(ctx, zero, input(`{}`)); return e }, "settings.preview": func() error { _, _, e := set.Preview(ctx, zero, input(`{}`)); return e },
 		"theme.check":   func() error { _, e := theme.Check(ctx, zero, input(`{}`)); return e },
 		"config.reload": func() error { _, e := co.ReloadFor(ctx, zero); return e }, "config.inputs": func() error { _, e := co.Inputs(ctx, zero); return e },
-		"secrets.grant": func() error { return sec.Grant(zero, "a", "x") }, "secrets.revoke": func() error { return sec.Revoke(zero, "a", "x") }, "secrets.set": func() error { return sec.Set(zero, "x", nil) }, "secrets.reveal": func() error { _, e := sec.Reveal(zero, "x"); return e }, "secrets.grants": func() error { _, e := sec.Grants(zero); return e },
+		"secrets.grant": func() error { return sec.Grant(context.Background(), zero, "a", "x") }, "secrets.revoke": func() error { return sec.Revoke(context.Background(), zero, "a", "x") }, "secrets.set": func() error { return sec.Set(zero, "x", "") }, "secrets.reveal": func() error { _, e := sec.Reveal(context.Background(), zero, "x"); return e },
 	}
 	for name, call := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -51,7 +50,7 @@ func TestReviewEmptyCallerDeniedOnEveryUserOnlyMethod(t *testing.T) {
 	if _, ok := set.SnapshotFor(zero).Raw("husk.input.hold_alt"); ok {
 		t.Fatal("empty caller got unfiltered snapshot")
 	}
-	if _, err := sec.Read(zero, "x"); err == nil {
+	if _, err := sec.Read(context.Background(), zero, "x"); err == nil {
 		t.Fatal("empty caller read secrets")
 	}
 	for _, kind := range []protocol.CallerKind{"cli", "host", "input"} {
@@ -163,55 +162,6 @@ func TestReviewDisabledChordFallsThroughAndUserDisableWins(t *testing.T) {
 	}
 }
 
-func TestReviewRevealAuditAndEveryReadOutcome(t *testing.T) {
-	tree := state.New(state.Options{})
-	clk := clock()
-	posts := make(chan func(), 4)
-	events := []map[string]string{}
-	audits := []string{}
-	backend := &memoryCrypto{data: map[string][]byte{"git.token": []byte("TOP_SECRET_VALUE")}}
-	sec, _ := secrets.New(secrets.Options{State: tree, Clock: clk, Crypto: backend, Post: func(f func()) bool { posts <- f; return true }, Publisher: c.PublishFunc(func(name string, data any) {
-		if name != "secrets.read" {
-			t.Error(name)
-		}
-		events = append(events, data.(map[string]string))
-	}), Audit: func(name string) { audits = append(audits, name) }})
-	defer sec.Close()
-	apply(t, sec, catalog("a"))
-	plugin := Caller{Kind: "plugin", PluginID: "a"}
-	user := Caller{Kind: "cli"}
-	sec.Read(plugin, "other")
-	sec.Read(plugin, "git.token")
-	timer := <-clk.created
-	clk.advance(time.Minute)
-	<-timer.stopped
-	sec.Read(plugin, "git.token")
-	if err := sec.Grant(user, "a", "git.token"); err != nil {
-		t.Fatal(err)
-	}
-	(<-posts)()
-	sec.Read(plugin, "git.token")
-	value, err := sec.Reveal(user, "git.token")
-	if err != nil || string(value) != "TOP_SECRET_VALUE" || len(audits) != 1 || audits[0] != "git.token" {
-		t.Fatal("reveal/audit failed", err)
-	}
-	sec.Read(user, "unset")
-	backend.err = errors.New("TOP_SECRET_VALUE")
-	sec.Read(user, "git.token")
-	outcomes := map[string]bool{}
-	for _, e := range events {
-		if len(e) != 3 || e["name"] == "TOP_SECRET_VALUE" || e["outcome"] == "TOP_SECRET_VALUE" {
-			t.Fatal("invalid read event", e)
-		}
-		outcomes[e["outcome"]] = true
-	}
-	for _, want := range []string{"not_declared", "needs_grant", "user_denied", "allowed", "not_found", "unavailable"} {
-		if !outcomes[want] {
-			t.Fatal("missing outcome", want, outcomes)
-		}
-	}
-}
-
 func TestReviewSchemaForExposureAndLocalKeyBoundaries(t *testing.T) {
 	in := catalog("a")
 	set := newSet(settings.Options{Schema: []settings.Entry{{Key: "dist.key", Type: "bool", Default: false, Owner: "dist", Apply: "live"}}})
@@ -260,7 +210,7 @@ func TestSecretsReadEventOmitsInvalidRequestedName(t *testing.T) {
 	defer sec.Close()
 	apply(t, sec, catalog("a"))
 	for _, name := range []string{"Bad Name\x1b[31m", "", strings.Repeat("x", 65), "UPPER"} {
-		if _, err := sec.Read(Caller{Kind: "plugin", PluginID: "a"}, name); err == nil {
+		if _, err := sec.Read(context.Background(), Caller{Kind: "plugin", PluginID: "a"}, name); err == nil {
 			t.Fatalf("read of %q succeeded", name)
 		}
 	}

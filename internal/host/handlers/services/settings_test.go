@@ -248,17 +248,17 @@ func TestSharedBudgetCoversSettingsAndSecretsGet(t *testing.T) {
 func TestSecretsServe(t *testing.T) {
 	rec := fakes.NewRecorder()
 	port := fakes.NewSecrets(rec)
-	port.Value = []byte("hunter2")
-	port.Infos = []contracts.SecretInfo{{Name: "token", Set: true}}
+	port.Value = "hunter2"
+	yes := true
+	port.Result = contracts.SecretNames{Storage: "ok", Secrets: []contracts.SecretInfo{{Name: "token", Declared: []string{"files"}, Granted: []string{"files"}, Set: &yes}}}
 	h := Secrets{Port: port}
 
 	got := decode(t, h.Serve(context.Background(), pluginCaller("files"), req(t, "secrets.get", `{"name":"token"}`), nil))
 	if got["name"] != "token" || got["value"] != "hunter2" {
 		t.Fatalf("get = %v", got)
 	}
-	var infos []contracts.SecretInfo
 	reply := h.Serve(context.Background(), pluginCaller("files"), req(t, "secrets.names", `{}`), nil)
-	if reply.Error != nil || json.Unmarshal(reply.Result, &infos) != nil || len(infos) != 1 {
+	if reply.Error != nil || string(reply.Result) != `{"storage":"ok","secrets":[{"name":"token","declared":["files"],"granted":["files"],"set":true,"required":false}]}` {
 		t.Fatalf("names = %s / %+v", reply.Result, reply.Error)
 	}
 	reveal := decode(t, h.Serve(context.Background(), cliCaller, req(t, "secrets.reveal", `{"name":"token"}`), nil))
@@ -320,11 +320,11 @@ func TestSecretsRequireNameAndPlugin(t *testing.T) {
 
 func TestSecretsNilNamesEncodeAsEmptyArray(t *testing.T) {
 	port := fakes.NewSecrets(nil)
-	port.Infos = nil
+	port.Result = contracts.SecretNames{Storage: "unavailable"}
 	h := Secrets{Port: port}
 	reply := h.Serve(context.Background(), cliCaller, req(t, "secrets.names", `{}`), nil)
-	if string(reply.Result) != "[]" {
-		t.Fatalf("nil names = %s, want []", reply.Result)
+	if string(reply.Result) != `{"storage":"unavailable","secrets":[]}` {
+		t.Fatalf("nil names = %s, want an empty secrets array", reply.Result)
 	}
 }
 
@@ -408,4 +408,58 @@ func TestSettingsValidateNilProblemsEncodeAsEmptyArray(t *testing.T) {
 	if want := `{"ok":true,"problems":[]}`; string(reply.Result) != want {
 		t.Fatalf("validate = %s, want %s", reply.Result, want)
 	}
+}
+
+// secrets.set takes UTF-8 text only: the handler sees the wire bytes, because
+// decoding into a string would turn bad bytes and lone surrogates into U+FFFD.
+func TestSecretsSetValueMustBeUTF8Text(t *testing.T) {
+	for _, tc := range []struct {
+		name, params, code, reason string
+	}{
+		{"invalid utf-8 bytes", "{\"name\":\"token\",\"value\":\"a\xffb\"}", string(protocol.CodeInvalidParams), "not_utf8"},
+		{"lone high surrogate", `{"name":"token","value":"a\ud800b"}`, string(protocol.CodeInvalidParams), "not_utf8"},
+		{"lone low surrogate", `{"name":"token","value":"\udc00"}`, string(protocol.CodeInvalidParams), "not_utf8"},
+		{"absent value", `{"name":"token"}`, string(protocol.CodeInvalidParams), ""},
+		{"non-string value", `{"name":"token","value":7}`, string(protocol.CodeInvalidParams), ""},
+		{"null value", `{"name":"token","value":null}`, string(protocol.CodeInvalidParams), ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := fakes.NewRecorder()
+			h := Secrets{Port: fakes.NewSecrets(rec)}
+			errp := replyErr(t, h.Serve(context.Background(), cliCaller, req(t, "secrets.set", tc.params), nil))
+			if string(errp.Code) != tc.code {
+				t.Fatalf("code = %s", errp.Code)
+			}
+			if tc.reason != "" && !strings.Contains(string(mustJSON(t, errp.Data)), `"reason":"`+tc.reason+`"`) {
+				t.Fatalf("data = %s", mustJSON(t, errp.Data))
+			}
+			if calls := rec.Methods(); len(calls) != 0 {
+				t.Fatalf("port touched: %v", calls)
+			}
+		})
+	}
+	for name, params := range map[string]string{
+		"empty value":     `{"name":"token","value":""}`,
+		"valid surrogate": `{"name":"token","value":"😀 é"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := fakes.NewRecorder()
+			h := Secrets{Port: fakes.NewSecrets(rec)}
+			if reply := h.Serve(context.Background(), cliCaller, req(t, "secrets.set", params), nil); reply.Error != nil {
+				t.Fatalf("rejected: %+v", reply.Error)
+			}
+			if calls := rec.Methods(); len(calls) != 1 {
+				t.Fatalf("calls = %v", calls)
+			}
+		})
+	}
+}
+
+func mustJSON(t *testing.T, v any) []byte {
+	t.Helper()
+	raw, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
 }

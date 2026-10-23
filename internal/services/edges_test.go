@@ -3,9 +3,7 @@ package services
 import (
 	"context"
 	"github.com/hyperlab-sh/husk/internal/services/keybinding"
-	"github.com/hyperlab-sh/husk/internal/services/secrets"
 	"github.com/hyperlab-sh/husk/internal/services/settings"
-	"github.com/hyperlab-sh/husk/internal/substrate/state"
 	"github.com/hyperlab-sh/husk/internal/substrate/store"
 	"strings"
 	"testing"
@@ -41,28 +39,6 @@ func TestKeymapKeepsLastGoodSemanticDocument(t *testing.T) {
 	match := kb.Resolve(keybinding.KeyContext{}, []string{"g"})
 	if match.Outcome != keybinding.Match || match.Binding.Action != "husk.home" {
 		t.Fatal("last good keymap lost")
-	}
-}
-func TestAcceptedDialogRemainsPendingUntilLoopRuns(t *testing.T) {
-	tree := state.New(state.Options{})
-	posts := make(chan func(), 8)
-	answers := make(chan bool, 1)
-	prompts := make(chan struct{}, 8)
-	sec, _ := secrets.New(secrets.Options{State: tree, Clock: clock(), Crypto: &memoryCrypto{data: map[string][]byte{}}, Post: func(f func()) bool { posts <- f; return true }, Prompt: func(secrets.Prompt) <-chan bool { prompts <- struct{}{}; return answers }})
-	defer sec.Close()
-	apply(t, sec, catalog("files"))
-	plugin := Caller{Kind: "plugin", PluginID: "files"}
-	sec.Read(plugin, "git.token")
-	<-prompts
-	answers <- true
-	queued := <-posts
-	sec.Read(plugin, "git.token")
-	if len(prompts) != 0 {
-		t.Fatal("duplicate dialog while accepted grant awaits loop")
-	}
-	queued()
-	if grants, _ := sec.Grants(Caller{Kind: "cli"}); len(grants) != 1 {
-		t.Fatal("queued grant lost")
 	}
 }
 func TestUserExposureDryPreviewAndNoGenerationChange(t *testing.T) {

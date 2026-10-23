@@ -19,6 +19,7 @@ import (
 	"github.com/hyperlab-sh/husk/internal/pods/server"
 	"github.com/hyperlab-sh/husk/internal/pods/wrapper"
 	"github.com/hyperlab-sh/husk/internal/services"
+	"github.com/hyperlab-sh/husk/internal/services/secrets"
 	"github.com/hyperlab-sh/husk/internal/stem/calls"
 	"github.com/hyperlab-sh/husk/internal/stem/dispatcher"
 	"github.com/hyperlab-sh/husk/internal/stem/eventbus"
@@ -268,6 +269,7 @@ func (r *Root) buildStore() error {
 		RuntimeDir: r.cfg.RuntimeDir,
 		Clock:      storeClock{r.clock},
 		Post:       r.post,
+		Keyring:    r.opts.keyring,
 	})
 	if err != nil {
 		return err
@@ -286,12 +288,16 @@ func (r *Root) buildServices() error {
 	if err != nil {
 		return fmt.Errorf("secrets namespace: %w", err)
 	}
-	prompt := r.opts.prompt
-	if prompt == nil {
-		// No dialog is wired: a grant prompt is refused, never granted.
-		prompt = denyPrompt
+	// No dialog wired (a headless host): the service answers every ungranted
+	// read user_denied and remembers nothing.
+	var prompt func(context.Context, secrets.Prompt) secrets.Answer
+	if show := r.opts.prompt; show != nil {
+		prompt = func(ctx context.Context, p secrets.Prompt) secrets.Answer {
+			// The line names who asks for what, never the purpose.
+			r.log(pods.LogMsg{Level: "info", Message: "secrets: dialog shown to grant " + p.Name + " to " + p.Plugin})
+			return show(ctx, p)
+		}
 	}
-	// Not wired yet: Audit (secrets auditing).
 	rt, err := services.New(services.RuntimeOptions{
 		Store:       r.store,
 		State:       r.st,
@@ -301,6 +307,9 @@ func (r *Root) buildServices() error {
 		Crypto:      secretsDoc,
 		Prompt:      prompt,
 		ProfileFlag: r.cfg.ProfileFlag,
+		Audit: func(name string) {
+			r.log(pods.LogMsg{Level: "info", Message: "secrets: " + name + " revealed to cli"})
+		},
 		Warn: func(msg string) {
 			r.log(pods.LogMsg{Level: "warn", Message: msg})
 		},

@@ -147,13 +147,22 @@ type SettingsPort interface {
 	Validate(ctx context.Context, c Caller) (ValidationResult, error)
 }
 
-// SecretInfo is secret metadata. It never carries a value.
+// SecretInfo is one entry of secrets.names: metadata, never a value. Set is
+// nil when the caller may not learn whether a value exists (a plugin that is
+// not granted the name).
 type SecretInfo struct {
 	Name     string   `json:"name"`
-	Declared []string `json:"declared,omitempty"`
-	Granted  []string `json:"granted,omitempty"`
-	Set      bool     `json:"set"`
-	Broken   bool     `json:"broken"`
+	Declared []string `json:"declared"`
+	Granted  []string `json:"granted"`
+	Set      *bool    `json:"set,omitempty"`
+	Required bool     `json:"required"`
+}
+
+// SecretNames is the secrets.names result. Storage is "ok" or "unavailable";
+// the entries are sorted by name.
+type SecretNames struct {
+	Storage string       `json:"storage"`
+	Secrets []SecretInfo `json:"secrets"`
 }
 
 // SecretsPort serves the secrets.* methods. secrets.get and secrets.names are
@@ -161,19 +170,22 @@ type SecretInfo struct {
 // grant, revoke and reveal are user only and answer denied to a plugin caller.
 // The adapter rate-limits secrets.get (20/s per plugin) before calling.
 type SecretsPort interface {
-	// Get serves secrets.get. Refusals carry data.reason: not_declared,
-	// needs_grant or user_denied.
-	Get(ctx context.Context, c Caller, name string) ([]byte, error)
+	// Get serves secrets.get. A plugin's read of a declared, ungranted name
+	// blocks on the confirm dialog until it is answered; ctx ends the wait.
+	// Refusals carry data.reason: not_declared, unset, user_denied,
+	// dialog_pending or storage. A cli caller takes the audited reveal path.
+	Get(ctx context.Context, c Caller, name string) (string, error)
 	// Names serves secrets.names.
-	Names(ctx context.Context, c Caller) ([]SecretInfo, error)
-	// Set serves secrets.set (user only).
-	Set(ctx context.Context, c Caller, name string, value []byte) error
-	// Grant serves secrets.grant (user only).
+	Names(ctx context.Context, c Caller) (SecretNames, error)
+	// Set serves secrets.set (user only). The value is UTF-8 text.
+	Set(ctx context.Context, c Caller, name, value string) error
+	// Grant serves secrets.grant (user only); it returns after the write ran.
 	Grant(ctx context.Context, c Caller, plugin, name string) error
-	// Revoke serves secrets.revoke (user only).
+	// Revoke serves secrets.revoke (user only); it returns after the write ran.
 	Revoke(ctx context.Context, c Caller, plugin, name string) error
-	// Reveal serves secrets.reveal (user only).
-	Reveal(ctx context.Context, c Caller, name string) ([]byte, error)
+	// Reveal serves secrets.reveal (user only), the audited path of a value to
+	// a human.
+	Reveal(ctx context.Context, c Caller, name string) (string, error)
 }
 
 // ProfileInfo describes one profile.

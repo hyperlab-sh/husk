@@ -5,7 +5,10 @@
 //   - a published inline slot (row actions anchored in surface content),
 //   - a gate hook the plugin fires before it refreshes (from the r key or the
 //     go.reference.refresh action) and an event it emits,
-//   - surface.resized for geometry, so nothing is hard-coded.
+//   - surface.resized for geometry, so nothing is hard-coded,
+//   - a declared secret (go.reference.token) and an action
+//     (go.reference.secret-check) that reads it with secrets.get and replies
+//     with whether it is set, never the value.
 //
 // It runs in one of two roles from the same binary, because a plugin cannot
 // contribute to its own published slot:
@@ -50,8 +53,12 @@ const (
 	refreshHook    = publisherID + ".before-refresh"
 	selectionEvent = publisherID + ".selection-changed"
 
-	refreshAction  = publisherID + ".refresh"
-	gateKind       = "gate"
+	refreshAction = publisherID + ".refresh"
+	gateKind      = "gate"
+
+	secretName        = publisherID + ".token"
+	secretCheckAction = publisherID + ".secret-check"
+
 	inspectAction  = contributorID + ".inspect"
 	inspectContrib = contributorID + ".inspect-button"
 )
@@ -111,6 +118,7 @@ const (
 	pendingContribute pendingKind = iota + 1
 	pendingHook
 	pendingEmit
+	pendingSecret
 )
 
 // plugin is single-threaded: run feeds it one message at a time.
@@ -122,6 +130,9 @@ type plugin struct {
 
 	nextID  int64
 	pending map[string]pendingKind
+	// secretChecks holds the secret-check requests waiting on secrets.get,
+	// keyed like pending.
+	secretChecks map[string]protocol.Message
 
 	sizes    map[protocol.SurfaceID]protocol.SurfaceSize
 	selected int
@@ -162,12 +173,13 @@ type input struct {
 // to the host's instance socket.
 func run(cfg config, stdin io.Reader, stdout io.Writer, sock io.ReadWriteCloser, errw io.Writer) error {
 	p := &plugin{
-		cfg:     cfg,
-		stdout:  protocol.NewWriter(stdout),
-		sock:    protocol.NewWriter(sock),
-		log:     errw,
-		pending: map[string]pendingKind{},
-		sizes:   map[protocol.SurfaceID]protocol.SurfaceSize{},
+		cfg:          cfg,
+		stdout:       protocol.NewWriter(stdout),
+		sock:         protocol.NewWriter(sock),
+		log:          errw,
+		pending:      map[string]pendingKind{},
+		secretChecks: map[string]protocol.Message{},
+		sizes:        map[protocol.SurfaceID]protocol.SurfaceSize{},
 	}
 
 	in := make(chan input)
@@ -316,6 +328,9 @@ func (p *plugin) request(m protocol.Message) error {
 			}
 			return p.reply(m, struct{}{})
 		}
+		if !p.cfg.contributor && a.Action == secretCheckAction {
+			return p.secretCheck(m)
+		}
 		if !p.cfg.contributor || a.Action != inspectAction {
 			return p.replyError(m, protocol.CodeNotFound, fmt.Sprintf("no action %q", a.Action))
 		}
@@ -348,6 +363,26 @@ func (p *plugin) request(m protocol.Message) error {
 		return p.reply(m, struct{}{})
 	}
 	return p.replyError(m, protocol.CodeUnknownMethod, fmt.Sprintf("unknown method %q", m.Method))
+}
+
+// secretCheck asks the host for the declared secret and answers the action once
+// the read is decided. The read blocks on the user's dialog, so the reply waits
+// for complete. The value is never replied or logged.
+func (p *plugin) secretCheck(req protocol.Message) error {
+	raw, err := json.Marshal(struct {
+		Name string `json:"name"`
+	}{secretName})
+	if err != nil {
+		return err
+	}
+	p.nextID++
+	id, err := protocol.NewIntID(p.nextID)
+	if err != nil {
+		return err
+	}
+	p.pending[id.String()] = pendingSecret
+	p.secretChecks[id.String()] = req
+	return p.sendSock(protocol.Message{ID: &id, Method: protocol.MethodSecretsGet, Params: raw})
 }
 
 func (p *plugin) notification(m protocol.Message) error {
@@ -424,6 +459,17 @@ func (p *plugin) complete(m protocol.Message) error {
 	}
 	delete(p.pending, key)
 	switch kind {
+	case pendingSecret:
+		req := p.secretChecks[key]
+		delete(p.secretChecks, key)
+		if m.Error == nil {
+			return p.reply(req, map[string]any{"set": true})
+		}
+		var data struct {
+			Reason string `json:"reason"`
+		}
+		_ = json.Unmarshal(m.Error.Data, &data)
+		return p.reply(req, map[string]any{"code": m.Error.Code, "reason": data.Reason})
 	case pendingContribute:
 		if m.Error == nil {
 			return nil

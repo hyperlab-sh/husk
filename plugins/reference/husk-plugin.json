@@ -6,6 +6,9 @@
   "version": "0.1.0",
   "description": "Declares a frame, a published slot, a hook and an event; build it first with go build -o plugins/reference/reference ./plugins/reference",
   "command": ["./reference"],
+  "secrets": [
+    {"name": "go.reference.token", "purpose": "Demonstrates a granted secret read", "required": false}
+  ],
   "surfaces": [
     {"id": "main-stage", "frame": {"border": true, "label": "Reference plugin", "close": true}}
   ],
@@ -13,7 +16,8 @@
     {"id": "go.reference.row-actions", "title": "Row actions", "description": "Actions beside each row", "kind": "inline"}
   ],
   "actions": [
-    {"id": "go.reference.refresh", "title": "Refresh", "description": "Refreshes the reference plugin, asking the before-refresh gate first"}
+    {"id": "go.reference.refresh", "title": "Refresh", "description": "Refreshes the reference plugin, asking the before-refresh gate first"},
+    {"id": "go.reference.secret-check", "title": "Check secret", "description": "Reads the declared secret and reports whether it is set, never its value"}
   ],
   "hooks": {
     "publish": [{"id": "go.reference.before-refresh", "kind": "gate", "title": "Before refresh", "description": "Called when the reference plugin refreshes"}]

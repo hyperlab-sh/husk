@@ -196,7 +196,7 @@ func main() {
 	// it. The model attaches the host before the program runs.
 	p := tea.NewProgram(model)
 	prog.set(p)
-	h, err := newHost(prog, model, id, runtimeDir, []string(*pluginPaths), []string(*pluginDirs), profileFlag, host.WithVersion(buildVersion()))
+	h, err := newHost(prog, model, id, runtimeDir, []string(*pluginPaths), []string(*pluginDirs), profileFlag, host.WithVersion(buildVersion()), host.WithPrompt(secretPromptFunc(prog)))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "husk: %v\n", err)
 		os.Exit(1)
