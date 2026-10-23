@@ -28,7 +28,7 @@ func (r *Root) Frontend() contracts.Frontend { return r }
 func (r *Root) Snapshot() *state.Snapshot { return r.st.Snapshot() }
 
 // Palette implements contracts.Frontend.
-func (r *Root) Palette() protocol.Palette { return r.rt.Theme.Get(hostCaller) }
+func (r *Root) Palette() protocol.Palette { return r.rt.Theme.Wire() }
 
 func (r *Root) keys() portsservices.Keys { return portsservices.Keys{Svc: r.rt.Keybinding} }
 

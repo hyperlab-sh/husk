@@ -76,7 +76,7 @@ func TestReviewKeyListingExactCatalogOwnership(t *testing.T) {
 		}
 	}
 	for _, id := range []string{"a", "a.b"} {
-		view := kb.ListFor(Caller{Kind: "plugin", PluginID: id})
+		view, _ := kb.ListFor(Caller{Kind: "plugin", PluginID: id})
 		if len(view.Entries) != 2 {
 			t.Fatalf("wrong listing for %s: %+v", id, view.Entries)
 		}
@@ -91,10 +91,10 @@ func TestReviewKeyListingExactCatalogOwnership(t *testing.T) {
 			}
 		}
 	}
-	if len(kb.ListFor(Caller{Kind: "cli"}).Entries) <= 2 {
+	if full, _ := kb.ListFor(Caller{Kind: "cli"}); len(full.Entries) <= 2 {
 		t.Fatal("trusted listing filtered")
 	}
-	if len(kb.ListFor(Caller{}).Entries) != 0 {
+	if none, err := kb.ListFor(Caller{}); err == nil || len(none.Entries) != 0 {
 		t.Fatal("empty caller listing")
 	}
 }

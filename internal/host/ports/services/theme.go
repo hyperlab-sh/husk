@@ -23,7 +23,8 @@ var _ host.ThemePort = Theme{}
 
 // Get implements contracts.ThemePort.
 func (p Theme) Get(ctx context.Context, hc host.Caller) (protocol.Palette, error) {
-	return p.Svc.Get(hc), nil
+	palette, err := p.Svc.Get(hc)
+	return palette, coded(err)
 }
 
 // Check implements contracts.ThemePort (user-only: dry input is user-scoped).

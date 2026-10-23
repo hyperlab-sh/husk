@@ -548,6 +548,11 @@ func TestCoordinatorStoreFailureDoesNotPrepareAnyService(t *testing.T) {
 	if err == nil || len(r) != 5 {
 		t.Fatal(r, err)
 	}
+	for _, rep := range r {
+		if len(rep.Problems) != 1 || rep.Problems[0].Code != "store_error" || rep.Problems[0].Severity != "error" {
+			t.Fatalf("%s report = %+v", rep.Service, rep.Problems)
+		}
+	}
 	for _, s := range services {
 		if s.(*fakeService).calls.Load() != 0 {
 			t.Fatal("prepared after source failure")

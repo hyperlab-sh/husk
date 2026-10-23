@@ -239,7 +239,7 @@ func (r *Root) opening(pluginID string) []protocol.Message {
 		}
 		out = append(out, m)
 	}
-	add(protocol.MethodThemeChanged, protocol.ThemeChangedParams{Palette: r.rt.Theme.Get(hostCaller)})
+	add(protocol.MethodThemeChanged, protocol.ThemeChangedParams{Palette: r.rt.Theme.Wire()})
 	add(protocol.MethodSurfaceResized, protocol.SurfaceResizedParams{Surfaces: r.occupiedSizes(pluginID)})
 	var mods protocol.ModifierState
 	if r.opts.modifiers != nil {

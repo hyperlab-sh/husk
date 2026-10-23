@@ -174,7 +174,7 @@ func TestToastAttributionFromCaller(t *testing.T) {
 
 // TestUnauthenticatedPluginCallerDenied pins S4: a plugin-kind caller with
 // an empty PluginID has no identity to authorize, so every method denies it
-// like the Calls port's callerOf.
+// like the Calls port's validCaller.
 func TestUnauthenticatedPluginCallerDenied(t *testing.T) {
 	port, _, _, _, _ := newPort(t)
 	anon := contracts.Caller{Kind: contracts.CallerPlugin}

@@ -143,7 +143,7 @@ func (s *Service) SnapshotFor(caller c.Caller) Snapshot {
 	old := s.current.Load()
 	out := defaults(map[string]Entry{}, func(string) {})
 	out.gen = old.gen
-	if caller.PluginID == "" {
+	if !c.ValidCaller(caller) {
 		return out
 	}
 	for key, entry := range old.schema {
