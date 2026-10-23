@@ -235,7 +235,9 @@ documents (not at single-manifest conversion, because they compare plugins).
 They run in this order on every catalog rebuild (each reload), over the
 plugins loaded at that moment. A plugin is loaded when it has declared
 documents in Store ([Pods](pods.md) keeps them across process exit), whatever
-its liveness: a `failed` plugin still owns its namespace.
+its liveness: a `failed` plugin still owns its namespace. `husk plugin remove`
+unloads it: its documents leave Store, the next rebuild drops its hooks and
+subscriptions, and a namespace it held is free again.
 
 1. **Namespace.** A loaded plugin owns its whole namespace: every hook id
    that starts with its id followed by a dot. A hook id belongs to the loaded
@@ -601,6 +603,13 @@ queuing hides the bug and adds a wait nobody asked for.
   `plugin_exited`, at once. `collect` and `gate`: the entry is recorded and
   the call waits for the rest. `transform`: the stage is skipped and the
   chain moves on.
+- **Subscriber or owner is removed mid-call** (`husk plugin remove`,
+  [Pods](pods.md)). The stop makes it a subscriber exit or an owner
+  disconnect, handled as the rules here say; the catalog refresh that follows
+  does not touch calls already in flight (invariant 10). Removal itself fires
+  no hook: it is not a gate, for the reasons given in [Pods](pods.md),
+  "Removing a plugin"; other plugins learn of it from the
+  `pods.plugin-removed` event.
 - **Subscriber is not live when the call starts.** No leg, no entry (today's
   behaviour; liveness at call time defines the set). The set is fixed then
   and there is no per-stage liveness check: a `transform` stage that starts
@@ -925,6 +934,14 @@ or priority. It is the starting point; the changes below extend it.
     so hooks are exercised from the CLI and from tests through their owner.
     Together with decision 1 this is the whole diagnostic story: there is no
     `husk hook call`.
+19. **`husk plugin remove` fires no hook.** The host owns the operation and
+    could fire a `husk.before-plugin-remove` gate under decision 1; it does
+    not, because the stop already gives the plugin EOF, SIGTERM and the 2 s
+    grace it gets at shutdown, the operation destroys no data, the usual
+    target is a dead plugin that cannot answer, and a veto would put a plugin
+    between the user and their own instance. The after-the-fact notice is the
+    `pods.plugin-removed` event ([Pods](pods.md)). Adding the hook later is a
+    protocol minor.
 
 ## Open questions
 

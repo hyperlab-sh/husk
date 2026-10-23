@@ -252,7 +252,11 @@ Resolution, in order, for one `Invoke`:
    launch gate in [Pods](pods.md)), and keeps the catalog entry across process
    exit, so an exited owner is `unavailable`, not `not_found`, and an action is
    never invocable before its keys, settings schema and secret declarations
-   exist.
+   exist. The entry leaves the catalog only when the user removes the plugin
+   from the instance (`plugin.remove`, CLI-only, [Pods](pods.md)): from then
+   on step 2 answers `not_found` for its actions, `action.list` no longer
+   lists them, and its subscriptions and hooks are gone from the Event bus
+   table and the hook catalog at the same catalog refresh.
 6. `Focus` is filled: Input keeps its snapshot; every other caller gets the
    focus slice read now. A `focus` field in a caller's params is ignored.
 7. Send `action.invoke` to the owner through Calls with the action timeout and
@@ -454,7 +458,9 @@ exit status); delivery to subscribers stays fire-and-forget:
 Names. A plugin event name must start with `<plugin_id>.`; the Server
 rejects others with a `denied` reply. A bare-shell CLI caller may emit only
 under the `user.` prefix. Core event names have no plugin-id prefix and are
-reserved: `state.changed`, `pods.plugin-exited`, `services.reloaded` and
+reserved: `state.changed`, `pods.plugin-exited`, `pods.plugin-removed`
+(`{"plugin_id","status"}`, published by the host after `plugin.remove`
+undeclares a plugin, [Pods](pods.md)), `services.reloaded` and
 `secrets.read` now, and the `state.`, `surface.`, `input.`, `pods.`,
 `services.`, `secrets.`, `user.` and `husk.` prefixes. `secrets.read` and
 `services.reloaded` are delivered to CLI watchers only, never to a plugin

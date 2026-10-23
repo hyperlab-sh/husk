@@ -133,7 +133,7 @@ Method families and their handlers (registered by `internal/host.New`; names and
 | `event.` | Event bus | `event.emit` (a request; a plugin may emit only under its own id, the bare CLI only under `user.`), `event.watch` (streams `event.deliver` notifications on this connection; for the CLI and debugging). |
 | `state.` | State | `state.get`, `state.snapshot`, `state.watch` for everyone. `state.set` and `state.patch` are accepted only from a plugin caller and only for that plugin's own slice; the Server forwards them to that plugin's Pod, which writes State as the slice owner. `state.clear` is CLI only. |
 | `settings.`, `theme.`, `secrets.`, `keys.`, `profile.`, `config.` | Services | `secrets.get` returns only what the Secrets service granted to `Caller.PluginID`. `config.reload` triggers the reload described in [Services](services.md). |
-| `plugin.` | Pods | `plugin.list` (spec summary plus liveness), `plugin.log` (log path for an id, not_found before a log exists). Both are the user's own: CLI-only callers, denied for plugins, Stem and zero-kind callers (D57); both read loop-owned Pod state through `Loop.Do` and answer unavailable when the loop no longer runs. |
+| `plugin.` | Pods | `plugin.list` (spec summary plus liveness), `plugin.log` (log path for an id, not_found before a log exists), `plugin.remove` (unload one plugin from this instance, see "Removing a plugin"). All three are the user's own: CLI-only callers, denied for plugins, Stem and zero-kind callers (D57); all read loop-owned Pod state through `Loop.Do` and answer unavailable when the loop no longer runs. |
 | `surface.`, `slot.`, `toast.` | Surfaces | `surface.update` and `surface.close` are notifications a plugin sends over a connection it keeps open; `slot.contribute` and `toast.show` likewise. |
 
 An unknown prefix gets error code `unknown_method`. Watch methods are the only place the Server pushes notifications to a socket connection; a plugin never needs them, because its subscribed events arrive on stdin.
@@ -150,7 +150,16 @@ An unknown prefix gets error code `unknown_method`. Watch methods are the only p
 
 `plugin.log` takes `{"plugin":"<id>"}` (a missing or empty `plugin` is `invalid_params`) and answers `{"path":"<log file>"}`. An id that names no Pod is `not_found`, and so is a Pod whose Wrapper has not opened a log yet; the result never carries an empty path.
 
-Both methods are the user's own: a CLI caller is served, every other caller kind is `denied`.
+`plugin.remove` takes `{"plugin":"<id>"}` (a missing or empty `plugin` is `invalid_params`) and answers once the plugin is gone from the instance and the Services reload that no longer sees it has completed:
+
+```json
+{"id":9,"method":"plugin.remove","params":{"plugin":"alpha"}}
+{"id":9,"result":{"plugin":"alpha","status":"exited","log":"/home/u/.local/state/husk/logs/4242/alpha.log","reports":[{"service":"profile","gen":4,"applied":true,"changed":false},{"service":"settings","gen":4,"applied":true,"changed":true},{"service":"theme","gen":3,"applied":true,"changed":false},{"service":"keybinding","gen":4,"applied":true,"changed":true},{"service":"secrets","gen":4,"applied":true,"changed":true}]}}
+```
+
+`status` is the plugin's last `husk.pods` status before its entry was removed: `exited` when a live process was stopped by this call, otherwise the status the Pod had (`starting`, `exited` or `failed`); it is never `live`. `log` is the log file path `plugin.log` would have answered, `""` when no log was opened; after this reply `plugin.log` answers `not_found`, so this is the last place the path is reported. `reports` is the reload's one report per Service, the same objects `config.reload` returns ([Services](services.md)); a report with `applied: false` does not make the call an error. The sequence, its ordering, idempotency and failure modes are in "Removing a plugin" below.
+
+All three methods are the user's own: a CLI caller is served, every other caller kind is `denied`.
 
 #### Caller identity: per-plugin token
 
@@ -255,7 +264,58 @@ What the Pod does with a `Spec`, in order, on launch:
 
 When several plugins launch together (startup, `--plugin-dir`), the Host runs steps 1 to 5 for all of them, requests one reload, and starts every Wrapper after that single reload completes. At startup that reload is the Services first load, which therefore already includes every declared plugin ([Store](store.md), startup order).
 
-On process exit (`exited` or `failed`) the Pod revokes the token and keeps the slice's value; the catalog stays declared, so the plugin's actions resolve `unavailable` rather than `not_found` and its focus-local keys stay listed as `unavailable` ([Message kinds](message-kinds.md), [Keybindings](keybindings.md)). Only when the Pod is torn down (the plugin removed from the instance) does it call `Store.Undeclare`, ask the coordinator to reload with reason `plugin`, and unregister the slice according to its scope and retention ([State](state.md) decides).
+On process exit (`exited` or `failed`) the Pod revokes the token and keeps the slice's value; the catalog stays declared, so the plugin's actions resolve `unavailable` rather than `not_found` and its focus-local keys stay listed as `unavailable` ([Message kinds](message-kinds.md), [Keybindings](keybindings.md)). Only when the Pod is torn down, which in v1 happens through `plugin.remove` and nowhere else (shutdown stops processes and tears nothing down), does the host call `Store.Undeclare`, ask the coordinator to reload with reason `plugin`, and unregister the slice; the persisted copies of a persistent slice are kept ([State](state.md), [Store](store.md)). The full sequence is "Removing a plugin".
+
+#### Removing a plugin (`plugin.remove`)
+
+`husk plugin remove <id>` unloads one plugin from the running instance (D59). It is an **unload, not an uninstall**: it touches no file the plugin or the user owns, deletes no persisted slice copy, forgets no secret grant, and is not remembered across restarts. A plugin named by `--plugin` or found under `--plugin-dir` is loaded again by the next start of the instance; v1 has no installed-plugin registry to record a removal in, and a plugin whose directory the user has deleted is simply not found next time. The command exists because a plugin that crashed otherwise keeps its catalog declared until the instance exits: its actions stay listed as `unavailable`, its keys as `unavailable`, its surfaces claimed, and nothing else calls `Store.Undeclare`.
+
+Terms used below: **removing** is a flag on the Pod set when a removal is accepted and cleared when the Pod is gone; **the launch gate** is step 6 of the launch; **teardown** is the loop half already described under "Host and loop boundary" (`TeardownMsg`); **stop** is the per-plugin form of the shutdown stop policy.
+
+The sequence, in order. Steps 2 to 5 and 7 run on the loop; steps 1, 6 and 8 run on worker or handler goroutines, never on the loop.
+
+| Step | Where | What happens |
+| :--- | :--- | :--- |
+| 1. Admit | Server handler | A caller that is not `cli` is `denied` before anything is looked up. Missing or empty `plugin` is `invalid_params`. The handler then hands the request to the loop (`Loop.Do` or a posted message) and waits off-loop under the request's `ctx`. |
+| 2. Look up | loop | No Pod with this id (never added, refused before a Pod existed, or already removed): `not_found`. The Host is closing (shutdown began): `unavailable`, `data.reason` `shutdown`, nothing changes. A Pod already marked removing: this request **joins** the removal in progress and receives the same reply when it completes; no second stop, teardown or reload runs. Otherwise the Pod is marked removing. |
+| 3. Settle the launch | loop | A Pod in `starting` whose launch gate is pending stays in place until that gate completes (at most one reload, 2 s). When the gate completes, a removing Pod is **not started**: the gate treats it like a torn-down id, writes nothing to `husk.pods` for it, and the removal continues at step 5. A gate cannot declare, register or reload after it has completed, so no stale declaration can reappear after step 7. A Pod in `exited` or `failed` has no process: continue at step 5. A Pod in `live`: continue at step 4. |
+| 4. Stop | worker | Exactly the shutdown stop for one plugin: the process is marked as stopped by Husk (so its exit classifies `exited`, never `failed`, and raises no toast), its stdin queue is flushed and closed (the plugin sees EOF), its process group gets SIGTERM, survivors get SIGKILL after the 2 s stop grace, and Husk waits at most the 1 s kill wait more. The Wrapper's ordinary notices run: the token is revoked on reap or channel close, `ReplySink.Closed` fails every pending call `cancelled` with `data.reason` `plugin_exited` ([Calls](calls.md)), `ExitMsg` writes `exited` to `husk.pods` and publishes `pods.plugin-exited`. If the process is still not reaped when the kill wait expires, liveness becomes `failed` with `last_error` `did not exit within 1s of SIGKILL`, one warning is logged, and the removal **continues**: the token is already revoked and the pipes closed, so the orphan can reach nothing. A later `ExitMsg` for an id that is no longer a Pod is ignored. |
+| 5. Tear down | loop, one tick | `TeardownMsg` for this id: revoke the token (a no-op after step 4), unregister `<id>.state` through the stored owner handle (State keeps its tombstone revision; Store flushes any pending persistent write and keeps every persisted copy, [Store](store.md) invariant 5), unregister `<id>.occupants` and `<id>.contributions`, remove the id from any pending gate, release the registry id, which deletes the plugin's `husk.pods` entry, and delete the Pod. All of it commits in the tick that handles the message, so one State flush carries the three `removed: true` changes and the `husk.pods` change, and the Surfaces engine's pass in that tick drops the removed owner's claims and slot entries ([State](state.md), "Surfaces resolution"). |
+| 6. Undeclare | loop, same tick | `Store.Undeclare(id)` removes the plugin's `plugins` and `keymap` documents (its first and only caller in v1); `Store.DeclaredRevision` advances, so every reader derived from the declared documents refreshes: the Dispatcher's action catalog (the plugin's actions are now `not_found`, [Message kinds](message-kinds.md)), the Event bus subscription table, the hook catalog ([Hooks](hooks.md)), and `Frontend.RailItems`, `Actions`, `PublishedSlots` and `SurfaceFrames`. The engine's `CatalogChanged()` is called when the published-slot catalog changed. The frontend re-registers its rail-item host actions from `RailItems`, so the removed plugin's rail items leave the palette and the Dispatcher. Then `pods.plugin-removed` is published (shape below). |
+| 7. Reload | worker | The host requests one Services reload with reason `plugin` and waits for it to complete (applied, failed or timed out all count as completed, as for the launch gate, D48). Coalescing applies: the request joins or queues a flight exactly as [Services](services.md) says, and the flight it is answered by captured its inputs after step 6. |
+| 8. Reply | handler | `{plugin, status, log, reports}` as in "plugin.* wire shapes", to every caller that joined. Then the removing flag is gone with the Pod, and a later `plugin.remove` for the same id is `not_found`. |
+
+Ordering invariants, each testable:
+
+1. A plugin's process is never running after its documents are undeclared (steps 4 and 5 precede 6), so the Dispatcher never sends `action.invoke` to a process whose catalog is gone and the launch-gate promise ("live means declared everywhere") holds in reverse.
+2. `pods.plugin-exited` (if a process was stopped) precedes `state.changed` for the four slices, which precedes `pods.plugin-removed`, which precedes `services.reloaded` for the reload of step 7. A watcher of `husk.pods` therefore sees `exited` before the entry disappears.
+3. Steps 5 and 6 happen in one tick: no flush observes the slices gone while the documents remain, or the documents gone while the slices remain.
+4. The reply is sent after the reload of step 7 completed, never before, so `husk plugin remove X && husk action list` never lists X's actions and `husk keys` never lists X's focus-local bindings after the command returned 0 (a user-layer binding to one of X's actions stays listed, as `not_found`, until the user edits it).
+5. A removal never undoes itself. If the request's `ctx` ends (the CLI disconnected or timed out) after step 2, the removal runs to completion and the reply is dropped; the next `plugin.list` shows the plugin gone.
+6. Removals of different ids run independently (each has its own stop worker; their loop steps interleave by tick). Two requests for one id share one removal.
+7. Shutdown that begins during a removal takes over: the shared stop covers the process, the waiting handler is answered `cancelled` with `data.reason` `shutdown`, and no teardown, undeclaration or reload runs (shutdown does not undeclare either; the Store closes with the documents in memory).
+
+What removal **fires**, following the owner-only model of [Hooks](hooks.md): events only, no hook.
+
+| Notice | Kind | When | Payload |
+| :--- | :--- | :--- | :--- |
+| `pods.plugin-exited` | event | step 4, only when a live process was stopped | the Pod's `husk.pods` entry plus `plugin_id`, status `exited` (unchanged rule) |
+| `state.changed` | event, one per slice | step 5, one tick | `<id>.state`, `<id>.occupants`, `<id>.contributions` with `removed: true`; `husk.pods` with its new revision |
+| `pods.plugin-removed` | event | step 6, after `Store.Undeclare` | `{"plugin_id":"alpha","status":"exited"}`, `status` as in the reply. Delivered to every subscriber of `pods.plugin-removed` or `pods.*` that is live, and to CLI watchers; the removed plugin is not live, so it never receives its own removal. |
+| `services.reloaded` | event | step 7 | reason `plugin`, the five reports ([Services](services.md)); CLI watchers only, as for every reload |
+
+Removal is **not a gate**, and no `husk.before-plugin-remove` hook exists in v1. The host owns the operation, so under the owner-only rule it is the one party that could fire such a hook; it does not, for these reasons:
+
+- The party with a stake in the operation is the plugin being removed, and step 4 already gives it what a gate would: EOF on stdin, SIGTERM and 2 s to flush, the same signal and grace it gets at instance exit, which every plugin must already handle. A hook would add a second way to say the same thing.
+- Removal destroys nothing: persisted slice copies, pending flushes, grants and config survive it. `husk.before-state-clear` is a gate because the clear deletes data a plugin may hold unsaved; nothing in removal is irreversible beyond what a restart undoes.
+- The motivating case (D59) is a crashed plugin. It cannot answer, so a gate would be pure latency (the leg timeout) in the common case.
+- A veto by another plugin over the user's decision to unload a plugin would put a plugin between the user and their own instance; the user's override (`--force`) would be the expected path, and a gate whose expected use is to be forced is the wrong shape. The after-the-fact `pods.plugin-removed` event tells other plugins what happened; a plugin that depends on another reads liveness and that event, as it must already for a crash.
+
+Adding such a hook later is a protocol minor (a new `husk.*` hook id), so nothing is foreclosed.
+
+What **stays** after removal, each owned elsewhere: persisted copies of the plugin's slice in every scope (Store; `Store.RemovePlugin` is not called, see the open question), secret grants ([Services](services.md), D88), the user's settings keys and keymap entries that name the plugin (now unknown-key warnings and `not_found` bindings until the user edits them), the log file (Store's GC removes it only if empty; the reply carried its path), and the refusal list of plugins that never got a Pod (`Frontend.Refusals` is not touched, because there is nothing to remove).
+
+Failure modes of this operation are in the table under "Failure modes" (rows marked `plugin.remove`).
 
 #### Host and loop boundary
 
@@ -299,7 +359,7 @@ type Registered struct {
 
 `Host.Add` rejects duplicates and reports `starting` through `Loop.Liveness`, without starting anything. After adding a batch, `Host.Prepare` returns one command. That worker declares the documents, then posts `RegisterSlicesMsg`: the loop applies each slice registration (step 4, a State write; the owner handle is stored on the Host) and acknowledges it, and only then does the worker request the reload — the first reload observes every registered slice ([Store](store.md) startup order). Its `PreparedMsg` is consumed by `Host.Handle` on the loop: failed plugins (declaration or registration failures, reported once each) stay failed, a reload report error is logged but opens the gate, and surviving wrappers start with `Loop.Opening` queued before `live`. Late or duplicate gate completions never relaunch a Pod; shutdown prevents a pending gate from launching.
 
-The stored owner handles serve two later duties. The Stem State port's write path resolves a plugin's `<plugin_id>.state` handle through the Host's slice-handle lookup (a plugin writes only its own slice, [State](state.md)); that lookup runs off the loop on a Server handler goroutine, while registration and teardown mutate the map on the loop, so this one map is guarded by a mutex that covers only the map access — the handle's own writes still run on the loop through the port's apply. `TeardownMsg` — the loop half of Pod teardown — revokes the credential, unregisters the slice through that handle ([State](state.md) decides scope and retention), releases the registry id, and drops the id from any pending launch gate; a slice registration is accepted only while the gate that owns it still holds the id — a stale registration from a torn-down launch of the same id, or one arriving during shutdown, is refused rather than applied (the closure is a State write that would register a slice nobody owns, or steal one the new launch owns). Store undeclaration and the follow-up reload stay with the composition root.
+The stored owner handles serve two later duties. The Stem State port's write path resolves a plugin's `<plugin_id>.state` handle through the Host's slice-handle lookup (a plugin writes only its own slice, [State](state.md)); that lookup runs off the loop on a Server handler goroutine, while registration and teardown mutate the map on the loop, so this one map is guarded by a mutex that covers only the map access — the handle's own writes still run on the loop through the port's apply. `TeardownMsg` — the loop half of Pod teardown — revokes the credential, unregisters the slice through that handle (persisted copies are kept, [State](state.md) and [Store](store.md)), releases the registry id, and drops the id from any pending launch gate; a slice registration is accepted only while the gate that owns it still holds the id — a stale registration from a torn-down launch of the same id, or one arriving during shutdown, is refused rather than applied (the closure is a State write that would register a slice nobody owns, or steal one the new launch owns). Store undeclaration and the follow-up reload stay with the composition root. `TeardownMsg` is posted by exactly one production path, the removal sequence ("Removing a plugin", step 5); the `PluginPort` gains `Remove(ctx, caller, pluginID)` beside `List` and `Log`, implemented by the Pods host over the same `Loop` seam, and its reply type carries the `config.reload` report type unchanged (one shared type, no copy). The Host keeps a per-Pod removing flag and a per-id list of waiting callers for the join rule; the gate-completion handler skips a removing id exactly as it skips a torn-down one.
 
 `Loop.Liveness` is the explicit seam for writing `husk.pods` and publishing exit events. Workers post typed notices; `Host.Handle` applies them through `Loop.Liveness` and `Loop.Log` on the loop. `ClosedMsg` is handled by the caller with Calls cleanup before a later `ExitMsg` changes liveness. Message types are exported from `pods` (aliases of leaf Wrapper notices avoid an import cycle). Tokens are held in a worker-safe local registry, not State: they are registered before `Start` so even an immediate exit can revoke them. A `ReapedMsg` revokes authentication immediately after Wait; `ChannelClosedMsg` does the same on EOF or a closed stdin pipe, without cancelling Calls. Final stdout replies drain before normal `ClosedMsg` and `ExitMsg`, so a successful reply is not overtaken by process cleanup.
 
@@ -390,10 +450,10 @@ Transitions:
 | (none) | `starting` | Pod begins launch (launch step 2), before the launch gate and `cmd.Start` |
 | `starting` | `live` | `cmd.Start` succeeded, after the launch gate (step 6) and the opening notifications are queued |
 | `starting` | `failed` | `cmd.Start` failed (`last_error`: the start error) |
-| `live` | `exited` | status 0, or killed by Husk during shutdown |
+| `live` | `exited` | status 0, or killed by Husk during shutdown or `plugin.remove` (step 4) |
 | `live` | `failed` | non-zero status, a signal Husk did not send, or Husk killed it after a stdin failure (`last_error`: `stopped reading: ...`) |
 
-`exited` and `failed` are terminal for that launch. There is no restart in v1: a failed plugin stays failed until the instance restarts. The Pod also publishes `pods.plugin-exited`, whose data is the Pod's `husk.pods` entry plus `plugin_id`, through the publisher interface the loop injects at construction (the same way State and Services publish; Pods import nothing from Stem), for other watchers; the frontend toasts the `husk.pods` transition into `failed`, not this event.
+`exited` and `failed` are terminal for that launch. There is no restart in v1: a failed plugin stays failed until the instance restarts or the user removes it with `husk plugin remove`, which deletes its entry. The Pod also publishes `pods.plugin-exited`, whose data is the Pod's `husk.pods` entry plus `plugin_id`, through the publisher interface the loop injects at construction (the same way State and Services publish; Pods import nothing from Stem), for other watchers; the frontend toasts the `husk.pods` transition into `failed`, not this event.
 
 #### Wrapper invariants
 
@@ -439,7 +499,17 @@ Decoration takes one surface's content (the cells or lines the plugin supplied t
 | EOF/EPIPE or closed pipe/file | Wrapper | Credentials revoked immediately; once-only `Closed` after Wait and final replies, or at reap-grace expiry; pending calls fail at most 100 ms later | Final reason `exited`, `crashed` with status, or `stopped reading: ...` while the child survives |
 | Plugin writes a non-reply or malformed line on stdout | Wrapper reader | Line dropped, `protocol.error` notification sent | Plugin sees the notification; log line |
 | Reply with an unknown or expired id | Calls | Dropped | Debug log only |
-| Plugin ignores SIGTERM | Shutdown | SIGKILL after 2 s | Log `did not exit within 2s of SIGTERM; killing it` |
+| Plugin ignores SIGTERM | Shutdown, `plugin.remove` step 4 | SIGKILL after 2 s | Log `did not exit within 2s of SIGTERM; killing it` |
+| `plugin.remove` from a plugin, Stem or zero-kind caller | Handler | Nothing looked up | `denied` |
+| `plugin.remove` with a missing or empty `plugin` | Handler | Nothing done | `invalid_params` |
+| `plugin.remove` for an id with no Pod (never added, refused before a Pod existed, already removed) | Loop (step 2) | Nothing done | `not_found` |
+| `plugin.remove` while the Host is already closing | Loop (step 2) | Nothing done | `unavailable`, `data.reason` `shutdown` |
+| `plugin.remove` for an id whose removal is in progress | Loop (step 2) | Joins it; nothing runs twice | The same reply as the first caller, when it completes |
+| `plugin.remove` for a `starting` Pod with a pending launch gate | Loop (step 3) | Waits for the gate; the gate does not start it | Reply after the sequence completes; `status` `starting` |
+| Process survives SIGKILL past the 1 s kill wait during `plugin.remove` | Stop worker | Liveness `failed`, `last_error` `did not exit within 1s of SIGKILL`; removal continues | Warning log line; reply `status` `failed` |
+| Reload of `plugin.remove` step 7 fails or times out | Coordinator | Documents are already undeclared; the next reload of any reason reads the catalog without the plugin | Success reply whose `reports` carry `applied: false` and the problems; the `services.reloaded` toast rule applies |
+| Request context ends (CLI disconnect or timeout) after step 2 of `plugin.remove` | Handler | The removal completes anyway; the reply is dropped | The CLI's transport error; `husk plugin list` shows the plugin gone |
+| Shutdown begins during `plugin.remove` | Loop | The shared stop takes over; no teardown, undeclaration or reload | `cancelled`, `data.reason` `shutdown` |
 
 Failures that arrive while a failure toast is showing join it as one "N plugins failed" toast; the log has each one.
 
@@ -455,8 +525,9 @@ Failures that arrive while a failure toast is showing join it as one "N plugins 
 | Pending notifications per socket connection | 64, including the active notification | One ordered worker, reader never blocks; excess gets `protocol.error` / `busy` / `too_many_in_flight` |
 | Concurrent socket connections | 256 | above any real count of plugins plus CLI calls; past it, accept closes the newest |
 | Stale-instance ping | 500 ms | a live instance answers `session.ping` without touching the loop |
-| Stop grace (SIGTERM to SIGKILL) | 2 s | unchanged |
-| Kill wait after SIGKILL | 1 s | unchanged; only matters for unreapable processes |
+| Stop grace (SIGTERM to SIGKILL) | 2 s | unchanged; shared by shutdown and `plugin.remove` |
+| Kill wait after SIGKILL | 1 s | unchanged; only matters for unreapable processes; shared by shutdown and `plugin.remove` |
+| `plugin.remove` wall time | at most 2 s (a pending launch gate) + 2 s + 1 s (stop) + 2 s (reload) plus loop hops | no bound of its own: the sum of the bounds above; the CLI default of 10 s ([Instances](instances.md)) covers it |
 | EOF / pipe-close reap grace | 100 ms | avoids racing a clean process exit against stdout or stdin pipe closure; one injected option |
 | Stderr tail on crash | 3 lines from the last 8 KiB | unchanged |
 | Log file name attempts | 100 | unchanged |
@@ -469,7 +540,7 @@ No per-request timeout lives in the Server. A request waits as long as its handl
 ### What the CLI gets
 
 - The socket and registration entry (`<base>/<id>.sock`, `<base>/<id>.json`) that [Instances](instances.md) resolves.
-- `session.ping`, `plugin.list`, `plugin.log`.
+- `session.ping`, `plugin.list`, `plugin.log`, `plugin.remove`. `husk plugin remove <id>` prints the reply in the generic table rendering ([Instances](instances.md)); exit 0 whatever the `reports` say, exit 1 on an error reply.
 - Attribution: the CLI forwards `HUSK_PLUGIN_TOKEN` when present, so the same `husk` command is a user call from a shell and a plugin call from inside a plugin.
 
 ## Level 2: Migration from today
@@ -526,6 +597,8 @@ Removed behaviour, stated for the changelog: the socket transport for plugins (p
 16. Exit with status 0 produces no toast; non-zero or a foreign signal produces a warning toast (the frontend toasts the `husk.pods` transition into `failed`; `pods.plugin-exited` carries the same entry for other watchers).
 17. Logs live at `$XDG_STATE_HOME/husk/logs/<instance-id>/<plugin-id>.log`, opened through Store, so the runtime directory holds only sockets and entries.
 18. `HUSK_BIN_PATH` is injected so a plugin calls the same build's CLI; the environment variable names for socket, instance and binary are Instances' (`HUSK_SOCKET_PATH`, `HUSK_INSTANCE`, `HUSK_BIN_PATH`).
+19. **`plugin.remove` is an unload for this instance, not an uninstall** (D59). It stops the process with the shutdown stop policy, tears the Pod down, undeclares the documents, reloads Services and replies with the reload's reports; it deletes no persisted slice copy, no grant, no file, and is not remembered across restarts. CLI-only, like `plugin.list` and `plugin.log` (D57). Rejected: a `--purge` that deletes the persisted slice copies (no v1 need; the open question records it) and a self-removal by the plugin's own token (removal is the user's decision about their instance).
+20. **Removal fires events and no hook.** `pods.plugin-exited` when a process was stopped, `state.changed` for the removed slices, `pods.plugin-removed` after undeclaration, `services.reloaded` for the reload. No `husk.before-plugin-remove` gate: the stop already gives the plugin EOF, SIGTERM and 2 s, the operation destroys nothing, the motivating case is a dead plugin that cannot answer, and a veto would put a plugin between the user and their instance. The rationale is under "Removing a plugin".
 
 ## Open questions
 
@@ -536,3 +609,7 @@ Removed behaviour, stated for the changelog: the socket transport for plugins (p
 5. **Readiness.** If Surfaces needs to know a plugin has drawn its first frame, `live` on `cmd.Start` is too early. Recommended: leave readiness to Surfaces (first content received), not to liveness.
 6. **Token in terminal surfaces.** Relying on a terminal plugin to drop `HUSK_PLUGIN_TOKEN` for user shells is a convention, not an enforcement. Recommended: accept it, and document it in the plugin author guide.
 7. **`pid` and `started_at` provenance under an injected Starter.** Liveness `pid`/`started_at` come from the Wrapper's process info. A composition that injects its own `Options.Starter` (bypassing the built-in `Host.Start`) never builds a Wrapper, so those fields stay zero even though liveness says `live`. Recommended: leave the fields zero — a Starter owns the whole step and liveness is honest about what it knows — and revisit only if a real composition injects a Starter.
+8. **Operator question: should `plugin.remove` be remembered across restarts?** This spec says no: it is an unload for this instance, and the plugin returns at the next start that names it. The alternative, a persisted "removed" list that `--plugin-dir` consults, is an installed-plugin registry Husk does not have; recommended: no, and let an uninstall be deleting the plugin's directory. The spec is written on the recommendation.
+9. **Operator question: should `plugin.remove` delete the plugin's persisted slice copies (`Store.RemovePlugin`)?** This spec says no: the copies are the user's data and the plugin may be loaded again next start; `Store.RemovePlugin` therefore has no caller in v1. Recommended: no, and add an explicit `husk plugin remove <id> --purge` only when a user asks for it; until then `husk state clear <ns>` clears this instance's and the user's copies.
+10. **Operator question: is "no gate" the right call for removal?** This spec fires `pods.plugin-removed` as an event and no `husk.before-plugin-remove` hook (decision 20). Recommended: keep it; a gate here would mostly be forced. Reverse by adding the hook as a protocol minor if plugins need to object or to run a hand-over before another plugin disappears.
+11. **Operator question: may a plugin remove itself?** This spec denies every non-CLI caller, D57's pattern for `plugin.*`. Recommended: keep CLI-only; a plugin that wants to go away exits, which already gets it `exited` and its calls cancelled, and the user decides whether its catalog stays.

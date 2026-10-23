@@ -283,7 +283,7 @@ The entry's `protocol_version` is informational (`husk instances` shows it); the
 
 ### Command table
 
-The complete v1 command set, one row (`plugin remove`) reserved for a method another piece of work defines. The synopsis column fixes the spelling of every subcommand and flag. The owner column names the spec that defines the arguments' meaning, the method's params and the reply; this spec adds nothing to that. Every command is a named wrapper over one method, except the local ones marked "none".
+The complete v1 command set. The synopsis column fixes the spelling of every subcommand and flag. The owner column names the spec that defines the arguments' meaning, the method's params and the reply; this spec adds nothing to that. Every command is a named wrapper over one method, except the local ones marked "none".
 
 | Synopsis | Method | Owner | Default timeout |
 |---|---|---|---|
@@ -321,7 +321,7 @@ The complete v1 command set, one row (`plugin remove`) reserved for a method ano
 | `husk config reload` | `config.reload` | [Services](services.md) | 10 s |
 | `husk plugin list` | `plugin.list` | [Pods](pods.md) | 5 s |
 | `husk plugin log <id>` | `plugin.log` | [Pods](pods.md) | 5 s |
-| `husk plugin remove <id>` | `plugin.remove`: not yet defined by any spec; the plugin-removal work (D59) adds the method to [Protocol](protocol.md) and its params and reply to [Pods](pods.md). The row is reserved and not implementable before that. | [Pods](pods.md), once amended | 10 s |
+| `husk plugin remove <id>` | `plugin.remove` (protocol minor 2.1) | [Pods](pods.md), "Removing a plugin" | 10 s |
 | `husk store paths` | none: local, the store command package | [Store](store.md) | not applicable |
 | `husk store check` | none: local, the store command package | [Store](store.md) | not applicable |
 | `husk store gc` | none: local, the store command package | [Store](store.md) | not applicable |
