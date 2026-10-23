@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	c "github.com/hyperlab-sh/husk/internal/services/contracts"
 	"github.com/hyperlab-sh/husk/internal/services/keybinding"
 	"github.com/hyperlab-sh/husk/internal/services/profile"
@@ -16,6 +15,7 @@ import (
 	"github.com/hyperlab-sh/husk/internal/services/theme"
 	"github.com/hyperlab-sh/husk/internal/substrate/state"
 	"github.com/hyperlab-sh/husk/internal/substrate/store"
+	"io/fs"
 	"sync"
 	"time"
 )
@@ -264,7 +264,15 @@ func (co *Coordinator) profileChanged(raw json.RawMessage) {
 // AwaitProfile implements profile.Reloader. It runs on the loop, in the
 // callback that wrote the slice: it registers the requester on the flight that
 // write causes and tells the slice listener not to request a second one.
+//
+// After Close it answers like Reload: a waiter on a flight that has already
+// ended with cancelled/shutdown, which no Tick or Close will ever launch.
 func (co *Coordinator) AwaitProfile(name string) profile.Waiter {
+	if co.ctx.Err() != nil {
+		f := &flight{done: make(chan struct{}), reason: ReasonProfile, started: true, err: shutdown()}
+		close(f.done)
+		return co.waiter(f)
+	}
 	co.mu.Lock()
 	co.expect, co.hasExpect = name, true
 	co.mu.Unlock()

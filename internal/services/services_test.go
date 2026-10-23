@@ -667,3 +667,32 @@ func TestCloseLaunchesALoopRequestedFlight(t *testing.T) {
 }
 
 func (s *fakeService) rebuilds() int64 { return s.calls.Load() }
+
+// AwaitProfile after Close answers cancelled/shutdown at once, like Reload,
+// and leaves nothing for Tick to launch.
+func TestAwaitProfileAfterCloseIsShutdown(t *testing.T) {
+	services := fakeServices()
+	source := &fakeStore{}
+	co, err := NewCoordinator(Options{Store: source, Services: services, Clock: clock()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	co.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	reports, err := co.AwaitProfile("x").Wait(ctx)
+	assertShutdown(t, err)
+	if reports != nil {
+		t.Fatalf("reports = %+v, want none", reports)
+	}
+	co.mu.Lock()
+	idle, expect := co.active == nil && len(co.queue) == 0, co.hasExpect
+	co.mu.Unlock()
+	if !idle || expect {
+		t.Fatalf("AwaitProfile after Close left state behind (idle %v, expect %v)", idle, expect)
+	}
+	co.Tick()
+	if got := source.trace(); len(got) != 0 {
+		t.Fatalf("store trace = %v, want nothing", got)
+	}
+}
