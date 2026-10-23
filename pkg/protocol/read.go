@@ -67,6 +67,15 @@ func (e *LineError) Response() (Message, bool) {
 // skipped without closing the stream. EOF, including after an unterminated final
 // line, returns nil; other read errors are returned. Either callback may be nil.
 func ReadLoop(r io.Reader, onMessage func(Message), onError func(*LineError)) error {
+	return ReadLoopFirst(r, nil, onMessage, onError)
+}
+
+// ReadLoopFirst is ReadLoop with an observer of the first nonblank line. first
+// gets that line's content (no line terminator), once, before the line is
+// delivered or reported, and only when it is within MaxLineBytes. When it
+// returns true the line is consumed, reading stops and ReadLoopFirst returns
+// nil; otherwise the line is processed as usual. A nil first is ReadLoop.
+func ReadLoopFirst(r io.Reader, first func(line []byte) (stop bool), onMessage func(Message), onError func(*LineError)) error {
 	br := bufio.NewReaderSize(r, readBufferBytes)
 	var line []byte
 	oversized := false
@@ -87,8 +96,16 @@ func ReadLoop(r io.Reader, onMessage func(Message), onError func(*LineError)) er
 			content := bytes.TrimSuffix(bytes.TrimSuffix(line, []byte{'\n'}), []byte{'\r'})
 			switch {
 			case oversized || len(content) > MaxLineBytes:
+				first = nil // the first line is not a hello; later lines are never observed
 				report(onError, &LineError{Code: CodeLineTooLong, Err: ErrLineTooLong})
 			case len(bytes.TrimSpace(content)) != 0:
+				if first != nil {
+					observe := first
+					first = nil
+					if observe(content) {
+						return nil
+					}
+				}
 				deliver(content, onMessage, onError)
 			}
 			line = resetLine(line)

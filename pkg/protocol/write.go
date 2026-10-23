@@ -41,6 +41,23 @@ func (w *Writer) Send(m Message) error {
 	return writeLine(w.w, b.Bytes())
 }
 
+// SendLine writes or queues one pre-encoded line. line must hold a single JSON
+// line of at most MaxLineBytes; a missing final newline is added. Used for the
+// major-1 rejection, which is not a v2 Message.
+func (w *Writer) SendLine(line []byte) error {
+	line = bytes.TrimSuffix(line, []byte{'\n'})
+	if len(line) > MaxLineBytes {
+		return ErrLineTooLong
+	}
+	b := append(append(make([]byte, 0, len(line)+1), line...), '\n')
+	if w.q != nil {
+		return w.q.enqueue(b)
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return writeLine(w.w, b)
+}
+
 func writeLine(w io.Writer, b []byte) error {
 	n, err := w.Write(b)
 	if err == nil && n != len(b) {
