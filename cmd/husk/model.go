@@ -203,27 +203,28 @@ type WorkbenchModel struct {
 	activePlacement contracts.RailPlacement
 	modal           modalState // the one source of truth for the open modal; use modalOwner/openModal/closeModal
 
-	showHotspots    bool
-	stageMode       string // "plugin" or "hotspots"
-	hotspotCursor   int
-	showPalette     bool
-	settings        *settingsCenter
-	lastSettingsTab string
-	secretPrompt    *secretPromptState // the Secrets confirm dialog, when one is up
-	paletteQuery    string
-	paletteCursor   int
-	paletteTop      int // first result row drawn; follows the cursor (movePaletteCursor)
-	activeToast     *contracts.Toast
-	engineToast     bool // activeToast came from the engine queue
-	toastPollOn     bool
-	toastSeq        int
-	refusalsShown   int      // host refusals already reported
-	noticesSeen     uint64   // newest host config notice already toasted
-	failures        []string // plugin failures noted, not yet toasted
-	shownFailures   []string // lines of the failure toast now up
-	pendingConfig   string   // config notice text raised this settle, not yet toasted
-	shownConfig     string   // config notice text folded into the failure toast now up
-	failureSeq      int      // toastSeq of that toast
+	showHotspots     bool
+	stageMode        string // "plugin" or "hotspots"
+	hotspotCursor    int
+	showPalette      bool
+	settings         *settingsCenter
+	settingsRestarts map[string]bool
+	lastSettingsTab  string
+	secretPrompt     *secretPromptState // the Secrets confirm dialog, when one is up
+	paletteQuery     string
+	paletteCursor    int
+	paletteTop       int // first result row drawn; follows the cursor (movePaletteCursor)
+	activeToast      *contracts.Toast
+	engineToast      bool // activeToast came from the engine queue
+	toastPollOn      bool
+	toastSeq         int
+	refusalsShown    int      // host refusals already reported
+	noticesSeen      uint64   // newest host config notice already toasted
+	failures         []string // plugin failures noted, not yet toasted
+	shownFailures    []string // lines of the failure toast now up
+	pendingConfig    string   // config notice text raised this settle, not yet toasted
+	shownConfig      string   // config notice text folded into the failure toast now up
+	failureSeq       int      // toastSeq of that toast
 
 	logOut io.Writer // host log lines, such as launch failures
 }
@@ -568,8 +569,20 @@ func (m *WorkbenchModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return next, cmd
 
 	case tea.PasteMsg:
-		if m.secretPrompt != nil || m.settings != nil {
-			return m, nil // the dialog is modal: pasted text reaches nothing
+		if m.secretPrompt != nil {
+			return m, nil
+		}
+		if s := m.settings; s != nil {
+			if s.profileForm == nil && s.focus == settingsContentFocus {
+				if s.tab == "general" {
+					return m, m.settingsGeneralKey(msg)
+				}
+				if s.tab == "keys" {
+					s.keyQuery += cleanQueryPaste(msg.Content)
+					s.keyTop = 0
+				}
+			}
+			return m, nil
 		}
 		if m.showPalette && !m.layoutFrozen() {
 			return m.pastePalette(msg.Content)
@@ -604,10 +617,15 @@ func (m *WorkbenchModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.host != nil && !m.closed {
 		m.host.Update(msg)
 	}
-	if s := m.settings; s != nil && s.profileForm != nil {
-		_, cmd := s.profileForm.Update(msg)
-		s.profileView = s.profileForm.View()
-		return m, cmd
+	if s := m.settings; s != nil {
+		if s.profileForm != nil {
+			_, cmd := s.profileForm.Update(msg)
+			s.profileView = s.profileForm.View()
+			return m, cmd
+		}
+		if s.general != nil && s.tab == "general" {
+			return m, m.settingsGeneralKey(msg)
+		}
 	}
 	return m, nil
 }

@@ -45,10 +45,22 @@ type settingsCenter struct {
 	profileView      string // huh rendering is cached on Update; View remains pure
 	styled           protocol.Palette
 	indices          map[string]int
+	general          *settingsGeneral
+	keyListing       contracts.KeyListing
+	keyQuery         string
+	keyTop           int
 }
 
-// dirty will include editable fields as their tabs land. U4 has none.
-func (s *settingsCenter) dirty() bool { return false }
+func (s *settingsCenter) dirty() bool {
+	if s.general != nil {
+		for _, f := range s.general.fields {
+			if f.dirty() {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 func (m *WorkbenchModel) settingsTab() string {
 	if m.settings == nil {
@@ -172,6 +184,10 @@ func (m *WorkbenchModel) refreshSettings() {
 		s.profileTop = settingsListTop(s.profileTop, max(0, slices.Index(s.profileNames, s.profileChoice)), len(s.profileNames), r.Dy()-1)
 	}
 	s.top = settingsListTop(s.top, s.cursor, len(s.themes), m.settingsContentRect().Dy()-4)
+	m.refreshSettingsGeneral()
+	if m.fe != nil {
+		s.keyListing = m.fe.KeyListing()
+	}
 }
 
 func settingsListTop(top, cursor, count, height int) int {
@@ -231,9 +247,15 @@ func (m *WorkbenchModel) settingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.closeSettings()
 		return m, nil
 	case "tab":
+		if s.focus == settingsContentFocus && s.tab == "general" && m.settingsGeneralTab(false) {
+			return m, nil
+		}
 		s.focus = (s.focus + 1) % 3
 		return m, nil
 	case "shift+tab":
+		if s.focus == settingsContentFocus && s.tab == "general" && m.settingsGeneralTab(true) {
+			return m, nil
+		}
 		s.focus = (s.focus + 2) % 3
 		return m, nil
 	}
@@ -256,6 +278,13 @@ func (m *WorkbenchModel) settingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.openSettingsProfiles()
 		}
 	case settingsContentFocus:
+		if s.tab == "general" {
+			return m, m.settingsGeneralKey(msg)
+		}
+		if s.tab == "keys" {
+			m.settingsKeysKey(msg)
+			return m, nil
+		}
 		if s.tab == "theme" && !s.pending {
 			switch key {
 			case "enter":
@@ -452,6 +481,18 @@ func (m *WorkbenchModel) settingsMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) 
 	content := m.settingsContentRect()
 	if left && point.In(content) {
 		s.focus = settingsContentFocus
+		if s.tab == "general" && s.general != nil {
+			g := s.general
+			at := g.top + mouse.Y - content.Min.Y
+			if at < len(g.hits) && g.hits[at] != "" {
+				g.active = g.hits[at]
+				if strings.HasPrefix(g.active, "@") {
+					name := strings.TrimPrefix(g.active, "@")
+					g.expanded[name] = !g.expanded[name]
+				}
+			}
+			m.cacheSettingsGeneral()
+		}
 		if s.tab == "theme" && !s.pending {
 			at := s.top + mouse.Y - content.Min.Y
 			if at < len(s.themes) && mouse.Y < content.Min.Y+max(1, content.Dy()-4) {
@@ -464,6 +505,18 @@ func (m *WorkbenchModel) settingsMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) 
 		}
 	}
 	if _, wheel := event.(tea.MouseWheelMsg); wheel {
+		if s.focus == settingsContentFocus && s.tab == "general" {
+			m.settingsGeneralTab(mouse.Button == tea.MouseWheelUp)
+			return m, nil
+		}
+		if s.focus == settingsContentFocus && s.tab == "keys" {
+			if mouse.Button == tea.MouseWheelUp {
+				s.keyTop = max(0, s.keyTop-1)
+			} else {
+				s.keyTop++
+			}
+			return m, nil
+		}
 		if mouse.Button == tea.MouseWheelUp {
 			return m.settingsKey(tea.KeyPressMsg{Code: tea.KeyUp})
 		}

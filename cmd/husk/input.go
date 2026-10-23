@@ -389,8 +389,8 @@ func paletteTextFor(msg tea.KeyPressMsg, key string) bool {
 // spelling used for plugins, so ASCII and non-ASCII text behave alike. The
 // query is a single line: line breaks and tabs become spaces and other
 // control characters are dropped.
-func (m *WorkbenchModel) pastePalette(content string) (tea.Model, tea.Cmd) {
-	clean := strings.Map(func(r rune) rune {
+func cleanQueryPaste(content string) string {
+	return strings.Map(func(r rune) rune {
 		switch {
 		case r == '\n' || r == '\r' || r == '\t':
 			return ' '
@@ -399,6 +399,10 @@ func (m *WorkbenchModel) pastePalette(content string) (tea.Model, tea.Cmd) {
 		}
 		return r
 	}, strings.ReplaceAll(content, "\r\n", "\n"))
+}
+
+func (m *WorkbenchModel) pastePalette(content string) (tea.Model, tea.Cmd) {
+	clean := cleanQueryPaste(content)
 	if clean == "" {
 		return m, nil
 	}
