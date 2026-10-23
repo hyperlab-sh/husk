@@ -234,7 +234,7 @@ Minor 2.1 ([Hooks](hooks.md), [Keybindings](keybindings.md), [Pods](pods.md)): `
 
 Minor 2.2 ([Pods](pods.md), "Adding a plugin"): `plugin.add` and the `pods.plugin-added` event name. `protocol.Version` moves to `2.2` when the handler lands; until then the method name is reserved vocabulary (the constant, the schema entry and the reserved event name exist) that the host answers `unknown_method`.
 
-Minor 2.3 ([Services](services.md), "Theme" and "Settings"): `theme.list` and `settings.set`, plus the `settings` reload reason in `services.reloaded`. Both are specified below under "Theme selection and the settings write (minor 2.3)" and land together with their handlers: the constants, the schema entries and the method-table rows above are added in the change that serves them, so `pkg/protocol` never names a method the host answers `unknown_method` to.
+Minor 2.3 ([Services](services.md), "Theme" and "Settings"): `theme.list` and `settings.set`, plus the `settings` reload reason in `services.reloaded`. Both are specified below under "Theme selection and the settings write (minor 2.3)" and land together with their handlers: the constants, the schema entries and the rows of the method table are added in the change that serves them, so `pkg/protocol` never names a method the host answers `unknown_method` to.
 
 Where the version is checked, since there is no handshake:
 
