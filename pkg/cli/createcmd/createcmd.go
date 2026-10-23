@@ -27,6 +27,8 @@ var templates embed.FS
 var nameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 
 // Command returns the local create noun. Only bundle is currently supported.
+// The tui verb stays unregistered until the workbench UI is importable outside
+// package main and the subsequent scaffold implementation lands.
 func Command(version string) output.Command {
 	return command(version, guide.Files, os.Getwd, writeFile)
 }

@@ -50,6 +50,46 @@ func TestCreateLocalFlagsUsageAndHiddenHelp(t *testing.T) {
 	}
 }
 
+func TestCreateTUIStaysUnregisteredUntilUIScaffold(t *testing.T) {
+	for _, format := range []string{"table", "json"} {
+		for _, args := range [][]string{{"tui"}, {"tui", "app"}, {"tui", "app", "example.test/app"}} {
+			t.Run(format+"/"+strings.Join(args, " "), func(t *testing.T) {
+				root := t.TempDir()
+				argv := append([]string{"create", "--format", format}, args...)
+				cmd := exec.CommandContext(t.Context(), os.Args[0], argv...)
+				cmd.Dir = root
+				cmd.Env = append(os.Environ(), "HUSK_TEST_RUN_MAIN=1", "HOME="+root)
+				var stdout, stderr bytes.Buffer
+				cmd.Stdout, cmd.Stderr = &stdout, &stderr
+				err := cmd.Run()
+				var ee *exec.ExitError
+				if !errors.As(err, &ee) || ee.ExitCode() != 2 {
+					t.Fatalf("exit=%v stdout=%s stderr=%s", err, &stdout, &stderr)
+				}
+				if stdout.Len() != 0 {
+					t.Fatalf("unsupported verb wrote stdout: %s", &stdout)
+				}
+				const usage = "usage: husk create bundle <name>"
+				if format == "json" {
+					var reply struct{ Error struct{ Code, Message string } }
+					if err := json.Unmarshal(stderr.Bytes(), &reply); err != nil {
+						t.Fatalf("stderr is not a JSON error: %s: %v", &stderr, err)
+					}
+					if reply.Error.Code != "usage" || !strings.Contains(reply.Error.Message, usage) {
+						t.Fatalf("error=%+v, want usage", reply.Error)
+					}
+				} else if !strings.Contains(stderr.String(), usage) {
+					t.Fatalf("usage missing from stderr: %s", &stderr)
+				}
+				entries, err := os.ReadDir(root)
+				if err != nil || len(entries) != 0 {
+					t.Fatalf("unsupported verb created %v err=%v", entries, err)
+				}
+			})
+		}
+	}
+}
+
 func TestHiddenGuideVerbStartsWatchAndSpeaksOnPipes(t *testing.T) {
 	// Short private Unix socket; all synchronization is by messages or EOF.
 	root, err := os.MkdirTemp("/tmp", "hc")
