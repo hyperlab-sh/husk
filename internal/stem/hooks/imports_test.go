@@ -13,9 +13,8 @@ import (
 // Store, Pods, Services and the Server.
 func TestImportsStayWithinAllowList(t *testing.T) {
 	allowed := map[string]bool{
-		"github.com/hyperlab-sh/husk/internal/stem/calls":     true,
-		"github.com/hyperlab-sh/husk/internal/host/contracts": true,
-		"github.com/hyperlab-sh/husk/pkg/protocol":            true,
+		"github.com/hyperlab-sh/husk/internal/stem/calls": true,
+		"github.com/hyperlab-sh/husk/pkg/protocol":        true,
 	}
 	files, _ := filepath.Glob("*.go")
 	for _, f := range files {
