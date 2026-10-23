@@ -188,6 +188,61 @@ func TestPluginSettingsFatalPaths(t *testing.T) {
 	}
 }
 
+func TestStartupFatal(t *testing.T) {
+	problem := func(code string) services.Report {
+		return services.Report{Service: "theme", Problems: []services.Problem{{Severity: "error", Code: code}}}
+	}
+	incomplete := errors.New("service reload incomplete")
+	for _, tc := range []struct {
+		name    string
+		reports []services.Report
+		err     error
+		want    bool
+	}{
+		{"store error", []services.Report{problem("store_error")}, incomplete, true},
+		{"timeout after settings applied", []services.Report{{Service: "settings", Applied: true}, problem("timed_out")}, incomplete, true},
+		{"cancelled", []services.Report{problem("cancelled")}, incomplete, true},
+		{"no reports with error", nil, incomplete, true},
+		{"validation only", []services.Report{problem("invalid_value")}, incomplete, false},
+		{"nil error", nil, nil, false},
+		{"applied with nil error", []services.Report{{Service: "settings", Applied: true}}, nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := startupFatal(tc.reports, tc.err); got != tc.want {
+				t.Fatalf("startupFatal(%+v, %v)=%v want %v", tc.reports, tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestStartupError(t *testing.T) {
+	storeMessage := "parse_error (layer user, file config.json): invalid JSON"
+	storeErr := errors.New(storeMessage)
+	incomplete := errors.New("service reload incomplete")
+	storeReport := services.Report{Problems: []services.Problem{{Code: "store_error", Message: storeMessage}}}
+	for _, tc := range []struct {
+		name    string
+		reports []services.Report
+		cause   error
+		want    string
+	}{
+		{"nil cause", []services.Report{{Problems: []services.Problem{{Code: "timed_out", Message: "deadline exceeded"}}}}, nil, "startup reload failed: timed_out: deadline exceeded"},
+		{"repeated store problem", []services.Report{storeReport, storeReport}, storeErr, "store_error: " + storeMessage},
+		{"separate diagnostic", []services.Report{{Problems: []services.Problem{{Code: "cancelled", Message: "shutdown", Source: &protocol.Source{Layer: "user", File: "config.json"}}}}}, incomplete, "service reload incomplete: cancelled: shutdown (layer user, file config.json)"},
+		{"no reports", nil, incomplete, "service reload incomplete"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := startupError(tc.reports, tc.cause)
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("error=%v want %q", err, tc.want)
+			}
+			if tc.cause != nil && !errors.Is(err, tc.cause) {
+				t.Fatalf("error does not wrap cause: %v", err)
+			}
+		})
+	}
+}
+
 func TestStartupFlightFailures(t *testing.T) {
 	for _, tc := range []struct {
 		name, config string
@@ -215,6 +270,9 @@ func TestStartupFlightFailures(t *testing.T) {
 					if err == nil || !strings.Contains(err.Error(), text) {
 						t.Fatalf("error=%v missing %q", err, text)
 					}
+				}
+				if strings.Count(err.Error(), "config.json") != 1 {
+					t.Fatalf("duplicated Store diagnostic: %v", err)
 				}
 				if failed == nil || !storeStopped(failed) || len(h.leftovers()) != 0 {
 					t.Fatal("fatal flight leaked resources")

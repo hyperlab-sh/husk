@@ -430,22 +430,50 @@ func TestCoordinatorTimeoutPartialApplyNeverPublishesLate(t *testing.T) {
 
 }
 func TestCoordinatorStoreFailureDoesNotPrepareAnyService(t *testing.T) {
-	services := fakeServices()
-	co, _ := NewCoordinator(Options{Store: &fakeStore{err: errors.New("bad source")}, Services: services, Clock: clock()})
-	defer co.Close()
-	r, err := co.Reload(context.Background(), ReasonCLI)
-	if err == nil || len(r) != 5 {
-		t.Fatal(r, err)
-	}
-	for _, rep := range r {
-		if len(rep.Problems) != 1 || rep.Problems[0].Code != "store_error" || rep.Problems[0].Severity != "error" {
-			t.Fatalf("%s report = %+v", rep.Service, rep.Problems)
-		}
-	}
-	for _, s := range services {
-		if s.(*fakeService).calls.Load() != 0 {
-			t.Fatal("prepared after source failure")
-		}
+	for _, tc := range []struct {
+		name    string
+		problem store.Problem
+		err     error
+	}{
+		{name: "resolve error", err: errors.New("bad source")},
+		{name: "user parse problem", problem: store.Problem{Code: "parse_error", Layer: store.LayerUser, File: "config.json", Message: "invalid JSON"}},
+		{name: "profile read problem", problem: store.Problem{Code: "unreadable", Layer: store.LayerProfile, File: "profiles/work/config.json", Message: "permission denied"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			services := fakeServices()
+			source := &fakeStore{err: tc.err}
+			if tc.problem.Code != "" {
+				source.resolved.Problems = []store.Problem{tc.problem}
+			}
+			co, err := NewCoordinator(Options{Store: source, Services: services, Clock: clock()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer co.Close()
+			r, err := co.Reload(context.Background(), ReasonCLI)
+			if err == nil || len(r) != 5 {
+				t.Fatal(r, err)
+			}
+			for _, rep := range r {
+				if len(rep.Problems) != 1 || rep.Problems[0].Code != "store_error" || rep.Problems[0].Severity != "error" {
+					t.Fatalf("%s report = %+v", rep.Service, rep.Problems)
+				}
+				want := []string{"bad source"}
+				if tc.problem.Code != "" {
+					want = []string{tc.problem.Code, "layer " + string(tc.problem.Layer), tc.problem.File, tc.problem.Message}
+				}
+				for _, text := range want {
+					if !strings.Contains(rep.Problems[0].Message, text) {
+						t.Fatalf("%s message=%q missing %q", rep.Service, rep.Problems[0].Message, text)
+					}
+				}
+			}
+			for _, s := range services {
+				if s.(*fakeService).calls.Load() != 0 {
+					t.Fatal("prepared after source failure")
+				}
+			}
+		})
 	}
 }
 
