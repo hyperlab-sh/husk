@@ -42,14 +42,29 @@ var defaultBindings = []defaultBinding{
 	{"esc", "husk.modal.close", string(protocol.SurfaceModal)},
 }
 
+// ordered lists the bindings strongest first, as the keybinding service ranks
+// them: scope first (surface before global), then layer (Extra stands in for
+// the plugin-declared layer, which sits above the built-in one), then file
+// order.
+func (d defaultKeys) ordered() []defaultBinding {
+	out := append(slices.Clone(d.Extra), defaultBindings...)
+	slices.SortStableFunc(out, func(a, b defaultBinding) int { return scopeOrder(b) - scopeOrder(a) })
+	return out
+}
+
+// scopeOrder is 1 for a surface-scoped binding and 0 for a global one.
+func scopeOrder(b defaultBinding) int {
+	if b.focus != "" {
+		return 1
+	}
+	return 0
+}
+
 func (d defaultKeys) Resolve(ctx contracts.KeyContext, keys []string) contracts.KeyResolution {
 	if len(keys) != 1 {
 		return contracts.KeyResolution{}
 	}
-	var hit *defaultBinding
-	all := append(slices.Clone(defaultBindings), d.Extra...)
-	for i := range all {
-		b := &all[i]
+	for _, b := range d.ordered() {
 		if b.key != keys[0] || b.focus != "" && b.focus != ctx.FocusSurface {
 			continue
 		}
@@ -59,23 +74,22 @@ func (d defaultKeys) Resolve(ctx contracts.KeyContext, keys []string) contracts.
 		if ctx.ModalOpen && b.focus == "" && b.action != "husk.modal.close" && (ctx.ModalAction == "" || b.action != ctx.ModalAction) {
 			continue
 		}
-		if hit == nil || hit.focus == "" && b.focus != "" {
-			hit = b
-		}
+		return contracts.KeyResolution{Outcome: contracts.KeyMatch, Binding: &contracts.KeyEntry{Keys: []string{b.key}, Action: b.action, Focus: b.focus}}
 	}
-	if hit == nil {
-		return contracts.KeyResolution{}
-	}
-	return contracts.KeyResolution{Outcome: contracts.KeyMatch, Binding: &contracts.KeyEntry{Keys: []string{hit.key}, Action: hit.action, Focus: hit.focus}}
+	return contracts.KeyResolution{}
 }
 
 func (defaultKeys) Hints(contracts.KeyContext) []contracts.KeyHint { return nil }
 
+// KeysFor lists global spellings first, then surface-scoped ones, each group
+// strongest layer first.
 func (d defaultKeys) KeysFor(action string) []string {
 	var out []string
-	for _, b := range append(slices.Clone(defaultBindings), d.Extra...) {
-		if b.action == action && b.focus == "" {
-			out = append(out, b.key)
+	for _, scoped := range []bool{false, true} {
+		for _, b := range d.ordered() {
+			if b.action == action && (b.focus != "") == scoped {
+				out = append(out, b.key)
+			}
 		}
 	}
 	return out

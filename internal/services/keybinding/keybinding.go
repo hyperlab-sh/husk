@@ -115,6 +115,9 @@ type Resolver interface {
 	Listing() Listing
 }
 
+// maxLayerEntries is the per-document entry limit.
+const maxLayerEntries = 2048
+
 //go:embed keymap.json
 var builtin []byte
 
@@ -156,26 +159,44 @@ func rank(l Layer) int {
 	}
 	return 0
 }
-func specificity(b Binding) int {
-	if b.Plugin != "" {
-		return 2
-	}
+func scopeRank(b Binding) int {
 	if b.Focus != "" {
 		return 1
 	}
 	return 0
 }
-func stronger(a, b Binding) bool {
+func conditionRank(b Binding) int {
+	if b.Plugin != "" {
+		return 1
+	}
+	return 0
+}
+
+// outranks is steps 2 to 4 of "Which binding wins": scope, then layer, then
+// whether `plugin` is set. File order is deliberately absent; see stronger.
+func outranks(a, b Binding) bool {
+	if scopeRank(a) != scopeRank(b) {
+		return scopeRank(a) > scopeRank(b)
+	}
 	if rank(a.Source.Layer) != rank(b.Source.Layer) {
 		return rank(a.Source.Layer) > rank(b.Source.Layer)
 	}
-	if specificity(a) != specificity(b) {
-		return specificity(a) > specificity(b)
+	return conditionRank(a) > conditionRank(b)
+}
+
+// stronger is the total order Resolve ranks candidates by: outranks, then file
+// order (declaring plugin, then index in its document).
+func stronger(a, b Binding) bool {
+	if outranks(a, b) != outranks(b, a) {
+		return outranks(a, b)
+	}
+	if a.Source.Plugin != b.Source.Plugin {
+		return a.Source.Plugin < b.Source.Plugin
 	}
 	if a.Source.Order != b.Source.Order {
 		return a.Source.Order < b.Source.Order
 	}
-	return a.Source.Plugin+"\x00"+a.Focus+"\x00"+a.Plugin+"\x00"+sequence(a.Keys)+"\x00"+a.Action < b.Source.Plugin+"\x00"+b.Focus+"\x00"+b.Plugin+"\x00"+sequence(b.Keys)+"\x00"+b.Action
+	return a.Focus+"\x00"+a.Plugin+"\x00"+sequence(a.Keys)+"\x00"+a.Action < b.Focus+"\x00"+b.Plugin+"\x00"+sequence(b.Keys)+"\x00"+b.Action
 }
 func sequence(keys []string) string { b, _ := json.Marshal(keys); return string(b) }
 func triple(b Binding) string       { return sequence(b.Keys) + "\x00" + b.Focus + "\x00" + b.Plugin }
@@ -193,12 +214,19 @@ func begins(a, b []string) bool {
 func scope(b Binding, ctx KeyContext) bool {
 	return b.Focus == "" || b.Focus == ctx.FocusSurface && (b.Plugin == "" || b.Plugin == ctx.FocusOwner)
 }
-func dominates(a, b Binding) bool {
-	// Callers group by equal keys first; exact disables do not cover other scopes.
-	if a.Disable && (a.Focus != b.Focus || a.Plugin != b.Plugin) {
+
+// shadows is the static rule of "husk keys": a shadows b when their sequences
+// are equal or one begins the other, a outranks b, and every context that
+// matches b also matches a. A tombstone longer than b is a candidate only for
+// its own sequence, so it shadows nothing shorter (D92).
+func shadows(a, b Binding) bool {
+	if a.Disable && len(a.Keys) > len(b.Keys) {
 		return false
 	}
-	return stronger(a, b) && (a.Focus == "" || a.Focus == b.Focus && (a.Plugin == "" || a.Plugin == b.Plugin))
+	if !begins(a.Keys, b.Keys) && !begins(b.Keys, a.Keys) {
+		return false
+	}
+	return outranks(a, b) && a.Focus == b.Focus && (a.Plugin == "" || a.Plugin == b.Plugin)
 }
 
 // Resolve is pure and never locks or calls another module.
@@ -208,6 +236,10 @@ func (s *Service) Resolve(ctx KeyContext, keys []string) Result {
 	}
 	for _, b := range s.current.Load().index[keys[0]] {
 		if !begins(b.Keys, keys) || !scope(b, ctx) || ctx.Frozen && b.Action != "husk.quit" {
+			continue
+		}
+		// A tombstone unbinds exactly the sequence it names, never a prefix of it.
+		if b.Disable && len(b.Keys) != len(keys) {
 			continue
 		}
 		if ctx.ModalOpen && b.Focus != "modal-surface" && !(b.Focus == "" && (b.Action == "husk.modal.close" || ctx.ModalAction != "" && b.Action == ctx.ModalAction)) {
@@ -251,7 +283,9 @@ func (s *Service) Hints(ctx KeyContext) []Hint {
 	return out
 }
 
-// KeysFor returns effective spellings, strongest first (sequences joined for display).
+// KeysFor returns effective spellings, global entries first and then
+// surface-scoped; within each group the stronger layer first, then file order
+// (sequences joined for display).
 func (s *Service) KeysFor(action string) []string {
 	var bs []Binding
 	for _, e := range s.current.Load().listing.Entries {
@@ -259,7 +293,19 @@ func (s *Service) KeysFor(action string) []string {
 			bs = append(bs, e.Binding)
 		}
 	}
-	sort.SliceStable(bs, func(i, j int) bool { return stronger(bs[i], bs[j]) })
+	sort.SliceStable(bs, func(i, j int) bool {
+		a, b := bs[i], bs[j]
+		if scopeRank(a) != scopeRank(b) {
+			return scopeRank(a) < scopeRank(b)
+		}
+		if rank(a.Source.Layer) != rank(b.Source.Layer) {
+			return rank(a.Source.Layer) > rank(b.Source.Layer)
+		}
+		if a.Source.Plugin != b.Source.Plugin {
+			return a.Source.Plugin < b.Source.Plugin
+		}
+		return a.Source.Order < b.Source.Order
+	})
 	var out []string
 	for _, b := range bs {
 		out = append(out, strings.Join(b.Keys, " "))
@@ -309,25 +355,27 @@ func validVersion(value any) bool {
 	}
 	return false
 }
-func layerProblem(doc store.Doc) string {
+
+// layerProblem is the file-level code for doc and the key the problem names.
+func layerProblem(doc store.Doc) (code, key string) {
+	if !validVersion(doc["version"]) {
+		return "unsupported_version", ""
+	}
 	encoded, err := json.Marshal(doc)
 	if err != nil {
-		return "invalid_entry"
+		return "invalid_entry", ""
 	}
 	if len(encoded) > 256*1024 {
-		return "too_many"
-	}
-	if !validVersion(doc["version"]) {
-		return "unsupported_version"
+		return "too_large", ""
 	}
 	if doc["bind"] == nil {
-		return "invalid_entry"
+		return "invalid_entry", "bind"
 	}
 	var entries []map[string]any
 	if c.Decode(doc["bind"], &entries) != nil {
-		return "invalid_entry"
+		return "invalid_entry", "bind"
 	}
-	return ""
+	return "", ""
 }
 
 func parse(raw map[string]any, src Source) (Binding, string) {
@@ -453,7 +501,7 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 	for _, layer := range in.Layers {
 		if layer.Layer == store.LayerDistribution {
 			doc := layer.Doc
-			if layerProblem(doc) != "" {
+			if code, _ := layerProblem(doc); code != "" {
 				doc = old.documents[string(LayerDistribution)]
 			}
 			if doc["builtin"] == false {
@@ -504,7 +552,7 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 			src Source
 		}{l.Doc, Source{Layer: Layer(l.Layer), File: file}})
 	}
-	seen := map[string]bool{}
+	seen := map[string]Source{}
 	for _, layer := range layers {
 		if ctx.Err() != nil {
 			return c.ContextError(ctx, r)
@@ -518,8 +566,8 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 			}
 			cacheKey += "\x00" + identity
 		}
-		if code := layerProblem(doc); code != "" {
-			issue(code, src, "")
+		if code, key := layerProblem(doc); code != "" {
+			issue(code, src, key)
 			doc = old.documents[cacheKey]
 			if doc == nil {
 				continue
@@ -556,13 +604,9 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 			issue("invalid_entry", src, "bind")
 			continue
 		}
-		limit := 2048
-		if src.Layer == LayerFocusLocal {
-			limit = 128
-		}
 		for i, raw := range entries {
 			src.Order = i
-			if i >= limit {
+			if i >= maxLayerEntries {
 				issue("too_many", src, "")
 				continue
 			}
@@ -585,83 +629,26 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 				}
 				continue
 			}
+			// Manifest conversion already enforced ownership, scope and the
+			// 128-entry cap; the declared document names the plugin.
 			if src.Layer == LayerFocusLocal {
-				if _, given := raw["plugin"]; given || b.Disable {
-					issue("invalid_entry", src, sequence(b.Keys))
-					continue
-				}
-				if b.Focus == "" {
-					issue("global_not_allowed", src, sequence(b.Keys))
-					continue
-				}
-				owned := false
-				for _, surface := range catalog[src.Plugin].Surfaces {
-					owned = owned || surface.ID == b.Focus
-				}
-				if !owned {
-					issue("foreign_surface", src, sequence(b.Keys))
-					continue
-				}
-				ownAction := strings.HasPrefix(b.Action, "husk.")
-				for _, action := range catalog[src.Plugin].Actions {
-					ownAction = ownAction || action.ID == b.Action
-				}
-				if !ownAction {
-					issue("foreign_action", src, sequence(b.Keys))
-					continue
-				}
 				b.Plugin = src.Plugin
 			}
 			dup := string(src.Layer) + "\x00" + triple(b)
 			entry := Entry{Binding: b, State: "effective"}
-			if seen[dup] {
+			if first, exists := seen[dup]; exists {
 				entry.State = "shadowed"
+				entry.ShadowedBy = &first
 				issue("duplicate", src, sequence(b.Keys))
+			} else {
+				seen[dup] = src
 			}
-			seen[dup] = true
 			next.listing.Entries = append(next.listing.Entries, entry)
 		}
 	}
-	// Exact tombstones and broader higher-ranked scopes shadow lower candidates.
 	es := next.listing.Entries
-	groups := map[string][]int{}
-	for i, e := range es {
-		groups[sequence(e.Keys)] = append(groups[sequence(e.Keys)], i)
-	}
-	for _, group := range groups {
-		for _, i := range group {
-			if es[i].State == "shadowed" {
-				continue
-			}
-			for _, j := range group {
-				if i != j && es[j].State != "shadowed" && dominates(es[j].Binding, es[i].Binding) {
-					es[i].State = "shadowed"
-					source := es[j].Source
-					es[i].ShadowedBy = &source
-					break
-				}
-			}
-		}
-	}
-	prefixes := map[string]int{}
-	for i, e := range es {
-		if e.State == "effective" {
-			prefixes[triple(e.Binding)] = i
-		}
-	}
-	for i := range es {
-		if es[i].State != "effective" {
-			continue
-		}
-		for n := 1; n < len(es[i].Keys); n++ {
-			key := sequence(es[i].Keys[:n]) + "\x00" + es[i].Focus + "\x00" + es[i].Plugin
-			if j, exists := prefixes[key]; exists && es[j].State == "effective" && !es[j].Disable {
-				es[i].State = "shadowed"
-				issue("unreachable", es[i].Source, sequence(es[i].Keys))
-				break
-			}
-		}
-	}
+	shadowEntries(es)
+	unreachable(es, issue)
 	// Past the cap the weakest entries go: rank the effective ones and drop
 	// the tail, so a flood of low layers cannot push out the profile or
 	// instance bindings.
@@ -706,4 +693,68 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 		return c.ContextError(ctx, r)
 	}
 	return c.Prepare(ctx, r, func() bool { return s.current.CompareAndSwap(old, next) }, s.Generation), r, nil
+}
+
+// shadowEntries marks every entry that another entry statically shadows and
+// names the strongest shadower. A duplicate is already shadowed by the first
+// of its pair and takes no part. Candidates are found through two indexes, one
+// by exact sequence and one by every prefix, so a large layer stays linear.
+func shadowEntries(es []Entry) {
+	exact, extends := map[string][]int{}, map[string][]int{}
+	for i, e := range es {
+		if e.State == "shadowed" {
+			continue
+		}
+		exact[sequence(e.Keys)] = append(exact[sequence(e.Keys)], i)
+		for n := 1; n <= len(e.Keys); n++ {
+			extends[sequence(e.Keys[:n])] = append(extends[sequence(e.Keys[:n])], i)
+		}
+	}
+	by := make([]int, len(es))
+	for j, b := range es {
+		by[j] = -1
+		if b.State == "shadowed" {
+			continue
+		}
+		candidates := extends[sequence(b.Keys)]
+		for n := 1; n <= len(b.Keys); n++ {
+			candidates = append(candidates[:len(candidates):len(candidates)], exact[sequence(b.Keys[:n])]...)
+		}
+		for _, i := range candidates {
+			if i != j && shadows(es[i].Binding, b.Binding) && (by[j] < 0 || stronger(es[i].Binding, es[by[j]].Binding)) {
+				by[j] = i
+			}
+		}
+	}
+	for j, i := range by {
+		if i >= 0 {
+			source := es[i].Source
+			es[j].State, es[j].ShadowedBy = "shadowed", &source
+		}
+	}
+}
+
+// unreachable drops, within one layer, scope and plugin condition, every
+// effective sequence that has an effective strict prefix: the shorter binding
+// (or tombstone) always resolves first.
+func unreachable(es []Entry, issue func(code string, src Source, key string)) {
+	prefixes := map[string]bool{}
+	group := func(b Binding) string { return string(b.Source.Layer) + "\x00" + b.Focus + "\x00" + b.Plugin + "\x00" }
+	for _, e := range es {
+		if e.State == "effective" {
+			prefixes[group(e.Binding)+sequence(e.Keys)] = true
+		}
+	}
+	for i := range es {
+		if es[i].State != "effective" {
+			continue
+		}
+		for n := 1; n < len(es[i].Keys); n++ {
+			if prefixes[group(es[i].Binding)+sequence(es[i].Keys[:n])] {
+				es[i].State = "shadowed"
+				issue("unreachable", es[i].Source, sequence(es[i].Keys))
+				break
+			}
+		}
+	}
 }

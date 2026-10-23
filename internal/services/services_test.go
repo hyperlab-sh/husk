@@ -197,13 +197,17 @@ func TestProfileFlagsUnknownDeletedAndLoopPost(t *testing.T) {
 func TestKeybindingLayersFirstWinsDisableAndFocus(t *testing.T) {
 	kb := keybinding.New()
 	in := catalog("files")
-	in.Declared[store.DeclaredKeymap] = map[string]store.Doc{"files": doc(`{"version":1,"bind":[{"key":"n","focus":"stage","action":"files.run"},{"key":"ctrl+badkey","focus":"stage","action":"files.run"},{"key":"x","action":"files.run"}],"problems":[{"index":3,"code":"foreign_action","message":"conversion rejected action"}]}`)}
-	in.Layers = []store.LayerDoc{{Layer: store.LayerUser, Doc: doc(`{"version":1,"bind":[{"key":"n","action":"husk.home","hint":"Home"},{"key":"n","action":"files.run"},{"key":"q","disable":true},{"keys":["ctrl+k","ctrl+s"],"action":"files.run"}]}`)}}
+	in.Declared[store.DeclaredKeymap] = map[string]store.Doc{"files": doc(`{"version":1,"bind":[{"key":"n","focus":"stage","action":"files.run"},{"key":"ctrl+badkey","focus":"stage","action":"files.run"}],"problems":[{"index":3,"code":"foreign_action","message":"conversion rejected action"},{"index":4,"code":"global_not_allowed","message":"conversion rejected scope"}]}`)}
+	in.Layers = []store.LayerDoc{{Layer: store.LayerUser, Doc: doc(`{"version":1,"bind":[{"key":"n","action":"husk.home","hint":"Home"},{"key":"n","action":"files.run"},{"key":"m","action":"husk.home","hint":"Home"},{"key":"q","disable":true},{"keys":["ctrl+k","ctrl+s"],"action":"files.run"}]}`)}}
 	apply(t, kb, in)
 	ctx := keybinding.KeyContext{FocusSurface: "stage", FocusOwner: "files"}
+	// The focused surface's own binding beats the user's global `n`.
 	r := kb.Resolve(ctx, []string{"n"})
-	if r.Outcome != keybinding.Match || r.Binding.Action != "husk.home" {
+	if r.Outcome != keybinding.Match || r.Binding.Action != "files.run" {
 		t.Fatal(r)
+	}
+	if r := kb.Resolve(keybinding.KeyContext{}, []string{"n"}); r.Outcome != keybinding.Match || r.Binding.Action != "husk.home" {
+		t.Fatal("global n", r)
 	}
 	if kb.Resolve(ctx, []string{"q"}).Outcome != keybinding.NoMatch {
 		t.Fatal("disable did not fall through")

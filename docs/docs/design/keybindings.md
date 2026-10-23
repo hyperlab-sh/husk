@@ -559,18 +559,18 @@ This is the complete list of codes.
 
 | Today (`main`) | Change |
 |---|---|
-| `internal/services/keybinding`: ranks layer first, then specificity (`stronger`, `dominates`) | Rank scope first, then layer, then `plugin` condition, then order, per "Which binding wins". Static shadowing per "`husk keys`". |
+| `internal/services/keybinding`: ranks layer first, then specificity (`stronger`, `dominates`) | Rank scope first, then layer, then `plugin` condition, then order, per "Which binding wins". Static shadowing per "`husk keys`". **Landed**: `stronger`, `shadows`, `Resolve`, `Hints`, `KeysFor` and the no-host fallback in `cmd/husk/keys.go` follow it; `unreachable` is per layer, scope and condition and counts tombstones. |
 | `KeyContext` has no capture bit; `surface.update` has no `capture` field; `husk.surfaces` has no `capture` map | Add `Capture`; filter global text-key candidates when set. `surface.update` gains `capture` (minor 2.1); the Surfaces engine records and clears it (D93); the frontend reads `husk.surfaces.capture`. |
-| `internal/services/keybinding/keybinding.go` `Resolve`: a tombstone longer than `K` returns `NoMatch`; the Frozen and modal filters drop tombstones | A tombstone is a candidate only for its exact sequence (D92); tombstones survive the Frozen, modal and Capture filters. |
+| `internal/services/keybinding/keybinding.go` `Resolve`: a tombstone longer than `K` returns `NoMatch`; the Frozen and modal filters drop tombstones | A tombstone is a candidate only for its exact sequence (D92); tombstones survive the Frozen, modal and Capture filters. **Landed**: the exact-sequence rule. **Open**: tombstones still drop under the Frozen and modal filters. |
 | `cmd/husk/input.go`: no sequence timeout; the key that breaks a sequence goes to the occupant without being resolved alone; pending keys survive focus and overlay changes | Add the 1500 ms timer; resolve the breaking key on its own; discard pending keys on focus, modal, palette and paste events. |
 | `cmd/husk/input.go`: `husk.home` falls through by a special case (`homeApplies`); `ActionReply` has no decline carrier; `contracts.Frontend.InvokeAction` takes no caller kind or focus (every call is the Stem caller with State's focus) and its callback is `reply func(result map[string]any, err error)`, with no promise of a synchronous callback for host actions | `ActionReply` gains `Declined bool`; `Frontend.InvokeAction` becomes `InvokeAction(action, args, kind protocol.CallerKind, focus *protocol.FocusContext, reply)` with Input passing `CallerInput` and its own focus snapshot and host-started actions passing `CallerHost` and nil ([Pods](pods.md), Frontend seams); its callback becomes `reply func(result map[string]any, declined bool, err error)` and carries the flag; the `husk.home` handler sets it; the Dispatcher runs host handlers inline so the `InvokeAction` callback fires before it returns for host actions, and maps `Declined` to an empty success reply for wire callers; Input treats a declined reply as `NoMatch`. |
 | `cmd/husk/input.go`: the palette closes on `esc`, `ctrl+p`, `ctrl+c` | The palette closes on `esc`, `ctrl+c` and every single-key, global, non-text-key spelling in `KeysFor("husk.palette.open")`. |
 | Built-in keymap has no `shift+tab` | Add `shift+tab` → `husk.focus.next`. |
 | `cmd/husk/commands.go`: `builtinCommands` lists six host actions | List every action the built-in keymap names, with titles. |
-| Loader reports a document over 256 KiB as `too_many` | Report `too_large`. |
-| Conversion accepts `focus_bindings` as an alias of `keybindings` | Accept `keybindings` only. |
+| Loader reports a document over 256 KiB as `too_many` | Report `too_large`. **Landed**; a missing `bind` also names the key `bind`. |
+| Conversion accepts `focus_bindings` as an alias of `keybindings` | Accept `keybindings` only. **Landed**: a manifest that still spells `focus_bindings` gets an `ignored_field` warning and binds nothing. The service no longer re-checks focus-local ownership, scope or the 128-entry cap; conversion owns them. |
 | Declared document name `focus-keymap` | `keymap` (D64; rename unit). |
-| `docs/docs/architecture.md`, "Input routing" | Says layer order decides; now scope decides first. |
+| `docs/docs/architecture.md`, "Input routing" | Says layer order decides; now scope decides first. **Landed.** |
 
 Behavior changes users can notice, compared with the layer-first draft of this spec:
 
