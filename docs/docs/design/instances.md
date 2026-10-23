@@ -364,7 +364,7 @@ Rules that apply across the table:
 
 Columns are separated by two or more spaces and aligned.
 
-A string in a row or cell, whether a value, an object key or a header, that contains a control character is shown in its JSON form (quoted, escaped), so no cell can break a row or carry a terminal sequence; sorting uses the raw key. A lone string result is printed bare. Alignment counts display columns (wide characters take two, combining and format characters none, East Asian ambiguous characters one) whatever the locale.
+A string in a row or cell, whether a value, an object key or a header, that contains a control character (Unicode category `Cc`: C0 and C1 controls, including the escape that starts a terminal sequence) is shown in its JSON form (quoted, escaped), so no cell can break a row or carry a terminal sequence; sorting uses the raw key. Format characters (`Cf`, bidi overrides among them) are not escaped. A lone string result is printed bare even then. Alignment counts display columns (wide characters take two, combining and format characters none, East Asian ambiguous characters one) whatever the locale.
 
 **`husk instances`** (JSON: an array of entries, each with an added `"status": "live" | "unresponsive"`, sorted by id; `[]` when none):
 
