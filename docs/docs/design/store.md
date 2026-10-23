@@ -300,9 +300,7 @@ settings keys under the host's `husk.*` namespace in document `config`
 ([Services](services.md)), for example:
 
 ```json
-{"husk": {"plugins": {"paths": ["./plugins/reference"], "dirs": ["./plugins"]},
-          "layout": {"rail": "stage"},
-          "input": {"hold_alt": true}}}
+{"husk": {"plugins": {"paths": ["./plugins/reference"], "dirs": ["./plugins"]}}}
 ```
 
 Store does not know these paths mean anything; `cmd/husk` owns the flag table
@@ -706,11 +704,14 @@ secrets. Explicit `GC` and `ResetSecrets` still do what they say.
    `store.Open` with the bundle's config as `Options.Bundle`.
 2. State is created with Store as `Hydrator`; `Store.Attach` registers the
    `husk.store` slice and the `Listener`.
-3. Stem, Services and Pods register their slices; each persistent one is
-   hydrated inside `Register`.
-4. Pods convert every manifest, `Declare` the plugin documents and register
-   each plugin's slice. Then the Services first load runs, reading the
-   declared documents; only after it completes do the Wrappers launch the
+3. Services register their slices; each persistent one is hydrated inside
+   `Register`.
+3a. The composition root runs the synchronous `startup` flight, reading no
+   declared plugin documents ([Services](services.md), "Reload").
+4. The root reads `husk.plugins.*` from that flight's Settings snapshot and
+   converts manifests, then builds Stem and Pods. Pods `Declare` the plugin
+   documents, register each plugin's slices and request one `plugin` flight
+   for the batch. Only after it completes do the Wrappers launch the
    processes (the launch gate, [Pods](pods.md)).
 5. GC runs once in the background (start mode only; a passive `Open`
    schedules no GC).
@@ -720,6 +721,10 @@ secrets. Explicit `GC` and `ResetSecrets` still do what they say.
    `Store.Close` flushes (2 s).
 
 ## Level 2: Migration from today
+
+D101 plugin settings: landed. The root passes explicit flag documents to Store,
+loads Services before manifest conversion, and reads plugin arguments from the
+startup snapshot. Configured arrays survive when their flag is absent.
 
 - `cmd/husk/socket_security.go`: `createSocketDir` and its per-run `mkdtemp`
   directory under `$XDG_RUNTIME_DIR` or the temp dir are replaced by
@@ -736,14 +741,14 @@ secrets. Explicit `GC` and `ResetSecrets` still do what they say.
   removal becomes `Store.Close`. `tailLines` stays with the Wrapper; it reads a
   path Store returned.
 - `cmd/husk/transport.go`: no file access; unchanged by Store.
-- `cmd/husk/main.go`: `--plugin`, `--plugin-dir`, `--rail` and `--hold-alt`
-  become instance-layer paths (`husk.plugins.paths`, `husk.plugins.dirs`,
-  `husk.layout.rail`, `husk.input.hold_alt`) passed in `Options.InstanceDocs`; their
-  consumers read the resolved document through Services instead of `main`
-  locals. `--dump-frame`, `--demo-frame` and `--demo` stay process flags, not
-  config. New flags: `--instance <name>`, `--bundle <dir>` (folded into
-  `husk.bundle`; the directory form of the distribution layer is a bundle,
-  [Bundles](bundles.md), so no separate `--distribution <dir>` flag is added),
+- `cmd/husk/main.go`: `--plugin` and `--plugin-dir` become instance-layer
+  paths (`husk.plugins.paths`, `husk.plugins.dirs`) in `Options.InstanceDocs`,
+  set only when given. The composition root reads them from the startup
+  flight's Settings snapshot. `--dump-frame`, `--demo-frame`, `--demo`,
+  `--rail` and `--hold-alt` stay process flags, not config. New flags:
+  `--instance <name>`, `--bundle <dir>` (folded into `husk.bundle`; the
+  directory form of the distribution layer is a bundle, [Bundles](bundles.md),
+  so no separate `--distribution <dir>` flag is added),
   `--profile <name>` ([Services](services.md)). `main`
   opens Store before the listener and closes it after `model.cleanup`.
 - `pkg/manifest`: deleted in the retirement; `internal/pods/manifest` reads
@@ -822,7 +827,7 @@ secrets. Explicit `GC` and `ResetSecrets` still do what they say.
    also forbid creating a new identity, even when the provider reports absence.
    Existing fallback use is
    diagnosed at Open, without waiting for the first secret request.
-5. Should the instance-layer flag mapping (`husk.layout.rail`, `husk.input.hold_alt`)
-   keep `--rail` and `--hold-alt` at all, given they exist for frame dumps?
-   Recommended: keep them as config paths so a named instance file can set
-   them; tests keep using the flags.
+5. **Resolved (D101):** delete `husk.layout.rail` and `husk.input.hold_alt`; `--rail` and `--hold-alt` remain process flags.
+6. Should plugin paths resolve relative to their layer file? Today every entry
+   resolves against the process cwd, without `~` expansion, like the flags.
+   Layer-relative resolution is deferred.
