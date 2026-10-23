@@ -416,7 +416,7 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 	if ctx.Err() != nil {
 		return c.ContextError(ctx, r)
 	}
-	return c.Prepare(ctx, r, func() bool { return s.current.CompareAndSwap(old, next) }, s.Generation), r, nil
+	return c.Prepare(ctx, r, !reflect.DeepEqual(old.values, next.values) || !reflect.DeepEqual(old.raw, next.raw) || !reflect.DeepEqual(old.sources, next.sources), func() bool { return s.current.CompareAndSwap(old, next) }, s.Generation), r, nil
 }
 
 // registerPlugin adds one plugin's declared entries to schema, all or nothing:

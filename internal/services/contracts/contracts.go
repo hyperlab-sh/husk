@@ -28,10 +28,13 @@ type Source = protocol.Source
 
 // Report describes the snapshot actually serving after a reload step.
 type Report struct {
-	Service  string     `json:"service"`
-	Gen      Generation `json:"gen"`
-	Applied  bool       `json:"applied"`
-	Problems []Problem  `json:"problems,omitempty"`
+	Service string     `json:"service"`
+	Gen     Generation `json:"gen"`
+	Applied bool       `json:"applied"`
+	// Changed is true when Applied and the new snapshot's value differs from
+	// the previous one; it is false whenever Applied is false.
+	Changed  bool      `json:"changed"`
+	Problems []Problem `json:"problems,omitempty"`
 }
 
 // SettingsSnapshot is immutable typed configuration. Child settings aliases it.
@@ -75,27 +78,56 @@ type Reloadable interface {
 	Generation() Generation
 }
 
+// flightKey carries the flight's deadline in the context a Rebuild receives.
+type flightKey struct{}
+
+type flightDeadline struct {
+	clock    Clock
+	deadline time.Time
+}
+
+// WithDeadline returns a context that tells every candidate prepared under it
+// when its flight's deadline passes, read on clock. The coordinator cancels a
+// flight's context later than the deadline passes, so Apply checks the
+// deadline itself rather than relying on cancellation alone.
+func WithDeadline(ctx context.Context, clock Clock, deadline time.Time) context.Context {
+	return context.WithValue(ctx, flightKey{}, flightDeadline{clock, deadline})
+}
+
+// pastDeadline reports whether ctx carries a flight deadline that has passed.
+func pastDeadline(ctx context.Context) bool {
+	d, ok := ctx.Value(flightKey{}).(flightDeadline)
+	return ok && !d.clock.Now().Before(d.deadline)
+}
+
 // Prepared implements a one-use candidate with a service-owned atomic commit.
 type Prepared struct {
 	once       sync.Once
 	report     Report
+	changed    bool
 	ctx        context.Context
 	commit     func() bool
 	generation func() Generation
 }
 
-// Prepare wraps a conditional atomic snapshot swap; no publication happens here.
-func Prepare(ctx context.Context, r Report, commit func() bool, gen func() Generation) Candidate {
-	return &Prepared{ctx: ctx, report: r, commit: commit, generation: gen}
+// Prepare wraps a conditional atomic snapshot swap; no publication happens
+// here. changed says whether the candidate's value differs from the snapshot
+// the Service loaded; Apply reports it only when the swap happened.
+func Prepare(ctx context.Context, r Report, changed bool, commit func() bool, gen func() Generation) Candidate {
+	return &Prepared{ctx: ctx, report: r, changed: changed, commit: commit, generation: gen}
 }
 
-// Apply publishes once, or reports cancellation/a stale candidate without swapping.
+// Apply publishes once. After the flight's deadline, after the flight's
+// context ended (Close included) or once the Service's generation moved, it
+// swaps nothing and reports applied false with one candidate_superseded
+// problem.
 func (p *Prepared) Apply() Report {
 	p.once.Do(func() {
-		if p.ctx.Err() == nil {
+		if p.ctx.Err() == nil && !pastDeadline(p.ctx) {
 			p.report.Applied = p.commit()
 		}
 		p.report.Gen = p.generation()
+		p.report.Changed = p.report.Applied && p.changed
 		if !p.report.Applied {
 			p.report.Problems = append(p.report.Problems, Problem{Severity: "error", Code: "candidate_superseded", Message: "candidate cancelled or superseded"})
 		}

@@ -74,16 +74,19 @@ type flight struct {
 	reason   Reason
 	captured bool // protected by Coordinator.mu; set once Store.Invalidate returned
 	started  bool // protected by Coordinator.mu; the worker was launched
+	dry      bool // a dry run: holds the coordinator's turn, never coalesces
+	granted  chan struct{}
 	reports  []Report
 	err      error
 }
 
 // Coordinator serializes reloads; overlapping callers wait on the same flight.
+// A dry run (Inputs) takes a turn in the same queue and never coalesces.
 type Coordinator struct {
 	opts   Options
 	mu     sync.Mutex
 	active *flight
-	queued *flight
+	queue  []*flight // behind active, in start order; at most one regular flight
 	ctx    context.Context
 	cancel context.CancelFunc
 
@@ -140,8 +143,26 @@ func cloneServices(in map[string]Reloadable) map[string]Reloadable {
 }
 func order() []string { return []string{"profile", "settings", "theme", "keybinding", "secrets"} }
 
-// Close cancels the lifetime used by listener-triggered reloads.
-func (co *Coordinator) Close() { co.cancel() }
+// Close cancels the lifetime used by listener-triggered reloads. A flight in
+// progress reports its unpublished Services as cancelled and answers its
+// waiters cancelled/shutdown. A flight the loop requested but Tick has not yet
+// launched is launched here, so its waiters get the same answer.
+func (co *Coordinator) Close() {
+	co.cancel()
+	co.mu.Lock()
+	f := co.active
+	launch := f != nil && !f.dry && !f.started
+	if launch {
+		f.started = true
+	}
+	co.mu.Unlock()
+	if launch {
+		go co.execute(f)
+	}
+}
+
+// shutdown is the error a requester sees when the coordinator closed first.
+func shutdown() error { return c.Failure("cancelled", "shutdown") }
 
 // ReloadFor implements the user-only config.reload exposure. Internal triggers
 // use Reload directly with an explicit reason and never trust a wire reason.
@@ -154,6 +175,9 @@ func (co *Coordinator) ReloadFor(ctx context.Context, caller Caller) ([]Report, 
 
 // Reload waits for a coordinator-owned flight. The caller's context controls
 // only this wait; cancellation cannot poison another requester's shared work.
+// It returns an error only when the flight itself failed (unavailable
+// store_error, timeout reload_deadline, cancelled shutdown); the reports
+// accompany it. A Service that kept its snapshot is a report, not an error.
 func (co *Coordinator) Reload(ctx context.Context, reason Reason) ([]Report, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -161,33 +185,41 @@ func (co *Coordinator) Reload(ctx context.Context, reason Reason) ([]Report, err
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if co.ctx.Err() != nil {
+		return nil, shutdown()
+	}
 	// ctx.Done() must not be read before the flight is joined: tests take its
 	// first call as the signal that this caller is parked on it.
 	return co.waiter(co.request(reason, false)).Wait(ctx)
 }
 
 // request joins the running flight when it has not yet captured, otherwise the
-// single queued follow-up, otherwise starts one. A request from the loop
+// single queued regular follow-up, otherwise starts or queues one; a dry run
+// holding or awaiting the turn is never joined. A request from the loop
 // (onLoop) only creates the flight; its worker launches at Tick, the end of the
 // loop tick, so every request posted in that tick joins the same flight.
 func (co *Coordinator) request(reason Reason, onLoop bool) *flight {
 	co.mu.Lock()
 	defer co.mu.Unlock()
-	f := co.active
 	switch {
-	case f == nil:
-		f = &flight{done: make(chan struct{}), reason: reason}
+	case co.active == nil:
+		f := &flight{done: make(chan struct{}), reason: reason}
 		co.active = f
 		if !onLoop {
 			f.started = true
 			go co.execute(f)
 		}
-	case f.captured:
-		if co.queued == nil {
-			co.queued = &flight{done: make(chan struct{}), reason: reason}
-		}
-		f = co.queued
+		return f
+	case !co.active.dry && !co.active.captured:
+		return co.active
 	}
+	for _, q := range co.queue {
+		if !q.dry {
+			return q
+		}
+	}
+	f := &flight{done: make(chan struct{}), reason: reason}
+	co.queue = append(co.queue, f)
 	return f
 }
 
@@ -199,7 +231,7 @@ func (co *Coordinator) Tick() {
 	// changed nothing produces no change to consume it.
 	co.hasExpect = false
 	f := co.active
-	if f == nil || f.started {
+	if f == nil || f.dry || f.started {
 		co.mu.Unlock()
 		return
 	}
@@ -242,7 +274,7 @@ func (co *Coordinator) AwaitProfile(name string) profile.Waiter {
 func (co *Coordinator) Settled(name string) bool {
 	co.mu.Lock()
 	defer co.mu.Unlock()
-	return co.active == nil && co.queued == nil && co.haveSelected && co.selected == name
+	return co.active == nil && len(co.queue) == 0 && co.haveSelected && co.selected == name
 }
 
 // LastReports implements profile.Reloader.
@@ -259,7 +291,9 @@ type flightWait struct {
 
 func (co *Coordinator) waiter(f *flight) flightWait { return flightWait{co, f} }
 
-// Wait implements profile.Waiter.
+// Wait implements profile.Waiter. A Close needs no arm of its own: the flight
+// observes it and ends with cancelled/shutdown (Close launches a flight Tick
+// had not yet started).
 func (w flightWait) Wait(ctx context.Context) ([]Report, error) {
 	select {
 	case <-w.f.done:
@@ -269,8 +303,6 @@ func (w flightWait) Wait(ctx context.Context) ([]Report, error) {
 		return c.Clone(w.f.reports), w.f.err
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case <-w.co.ctx.Done():
-		return nil, w.co.ctx.Err()
 	}
 }
 func (co *Coordinator) execute(f *flight) {
@@ -280,16 +312,25 @@ func (co *Coordinator) execute(f *flight) {
 	f.err = err
 	co.last = c.Clone(reports)
 	close(f.done)
-	co.active = co.queued
-	co.queued = nil
-	next := co.active
-	if next != nil {
-		next.started = true
-	}
+	co.advanceLocked()
 	co.mu.Unlock()
-	if next != nil {
-		go co.execute(next)
+}
+
+// advanceLocked ends the active turn and starts the next one, if any.
+func (co *Coordinator) advanceLocked() {
+	co.active = nil
+	if len(co.queue) == 0 {
+		return
 	}
+	next := co.queue[0]
+	co.queue = co.queue[1:]
+	co.active = next
+	if next.dry {
+		close(next.granted)
+		return
+	}
+	next.started = true
+	go co.execute(next)
 }
 
 type inputResult struct {
@@ -302,18 +343,46 @@ type prepared struct {
 	err       error
 }
 
+// storeFailure is a flight-level Store failure: the message names the
+// config-relative file when Store reported one, never a value.
+type storeFailure struct{ message string }
+
+func (e *storeFailure) Error() string { return e.message }
+
+func storeProblemFailure(problems []store.Problem) error {
+	for _, problem := range problems {
+		if problem.Code != "type_clash" {
+			if problem.File != "" {
+				where := problem.File
+				if problem.Layer != "" {
+					where += " (layer " + string(problem.Layer) + ")"
+				}
+				return &storeFailure{problem.Code + ": configuration file " + where + " could not be loaded"}
+			}
+			return &storeFailure{problem.Code + ": configuration could not be loaded"}
+		}
+	}
+	return nil
+}
+
 func (co *Coordinator) reload(parent context.Context, reason Reason, f *flight) ([]Report, error) {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	timer := co.opts.Clock.NewTimer(2 * time.Second)
 	defer timer.Stop()
 	deadline := co.opts.Clock.Now().Add(2 * time.Second)
-	expired := func() bool {
-		if ctx.Err() != nil || co.ctx.Err() != nil || !co.opts.Clock.Now().Before(deadline) {
-			cancel()
-			return true
+	ctx = c.WithDeadline(ctx, co.opts.Clock, deadline)
+	timerFired := false
+	// stopped says why the flight can no longer publish: the coordinator
+	// closed ("cancelled") or the 2 s deadline passed ("timed_out").
+	stopped := func() string {
+		switch {
+		case co.ctx.Err() != nil:
+			return "cancelled"
+		case timerFired || !co.opts.Clock.Now().Before(deadline):
+			return "timed_out"
 		}
-		return false
+		return ""
 	}
 	reports := []Report{}
 	publish := func() {
@@ -325,42 +394,39 @@ func (co *Coordinator) reload(parent context.Context, reason Reason, f *flight) 
 	inputs := make(chan inputResult, 1)
 	go func() { inputs <- co.loadInput(f) }()
 	var input inputResult
-	timeout := false
 	select {
 	case input = <-inputs:
 	case <-timer.C():
+		timerFired = true
 		cancel()
-		timeout = true
-	case <-ctx.Done():
-		timeout = true
 	case <-co.ctx.Done():
-		cancel()
-		timeout = true
 	}
-	if expired() {
-		timeout = true
-	}
-	if timeout || input.err != nil {
-		message, code := "Store resolution failed", "store_error"
-		if input.err != nil {
-			message = input.err.Error()
+	if why := stopped(); why != "" {
+		for _, name := range order() {
+			reports = append(reports, stoppedReport(name, co.opts.Services[name].Generation(), why))
 		}
-		if timeout {
-			message, code = "timed out", "timed_out"
+		return reports, stoppedError(why)
+	}
+	if input.err != nil {
+		message := "configuration could not be loaded"
+		var failure *storeFailure
+		if errors.As(input.err, &failure) {
+			message = failure.message
 		}
 		for _, name := range order() {
-			reports = append(reports, Report{Service: name, Gen: co.opts.Services[name].Generation(), Problems: []Problem{{Severity: "error", Code: code, Message: message}}})
+			reports = append(reports, Report{Service: name, Gen: co.opts.Services[name].Generation(), Problems: []Problem{{Severity: "error", Code: "store_error", Message: message}}})
 		}
-		return reports, errors.New(message)
+		return reports, &c.Error{Code: "unavailable", Reason: "store_error", Message: message}
 	}
-	failed := false
+	final := ""
 	settingsFailed := false
 	for _, name := range order() {
 		service := co.opts.Services[name]
-		if timeout || expired() {
-			timeout = true
-			reports = append(reports, Report{Service: name, Gen: service.Generation(), Problems: []Problem{{Severity: "error", Code: "timed_out", Message: "timed out"}}})
-			failed = true
+		if final == "" {
+			final = stopped()
+		}
+		if final != "" {
+			reports = append(reports, stoppedReport(name, service.Generation(), final))
 			continue
 		}
 		if name == "theme" && settingsFailed {
@@ -377,25 +443,19 @@ func (co *Coordinator) reload(parent context.Context, reason Reason, f *flight) 
 		select {
 		case p = <-result:
 		case <-timer.C():
+			timerFired = true
 			cancel()
-			timeout = true
-		case <-ctx.Done():
-			timeout = true
 		case <-co.ctx.Done():
-			cancel()
-			timeout = true
 		}
-		if timeout || expired() {
-			timeout = true
-			reports = append(reports, Report{Service: name, Gen: service.Generation(), Problems: []Problem{{Severity: "error", Code: "timed_out", Message: "timed out"}}})
-			failed = true
+		if final = stopped(); final != "" {
+			reports = append(reports, stoppedReport(name, service.Generation(), final))
 			continue
 		}
 		if p.err == nil && p.candidate != nil {
 			p.report = p.candidate.Apply()
 		} else {
-			failed = true
 			p.report.Applied = false
+			p.report.Changed = false
 			p.report.Gen = service.Generation()
 			if p.err != nil && len(p.report.Problems) == 0 {
 				p.report.Problems = []Problem{rebuildProblem(p.err)}
@@ -406,14 +466,29 @@ func (co *Coordinator) reload(parent context.Context, reason Reason, f *flight) 
 		if name == "settings" {
 			settingsFailed = !p.report.Applied
 		}
-		if !p.report.Applied {
-			failed = true
-		}
 	}
-	if failed {
-		return reports, errors.New("service reload incomplete")
+	return reports, stoppedError(final)
+}
+
+// stoppedReport is the report of a Service the flight could not publish.
+func stoppedReport(name string, gen Generation, why string) Report {
+	message := "timed out"
+	if why == "cancelled" {
+		message = "cancelled"
 	}
-	return reports, nil
+	return Report{Service: name, Gen: gen, Problems: []Problem{{Severity: "error", Code: why, Message: message}}}
+}
+
+// stoppedError is the flight's error for the reason it stopped: nil when it
+// did not.
+func stoppedError(why string) error {
+	switch why {
+	case "cancelled":
+		return shutdown()
+	case "timed_out":
+		return c.Failure("timeout", "reload_deadline")
+	}
+	return nil
 }
 
 // rebuildProblem names a failed Rebuild that raised no problem of its own, so
@@ -466,10 +541,8 @@ func (co *Coordinator) loadInput(f *flight) inputResult {
 	if err != nil {
 		return inputResult{err: err}
 	}
-	for _, problem := range resolved.Problems {
-		if problem.Code != "type_clash" {
-			return inputResult{err: fmt.Errorf("%s (layer %s, file %s): %s", problem.Code, problem.Layer, problem.File, problem.Message)}
-		}
+	if err := storeProblemFailure(resolved.Problems); err != nil {
+		return inputResult{err: err}
 	}
 	layers, err := co.opts.Store.Layers("keymap", selected)
 	if err != nil {
@@ -482,8 +555,14 @@ func (co *Coordinator) loadInput(f *flight) inputResult {
 	return inputResult{in: ReloadInput{Doc: resolved, Layers: layers, ConfigLayers: configLayers, Declared: map[store.DocName]map[string]store.Doc{store.DeclaredPlugins: co.opts.Store.Declared(store.DeclaredPlugins), store.DeclaredKeymap: co.opts.Store.Declared(store.DeclaredKeymap)}, Profile: &selected, ProfileNames: profileNames, ProfileProblems: selectionProblems, ProfileWrite: profileWrite}}
 }
 
-// Inputs collects fresh user-authorized disk input for dry validation/checks.
-// It never applies a candidate or publishes services.reloaded.
+// Inputs collects fresh user-authorized disk input for a dry run
+// (settings.validate, theme.check). It takes the coordinator's turn: it waits
+// for a running flight to end, a flight requested meanwhile waits for it, and
+// it never coalesces. Step 2 (capture included) runs under the same 2 s
+// deadline as a flight, counted from when the turn is granted. The turn ends
+// when the input is gathered: the caller's Rebuild publishes nothing, so it
+// needs no exclusion. It never applies a candidate or publishes
+// services.reloaded.
 func (co *Coordinator) Inputs(ctx context.Context, caller Caller) (ReloadInput, error) {
 	if err := c.RequireUser(caller); err != nil {
 		return ReloadInput{}, err
@@ -491,6 +570,28 @@ func (co *Coordinator) Inputs(ctx context.Context, caller Caller) (ReloadInput, 
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if co.ctx.Err() != nil {
+		return ReloadInput{}, shutdown()
+	}
+	f := &flight{dry: true, granted: make(chan struct{})}
+	co.mu.Lock()
+	if co.active == nil {
+		co.active = f
+		close(f.granted)
+	} else {
+		co.queue = append(co.queue, f)
+	}
+	co.mu.Unlock()
+	select {
+	case <-f.granted:
+	case <-ctx.Done():
+		co.abandon(f)
+		return ReloadInput{}, ctx.Err()
+	case <-co.ctx.Done():
+		co.abandon(f)
+		return ReloadInput{}, shutdown()
+	}
+	defer co.release(f)
 	timer := co.opts.Clock.NewTimer(2 * time.Second)
 	defer timer.Stop()
 	result := make(chan inputResult, 1)
@@ -506,7 +607,33 @@ func (co *Coordinator) Inputs(ctx context.Context, caller Caller) (ReloadInput, 
 	case <-ctx.Done():
 		return ReloadInput{}, ctx.Err()
 	case <-co.ctx.Done():
-		return ReloadInput{}, co.ctx.Err()
+		return ReloadInput{}, shutdown()
+	}
+}
+
+// release ends a dry run's turn.
+func (co *Coordinator) release(f *flight) {
+	co.mu.Lock()
+	if co.active == f {
+		co.advanceLocked()
+	}
+	co.mu.Unlock()
+}
+
+// abandon withdraws a dry run that stopped waiting: out of the queue if it
+// has not been granted, else it ends its turn.
+func (co *Coordinator) abandon(f *flight) {
+	co.mu.Lock()
+	defer co.mu.Unlock()
+	if co.active == f {
+		co.advanceLocked()
+		return
+	}
+	for i, q := range co.queue {
+		if q == f {
+			co.queue = append(co.queue[:i:i], co.queue[i+1:]...)
+			break
+		}
 	}
 }
 

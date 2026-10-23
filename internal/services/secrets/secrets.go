@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -855,5 +856,6 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 		s.reconcile(next)
 		return true
 	}
-	return c.Prepare(ctx, r, commit, s.Generation), r, nil
+	changed := !reflect.DeepEqual(old.declarations, next.declarations) || !reflect.DeepEqual(old.names, next.names)
+	return c.Prepare(ctx, r, changed, commit, s.Generation), r, nil
 }
