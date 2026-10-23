@@ -77,6 +77,7 @@ type flight struct {
 	started  bool // protected by Coordinator.mu; the worker was launched
 	dry      bool // a dry run: holds the coordinator's turn, never coalesces
 	granted  chan struct{}
+	input    <-chan inputResult // buffered worker delivery, protected by Coordinator.mu
 	reports  []Report
 	err      error
 }
@@ -415,6 +416,8 @@ func storeErrorFailure(err error) *storeFailure {
 
 func (co *Coordinator) reload(parent context.Context, reason Reason, f *flight) ([]Report, error) {
 	ctx, cancel := context.WithCancel(parent)
+	// This defer orders cancellation before execute advances the queue, even
+	// when stopped observes the deadline without selecting the timer arm.
 	defer cancel()
 	timer := co.opts.Clock.NewTimer(2 * time.Second)
 	defer timer.Stop()
@@ -448,6 +451,9 @@ func (co *Coordinator) reload(parent context.Context, reason Reason, f *flight) 
 	}
 	defer publish()
 	inputs := make(chan inputResult, 1)
+	co.mu.Lock()
+	f.input = inputs
+	co.mu.Unlock()
 	go func() { inputs <- co.loadInput(ctx, f) }()
 	var input inputResult
 	select {
@@ -691,9 +697,13 @@ func (co *Coordinator) Inputs(ctx context.Context, caller Caller) (ReloadInput, 
 	timer := co.opts.Clock.NewTimer(2 * time.Second)
 	defer timer.Stop()
 	gatherCtx, cancel := context.WithCancel(co.ctx)
-	gatherCtx = c.WithDeadline(gatherCtx, co.opts.Clock, co.opts.Clock.Now().Add(2*time.Second))
+	// input_deadline is enforced by the timer below; returning cancels the
+	// gather before releasing the turn, rather than a context-owned timer.
 	defer func() { cancel(); co.release(f) }()
 	result := make(chan inputResult, 1)
+	co.mu.Lock()
+	f.input = result
+	co.mu.Unlock()
 	go func() {
 		loaded := co.loadInput(gatherCtx, nil)
 		cancel()
@@ -702,6 +712,11 @@ func (co *Coordinator) Inputs(ctx context.Context, caller Caller) (ReloadInput, 
 	}()
 	select {
 	case loaded := <-result:
+		// Close can make both the gather result and shutdown ready together.
+		// Preserve shutdown's wire error whichever select arm wins.
+		if co.ctx.Err() != nil {
+			return ReloadInput{}, shutdown()
+		}
 		if loaded.err != nil {
 			return ReloadInput{}, c.SafeError("unavailable")
 		}
