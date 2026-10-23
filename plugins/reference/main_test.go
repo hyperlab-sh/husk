@@ -770,18 +770,20 @@ func TestCaptureFieldWireShape(t *testing.T) {
 }
 
 // secret-check asks the host for the declared secret and replies to the action
-// once the read is decided: set:true on a value, the error's code and reason
-// otherwise, and never the value.
+// once the read is decided: set:true on a value, an action error preserving
+// the error's code and reason otherwise, and never the value or backend prose.
 func TestSecretCheckRepliesWithoutTheValue(t *testing.T) {
 	for _, tc := range []struct {
-		name  string
-		reply string
-		want  map[string]any
+		name       string
+		reply      string
+		wantCode   protocol.Code
+		wantReason string
 	}{
-		{"value", `{"id":%s,"result":{"name":"go.reference.token","value":"s3cret"}}`, map[string]any{"set": true}},
-		{"declined", `{"id":%s,"error":{"code":"denied","message":"denied: user_denied","data":{"reason":"user_denied"}}}`, map[string]any{"code": "denied", "reason": "user_denied"}},
-		{"unset", `{"id":%s,"error":{"code":"not_found","message":"not_found: unset","data":{"reason":"unset"}}}`, map[string]any{"code": "not_found", "reason": "unset"}},
-		{"no reason", `{"id":%s,"error":{"code":"internal","message":"boom"}}`, map[string]any{"code": "internal", "reason": ""}},
+		{"value", `{"id":%s,"result":{"name":"go.reference.token","value":"s3cret"}}`, "", ""},
+		{"declined", `{"id":%s,"error":{"code":"denied","message":"s3cret","data":{"reason":"user_denied","extra":"s3cret"}}}`, protocol.CodeDenied, "user_denied"},
+		{"unset", `{"id":%s,"error":{"code":"not_found","message":"not_found: unset","data":{"reason":"unset"}}}`, protocol.CodeNotFound, "unset"},
+		{"storage", `{"id":%s,"error":{"code":"unavailable","message":"s3cret","data":{"reason":"storage"}}}`, protocol.CodeUnavailable, "storage"},
+		{"no reason", `{"id":%s,"error":{"code":"internal","message":"s3cret"}}`, protocol.CodeInternal, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := start(t, false)
@@ -794,14 +796,28 @@ func TestSecretCheckRepliesWithoutTheValue(t *testing.T) {
 			h.stdoutBarrier()
 			h.toSocket(fmt.Sprintf(tc.reply, get.ID.String()))
 			rep := h.outNext()
-			if rep.ID == nil || rep.ID.String() != `"inv-1"` || rep.Error != nil {
+			if rep.ID == nil || rep.ID.String() != `"inv-1"` {
 				t.Fatalf("action reply = %+v", rep)
 			}
-			if strings.Contains(string(rep.Result), "s3cret") {
-				t.Fatalf("reply leaks the value: %s", rep.Result)
+			raw, err := json.Marshal(rep)
+			if err != nil {
+				t.Fatal(err)
 			}
-			if got := decode[map[string]any](t, rep.Result); fmt.Sprint(got) != fmt.Sprint(tc.want) {
-				t.Fatalf("reply = %v, want %v", got, tc.want)
+			if strings.Contains(string(raw), "s3cret") || strings.Contains(h.logs.String(), "s3cret") {
+				t.Fatal("secret value or backend prose leaked into a reply or log")
+			}
+			if tc.wantCode == "" {
+				if rep.Error != nil || string(rep.Result) != `{"set":true}` {
+					t.Fatalf("successful action = %+v", rep)
+				}
+				return
+			}
+			if rep.Error == nil || rep.Error.Code != tc.wantCode || rep.Result != nil {
+				t.Fatalf("action reply = %+v, want error %s without a result", rep, tc.wantCode)
+			}
+			want := map[string]string{"reason": tc.wantReason}
+			if got := decode[map[string]string](t, rep.Error.Data); fmt.Sprint(got) != fmt.Sprint(want) {
+				t.Fatalf("error data = %v, want %v", got, want)
 			}
 		})
 	}

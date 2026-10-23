@@ -472,7 +472,13 @@ func (p *plugin) complete(m protocol.Message) error {
 			Reason string `json:"reason"`
 		}
 		_ = json.Unmarshal(m.Error.Data, &data)
-		return p.reply(req, map[string]any{"code": m.Error.Code, "reason": data.Reason})
+		raw, err := json.Marshal(data)
+		if err != nil {
+			return err
+		}
+		return p.stdout.Send(protocol.Message{ID: req.ID, Error: &protocol.Error{
+			Code: m.Error.Code, Message: "secret read failed: " + string(m.Error.Code), Data: raw,
+		}})
 	case pendingContribute:
 		if m.Error == nil {
 			return nil

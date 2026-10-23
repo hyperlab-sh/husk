@@ -89,8 +89,10 @@ Plugins can publish namespaced slots, hooks and events for other plugins to atta
 
 The reference plugin declares the optional secret `go.reference.token` and the
 `go.reference.secret-check` action. After storing a value with `secrets.set`,
-invoke the action to exercise the consent dialog. It replies with `{"set":true}`
-or an error code and reason, never the value.
+invoke the action to exercise the consent dialog. Success replies with
+`{"set":true}`; a failed read is an action error preserving its code and
+`data.reason`, never the value. A denial or dismissal therefore makes the CLI
+exit nonzero, with the error on stderr and no successful result on stdout.
 
 Answer the dialog within the host's **10 s action timeout** (and before any
 shorter CLI `--timeout`). The dialog's own timeout is 60 s, so waiting for it
