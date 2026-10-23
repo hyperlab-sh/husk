@@ -18,8 +18,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/charmbracelet/x/term"
-
 	"github.com/hyperlab-sh/husk/internal/cli/output"
 	"github.com/hyperlab-sh/husk/internal/instance"
 )
@@ -48,10 +46,16 @@ func OSEnv() Env {
 		Stdout:      os.Stdout,
 		Stderr:      os.Stderr,
 		Stdin:       os.Stdin,
-		StdoutIsTTY: term.IsTerminal(os.Stdout.Fd()),
+		StdoutIsTTY: isCharDevice(os.Stdout),
 		Getenv:      os.Getenv,
 		RuntimeDir:  instance.LookupRuntimeDir,
 	}
+}
+
+// isCharDevice reports whether f is a terminal-like character device.
+func isCharDevice(f *os.File) bool {
+	fi, err := f.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }
 
 // command is one subcommand of the table.

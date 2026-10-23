@@ -32,6 +32,9 @@ func TestImportsStayWithinAllowList(t *testing.T) {
 			if path == "os/signal" {
 				t.Errorf("%s imports os/signal: the CLI installs no signal handler; a signal ends it by the signal", f)
 			}
+			if strings.Contains(strings.SplitN(path, "/", 2)[0], ".") && !strings.HasPrefix(path, module) {
+				t.Errorf("%s imports %s: the CLI imports the standard library and Husk packages only", f, path)
+			}
 			if rel, ok := strings.CutPrefix(path, module); ok && !allowed[rel] {
 				t.Errorf("%s imports %s", f, path)
 			}

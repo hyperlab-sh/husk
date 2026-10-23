@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -358,6 +359,24 @@ func TestStaleEntryIsRemovedWhenTheConnectIsRefused(t *testing.T) {
 				t.Fatalf("stale entry still on disk: %v", err)
 			}
 		})
+	}
+}
+
+// A target found by discovery that dies between the survey and the dial is
+// still cleaned up, but the removal is silent: only an explicit target is told.
+func TestDiscoveredTargetThatDiesBeforeTheDialIsRemovedSilently(t *testing.T) {
+	dir := shortDir(t)
+	register(t, dir, "ghost", instance.SocketPath(dir, "ghost"), protocol.Version) // entry, no socket
+	h := newHarness(t, dir, nil)
+	h.env.Deps = &instance.Deps{Ping: func(string) error { return nil }} // the survey saw it live
+	if got := h.run("ping", "--format", "table"); got != output.ExitNoInstance {
+		t.Fatalf("exit = %d, want %d; stderr %q", got, output.ExitNoInstance, h.errb.String())
+	}
+	if h.errb.String() != "husk: instance \"ghost\" is not running\n" {
+		t.Fatalf("stderr = %q", h.errb.String())
+	}
+	if _, err := os.Stat(instance.EntryPath(dir, "ghost")); !os.IsNotExist(err) {
+		t.Fatalf("stale entry still on disk: %v", err)
 	}
 }
 
@@ -858,18 +877,26 @@ func TestParseInterspersed(t *testing.T) {
 	}
 }
 
-func TestTimeoutStartsWhenTheFirstByteIsSentNotWhenConnectingStarts(t *testing.T) {
+// TestTimeoutStartsAfterTheDialReturns pins the order without a clock: the
+// context handed to the dial carries no deadline, so --timeout has not
+// started while connecting; the command's own context does carry it.
+func TestTimeoutStartsAfterTheDialReturns(t *testing.T) {
 	dir := shortDir(t)
 	srv := serve(t, dir, "a", pingOK("a", func(c *srvConn, req protocol.Message) { c.reply(req, map[string]any{"ok": true}) }))
-	slow := dialSocket
+	real := dialSocket
+	var dialHadDeadline atomic.Bool
 	dialSocket = func(ctx context.Context, socket string) (net.Conn, error) {
-		time.Sleep(300 * time.Millisecond) // the connect alone outlasts --timeout
-		return slow(ctx, socket)
+		_, has := ctx.Deadline()
+		dialHadDeadline.Store(has)
+		return real(ctx, socket)
 	}
-	t.Cleanup(func() { dialSocket = slow })
+	t.Cleanup(func() { dialSocket = real })
 	h := newHarness(t, dir, nil)
-	if got := h.run("rpc", "x.y", "--socket", srv.Socket, "--timeout", "200ms"); got != 0 {
+	if got := h.run("rpc", "x.y", "--socket", srv.Socket, "--timeout", "30s"); got != 0 {
 		t.Fatalf("exit = %d; stderr %q", got, h.errb.String())
+	}
+	if dialHadDeadline.Load() {
+		t.Fatal("the dial ran under --timeout: the timeout must start after connecting")
 	}
 }
 
