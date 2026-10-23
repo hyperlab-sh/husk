@@ -210,9 +210,9 @@ type Dispatcher interface {
     // rail item id. Host handlers run inline on the loop, so for a host
     // action Reply is called before Invoke returns. A handler may answer
     // with Declined: true, a host-only flag that never crosses the wire: the
-    // Dispatcher passes it unchanged to an in-process caller (Input treats it
-    // as an unbound key, see Keybindings) and answers every other caller
-    // with a successful empty reply.
+    // Dispatcher passes it unchanged to whoever made the request (Input treats
+    // it as an unbound key, see Keybindings); the Calls port, the only wire
+    // path, answers a declined reply with a successful empty result.
     RegisterHost(action string, h func(ActionRequest) ActionReply)
     // Complete turns Calls results (Resolve, Expire, DropPlugin, Close) into
     // the pending Replies. Results of other requesters are ignored.
@@ -291,15 +291,15 @@ Notes fixed by the implementation (`internal/stem/dispatcher`):
   Host see every entry, a plugin sees its own and the public ones. `live` is
   true for host actions. The `--owner` filter of `husk action list` is applied
   by the CLI, since the method has no parameters.
-- A Stem caller arriving over the `CallsPort` (`Frontend.InvokeAction`)
-  carries the kind the frontend passed: `input` for a key binding Input
+- A caller entering through `Frontend.InvokeAction` (`Root` calls
+  `Dispatcher.Invoke` directly, not through the `CallsPort`) carries the kind the frontend passed: `input` for a key binding Input
   resolved, `host` for an action the host started itself (a palette entry, a
   rail item). An `input` caller also carries the `FocusContext` Input read on
   that key press, and the Dispatcher uses it; a `host` caller gets State's
   focus like every other caller. The two mismatches are rejected before
   anything is dispatched: `input` with no focus, and `host` with a focus, each
   get an `invalid_params` reply through the caller's `Reply`, synchronously,
-  plus a log line; the frontend seam defines the same rule ([Pods](pods.md),
+  plus a log line, both from `Root.InvokeAction` before the Dispatcher; the frontend seam defines the same rule ([Pods](pods.md),
   Frontend seams).
 - A host handler that panics yields one `internal` reply and a log line.
 
