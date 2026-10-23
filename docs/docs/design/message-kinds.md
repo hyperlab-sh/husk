@@ -633,7 +633,8 @@ introspection; the shapes are in [Hooks](hooks.md).
     `event.emit` is a request so refusals are replies.
 12. Coalescing keys on `(Name, Key)`, not name alone, so `state.changed` for
     different slices does not collapse.
-13. `state.changed` carries `{slice, owner, revision}` and no value.
+13. `state.changed` carries `{slice, owner, revision}` and no value; on slice
+    removal it also carries `removed: true` ([State](state.md)).
 14. A publisher receives its own events when it subscribed to them.
 15. Events with `coalesce: false` are queued in full up to 256 per subscriber
     per tick, excess dropped with one log line per subscriber per tick.

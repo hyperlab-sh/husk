@@ -233,9 +233,9 @@ What changes: this envelope is a breaking change, so the target major is **2** (
 
 Minor 2.1 ([Hooks](hooks.md), [Keybindings](keybindings.md), [Pods](pods.md)): `hook.list`; `hook.call` outcome fields `kind`, `data`, `allowed`, `vetoes` and the per-entry `items`, `veto`, `reason`; subscriber params `kind`; the optional `capture` field of `surface.update`; `plugin.remove` and the `pods.plugin-removed` event name. Owner-only firing (the CLI included) tightens 2.0 without a major bump because no shipped plugin fires a hook it does not own and no CLI exists yet.
 
-Minor 2.2 ([Pods](pods.md), "Adding a plugin"): `plugin.add` and the `pods.plugin-added` event name. **Landed:** `protocol.Version` is `2.2`; the CLI-only handler loads a batch and returns its launch outcomes and five reload reports.
+Minor 2.2 ([Pods](pods.md), "Adding a plugin"): `plugin.add` and the `pods.plugin-added` event name. **Landed in 2.2:** the CLI-only handler loads a batch and returns its launch outcomes and five reload reports.
 
-Minor 2.3 ([Services](services.md), "Theme" and "Settings"; [Settings center](settings-center.md)): `theme.list` and `settings.set`, plus the `settings` reload reason in `services.reloaded`, plus the `dir` field of each `plugin.list` entry and `husk.pods` entry (additive; the plugin's directory as the converter resolved it, `""` for an implicit command line; [Pods](pods.md), "plugin.* wire shapes"). `protocol.Version` moves to `2.3` when both `theme.list` and `settings.set` are served (rule 5 above: the minor is "specified, not landed" until all of it is); `dir` is an additive field and does not move the version, whenever it lands. `plugin.remove` admitting a `host` caller at its port is a port rule, not a wire change, and is not part of any minor. The two methods are specified below under "Theme selection and the settings write (minor 2.3)" and land together with their handlers: the constants, the schema entries and the rows of the method table are added in the change that serves them, so `pkg/protocol` never names a method the host answers `unknown_method` to.
+Minor 2.3 ([Services](services.md), "Theme" and "Settings"; [Settings center](settings-center.md)): `theme.list` and `settings.set`, plus the `settings` reload reason in `services.reloaded`, plus the `dir` field of each `plugin.list` entry and `husk.pods` entry (additive; the plugin's directory as the converter resolved it, `""` for an implicit command line; [Pods](pods.md), "plugin.* wire shapes"). **Landed:** `protocol.Version` is `2.3`, with both `theme.list` and `settings.set` served after minor 2.2's `plugin.add` (rule 5 above); `dir` is an additive field and does not move the version, whenever it lands. `plugin.remove` admitting a `host` caller at its port is a port rule, not a wire change, and is not part of any minor. The two methods are described below under "Theme selection and the settings write (minor 2.3)" and landed together with their handlers: the constants, the schema entries and the rows of the method table were added in the change that serves them, so `pkg/protocol` never names a method the host answers `unknown_method` to.
 
 Minor 2.4 ([Built-in themes](themes.md), "Role values"; [Services](services.md), "Theme"): the optional `ansi` object beside `palette` in the `theme.get` result and the `theme.changed` params, mapping each palette role a theme set as an ANSI index to that index (`0`–`15`). No method is added and no existing field changes: `palette` values stay `#rrggbb`. `protocol.Version` moves to `2.4` when the host serves `ansi` and minor 2.3 has landed (rule 5). The field and its payload type are added to `pkg/protocol`, and so to the generated schema, in the change that serves it; the shape is under "ANSI palette roles (minor 2.4)" below.
 
@@ -247,7 +247,7 @@ Where the version is checked, since there is no handshake:
 A major-1 plugin that slipped through (a manifest without a version, read by the v1 converter) is recognized by its first stdout line (`{"type":"hello",...}`) or by the first line of a socket connection it opens. Husk answers it once, on stdin or on that connection, in the major-1 shape so the plugin can log a useful reason, then stops it. On the socket the plugin is the live pod named by `hello.plugin_id`; a hello naming no live pod gets the line and the close and nothing else is stopped:
 
 ```json
-{"type":"protocol_error","protocol_error":{"message_type":"hello","message":"unsupported protocol major 1: host speaks 2.2"}}
+{"type":"protocol_error","protocol_error":{"message_type":"hello","message":"unsupported protocol major 1: host speaks 2.3"}}
 ```
 
 ### Session start and end
@@ -325,7 +325,7 @@ Each entry names the surface and its inner content dimensions in cells, focus an
 
 ### Runtime and terminal surfaces (minor 2.2)
 
-**Level 1: specified, not landed.** Nothing below exists in `pkg/protocol`; the current `2.2` serves `plugin.add`, not these methods. The method table above, `pkg/protocol/methods.go` and the generated schema gain the rows, constants and payload types only in the change that serves them. The host-side contracts (ports, `MethodHomes`, the Surfaces engine) are named in [Pods](pods.md) and [State](state.md); this section owns only the wire.
+**Level 1: specified, not landed.** Nothing below exists in `pkg/protocol`; the current `2.3` serves `plugin.add`, `theme.list` and `settings.set`, not these methods. The method table above, `pkg/protocol/methods.go` and the generated schema gain the rows, constants and payload types only in the change that serves them. The host-side contracts (ports, `MethodHomes`, the Surfaces engine) are named in [Pods](pods.md) and [State](state.md); this section owns only the wire.
 
 Two capabilities a manifest cannot express motivate the minor: a plugin that decides at run time that it needs a modal or the whole canvas (a dialog, a viewer), and a plugin whose content is a terminal, a byte stream from a process, rather than lines of text. Both are generic: no plugin kind is named here.
 
@@ -361,7 +361,7 @@ Why the host emulates: the host owns the cell canvas and the key encoder, so a t
 
 ### Theme selection and the settings write (minor 2.3)
 
-**Both methods are served; the minor is still "specified, not landed" (rule 5) because minor 2.2 is not.** The method table above, `pkg/protocol/methods.go` and the generated schema contain these rows, constants and payload shapes. `protocol.Version` remains `2.1` until minor 2.2 lands; the later stamp to `2.3` changes no payload. This section owns only the names, forms and directions; params, results and errors are [Services](services.md)'s ("Theme", "Settings").
+**Landed:** both methods and minor 2.2's `plugin.add` are served, so `protocol.Version` is `2.3` (rule 5). The method table above, `pkg/protocol/methods.go` and the generated schema contain these rows, constants and payload shapes. The version stamp changes no payload. This section owns only the names, forms and directions; params, results and errors are [Services](services.md)'s ("Theme", "Settings").
 
 | Namespace | Method | Form | Direction |
 | :--- | :--- | :--- | :--- |
