@@ -26,10 +26,10 @@ func cloneSpec(s Spec) Spec {
 	for i := range s.RailItems {
 		s.RailItems[i].Frame = clonePtr(s.RailItems[i].Frame)
 	}
-	s.FocusBindings = slices.Clone(s.FocusBindings)
-	for i := range s.FocusBindings {
-		s.FocusBindings[i].Keys = slices.Clone(s.FocusBindings[i].Keys)
-		s.FocusBindings[i].Args = bytes.Clone(s.FocusBindings[i].Args)
+	s.Keybindings = slices.Clone(s.Keybindings)
+	for i := range s.Keybindings {
+		s.Keybindings[i].Keys = slices.Clone(s.Keybindings[i].Keys)
+		s.Keybindings[i].Args = bytes.Clone(s.Keybindings[i].Args)
 	}
 	s.Subscriptions = slices.Clone(s.Subscriptions)
 	s.EventsDeclared = slices.Clone(s.EventsDeclared)

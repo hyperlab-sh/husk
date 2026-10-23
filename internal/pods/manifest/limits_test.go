@@ -20,10 +20,10 @@ func TestFocusBindingLimitPreservesFirst128AndReportsOneProblem(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(s.FocusBindings) != MaxFocusBindings || len(s.BindingProblems) != 1 || len(w) != 1 {
-		t.Fatal(len(s.FocusBindings), s.BindingProblems, w)
+	if len(s.Keybindings) != MaxFocusBindings || len(s.BindingProblems) != 1 || len(w) != 1 {
+		t.Fatal(len(s.Keybindings), s.BindingProblems, w)
 	}
-	for i, b := range s.FocusBindings {
+	for i, b := range s.Keybindings {
 		if b.Key != fmt.Sprint(i) {
 			t.Fatal("document order changed", i, b)
 		}
@@ -68,14 +68,14 @@ func TestFocusBindingsSpellingIsNotAnAlias(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(s.FocusBindings) != 0 || len(s.BindingProblems) != 0 {
-		t.Fatalf("focus_bindings still read: %+v %+v", s.FocusBindings, s.BindingProblems)
+	if len(s.Keybindings) != 0 || len(s.BindingProblems) != 0 {
+		t.Fatalf("focus_bindings still read: %+v %+v", s.Keybindings, s.BindingProblems)
 	}
 	if len(w) != 1 || w[0].Code != "ignored_field" || w[0].Field != "focus_bindings" {
 		t.Fatalf("warnings = %+v, want one ignored_field for focus_bindings", w)
 	}
 	raw = strings.Replace(raw, "focus_bindings", "keybindings", 1)
-	if s, _, err = convertBytes(t, raw, true); err != nil || len(s.FocusBindings) != 1 {
+	if s, _, err = convertBytes(t, raw, true); err != nil || len(s.Keybindings) != 1 {
 		t.Fatalf("keybindings not read: %+v %v", s, err)
 	}
 }

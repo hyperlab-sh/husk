@@ -218,7 +218,7 @@ func convert(src Source, modern bool) (*Spec, []Warning, error) {
 				warnings = append(warnings, Warning{Code: code, Field: "keybindings", Index: i, Message: message})
 				continue
 			}
-			s.FocusBindings = append(s.FocusBindings, b.FocusBinding)
+			s.Keybindings = append(s.Keybindings, b.FocusBinding)
 		}
 		if overLimit {
 			message := fmt.Sprintf("focus-local bindings exceed the %d-entry limit; remaining entries dropped", MaxFocusBindings)

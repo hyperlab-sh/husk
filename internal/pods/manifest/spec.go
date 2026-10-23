@@ -25,7 +25,7 @@ type Spec struct {
 	Actions           []ActionDecl       `json:"actions,omitempty"`
 	Surfaces          []SurfaceDecl      `json:"surfaces,omitempty"`
 	RailItems         []RailItemDecl     `json:"rail_items,omitempty"`
-	FocusBindings     []FocusBinding     `json:"focus_bindings,omitempty"`
+	Keybindings       []FocusBinding     `json:"keybindings,omitempty"`
 	Subscriptions     []string           `json:"subscriptions,omitempty"`
 	EventsDeclared    []EventDecl        `json:"events_declared,omitempty"`
 	HooksDeclared     []HookDecl         `json:"hooks_declared,omitempty"`
