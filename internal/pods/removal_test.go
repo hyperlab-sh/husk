@@ -239,7 +239,7 @@ func TestRemoveAdmissionAndLookup(t *testing.T) {
 		wantData string
 	}{
 		{"plugin caller is denied before any lookup", contracts.Caller{Kind: contracts.CallerPlugin, PluginID: "a"}, "a", false, protocol.CodeDenied, 0, ""},
-		{"stem caller is denied", contracts.Caller{Kind: contracts.CallerStem}, "a", false, protocol.CodeDenied, 0, ""},
+		{"host caller is denied", contracts.Caller{Kind: contracts.CallerHost}, "a", false, protocol.CodeDenied, 0, ""},
 		{"zero caller is denied", contracts.Caller{}, "a", false, protocol.CodeDenied, 0, ""},
 		{"empty id is invalid_params", cliCaller, "", false, protocol.CodeInvalidParams, 0, ""},
 		{"unknown id is not_found", cliCaller, "ghost", false, protocol.CodeNotFound, 1, ""},
@@ -707,7 +707,7 @@ func TestRemoveWithUnappliedReloadIsASuccess(t *testing.T) {
 	f := newRemovalFixture(t)
 	f.add("a", false)
 	f.rec.reload = func(context.Context) ([]contracts.ReloadReport, error) {
-		return []contracts.ReloadReport{{Service: "settings", Gen: 3, Applied: false, Problems: []contracts.Problem{{Severity: "error", Message: "timed out"}}}}, nil
+		return []contracts.ReloadReport{{Service: "settings", Gen: 3, Applied: false, Problems: []protocol.Problem{{Severity: "error", Message: "timed out"}}}}, nil
 	}
 	f.onLoop(func() { p, _ := f.h.Pod("a"); p.info.Status = wrapper.Exited })
 	res, err := f.h.Remove(t.Context(), cliCaller, "a")
@@ -800,5 +800,33 @@ func TestReloadCutShortAnswersCancelled(t *testing.T) {
 	_, err := f.h.Remove(t.Context(), cliCaller, "a")
 	if contracts.CodeOf(err) != string(protocol.CodeCancelled) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// The shutdown mark is checked first, whatever the entry map holds: a
+// teardown or completion that reaches a closing Host does nothing even for an
+// id that still has an entry.
+func TestRemovalHandlersCheckTheShutdownMarkFirst(t *testing.T) {
+	f := newRemovalFixture(t)
+	f.add("a", true)
+	handle := &fakeHandle{namespace: "a.state"}
+	rm := &removal{done: make(chan struct{})}
+	f.onLoop(func() {
+		f.h.handles["a"] = handle
+		f.h.removing["a"] = rm
+		f.h.closing = true
+		f.h.Handle(TeardownMsg{PluginID: "a"})
+		f.h.Handle(RemoveDoneMsg{PluginID: "a"})
+		if _, ok := f.h.Pod("a"); !ok || handle.unregistered || len(f.rec.undeclared) != 0 {
+			t.Error("teardown ran after the shutdown mark")
+		}
+		select {
+		case <-rm.done:
+			t.Error("the entry completed after the shutdown mark")
+		default:
+		}
+	})
+	if f.rec.data != nil {
+		t.Fatal("removed event after the shutdown mark")
 	}
 }
