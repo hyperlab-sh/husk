@@ -28,6 +28,10 @@ type fakeFE struct {
 	KeyStates []keyStateSent
 	Invoked   []invoked
 	Registers []string
+	// Writer calls retain their callbacks until a test explicitly delivers a reply.
+	SettingWrites  []settingWrite
+	ProfileUses    []profileUse
+	PluginRemovals []pluginRemoval
 	// Views is every surface view the model committed.
 	Views []contracts.SurfaceView
 	st    *state.State
@@ -169,19 +173,68 @@ func (f *fakeFE) Setting(string) (any, string, error)      { return nil, "", nil
 func (f *fakeFE) KeyListing() contracts.KeyListing         { return contracts.KeyListing{} }
 func (f *fakeFE) Profiles() []contracts.ProfileInfo        { return nil }
 func (f *fakeFE) ConfigDir() string                        { return "" }
-func (f *fakeFE) SetSetting(_ string, _ any, reply func(contracts.SettingSetResult, error)) {
+
+type settingWrite struct {
+	Key   string
+	Value any
+	Reply func(contracts.SettingSetResult, error)
+}
+type profileUse struct {
+	Name  string
+	Reply func(contracts.ProfileUseResult, error)
+}
+type pluginRemoval struct {
+	ID    string
+	Reply func(contracts.PluginRemoval, error)
+}
+
+func (f *fakeFE) SetSetting(key string, value any, reply func(contracts.SettingSetResult, error)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.SettingWrites = append(f.SettingWrites, settingWrite{key, value, reply})
+}
+func (f *fakeFE) UseProfile(name string, reply func(contracts.ProfileUseResult, error)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ProfileUses = append(f.ProfileUses, profileUse{name, reply})
+}
+func (f *fakeFE) RemovePlugin(id string, reply func(contracts.PluginRemoval, error)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.PluginRemovals = append(f.PluginRemovals, pluginRemoval{id, reply})
+}
+
+// replySetting delivers a queued reply from the test's loop, outside the call
+// stack that requested it. Clear it before delivery so a reentrant reply is safe.
+func (f *fakeFE) replySetting(i int, result contracts.SettingSetResult, err error) {
+	f.mu.Lock()
+	reply := f.SettingWrites[i].Reply
+	f.SettingWrites[i].Reply = nil
+	f.mu.Unlock()
 	if reply != nil {
-		reply(contracts.SettingSetResult{}, nil)
+		reply(result, err)
 	}
 }
-func (f *fakeFE) UseProfile(_ string, reply func(contracts.ProfileUseResult, error)) {
+
+// replyProfile delivers a queued profile reply from the test's loop.
+func (f *fakeFE) replyProfile(i int, result contracts.ProfileUseResult, err error) {
+	f.mu.Lock()
+	reply := f.ProfileUses[i].Reply
+	f.ProfileUses[i].Reply = nil
+	f.mu.Unlock()
 	if reply != nil {
-		reply(contracts.ProfileUseResult{}, nil)
+		reply(result, err)
 	}
 }
-func (f *fakeFE) RemovePlugin(_ string, reply func(contracts.PluginRemoval, error)) {
+
+// replyRemoval delivers a queued removal reply from the test's loop.
+func (f *fakeFE) replyRemoval(i int, result contracts.PluginRemoval, err error) {
+	f.mu.Lock()
+	reply := f.PluginRemovals[i].Reply
+	f.PluginRemovals[i].Reply = nil
+	f.mu.Unlock()
 	if reply != nil {
-		reply(contracts.PluginRemoval{}, nil)
+		reply(result, err)
 	}
 }
 
@@ -357,6 +410,23 @@ func contribute(m *WorkbenchModel, slot string, c contribution) {
 // setContent publishes content for a surface the way the content sink does.
 func setContent(m *WorkbenchModel, plugin string, p protocol.SurfaceUpdateParams) {
 	m.content(plugin, p)
+}
+
+func (f *fakeFE) lastKey() (keySent, bool) {
+	if len(f.Keys) == 0 {
+		return keySent{}, false
+	}
+	return f.Keys[len(f.Keys)-1], true
+}
+
+func (f *fakeFE) keysTo(plugin string) []string {
+	var out []string
+	for _, k := range f.Keys {
+		if k.Plugin == plugin {
+			out = append(out, k.P.Key)
+		}
+	}
+	return slices.Clone(out)
 }
 
 // hello is what a test declares about a plugin: the surfaces it occupies and
