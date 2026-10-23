@@ -497,7 +497,7 @@ Decoration takes one surface's content (the cells or lines the plugin supplied t
 | `cmd.Start` fails | Wrapper | Liveness `failed`; the catalog stays declared | Warning toast `<id>: <last_error>` (the frontend toasts on the transition into `failed`) |
 | Plugin exits non-zero or by a foreign signal | Wrapper | Pending calls failed via `Closed`, liveness `failed`, token revoked; the catalog stays declared | Warning toast `<id>: <last_error>`; log has the last 3 stderr lines |
 | Plugin exits 0 | Wrapper | Same cleanup, liveness `exited` | Info-level log line, no toast |
-| Plugin stops reading stdin | Stdin queue | Rule 4: immediate once-only `Closed` for overflow/deadline, kill, `failed` with `last_error` prefixed `stopped reading: ` | Warning toast `stopped reading: send queue full (1024 messages)` or `stopped reading: write timed out after 5s` |
+| Plugin stops reading stdin | Stdin queue | Rule 4: immediate once-only `Closed` for overflow/deadline, kill, `failed` with `last_error` prefixed `stopped reading: ` | Warning toast `<id>: stopped reading: protocol: send queue full (1024 messages)` or `<id>: stopped reading: protocol: write timed out after 5s` |
 | EOF/EPIPE or closed pipe/file | Wrapper | Credentials revoked immediately; once-only `Closed` after Wait and final replies, or at reap-grace expiry; pending calls fail at most 100 ms later | Final reason `exited`, `crashed` with status, or `stopped reading: ...` while the child survives |
 | Plugin writes a non-reply or malformed line on stdout | Wrapper reader | Line dropped, `protocol.error` notification sent | Plugin sees the notification; log line |
 | Reply with an unknown or expired id | Calls | Dropped | Debug log only |
