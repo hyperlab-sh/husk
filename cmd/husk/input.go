@@ -343,6 +343,10 @@ func (m *WorkbenchModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if m.terminalKey(protocol.SurfaceID(m.keyContext().FocusSurface), msg) {
+		return m, nil
+	}
+
 	// An open modal owns every key the keymap left alone.
 	if m.modalOwner().Open() {
 		m.sendKey(m.modalOwner().PluginID, protocol.SurfaceModal, key)
@@ -600,6 +604,10 @@ func (m *WorkbenchModel) handleMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 			m.hoverDivider = m.detectDividerAt(msg.X, msg.Y)
 			return m, nil
 		}
+	}
+
+	if m.activeDrag == "" && m.routeTerminalMouse(event) {
+		return m, nil
 	}
 
 	if _, motion := event.(tea.MouseMotionMsg); motion {

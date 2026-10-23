@@ -394,6 +394,9 @@ func (m *WorkbenchModel) currentHeldKeys() []string {
 // broadcastKeyState tells every live plugin about a key or modifier
 // transition. Delivery failures (a plugin that just exited) are not errors.
 func (m *WorkbenchModel) broadcastKeyState(phase protocol.KeyPhase, key string, held bool) {
+	if m.terminalView(protocol.SurfaceID(m.keyContext().FocusSurface)) != nil {
+		return
+	}
 	if m.fe == nil {
 		return
 	}
@@ -594,6 +597,16 @@ func (m *WorkbenchModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.showPalette && !m.layoutFrozen() {
 			return m.pastePalette(msg.Content)
+		}
+		if !m.layoutFrozen() {
+			id := protocol.SurfaceID(m.keyContext().FocusSurface)
+			if m.terminalView(id) != nil {
+				m.clearPending()
+				m.captureReleased = false
+				m.captureGen++
+				m.fe.SendTerminalPaste(id, msg.Content)
+				return m, nil
+			}
 		}
 		// A paste ends a pending sequence, then travels as one key. v1 delivered
 		// bracketed paste as a key whose string was wrapped in brackets,
