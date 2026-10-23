@@ -434,7 +434,7 @@ JSON output (the reply `result`):
     },
     {
       "keys": ["n"], "focus": "sidebar-list", "plugin": "files", "action": "files.new",
-      "source": {"layer": "focus-local", "plugin": "files", "order": 0},
+      "source": {"layer": "focus-local", "plugin": "files"},
       "state": "shadowed",
       "shadowed_by": {"layer": "user", "file": "keymap.json", "order": 8}
     },
