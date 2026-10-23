@@ -128,7 +128,9 @@ const (
 
 Only `cli` and `plugin` are ever produced from a socket request. A zero value is not a valid caller; each receiving module says what it answers to one.
 
-`FocusContext` lives here for the same reason: it is the `params.focus` member of the `action.invoke` request Husk sends an owner ([Message kinds](message-kinds.md)), and it is the one focus type the Dispatcher, the frontend seam (`Frontend.InvokeAction`, [Pods](pods.md)) and the Server share; no module defines its own copy.
+### FocusContext
+
+`FocusContext` lives here for the same reason as `Caller`: it is the `params.focus` member of the `action.invoke` request Husk sends an owner ([Message kinds](message-kinds.md)), and it is the one focus type the Dispatcher, the frontend seam (`Frontend.InvokeAction`, [Pods](pods.md)) and the Server share; no module defines its own copy.
 
 ```go
 // FocusContext is the focus at dispatch time: State's focus slice, or, for an
