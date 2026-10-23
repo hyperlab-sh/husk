@@ -18,7 +18,7 @@ type catalogCache struct {
 
 // Catalog implements contracts.Frontend without calling Store.
 func (r *Root) Catalog() contracts.CatalogResult {
-	out := contracts.CatalogResult{Entries: []contracts.CatalogEntry{}, Problems: nil}
+	out := contracts.CatalogResult{Entries: []contracts.CatalogEntry{}, Problems: []protocol.Problem{}}
 	if p := r.pluginCatalog.value.Load(); p != nil {
 		out.Entries = append(out.Entries, p.Entries...)
 		out.Problems = append(out.Problems, p.Problems...)
@@ -51,9 +51,9 @@ func (r *Root) warmCatalog() <-chan struct{} {
 	if r.opts.catalogReader != nil {
 		reader = r.opts.catalogReader
 	}
-	r.spawn(func() tea.Msg {
+	if !r.spawn(func() tea.Msg {
 		defer close(done)
-		result := catalog.Read(reader, profile)
+		result := catalog.Read(reader, profile, r.store.Paths().Config)
 		out := contracts.CatalogResult{Entries: make([]contracts.CatalogEntry, len(result.Entries)), Problems: result.Problems}
 		for i, e := range result.Entries {
 			out.Entries[i] = contracts.CatalogEntry(e)
@@ -64,6 +64,8 @@ func (r *Root) warmCatalog() <-chan struct{} {
 			}
 		})
 		return nil
-	})
+	}) {
+		close(done)
+	}
 	return done
 }

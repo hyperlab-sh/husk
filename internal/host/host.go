@@ -610,8 +610,8 @@ func (r *Root) launchPlugins(ctx context.Context) error {
 }
 
 // spawn runs a Bubble Tea style command on a host-owned worker and posts its
-// message to the loop.
-func (r *Root) spawn(cmd tea.Cmd) {
+// message to the loop. It reports whether a worker was accepted.
+func (r *Root) spawn(cmd tea.Cmd) bool {
 	r.mu.Lock()
 	if r.closing {
 		// Shutdown is waiting on (or past) wg: a late worker would race
@@ -620,7 +620,7 @@ func (r *Root) spawn(cmd tea.Cmd) {
 		if r.opts.onSpawn != nil {
 			r.opts.onSpawn(false)
 		}
-		return
+		return false
 	}
 	r.wg.Add(1)
 	r.workers.Add(1)
@@ -635,6 +635,7 @@ func (r *Root) spawn(cmd tea.Cmd) {
 			r.cfg.Post(msg)
 		}
 	}()
+	return true
 }
 
 // Close stops everything in the order pods.md fixes and is idempotent: the
