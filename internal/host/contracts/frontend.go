@@ -130,6 +130,8 @@ type Frontend interface {
 	// SendMouse delivers input.mouse; errors as SendKey. Loop only.
 	SendMouse(plugin string, params protocol.SurfaceMouseParams) error
 	// SendKeyState delivers input.key_state; errors as SendKey. Loop only.
+	// The frontend suppresses broadcasts while a terminal has effective focus
+	// (modal precedence); params.Surface and target occupancy do not gate delivery.
 	SendKeyState(plugin string, params protocol.KeyStateParams) error
 
 	// TerminalView returns the attached emulator's drawer, nil for a line

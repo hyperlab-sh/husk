@@ -176,16 +176,6 @@ func (r *Root) SendKeyState(plugin string, params protocol.KeyStateParams) error
 	if err := params.Validate(); err != nil {
 		return invalidParams(err)
 	}
-	if params.Surface != "" && r.engine.Terminal(params.Surface) != nil {
-		return nil
-	}
-	if params.Surface == "" {
-		for _, size := range r.occupiedSizes(plugin) {
-			if r.engine.Terminal(size.Surface) != nil {
-				return nil
-			}
-		}
-	}
 	return r.deliver(plugin, protocol.MethodInputKeyState, params)
 }
 
