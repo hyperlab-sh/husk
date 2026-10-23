@@ -119,6 +119,34 @@ func TestTerminalReleaseClockAndDoubleRelease(t *testing.T) {
 	}
 }
 
+func TestTerminalSettingsOverlayOwnsInputAndCursor(t *testing.T) {
+	m, fe, _, input := terminalModel(t, false)
+	if m.View().Cursor == nil {
+		t.Fatal("focused terminal cursor missing")
+	}
+	if _, err := m.openSettings(nil); err != nil {
+		t.Fatal(err)
+	}
+	if m.View().Cursor != nil {
+		t.Fatal("terminal cursor visible beneath Settings")
+	}
+	m.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
+	m.Update(tea.PasteMsg{Content: "private overlay input"})
+	r := m.slotRects[protocol.SurfaceMainStage]
+	m.Update(tea.MouseClickMsg{X: r.InnerX, Y: r.InnerY, Button: tea.MouseLeft})
+	if len(fe.TerminalKeys) != 0 || len(fe.TerminalPastes) != 0 || len(fe.TerminalMice) != 0 {
+		t.Fatal("Settings input reached the terminal")
+	}
+	m.closeSettings()
+	if m.View().Cursor == nil {
+		t.Fatal("terminal cursor not restored after Settings")
+	}
+	m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	if got := string(<-input); got != "y" {
+		t.Fatalf("restored terminal input = %q", got)
+	}
+}
+
 func TestTerminalCanvasCursorTitleAndMouse(t *testing.T) {
 	m, fe, term, _ := terminalModel(t, false)
 	term.Write([]byte("\x1b]2;Program\ahello"))
