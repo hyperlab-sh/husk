@@ -348,14 +348,14 @@ Work units, in order. Sizes: S under a day, M two to three days, L a week. Core 
 | C6 | **Live `plugin.add`.** Core, for every plugin kind; specified in its own core spec and built before A4. | M | C1 |
 | A7 | **Registry sync.** `husk-herdr sync`, the `doctor` row for registry plugins absent from the instance, end-to-end test that installs a fixture plugin into a fake registry while the host runs. | S | A3, C6 |
 | C2 | **Runtime surfaces.** `surface.open` (`modal`, `canvas`), dynamic surface ids, `husk.surfaces.runtime`, modal singleton, frontend placement, close paths, golden frames. | L | — |
-| C3 | **Terminal surfaces.** Emulator package over `charmbracelet/x/vt`, `terminal.attach|write|detach|input`, frontend draw into the cell canvas, scrollback on wheel, cursor, title in the frame label, golden frames with a scripted byte stream. | L | C2 |
+| C3 | **Terminal surfaces.** Emulator package over `charmbracelet/x/vt`, `terminal.attach|write|detach|input`, frontend draw into the cell canvas, scrollback on wheel, cursor, title in the frame label, golden frames with a scripted byte stream. Attach works on claimed surfaces, so C3 shipped (minor 2.5) without C2; only runtime terminal surfaces wait for C2. | L | — |
 | C4 | **Capture modes and the release key.** `capture` tri-state on the wire and in `husk.surfaces`, `all` filter, `husk.capture.release` and its one-shot, mouse and paste to terminal surfaces. | M | C3 |
 | A4 | **Panes and popups.** PTYs, placement mapping, `plugin.pane.open|focus|close` and `popup.close` interception, `husk:` ids, exit and close paths, limits. | M | A3, C2, C3, C4 |
 | C5 | **`terminal.link`** (OSC 8 and URL detection on modified click) and runtime `stage`/`panel` placements with the stack rule. | M | C3 |
 | A5 | **Link handlers and `split` → `panel`.** | S | A4, C5 |
 | A6 | **Hardening.** Reconnect under load, the two-instance case, 32-command cap, PTY teardown races, a run against the real server with the installed plugins recorded in a checklist. | M | A4 |
 
-Critical path: C1 → A3 (actions usable), then C2 → C3 → C4 → A4 (panes visible). C2 to C4 can run in parallel with A1 to A3; C6 → A7 runs beside them and lands before A4.
+Critical path: C1 → A3 (actions usable), then C2 → C3 → C4 → A4 (panes visible). C3 and C4 do not need C2 (they landed first, on claimed surfaces), but A4 needs all three. C2 to C4 can run in parallel with A1 to A3; C6 → A7 runs beside them and lands before A4.
 
 ## Decisions made here
 
