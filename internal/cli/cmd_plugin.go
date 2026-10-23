@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/hyperlab-sh/husk/internal/cli/output"
@@ -52,7 +53,29 @@ func runPluginAdd(ctx context.Context, inv *Invocation, args []string) error {
 		}
 		path = filepath.Join(cwd, path)
 	}
-	return pluginCall(ctx, inv, protocol.MethodPluginAdd, map[string]string{key: filepath.Clean(path)})
+	res, err := pluginRequest(ctx, inv, protocol.MethodPluginAdd, map[string]string{key: filepath.Clean(path)})
+	if err != nil {
+		return err
+	}
+	var result struct {
+		Added []struct{ Plugin, Status string }
+	}
+	if err := json.Unmarshal(res, &result); err != nil {
+		return output.Protocol(err, "unreadable plugin.add reply: %v", err)
+	}
+	if err := inv.out.Result(res); err != nil {
+		return err
+	}
+	var failed []string
+	for _, added := range result.Added {
+		if added.Status == "failed" {
+			failed = append(failed, added.Plugin)
+		}
+	}
+	if len(failed) > 0 {
+		return &output.Error{Exit: output.ExitRemote, Code: string(protocol.CodeFailed), Message: "plugins failed to launch: " + strings.Join(failed, ", ")}
+	}
+	return nil
 }
 
 func runPluginList(ctx context.Context, inv *Invocation, args []string) error {
@@ -82,21 +105,26 @@ func runPluginRemove(ctx context.Context, inv *Invocation, args []string) error 
 // pluginCall sends one request and prints the reply's result: the document in
 // JSON, the generic rendering in table mode.
 func pluginCall(ctx context.Context, inv *Invocation, method string, params map[string]string) error {
-	raw, err := json.Marshal(params)
-	if err != nil {
-		return output.Usage("params: %v", err)
-	}
-	if err := inv.checkRequestSize(method, raw); err != nil {
-		return err
-	}
-	c, err := inv.Connect(ctx)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-	res, err := c.Call(c.Ctx, method, params)
+	res, err := pluginRequest(ctx, inv, method, params)
 	if err != nil {
 		return err
 	}
 	return inv.out.Result(res)
+}
+
+// pluginRequest sends one request without rendering its outcome.
+func pluginRequest(ctx context.Context, inv *Invocation, method string, params map[string]string) (json.RawMessage, error) {
+	raw, err := json.Marshal(params)
+	if err != nil {
+		return nil, output.Usage("params: %v", err)
+	}
+	if err := inv.checkRequestSize(method, raw); err != nil {
+		return nil, err
+	}
+	c, err := inv.Connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+	return c.Call(c.Ctx, method, params)
 }
