@@ -147,6 +147,113 @@ func TestAddPluginPreservesConfiguredPaths(t *testing.T) {
 	}
 }
 
+func TestAddPluginPreservesNamedInstanceConfig(t *testing.T) {
+	for _, tc := range []struct {
+		name, key, flag string
+		instance        any
+		otherFlags      []string
+		want            []string
+		invalid         bool
+	}{
+		{"instance paths replace user", "paths", "--add-plugin", nil, nil, []string{"instance", "added"}, false},
+		{"instance dirs replace user", "dirs", "--add-plugin-dir", nil, nil, []string{"instance", "added"}, false},
+		{"invalid instance paths retain user", "paths", "--add-plugin", 42, nil, []string{"user", "added"}, true},
+		{"invalid instance dirs retain user", "dirs", "--add-plugin-dir", 42, nil, []string{"user", "added"}, true},
+		{"invalid instance paths with other flags", "paths", "--add-plugin", 42, []string{"--bundle", ""}, []string{"user", "added"}, true},
+		{"invalid instance dirs with other flags", "dirs", "--add-plugin-dir", 42, []string{"--bundle", ""}, []string{"user", "added"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			t.Setenv("HOME", root)
+			t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
+			t.Setenv("XDG_STATE_HOME", filepath.Join(root, "state"))
+			t.Setenv("XDG_DATA_HOME", filepath.Join(root, "data"))
+			configDir := filepath.Join(root, "config", "husk")
+			instanceDir := filepath.Join(configDir, "instances", "add-flags")
+			if err := os.MkdirAll(instanceDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			paths := map[string]string{}
+			for _, id := range []string{"user", "instance", "added"} {
+				dir := filepath.Join(root, id)
+				if err := os.Mkdir(dir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				manifest := `{"manifest_version":2,"protocol":2,"id":"` + id + `","name":"Example","version":"1","command":["./plugin"]}`
+				if err := os.WriteFile(filepath.Join(dir, "husk-plugin.json"), []byte(manifest), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				paths[id] = dir
+			}
+			// Keep the instance spelling relative to the process directory, not
+			// the config file, just as without an additive launch flag.
+			cwd, err := os.Getwd()
+			if err != nil {
+				t.Fatal(err)
+			}
+			relative, err := filepath.Rel(cwd, paths["instance"])
+			if err != nil {
+				t.Fatal(err)
+			}
+			paths["instance"] = relative
+			instance := tc.instance
+			if !tc.invalid {
+				instance = []string{relative}
+			}
+			for file, value := range map[string]any{
+				filepath.Join(configDir, "config.json"):   []string{paths["user"]},
+				filepath.Join(instanceDir, "config.json"): instance,
+			} {
+				data, err := json.Marshal(map[string]any{"husk": map[string]any{"plugins": map[string]any{tc.key: value}}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(file, data, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			args := append([]string{tc.flag, paths["added"]}, tc.otherFlags...)
+			fs := pluginFlags(t, args...)
+			additions, err := pluginAdditions(fs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			prog := newProgramRef()
+			h, err := newHost(prog, goldenModel(), "add-flags", shortRuntimeDir(t, "add-instance"), pluginInstanceDocs(fs), nil, host.WithPluginAdditions(additions))
+			if err != nil {
+				prog.closeGate()
+				t.Fatal(err)
+			}
+			defer func() { prog.closeGate(); _ = h.Close() }()
+			value, source, err := h.Frontend().Setting("husk.plugins." + tc.key)
+			encoded, _ := json.Marshal(value)
+			var got []string
+			_ = json.Unmarshal(encoded, &got)
+			want := []string{}
+			for _, id := range tc.want {
+				want = append(want, paths[id])
+			}
+			if err != nil || !reflect.DeepEqual(got, want) || source != "instance" {
+				t.Fatalf("%s = %v (%s, %v), want %v from instance", tc.key, got, source, err, want)
+			}
+			found := false
+			for _, report := range h.Frontend().StartupReports() {
+				for _, p := range report.Problems {
+					if p.Code == "invalid_value" && p.Key == "husk.plugins."+tc.key {
+						if p.Layer != "instance" || p.Source == nil || p.Source.Layer != "instance" || p.Source.File != "instances/add-flags/config.json" {
+							t.Fatalf("invalid instance array provenance = %+v", p)
+						}
+						found = true
+					}
+				}
+			}
+			if found != tc.invalid {
+				t.Fatalf("invalid instance array diagnostic present = %v, want %v", found, tc.invalid)
+			}
+		})
+	}
+}
+
 func TestAddPluginUsageAndHelp(t *testing.T) {
 	for _, tc := range []struct {
 		name     string

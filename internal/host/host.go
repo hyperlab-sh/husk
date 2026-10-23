@@ -456,9 +456,10 @@ func startupFatal(reports []services.Report, err error, additions map[string][]s
 			case "store_error", "timed_out", "cancelled":
 				return true
 			case "invalid_value":
-				// Additive flags replace an invalid lower array with their own
-				// valid instance array, while retaining the original diagnostic.
-				if report.Service == "settings" && strings.HasPrefix(p.Key, "husk.plugins.") && p.Layer != "instance" && len(additions[strings.TrimPrefix(p.Key, "husk.plugins.")]) > 0 {
+				// Additive flags supply a valid array while retaining config
+				// diagnostics, including a named-instance file's invalid value.
+				// A flag path resolution failure has no source file and stays fatal.
+				if report.Service == "settings" && strings.HasPrefix(p.Key, "husk.plugins.") && (p.Layer != "instance" || p.Source != nil && p.Source.File != "") && len(additions[strings.TrimPrefix(p.Key, "husk.plugins.")]) > 0 {
 					continue
 				}
 				if report.Service == "settings" && settings.IsStartConsumed(p.Key) {

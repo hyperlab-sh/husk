@@ -54,7 +54,7 @@ type Options struct {
 	// process. It is not a Problem and appears in no report.
 	Warn func(msg string)
 	// PluginAdditions holds paths/dirs from additive launch flags. Each array
-	// overlays the layers below instance, not the named-instance file.
+	// appends to the effective config, including the named-instance file.
 	PluginAdditions map[string][]string
 }
 

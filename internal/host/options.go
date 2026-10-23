@@ -67,8 +67,8 @@ func WithPrompt(fn func(ctx context.Context, p secrets.Prompt) secrets.Answer) O
 }
 
 // WithPluginAdditions appends launch paths or dirs to the effective settings
-// below the instance layer. Keys are "paths" and "dirs"; replace flags remain
-// in the instance documents instead.
+// including the named-instance file. Keys are "paths" and "dirs"; replace
+// flags remain in the instance documents instead.
 func WithPluginAdditions(additions map[string][]string) Option {
 	return func(o *options) { o.pluginAdditions = additions }
 }

@@ -286,10 +286,12 @@ func (s *Store) loadLayers(name DocName, profile string) (layerLoad, error) {
 	if d, ok := s.opts.InstanceDocs[name]; ok {
 		var previous Doc
 		var order map[string][]string
+		var instanceFile string
 		for i := range out.layers {
 			if out.layers[i].Layer == LayerInstance {
 				previous = out.layers[i].Doc
 				order = out.layers[i].MemberOrder
+				instanceFile = out.layers[i].File
 				out.layers = append(out.layers[:i], out.layers[i+1:]...)
 				break
 			}
@@ -298,7 +300,7 @@ func (s *Store) loadLayers(name DocName, profile string) (layerLoad, error) {
 			previous = Doc{}
 		}
 		overlayDoc(previous, d)
-		out.layers = append(out.layers, LayerDoc{Layer: LayerInstance, Doc: previous, MemberOrder: overlayOrder(order, docOrder(d))})
+		out.layers = append(out.layers, LayerDoc{Layer: LayerInstance, InstanceFile: instanceFile, Doc: previous, MemberOrder: overlayOrder(order, docOrder(d))})
 	}
 	return out, nil
 }
