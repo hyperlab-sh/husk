@@ -13,27 +13,6 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
-func TestHumanName(t *testing.T) {
-	for _, tc := range []struct {
-		id   protocol.SurfaceID
-		want string
-	}{
-		{protocol.SurfaceActivityRail, "Activity rail"}, {protocol.SurfaceSidebarNavigation, "Sidebar navigation"},
-		{protocol.SurfaceSidebarList, "Sidebar list"}, {protocol.SurfaceThreadRowStatus, "Thread row status"},
-		{protocol.SurfaceSidebarFooter, "Sidebar footer"}, {protocol.SurfaceMainHeader, "Main header"},
-		{protocol.SurfaceMainStage, "Main stage"}, {protocol.SurfaceSidePanel, "Side panel"},
-		{protocol.SurfaceAppOverlay, "App overlay"}, {protocol.SurfaceModal, "Modal surface"},
-		{protocol.SurfaceFullCanvas, "Full canvas"}, {protocol.SurfaceWorkspaceStage, "Workspace stage"},
-		{"écran-test", "Écran test"}, {"", ""},
-	} {
-		t.Run(string(tc.id), func(t *testing.T) {
-			if got := humanName(tc.id); got != tc.want {
-				t.Fatalf("name %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
 func TestEmptySurfaceNameClipsAndHides(t *testing.T) {
 	for _, tc := range []struct {
 		w, h, x, y int

@@ -1,5 +1,10 @@
 package protocol
 
+import (
+	"strings"
+	"unicode"
+)
+
 // SurfaceID identifies a host layout surface.
 type SurfaceID string
 
@@ -40,6 +45,16 @@ func (s SurfaceID) Valid() bool {
 		return true
 	}
 	return false
+}
+
+// Humanised returns the surface id with every hyphen replaced by a space and
+// its first rune upper-cased, leaving all other runes unchanged.
+func (s SurfaceID) Humanised() string {
+	runes := []rune(strings.ReplaceAll(string(s), "-", " "))
+	if len(runes) > 0 {
+		runes[0] = unicode.ToUpper(runes[0])
+	}
+	return string(runes)
 }
 
 // FrameSpec declares independent border, label and close decorations.
