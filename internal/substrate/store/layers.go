@@ -206,7 +206,7 @@ func (s *Store) loadLayers(name DocName, profile string) (layerLoad, error) {
 		return layerLoad{}, ErrInvalidPath
 	}
 	var out layerLoad
-	appendDoc := func(layer Layer, file, name string, b []byte, readErr error) {
+	appendDoc := func(layer Layer, problemFile, layerFile string, b []byte, readErr error) {
 		if errors.Is(readErr, fs.ErrNotExist) {
 			return
 		}
@@ -216,7 +216,7 @@ func (s *Store) loadLayers(name DocName, profile string) (layerLoad, error) {
 			d, err = ParseDoc(b)
 		}
 		if err != nil {
-			p := Problem{Code: "invalid_document", Layer: layer, File: file, Message: err.Error()}
+			p := Problem{Code: "invalid_document", Layer: layer, File: problemFile, Message: err.Error()}
 			_, _ = fmt.Sscanf(err.Error(), "hujson: line %d, column %d:", &p.Line, &p.Column)
 			var syntax *json.SyntaxError
 			if errors.As(err, &syntax) {
@@ -229,7 +229,7 @@ func (s *Store) loadLayers(name DocName, profile string) (layerLoad, error) {
 			out.problems = append(out.problems, p)
 			return
 		}
-		out.layers = append(out.layers, LayerDoc{Layer: layer, File: name, Doc: d})
+		out.layers = append(out.layers, LayerDoc{Layer: layer, File: layerFile, Doc: d})
 	}
 	if s.opts.Distribution != nil {
 		b, err := fs.ReadFile(s.opts.Distribution, string(name)+".json")

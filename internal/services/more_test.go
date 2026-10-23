@@ -446,17 +446,18 @@ func TestKeybindingResolvedCapKeepsStrongestLayers(t *testing.T) {
 // A key problem names the config-relative file.
 func TestKeybindingProblemsKeepLayerFile(t *testing.T) {
 	for _, tc := range []struct {
+		name       string
 		layer      store.Layer
 		file, want string
 	}{
-		{store.LayerUser, "keymap.json", "keymap.json"},
-		{store.LayerProfile, "profiles/work/keymap.json", "profiles/work/keymap.json"},
-		{store.LayerDistribution, "keymap.json", "keymap.json"},
-		{store.LayerUser, "", "keymap.json"},
-		{store.LayerProfile, "", "profiles/work/keymap.json"},
-		{store.LayerDistribution, "", "keymap.json"},
+		{"user store-named", store.LayerUser, "keymap.json", "keymap.json"},
+		{"profile store-named", store.LayerProfile, "profiles/work/keymap.json", "profiles/work/keymap.json"},
+		{"distribution store-named", store.LayerDistribution, "keymap.json", "keymap.json"},
+		{"user fallback", store.LayerUser, "", "keymap.json"},
+		{"profile fallback", store.LayerProfile, "", "profiles/work/keymap.json"},
+		{"distribution fallback", store.LayerDistribution, "", "keymap.json"},
 	} {
-		t.Run(string(tc.layer)+"/"+tc.file, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			kb := keybinding.New()
 			in := input(`{}`)
 			profile := "work"
