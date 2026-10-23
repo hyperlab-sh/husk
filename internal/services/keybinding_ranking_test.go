@@ -434,3 +434,56 @@ func TestTombstoneBeforeLongerBindingIsOrderDependent(t *testing.T) {
 		t.Errorf("tombstone last: long binding not typeable")
 	}
 }
+
+// A hint needs every proper prefix to wait for the next key: a prefix that
+// matches in ctx (cross-scope) or is a tombstone ends the sequence.
+func TestHintsRequireTypeablePrefixes(t *testing.T) {
+	long := `{"keys":["g","x"],"action":"p.y","hint":"Y"}`
+	texts := func(kb *keybinding.Service, ctx keybinding.KeyContext) string {
+		var out []string
+		for _, h := range kb.Hints(ctx) {
+			out = append(out, h.Text)
+		}
+		return fmt.Sprint(out)
+	}
+	s := keybinding.KeyContext{FocusSurface: "S"}
+	// Cross-scope: both stay effective, but g matches on S.
+	kb := rankKeys(t, map[store.Layer]string{store.LayerUser: bind(`{"key":"g","focus":"S","action":"u.a"}`), store.LayerProfile: bind(long)}, "")
+	if got := texts(kb, s); got != "[]" {
+		t.Errorf("prefix matches on S: hints %s, want none", got)
+	}
+	if got := texts(kb, keybinding.KeyContext{}); got != "[Y]" {
+		t.Errorf("no focus: hints %s, want [Y]", got)
+	}
+	// A surface tombstone on the prefix.
+	kb = rankKeys(t, map[store.Layer]string{store.LayerUser: bind(`{"key":"g","focus":"S","disable":true}`), store.LayerProfile: bind(long)}, "")
+	if got := texts(kb, s); got != "[]" {
+		t.Errorf("surface tombstone on the prefix: hints %s, want none", got)
+	}
+	// Same layer: a tombstone before the longer binding makes it untypeable.
+	tomb := `{"key":"g","disable":true}`
+	kb = rankKeys(t, map[store.Layer]string{store.LayerUser: bind(tomb, long)}, "")
+	if got := texts(kb, keybinding.KeyContext{}); got != "[]" {
+		t.Errorf("tombstone first: hints %s, want none", got)
+	}
+	kb = rankKeys(t, map[store.Layer]string{store.LayerUser: bind(long, tomb)}, "")
+	if got := texts(kb, keybinding.KeyContext{}); got != "[Y]" {
+		t.Errorf("tombstone last: hints %s, want [Y]", got)
+	}
+}
+
+// Between a statically shadowed shorter entry and a longer effective one in a
+// single group, file order decides under a filter that removes the shadower.
+func TestShadowedPrefixOrderDependenceUnderModalFilter(t *testing.T) {
+	short, long := `{"key":"g","action":"husk.modal.close"}`, `{"keys":["g","x"],"action":"husk.modal.close"}`
+	profile := bind(`{"keys":["g","y"],"action":"p.a"}`)
+	modal := keybinding.KeyContext{ModalOpen: true, FocusSurface: "modal-surface"}
+	kb := rankKeys(t, map[store.Layer]string{store.LayerProfile: profile, store.LayerUser: bind(long, short)}, "")
+	if got := resolved(kb, modal, "g"); got != "<prefix>" {
+		t.Errorf("long first: g = %s, want prefix", got)
+	}
+	kb = rankKeys(t, map[store.Layer]string{store.LayerProfile: profile, store.LayerUser: bind(short, long)}, "")
+	if got := resolved(kb, modal, "g"); got != "husk.modal.close" {
+		t.Errorf("short first: g = %s, want husk.modal.close", got)
+	}
+}
