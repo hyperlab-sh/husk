@@ -18,6 +18,10 @@ func (h *Host) FailLegacy(pluginID string) { h.loop.Post(LegacyHelloMsg{PluginID
 // failLegacy fails the live Pod named by a socket hello with version_mismatch,
 // exactly as a stdout hello does. A Pod that is unknown, not live (starting,
 // stopped, failed) or being removed is left alone. Loop-only.
+//
+// The process is failed on a worker: the Wrapper reports its closing through
+// Loop.Post, which may block for backpressure, and a loop that posts to itself
+// from Update deadlocks.
 func (h *Host) failLegacy(id string) {
 	p := h.pods[id]
 	_, removing := h.removing[id]
@@ -25,5 +29,5 @@ func (h *Host) failLegacy(id string) {
 		h.loop.Log(LogMsg{PluginID: id, Level: "debug", Message: fmt.Sprintf("major-1 hello on the socket names no live plugin (%q); nothing stopped", id)})
 		return
 	}
-	p.process.FailVersionMismatch()
+	go p.process.FailVersionMismatch()
 }
