@@ -200,7 +200,7 @@ Dry runs. `settings.validate` and `theme.check` take the coordinator's turn exac
 
 Inputs: `Store.Profiles()` and `Store.ProfileSources()` (names and whether each comes from the `user` or `distribution` layer), the `--profile` start flag, the `husk.profile` slice, and the user-layer setting `profile.default`. Output: the active profile name; `""` means no profile layer is merged.
 
-State slice, registered by Profile at construction, exactly as [State](state.md) lists it: `husk.profile`, owner `husk`, instance scope, persistent, `keep-latest`, value `{"active":"<name>"}`. A named instance therefore reopens with its last profile; a pid-named instance starts fresh.
+State slice, registered by Profile at construction, exactly as [State](state.md) lists it: `husk.profile`, owner `husk`, instance scope, persistent, `keep-latest`, value `{"active":"<name>"}`. Before any write the slice is **absent**: State's empty value with no `active` key (a fresh pid instance, a named instance that never chose, a slice just cleared). `{"active":""}` is an explicit **no profile** and is not absent. A named instance therefore reopens with its last profile; a pid-named instance starts fresh.
 
 Selection runs in the coordinator's step 2, before the one `Store.Resolve`, so the merged document it produces is already the selected profile's. It reads only the unmerged `user` layer of `config` (`Store.Layers("config", "")`) for `profile.default`, never a merged document: the merge needs the profile, and the profile must not come from the merge. First match wins:
 
