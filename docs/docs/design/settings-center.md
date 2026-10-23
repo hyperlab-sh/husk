@@ -101,7 +101,7 @@ The closed key set, by focused part:
 | General content | `ctrl+s` | save dirty fields ("General") |
 | profile corner | `enter`, `space` | open the profile Select ("The profile corner") |
 
-Mouse: a click on a tab row activates it; a click in the content focuses it and is handed to the tab (huh fields, list rows); a click on the profile corner opens the Select; a click outside the modal closes the center; the wheel scrolls the focused part. Every other key is ignored; nothing reaches `Resolve` or a plugin.
+Mouse: a click on a tab row activates it; a click in the content focuses it and is handed to the tab (huh fields, list rows); a click on the profile corner opens the Select; a click outside the modal closes the center, except on the theme pill ("Opening and closing"); the wheel scrolls the focused part. Every other key is ignored; nothing reaches `Resolve` or a plugin.
 
 ### Tabs
 
