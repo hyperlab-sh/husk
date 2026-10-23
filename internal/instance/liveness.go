@@ -122,8 +122,9 @@ type Status struct {
 
 	// RecoverErr is the removal failure (an *fs.PathError naming the entry or
 	// socket path) stale recovery hit for this entry, such as EACCES or EBUSY.
-	// The status stays in the result, classed stale; callers skip it and warn
-	// naming the path.
+	// Both are kept (joined) when entry and socket removal failed. The status
+	// stays in the result, classed stale; callers skip it and warn naming
+	// every path.
 	RecoverErr error
 }
 
@@ -133,14 +134,17 @@ func (s Status) Skipped() bool { return s.NotSocket != "" || s.RecoverErr != nil
 
 // Survey lists the runtime directory's entries with a liveness class,
 // probing them in parallel, then runs stale recovery once, under one lock,
-// for the whole stale set. Stale entries are removed and do not appear in
-// the result; live and unresponsive ones do, so the CLI can report them. An
-// entry whose re-probe under the lock found it live or unresponsive is
-// listed as such. If the lock is not acquired in time the stale entries are
-// listed unresponsive with Locked set and nothing is removed. An entry whose
-// socket path is not a socket is skipped: it stays in the result as a
-// stale status with NotSocket set, and the path itself is left alone. The result is sorted by instance
-// id.
+// for the whole stale set. Stale entries recovery cleared are removed and do
+// not appear in the result; live and unresponsive ones do, so the CLI can
+// report them. An entry whose re-probe under the lock found it live or
+// unresponsive is listed as such. If the lock is not acquired in time the
+// stale entries are listed unresponsive with Locked set and nothing is
+// removed. A stale entry recovery could not clear stays in the result as a
+// stale status (see Status.Skipped): NotSocket is set when its socket path
+// is not a socket, in which case neither the entry nor the path is touched,
+// and RecoverErr when removing a file failed. Only errors that name an
+// entry's own path are carried out; the survey goes on past them. The result
+// is sorted by instance id.
 func Survey(dir string, d *Deps) ([]Status, error) {
 	entries, err := List(dir)
 	if err != nil {
@@ -191,7 +195,7 @@ func Survey(dir string, d *Deps) ([]Status, error) {
 					if ns != nil {
 						statuses[i].NotSocket = path
 					} else {
-						statuses[i].RecoverErr = re
+						statuses[i].RecoverErr = errors.Join(statuses[i].RecoverErr, re)
 					}
 				}
 			}

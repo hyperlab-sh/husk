@@ -164,26 +164,50 @@ func TestNonSocketEntryIsSkippedWithAWarningNamingThePath(t *testing.T) {
 }
 
 // A removal failure while recovering a stale entry (EACCES here) is warned
-// about naming the path, in both `instances` and discovery; the entry stays.
+// about naming the path, in both `instances` and discovery; the entry stays
+// and the stuck instance is never listed.
 func TestRemovalFailureIsWarnedAboutNamingThePath(t *testing.T) {
-	for _, args := range [][]string{{"instances", "--format", "json"}, {"ping", "--format", "table"}} {
-		t.Run(args[0], func(t *testing.T) {
-			dir := shortDir(t)
-			sock := instance.SocketPath(dir, "stuck")
-			register(t, dir, "stuck", sock, protocol.Version)
-			deadSocket(t, sock)
-			h := newHarness(t, dir, nil)
-			h.env.Deps = &instance.Deps{Remove: func(path string) error {
-				if path == sock {
-					return &fs.PathError{Op: "remove", Path: path, Err: syscall.EACCES}
-				}
-				return os.Remove(path)
-			}}
-			h.run(args...)
-			want := "cannot remove " + sock + ": permission denied; instance \"stuck\" skipped"
-			if !strings.Contains(h.errb.String(), strings.ReplaceAll(want, `"`, map[bool]string{true: `\"`, false: `"`}[args[0] == "instances"])) {
-				t.Fatalf("stderr = %q, want %q", h.errb.String(), want)
+	setup := func(t *testing.T) (*harness, string, string) {
+		dir := shortDir(t)
+		sock := instance.SocketPath(dir, "stuck")
+		entry := instance.EntryPath(dir, "stuck")
+		register(t, dir, "stuck", sock, protocol.Version)
+		deadSocket(t, sock)
+		h := newHarness(t, dir, nil)
+		h.env.Deps = &instance.Deps{Remove: func(path string) error {
+			if path == entry {
+				return &fs.PathError{Op: "remove", Path: path, Err: syscall.EACCES}
 			}
-		})
+			return os.Remove(path)
+		}}
+		return h, dir, "cannot remove " + entry + ": permission denied; instance \"stuck\" skipped"
 	}
+	stays := func(t *testing.T, dir string) {
+		if _, err := os.Lstat(instance.EntryPath(dir, "stuck")); err != nil {
+			t.Fatalf("the entry must stay: %v", err)
+		}
+	}
+	t.Run("instances", func(t *testing.T) {
+		h, dir, want := setup(t)
+		if got := h.run("instances", "--format", "json"); got != 0 {
+			t.Fatalf("exit = %d; stderr %q", got, h.errb.String())
+		}
+		if strings.TrimSpace(h.out.String()) != "[]" {
+			t.Fatalf("stdout = %q, want no rows", h.out.String())
+		}
+		if !strings.Contains(h.errb.String(), strings.ReplaceAll(want, `"`, `\"`)) {
+			t.Fatalf("stderr = %q, want %q", h.errb.String(), want)
+		}
+		stays(t, dir)
+	})
+	t.Run("discovery", func(t *testing.T) {
+		h, dir, want := setup(t)
+		if got := h.run("ping", "--format", "table"); got != 3 {
+			t.Fatalf("exit = %d; stderr %q", got, h.errb.String())
+		}
+		if !strings.Contains(h.errb.String(), want) {
+			t.Fatalf("stderr = %q, want %q", h.errb.String(), want)
+		}
+		stays(t, dir)
+	})
 }

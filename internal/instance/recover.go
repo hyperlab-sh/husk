@@ -37,9 +37,10 @@ func (e *NotSocketError) Error() string {
 // a live or unresponsive entry is left untouched and the caller acts on it.
 //
 // ErrLocked means the lock was not acquired in time: the classes are nil and
-// nothing was removed. A path at <id>.sock that is not a socket is left
-// alone and reported as a *NotSocketError (joined if several); the other
-// entries are still recovered and their classes returned.
+// nothing was removed. A path at <id>.sock that is not a socket is refused
+// before anything is removed: both it and <id>.json are left alone and it is
+// reported as a *NotSocketError (joined if several); the other entries are
+// still recovered and their classes returned.
 func RecoverStale(dir string, entries []*Entry) ([]Class, error) {
 	return RecoverStaleWith(dir, entries, nil)
 }
