@@ -145,6 +145,26 @@ func pluginInstanceDocs(fs *flag.FlagSet) map[string]map[string]any {
 	return map[string]map[string]any{"config": {"husk": husk}}
 }
 
+// pluginAdditions keeps additive flags separate until Settings resolves the
+// selected profile and the layers below instance.
+func pluginAdditions(fs *flag.FlagSet) (map[string][]string, error) {
+	out := map[string][]string{}
+	given := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { given[f.Name] = true })
+	for _, pair := range []struct{ replace, add, key string }{
+		{"plugin", "add-plugin", "paths"},
+		{"plugin-dir", "add-plugin-dir", "dirs"},
+	} {
+		if given[pair.replace] && given[pair.add] {
+			return nil, fmt.Errorf("--%s and --%s cannot be used together", pair.replace, pair.add)
+		}
+		if given[pair.add] {
+			out[pair.key] = append([]string(nil), (*fs.Lookup(pair.add).Value.(*stringFlag))...)
+		}
+	}
+	return out, nil
+}
+
 func main() {
 	// argv[1] decides the mode: a first argument that does not start with
 	// "-" is a subcommand. The CLI installs no signal handler; a signal ends
@@ -161,6 +181,8 @@ func main() {
 	holdAlt := flag.Bool("hold-alt", false, "Simulate holding Alt/Option key on startup")
 	repeatable("plugin", "Plugin: executable, plugin directory, or husk-plugin.json path (repeatable)")
 	repeatable("plugin-dir", "Load every immediate subdirectory containing a husk-plugin.json (repeatable)")
+	repeatable("add-plugin", "Append a plugin path to configured plugins, deduplicating paths (repeatable)")
+	repeatable("add-plugin-dir", "Append a directory to configured plugin directories, deduplicating paths (repeatable)")
 	var bundleDir bundleFlag
 	flag.Var(&bundleDir, "bundle", "Load a bundle directory as plugins and distribution config; empty disables")
 	demo := flag.String("demo", "", "In-process frame demo: pubslots (requires --dump-frame)")
@@ -168,6 +190,11 @@ func main() {
 	profileName := flag.String("profile", "", "Select a profile on startup (a-z, 0-9, _ and -); it wins over the saved selection and profile.default")
 	flag.Parse()
 	instanceDocs := pluginInstanceDocs(flag.CommandLine)
+	additions, err := pluginAdditions(flag.CommandLine)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "husk: %v\n", err)
+		os.Exit(2)
+	}
 	// Subcommands come first; a positional left over here is a misplaced one
 	// (`husk --instance notes ping`) and must not start an instance.
 	if flag.NArg() > 0 {
@@ -232,7 +259,7 @@ func main() {
 	prog := newProgramRef()
 	if *dumpFrame {
 		// runDumpFrame builds the headless program; a host Post waits for it.
-		h, err := newHost(prog, model, id, runtimeDir, instanceDocs, profileFlag, host.WithVersion(buildVersion()))
+		h, err := newHost(prog, model, id, runtimeDir, instanceDocs, profileFlag, host.WithVersion(buildVersion()), host.WithPluginAdditions(additions))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "husk: %v\n", err)
 			os.Exit(1)
@@ -245,7 +272,7 @@ func main() {
 	// it. The model attaches the host before the program runs.
 	p := tea.NewProgram(model)
 	prog.set(p)
-	h, err := newHost(prog, model, id, runtimeDir, instanceDocs, profileFlag, host.WithVersion(buildVersion()), host.WithPrompt(secretPromptFunc(prog)))
+	h, err := newHost(prog, model, id, runtimeDir, instanceDocs, profileFlag, host.WithVersion(buildVersion()), host.WithPluginAdditions(additions), host.WithPrompt(secretPromptFunc(prog)))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "husk: %v\n", err)
 		os.Exit(1)

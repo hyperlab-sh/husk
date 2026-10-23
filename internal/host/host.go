@@ -390,15 +390,16 @@ func (r *Root) buildServices() error {
 		}
 	}
 	rt, err := services.New(services.RuntimeOptions{
-		Writer:      r.store,
-		Store:       r.store,
-		State:       r.st,
-		Post:        r.post,
-		Publisher:   publisher{r},
-		Clock:       storeClock{r.clock},
-		Crypto:      secretsDoc,
-		Prompt:      prompt,
-		ProfileFlag: r.cfg.ProfileFlag,
+		Writer:          r.store,
+		Store:           r.store,
+		State:           r.st,
+		Post:            r.post,
+		Publisher:       publisher{r},
+		Clock:           storeClock{r.clock},
+		Crypto:          secretsDoc,
+		Prompt:          prompt,
+		ProfileFlag:     r.cfg.ProfileFlag,
+		PluginAdditions: r.opts.pluginAdditions,
 		Audit: func(name string) {
 			r.log(pods.LogMsg{Level: "info", Message: "secrets: " + name + " revealed to cli"})
 		},
@@ -432,7 +433,7 @@ func (r *Root) startup() error {
 			}
 		}
 	}
-	if startupFatal(reports, err) {
+	if startupFatal(reports, err, r.opts.pluginAdditions) {
 		return startupError(reports, err)
 	}
 	r.rt.Settings.FreezeStartConsumed()
@@ -445,7 +446,7 @@ func (r *Root) startup() error {
 // startupFatal rejects failed flights and invalid plugin launch settings.
 // Other service validation remains nonfatal; a flight may fail after earlier
 // services have already applied their snapshots.
-func startupFatal(reports []services.Report, err error) bool {
+func startupFatal(reports []services.Report, err error, additions ...map[string][]string) bool {
 	if len(reports) == 0 && err != nil {
 		return true
 	}
@@ -455,6 +456,11 @@ func startupFatal(reports []services.Report, err error) bool {
 			case "store_error", "timed_out", "cancelled":
 				return true
 			case "invalid_value":
+				// Additive flags replace an invalid lower array with their own
+				// valid instance array, while retaining the original diagnostic.
+				if len(additions) > 0 && len(additions[0][strings.TrimPrefix(p.Key, "husk.plugins.")]) > 0 && p.Layer != "instance" {
+					continue
+				}
 				if report.Service == "settings" && settings.IsStartConsumed(p.Key) {
 					return true
 				}
