@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"os"
 	"sync"
 	"syscall"
 	"time"
@@ -251,5 +252,8 @@ func protocolErrorNotification(m protocol.Message) *output.Error {
 	return e
 }
 
-// isDeadline reports whether err is a command timeout.
-func isDeadline(err error) bool { return errors.Is(err, context.DeadlineExceeded) }
+// isDeadline reports whether err is a command timeout: the context's deadline,
+// or the write deadline the client copies from it.
+func isDeadline(err error) bool {
+	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, os.ErrDeadlineExceeded)
+}

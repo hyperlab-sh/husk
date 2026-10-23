@@ -975,6 +975,20 @@ func TestTimeoutExpiryIsTransportExit(t *testing.T) {
 	}
 }
 
+// A timeout that has already run out when the request is written fails in the
+// write, not in the wait: it is still the timeout.
+func TestExpiredTimeoutOnWriteIsTransportExit(t *testing.T) {
+	dir := shortDir(t)
+	srv := serve(t, dir, "a", pingOK("a", func(c *srvConn, req protocol.Message) {}))
+	h := newHarness(t, dir, nil)
+	if got := h.run("rpc", "x.y", "--socket", srv.Socket, "--timeout", "1ns", "--format", "table"); got != output.ExitTransport {
+		t.Fatalf("exit = %d, want %d; stderr %q", got, output.ExitTransport, h.errb.String())
+	}
+	if h.errb.String() != "husk: instance did not answer within 1ns\n" {
+		t.Fatalf("stderr = %q", h.errb.String())
+	}
+}
+
 func TestEffectiveTimeout(t *testing.T) {
 	for _, tc := range []struct {
 		flag, def, want time.Duration
