@@ -1,0 +1,12 @@
+{
+  "manifest_version": 2,
+  "protocol": 2,
+  "id": "go.terminal",
+  "name": "Terminal",
+  "version": "0.1.0",
+  "description": "Hosts a user shell or argv in a terminal surface",
+  "command": ["./terminal"],
+  "surfaces": [
+    {"id": "main-stage", "frame": {"border": true, "label": "Terminal", "close": true}}
+  ]
+}
