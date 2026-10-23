@@ -47,7 +47,7 @@ func (s *Service) addPlugins(next *snapshot, layers []store.LayerDoc, files map[
 		if raw != nil {
 			value, err := validate(next.schema[key], raw)
 			if err != nil {
-				*problems = append(*problems, c.Problem{Severity: "error", Code: "invalid_value", Layer: layer, Key: key, Message: fmt.Sprintf("%s layer: %s: want strings", layer, key), Source: sourceOf(layer, files)})
+				*problems = append(*problems, c.Problem{Severity: "error", Code: "invalid_value", Layer: layer, Key: key, Message: fmt.Sprintf("%s layer: %s: want %s", layer, key, wantOf(next.schema[key])), Source: sourceOf(layer, files)})
 			} else {
 				base = value.([]string)
 			}

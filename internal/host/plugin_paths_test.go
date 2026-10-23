@@ -215,8 +215,28 @@ func TestStartupFatal(t *testing.T) {
 		{"applied with nil error", []services.Report{{Service: "settings", Applied: true}}, nil, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := startupFatal(tc.reports, tc.err); got != tc.want {
+			if got := startupFatal(tc.reports, tc.err, nil); got != tc.want {
 				t.Fatalf("startupFatal(%+v, %v)=%v want %v", tc.reports, tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestStartupFatalAdditions(t *testing.T) {
+	for _, tc := range []struct {
+		name, key, layer string
+		additions        map[string][]string
+		want             bool
+	}{
+		{"matching lower paths", "husk.plugins.paths", "user", map[string][]string{"paths": {"added"}}, false},
+		{"cross array stays fatal", "husk.plugins.paths", "user", map[string][]string{"dirs": {"added"}}, true},
+		{"instance error stays fatal", "husk.plugins.paths", "instance", map[string][]string{"paths": {"added"}}, true},
+		{"bundle error stays fatal", "husk.bundle", "user", map[string][]string{"paths": {"added"}}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reports := []services.Report{{Service: "settings", Problems: []services.Problem{{Severity: "error", Code: "invalid_value", Key: tc.key, Layer: tc.layer}}}}
+			if got := startupFatal(reports, errors.New("service reload incomplete"), tc.additions); got != tc.want {
+				t.Fatalf("startupFatal(%+v, additions=%v)=%v want %v", reports, tc.additions, got, tc.want)
 			}
 		})
 	}
