@@ -147,7 +147,8 @@ type Remover interface {
 	Undeclare(pluginID string)
 	// Reload runs in the reload worker: one Services reload with reason
 	// plugin, under ctx. Reports come back whether or not every service
-	// applied; the error is set only when no reload completed (cancelled).
+	// applied; the error is set only when no reload completed: a context error
+	// means the Host is shutting down, anything else is an internal failure.
 	Reload(ctx context.Context) ([]contracts.ReloadReport, error)
 	// Go starts cmd as a tracked worker and posts the message it returns. It
 	// does nothing once shutdown began.

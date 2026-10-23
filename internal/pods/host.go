@@ -367,6 +367,9 @@ func (h *Host) publishExited(info wrapper.Info) {
 // Pod returns a loop-owned Pod for per-subscriber notification delivery.
 func (h *Host) Pod(id string) (*Pod, bool) { p, ok := h.pods[id]; return p, ok }
 
+// Removing reports whether a plugin.remove for id is in progress. Loop-only.
+func (h *Host) Removing(id string) bool { _, ok := h.removing[id]; return ok }
+
 // PodSlices adapts the Host's stored slice handles to the host's
 // SliceHandles lookup seam: the Stem State port resolves a plugin's write
 // capability by namespace here. The lookup runs off the loop on the Stem

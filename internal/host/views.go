@@ -70,9 +70,9 @@ func (p publisher) Publish(name string, data any) {
 		}
 	}
 	// Coalescing is by name alone unless a key says otherwise: two plugins
-	// that exit in one tick are two events, not one.
+	// that exit, or are removed, in one tick are two events, not one.
 	var key string
-	if name == pods.PluginExitedEvent {
+	if name == pods.PluginExitedEvent || name == pods.PluginRemovedEvent {
 		key, _ = obj["plugin_id"].(string)
 	}
 	publish := func() {

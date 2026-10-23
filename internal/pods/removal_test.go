@@ -493,6 +493,17 @@ func TestRemoveOfUnreapableProcessContinuesAsFailed(t *testing.T) {
 	if warned != 1 {
 		t.Fatalf("SIGKILL warnings = %d, want one", warned)
 	}
+	var failedWritten bool
+	f.onLoop(func() {
+		for _, m := range f.loop.statuses {
+			if m.Info.Status == wrapper.Failed && m.Info.LastError == unreapedError {
+				failedWritten = true
+			}
+		}
+	})
+	if !failedWritten {
+		t.Fatal("liveness failed with last_error was never written before the entry was released")
+	}
 	if f.rec.reloadCount() != 1 {
 		t.Fatal("no reload after the unreapable process")
 	}
@@ -828,5 +839,33 @@ func TestRemovalHandlersCheckTheShutdownMarkFirst(t *testing.T) {
 	})
 	if f.rec.data != nil {
 		t.Fatal("removed event after the shutdown mark")
+	}
+}
+
+// A reload that returns no report for a reason other than a context ending is
+// not a shutdown: it must not be labelled cancelled/shutdown.
+func TestReloadFailureWithoutReportsIsInternalNotCancelled(t *testing.T) {
+	f := newRemovalFixture(t)
+	f.add("a", false)
+	f.onLoop(func() { p, _ := f.h.Pod("a"); p.info.Status = wrapper.Exited })
+	f.rec.reload = func(context.Context) ([]contracts.ReloadReport, error) {
+		return nil, errors.New("Store resolution failed")
+	}
+	_, err := f.h.Remove(t.Context(), cliCaller, "a")
+	if contracts.CodeOf(err) != string(protocol.CodeInternal) {
+		t.Fatalf("err = %v, want internal", err)
+	}
+}
+
+// A request whose context ended before the loop ran its closure reports the
+// context error, not a dead loop.
+func TestRemoveWithEndedContextReportsTheContext(t *testing.T) {
+	h, _, _, _ := hostFixture(t)
+	addPod(t, h, "a")
+	h.loop = deadLoop{}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := h.Remove(ctx, cliCaller, "a"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
 	}
 }

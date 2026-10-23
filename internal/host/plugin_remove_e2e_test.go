@@ -1,12 +1,17 @@
 package host
 
 import (
+	tea "charm.land/bubbletea/v2"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -90,7 +95,7 @@ func TestPluginRemoveAgainstRealHostAndProcess(t *testing.T) {
 	}{
 		{protocol.MethodEventWatch, map[string]any{"pattern": "pods.*"}},
 		{protocol.MethodEventWatch, map[string]any{"pattern": "services.*"}},
-		{protocol.MethodStateWatch, map[string]any{"slices": []string{"alpha.state"}}},
+		{protocol.MethodStateWatch, map[string]any{"slices": []string{"alpha.state", "alpha.occupants", "alpha.contributions", "husk.pods"}}},
 	} {
 		if rep := w.callParams(t, string(rune('a'+i)), req.method, req.params); rep.Error != nil {
 			t.Fatalf("%s: %+v", req.method, rep.Error)
@@ -120,7 +125,11 @@ func TestPluginRemoveAgainstRealHostAndProcess(t *testing.T) {
 		t.Fatalf("second remove: exit %d err %q", code, stderr)
 	}
 
-	// Invariant 2: exited, the plugin's slice changing, removed, reloaded.
+	// Invariants 2 and 3: pods.plugin-exited, then the three plugin slices
+	// removed and husk.pods without the plugin (one flush, so contiguous and
+	// before anything else), then pods.plugin-removed, then
+	// services.reloaded. A husk.pods change that still lists the plugin (the
+	// exit's own write) is not part of the removal.
 	var order []string
 	_ = w.c.SetReadDeadline(time.Now().Add(failBound))
 	for len(order) == 0 || order[len(order)-1] != "services.reloaded" {
@@ -134,12 +143,24 @@ func TestPluginRemoveAgainstRealHostAndProcess(t *testing.T) {
 		}
 		if m.Method == protocol.MethodStateChanged {
 			var c struct {
-				Slice   string `json:"slice"`
-				Removed bool   `json:"removed"`
+				Slice   string          `json:"slice"`
+				Removed bool            `json:"removed"`
+				Value   json.RawMessage `json:"value"`
 			}
 			_ = json.Unmarshal(m.Params, &c)
-			if c.Slice == "alpha.state" && c.Removed {
-				order = append(order, "state.changed")
+			switch {
+			case c.Slice == "husk.pods":
+				var doc struct {
+					Plugins map[string]json.RawMessage `json:"plugins"`
+				}
+				_ = json.Unmarshal(c.Value, &doc)
+				if _, listed := doc.Plugins["alpha"]; !listed {
+					order = append(order, "slice:husk.pods")
+				}
+			case c.Removed:
+				order = append(order, "slice:"+c.Slice)
+			default:
+				t.Fatalf("slice %s changed without being removed: %s", c.Slice, m.Params)
 			}
 			continue
 		}
@@ -150,13 +171,104 @@ func TestPluginRemoveAgainstRealHostAndProcess(t *testing.T) {
 			Name string `json:"name"`
 		}
 		_ = json.Unmarshal(m.Params, &p)
-		switch {
-		case p.Name == "pods.plugin-exited" || p.Name == "pods.plugin-removed" || p.Name == "services.reloaded":
+		switch p.Name {
+		case "pods.plugin-exited", "pods.plugin-removed", "services.reloaded":
 			order = append(order, p.Name)
 		}
 	}
-	want := []string{"pods.plugin-exited", "state.changed", "pods.plugin-removed", "services.reloaded"}
-	if strings.Join(order, ",") != strings.Join(want, ",") {
-		t.Fatalf("order = %v, want %v", order, want)
+	if len(order) != 7 || order[0] != "pods.plugin-exited" || order[5] != "pods.plugin-removed" || order[6] != "services.reloaded" {
+		t.Fatalf("order = %v", order)
+	}
+	slices := append([]string(nil), order[1:5]...)
+	sort.Strings(slices)
+	if want := []string{"slice:alpha.contributions", "slice:alpha.occupants", "slice:alpha.state", "slice:husk.pods"}; !reflect.DeepEqual(slices, want) {
+		t.Fatalf("slice changes between exited and removed = %v, want %v", slices, want)
+	}
+}
+
+// Two removals whose teardowns land in one tick (two `starting` Pods in one
+// launch gate, both removed while it is pending) are two pods.plugin-removed
+// events, not one coalesced by name.
+func TestPluginRemovedEventsOfOneTickAreNotCoalesced(t *testing.T) {
+	proceed := make(chan struct{})
+	ready := make(chan struct{})
+	var once sync.Once
+	hook := func(stage string) error {
+		if stage != "run" {
+			return nil
+		}
+		once.Do(func() { close(ready) })
+		<-proceed // hold launchPlugins: the test adds the Pods itself
+		return errors.New("test over")
+	}
+	h, err := boot(t, func(c *contracts.Config) {
+		c.Plugins = []string{writeIdlePlugin(t, "alpha"), writeIdlePlugin(t, "beta")}
+	}, withHook(hook))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancel, _ := runHost(t, ready, h)
+	defer func() { close(proceed); cancel() }()
+
+	w := dial(t, instance.SocketPath(h.dir, h.id))
+	if rep := w.callParams(t, "w", protocol.MethodEventWatch, map[string]any{"pattern": "pods.*"}); rep.Error != nil {
+		t.Fatalf("event.watch: %+v", rep.Error)
+	}
+
+	// Both Pods exist, `starting`, with no launch gate yet.
+	h.loop(func() {
+		for _, spec := range h.root.specs {
+			if _, err := h.root.pods.Add(spec); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+	replies := make(chan error, 2)
+	for _, id := range []string{"alpha", "beta"} {
+		go func() { _, err := h.remove(id); replies <- err }()
+	}
+	for i := 0; ; i++ {
+		var both bool
+		h.loop(func() { both = h.root.pods.Removing("alpha") && h.root.pods.Removing("beta") })
+		if both {
+			break
+		}
+		if i > 5000 {
+			t.Fatal("both removals never began")
+		}
+		runtime.Gosched()
+	}
+	// Completing the gate tears both down in one PreparedMsg.
+	var cmd tea.Cmd
+	h.loop(func() { cmd = h.root.pods.Prepare() })
+	h.root.spawn(cmd)
+	for range 2 {
+		if err := <-replies; err != nil {
+			t.Fatalf("remove: %v", err)
+		}
+	}
+
+	_ = w.c.SetReadDeadline(time.Now().Add(failBound))
+	got := map[string]bool{}
+	for len(got) < 2 {
+		line, err := w.r.ReadBytes('\n')
+		if err != nil {
+			t.Fatalf("after %v: %v", got, err)
+		}
+		var m protocol.Message
+		_ = json.Unmarshal(line, &m)
+		var p struct {
+			Name string `json:"name"`
+			Data struct {
+				Plugin string `json:"plugin_id"`
+			} `json:"data"`
+		}
+		_ = json.Unmarshal(m.Params, &p)
+		if m.Method == protocol.MethodEventDeliver && p.Name == "pods.plugin-removed" {
+			got[p.Data.Plugin] = true
+		}
+	}
+	if !got["alpha"] || !got["beta"] {
+		t.Fatalf("pods.plugin-removed for %v, want alpha and beta", got)
 	}
 }
