@@ -95,6 +95,38 @@ func TestRailAltBadgeCentredAndClipped(t *testing.T) {
 	}
 }
 
+func TestRailAltIconAndBadgeRoles(t *testing.T) {
+	for _, active := range []bool{false, true} {
+		for _, key := range []string{"", "k"} {
+			t.Run(fmt.Sprintf("active=%t/key=%q", active, key), func(t *testing.T) {
+				m := goldenModel()
+				fe := withFE(m)
+				m.railItems = []contracts.RailItem{{ID: "p.open", Plugin: "p", Icon: "x"}}
+				if active {
+					m.activeRailID = "p.open"
+				}
+				if key != "" {
+					fe.bind(key, "p.open")
+				}
+				m.modifiers.Alt = true
+				fg, bg, text := m.palette.Ink, m.palette.SurfaceElevated, "x"
+				if active {
+					bg = m.palette.SurfaceSelected
+					if key == "" {
+						fg = m.palette.Accent
+					}
+				}
+				if key != "" {
+					text = keyLabel(key)
+				}
+				b := m.railButtons()[1]
+				rows := strings.Split(m.renderActivityRailBox(), "\n")
+				requireChromeText(t, frameCells(rows[b.startY+1]), text, lipgloss.Color(fg), true, lipgloss.Color(bg))
+			})
+		}
+	}
+}
+
 func TestRailIdleIconDoesNotShiftOnHover(t *testing.T) {
 	for _, icon := range []string{"x", "界"} {
 		t.Run(icon, func(t *testing.T) {
