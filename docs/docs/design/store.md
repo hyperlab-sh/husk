@@ -254,8 +254,10 @@ Focus-local actions may target the declaring plugin's actions or `husk.*`.
 Pods conversion drops foreign, unscoped and over-limit (`too_many`) bindings. It passes key spellings through
 unchanged: Keybinding is the single key parser and drops invalid spellings with
 `unparsable_key` in layer `plugin:<source>`. Optional `problems` is an array of
-`{index,code,message,key?}` objects, where index is the original zero-based manifest
-position and code is `foreign_action`, `global_not_allowed`, `too_many` or
+`{index,code,message,key?}` objects, where `index` is the original zero-based
+position in the manifest list the problem is about (the `keybindings` entry,
+or the `events.subscribe` entry for `cli_only_event`), and code is
+`foreign_action`, `global_not_allowed`, `too_many` or
 `cli_only_event`. For a problem not about a binding position, `key` names the
 manifest member, for example `events.subscribe[1]` (`<field>[<i>]`). Keybinding
 imports these into its problems with layer `plugin:<source>`; conversion
