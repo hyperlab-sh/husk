@@ -128,7 +128,7 @@ A frame at 200x60 is at most 60 lines of 200 cells with a few SGR runs each, wel
 | :--- | :--- | :--- |
 | Callout fields | 5 (number, name, id, occupant, key) | fits a 40-cell top edge with the id and key, the two a developer needs most |
 | Legend width | `min(64, width - 4)` | one row per surface with all five fields at the default sizes |
-| Renders per socket-read notification batch | 1, best effort | Coalesce available notifications without assuming a host tick boundary. |
+| Renders per socket-read notification batch | 1, best effort | coalesces the notifications available on one read without assuming a host tick boundary |
 
 ### Tests
 
