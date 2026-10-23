@@ -93,6 +93,7 @@ func builtins() map[string]command {
 		"action":    actionCommand(),
 		"event":     eventCommand(),
 		"plugin":    pluginCommand(),
+		"hook":      hookCommand(),
 	}
 }
 
@@ -150,6 +151,7 @@ type Invocation struct {
 	// The command-specific flags; flagSet says which were given.
 	owner, argsJSON, data, ifRevision string
 	args                              []string
+	force                             bool
 	flagSet                           map[string]bool
 }
 
@@ -198,6 +200,7 @@ func Main(ctx context.Context, args []string, env Env) int {
 	fs.StringVar(&inv.argsJSON, "args-json", "", "")
 	fs.StringVar(&inv.data, "data", "", "")
 	fs.StringVar(&inv.ifRevision, "if-revision", "", "")
+	fs.BoolVar(&inv.force, "force", false, "")
 	fs.Func("arg", "", func(v string) error { inv.args = append(inv.args, v); return nil })
 	pos, err := parseInterspersed(fs, args[1:])
 	if err != nil {
