@@ -105,6 +105,7 @@ func builtins() map[string]command {
 		"profile":   profileCommand(),
 		"secrets":   secretsCommand(),
 		"config":    configCommand(),
+		"keys":      keysCommand(),
 	}
 }
 
