@@ -196,6 +196,32 @@ func TestExpireBoundaryOrderingAndLateReplies(t *testing.T) {
 	assertCounts(t, table)
 }
 
+// The Pod's final reason reaches a pending call verbatim, in Message, while
+// Data stays the stable plugin_exited code (pods.md wrapper invariants 4 and 6).
+func TestDropPluginCarriesThePodReasonVerbatim(t *testing.T) {
+	for _, reason := range []string{
+		"exited",
+		"crashed (exit status 7): exit status 7",
+		"crashed (signal: killed): signal: killed",
+		"stopped reading: wrapper: stdout closed while process is running",
+		"stopped reading: read stdout: connection reset by peer",
+		"stopped reading: protocol: send queue full (1024 messages)",
+		"stopped reading: protocol: write timed out after 5s",
+	} {
+		t.Run(reason, func(t *testing.T) {
+			table, _, _ := newTestTable(TableOptions{})
+			mustSend(t, table, "p")
+			results := table.DropPlugin("p", reason)
+			if len(results) != 1 {
+				t.Fatal(results)
+			}
+			if e := results[0].Err; e.Code != protocol.CodeCancelled || string(e.Data) != `{"reason":"plugin_exited"}` || e.Message != "plugin p exited: "+reason {
+				t.Fatalf("error = %+v", e)
+			}
+		})
+	}
+}
+
 func TestDropPluginOrdersByIDAndPreservesOthers(t *testing.T) {
 	table, clock, _ := newTestTable(TableOptions{})
 	p1 := mustSend(t, table, "p", Options{Timeout: MaxTimeout, Requester: "first"})
