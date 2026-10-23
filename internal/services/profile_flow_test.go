@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -238,15 +239,130 @@ func (r *rig) use(name string) <-chan useResult {
 	return out
 }
 
-func TestProfileUseSameNameRepliesAtOnceAndWritesNothing(t *testing.T) {
-	r, st := startedRig(t)
+// A default selection leaves the slice absent. Choosing that same profile
+// records it without a reload, so a later default change no longer moves it.
+func TestProfileUseConfirmsDefaultWithoutReload(t *testing.T) {
+	r, st := defaultRig(t, state.Options{}, "work")
+	if _, err := r.rt.Coordinator.Reload(context.Background(), ReasonStartup); err != nil {
+		t.Fatal(err)
+	}
+	r.settle()
+	if r.present() || r.rt.Profile.Active() != "work" {
+		t.Fatalf("present=%v active=%q after a default selection", r.present(), r.rt.Profile.Active())
+	}
 	before := st.Resolved()
-	active, reports, err := r.rt.Profile.Use(context.Background(), Caller{Kind: "cli"}, "work")
-	if err != nil || active != "work" || len(reports) != 5 {
-		t.Fatalf("Use = %q %d %v", active, len(reports), err)
+	last := r.rt.Coordinator.LastReports()
+	got := r.use("work")
+	(<-r.posts)()
+	r.tree.Flush()
+	r.rt.Coordinator.Tick()
+	res := <-got
+	if res.err != nil || res.active != "work" || !reflect.DeepEqual(res.reports, last) {
+		t.Fatalf("Use = %+v", res)
+	}
+	if !r.present() || r.slice(t) != "work" {
+		t.Fatalf("slice present=%v value=%q, want work", r.present(), r.slice(t))
 	}
 	if len(r.posts) != 0 || !r.idle() || len(st.Resolved()) != len(before) {
-		t.Fatal("same-name Use wrote or started a flight")
+		t.Fatal("confirming the default started a flight")
+	}
+	st.set(func() { st.layers = []store.LayerDoc{userLayer(`{"profile":{"default":"other"}}`)} })
+	if _, err := r.rt.Coordinator.Reload(context.Background(), ReasonCLI); err != nil {
+		t.Fatal(err)
+	}
+	r.settle()
+	if last := st.Resolved(); last[len(last)-1] != "work" || r.rt.Profile.Active() != "work" {
+		t.Fatalf("Resolve calls = %q active=%q, want work to stay", last, r.rt.Profile.Active())
+	}
+}
+
+// A slice that already records the name needs no write: the reply is immediate.
+func TestProfileUseSameRecordedNameWritesNothing(t *testing.T) {
+	r, st := defaultRig(t, state.Options{Hydrator: profileHydratorOf("work")}, "")
+	if _, err := r.rt.Coordinator.Reload(context.Background(), ReasonStartup); err != nil {
+		t.Fatal(err)
+	}
+	r.settle()
+	if !r.present() || r.rt.Profile.Active() != "work" {
+		t.Fatalf("present=%v active=%q", r.present(), r.rt.Profile.Active())
+	}
+	before := len(st.Resolved())
+	rev := r.tree.Snapshot().Slices[state.ProfileNamespace].Revision
+	got := r.use("work")
+	post := <-r.posts
+	post()
+	res := <-got
+	if res.err != nil || res.active != "work" {
+		t.Fatalf("Use = %+v", res)
+	}
+	r.tree.Flush()
+	if r.tree.Snapshot().Slices[state.ProfileNamespace].Revision != rev {
+		t.Fatal("same recorded name rewrote the slice")
+	}
+	if len(r.posts) != 0 || !r.idle() || len(st.Resolved()) != before {
+		t.Fatal("same recorded name started a flight")
+	}
+}
+
+// A slice that records a choice no flight has applied yet (an earlier call in
+// the tick wrote it) is joined, not rewritten: both callers share one flight.
+func TestProfileUseRecordedButPendingJoinsTheFlight(t *testing.T) {
+	r, st := defaultRig(t, state.Options{}, "work")
+	if _, err := r.rt.Coordinator.Reload(context.Background(), ReasonStartup); err != nil {
+		t.Fatal(err)
+	}
+	r.settle()
+	before := len(st.Resolved())
+	a := r.use("other")
+	(<-r.posts)()
+	b := r.use("other")
+	(<-r.posts)()
+	r.tree.Flush()
+	r.rt.Coordinator.Tick()
+	ra, rb := <-a, <-b
+	if ra.err != nil || rb.err != nil || ra.active != "other" || rb.active != "other" {
+		t.Fatalf("results = %+v %+v", ra, rb)
+	}
+	if len(ra.reports) != 5 || ra.reports[0].Gen != rb.reports[0].Gen {
+		t.Fatalf("generations differ: %d vs %d", ra.reports[0].Gen, rb.reports[0].Gen)
+	}
+	if got := len(st.Resolved()); got != before+1 {
+		t.Fatalf("%d flights, want 1", got-before)
+	}
+}
+
+// With no profile selected and the slice absent, use "" records an explicit
+// none, which a later default does not override.
+func TestProfileUseNoneWhileAbsentRecordsExplicitNone(t *testing.T) {
+	r, st := defaultRig(t, state.Options{}, "")
+	if _, err := r.rt.Coordinator.Reload(context.Background(), ReasonStartup); err != nil {
+		t.Fatal(err)
+	}
+	r.settle()
+	if r.present() {
+		t.Fatal("slice present after startup with no default")
+	}
+	before := len(st.Resolved())
+	got := r.use("")
+	(<-r.posts)()
+	r.tree.Flush()
+	r.rt.Coordinator.Tick()
+	if res := <-got; res.err != nil || res.active != "" {
+		t.Fatalf("Use = %+v", res)
+	}
+	if !r.present() || r.slice(t) != "" {
+		t.Fatalf("slice present=%v value=%q, want explicit none", r.present(), r.slice(t))
+	}
+	if !r.idle() || len(st.Resolved()) != before {
+		t.Fatal("recording none started a flight")
+	}
+	st.set(func() { st.layers = []store.LayerDoc{userLayer(`{"profile":{"default":"work"}}`)} })
+	if _, err := r.rt.Coordinator.Reload(context.Background(), ReasonCLI); err != nil {
+		t.Fatal(err)
+	}
+	r.settle()
+	if last := st.Resolved(); last[len(last)-1] != "" || r.rt.Profile.Active() != "" {
+		t.Fatalf("Resolve calls = %q active=%q", last, r.rt.Profile.Active())
 	}
 }
 
