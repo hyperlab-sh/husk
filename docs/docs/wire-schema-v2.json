@@ -683,6 +683,37 @@
     },
     "ThemeChangedParams": {
       "properties": {
+        "ansi": {
+          "additionalProperties": {
+            "maximum": 15,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "propertyNames": {
+            "enum": [
+              "canvas",
+              "surface",
+              "surface_elevated",
+              "surface_selected",
+              "surface_hover",
+              "slot_background",
+              "border",
+              "border_subtle",
+              "border_focused",
+              "ink",
+              "ink_muted",
+              "ink_subtle",
+              "accent",
+              "accent_secondary",
+              "accent_soft",
+              "success",
+              "warning",
+              "danger",
+              "info"
+            ]
+          },
+          "type": "object"
+        },
         "palette": {
           "$ref": "#/$defs/Palette"
         }

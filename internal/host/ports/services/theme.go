@@ -26,9 +26,9 @@ type Theme struct {
 var _ host.ThemePort = Theme{}
 
 // Get implements contracts.ThemePort.
-func (p Theme) Get(ctx context.Context, hc host.Caller) (protocol.Palette, error) {
-	palette, err := p.Svc.Get(hc)
-	return palette, coded(err)
+func (p Theme) Get(ctx context.Context, hc host.Caller) (protocol.Palette, map[string]int, error) {
+	pal, indices, err := p.Svc.Get(hc)
+	return pal, indices, coded(err)
 }
 
 // List implements contracts.ThemePort without reading Store.

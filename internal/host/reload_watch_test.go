@@ -55,7 +55,10 @@ func reloaded(t *testing.T, h *harness, reason string, reports ...reportData) {
 
 // A services.reloaded carrying theme changed:true pushes theme.changed, with
 // Theme's serving palette, to every live Pod and to no other; changed:false or
-// another Service's change pushes nothing.
+// another Service's change pushes nothing. The separate
+// TestThemeWireReloadAndIdenticalRepublish drives real coordinator reloads and
+// checks raw ANSI payload transitions; this synthetic-event test isolates
+// event interpretation and live-Pod filtering.
 func TestThemeChangedPushesOnlyWhenThePaletteChanged(t *testing.T) {
 	h, f, _ := bootFrontendWith(t, nil, alphaPlugin(t), writeFrontendPlugin(t, "beta", []string{"sidebar-list"}, nil))
 	// beta fails: no longer live.

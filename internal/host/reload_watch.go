@@ -51,7 +51,8 @@ func (w reloadWatcher) Notify(n protocol.Message) error {
 	}
 	if themeChanged {
 		// The palette is read from Theme's serving snapshot, not the event.
-		if err := w.r.pods.Notify(protocol.MethodThemeChanged, protocol.ThemeChangedParams{Palette: w.r.rt.Theme.Wire()}); err != nil {
+		pal, indices := w.r.rt.Theme.WireANSI()
+		if err := w.r.pods.Notify(protocol.MethodThemeChanged, protocol.ThemeChangedParams{Palette: pal, ANSI: indices}); err != nil {
 			w.r.log(pods.LogMsg{Level: "warn", Message: "theme.changed: " + err.Error()})
 		}
 	}

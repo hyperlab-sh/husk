@@ -195,7 +195,7 @@ func TestPortsRecordCallerAndReturn(t *testing.T) {
 	}
 	th := fakes.NewTheme(rec)
 	th.Palette.Name = "n"
-	if p, _ := th.Get(ctx, plugin); p.Name != "n" {
+	if p, _, _ := th.Get(ctx, plugin); p.Name != "n" {
 		t.Fatal(p)
 	}
 	kb := fakes.NewKeybinding(rec)

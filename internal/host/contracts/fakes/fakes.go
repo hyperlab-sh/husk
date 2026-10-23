@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strings"
 	"sync"
 	"time"
@@ -426,6 +427,7 @@ func (f *Profile) Use(_ context.Context, c contracts.Caller, name string) (contr
 type Theme struct {
 	callLog
 	Palette     protocol.Palette
+	ANSI        map[string]int
 	Themes      []contracts.ThemeEntry
 	CheckResult contracts.ThemeCheckResult
 	Err         error
@@ -435,9 +437,9 @@ type Theme struct {
 func NewTheme(rec *Recorder) *Theme { return &Theme{callLog: callLog{r: orNew(rec)}} }
 
 // Get implements contracts.ThemePort.
-func (f *Theme) Get(_ context.Context, c contracts.Caller) (protocol.Palette, error) {
+func (f *Theme) Get(_ context.Context, c contracts.Caller) (protocol.Palette, map[string]int, error) {
 	f.RecordCaller("Theme.Get", c)
-	return f.Palette, f.Err
+	return f.Palette, maps.Clone(f.ANSI), f.Err
 }
 
 // List implements contracts.ThemePort.
