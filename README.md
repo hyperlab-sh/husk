@@ -18,7 +18,10 @@ go build -o bin/husk ./cmd/husk
 go build -o plugins/reference/reference ./plugins/reference   # the reference plugins run this binary
 ./bin/husk --plugin-dir ./plugins         # load every bundled plugin
 ./bin/husk --plugin ./plugins/reference   # load one plugin (dir, manifest, or executable)
+./bin/husk --instance notes               # a named instance: husk ping --instance notes reaches it
 ```
+
+`--instance <name>` names the instance (`[a-z0-9][a-z0-9-]*`, at most 32 bytes, not digits only; invalid is exit 2 before anything is created); without it the instance is called by its pid. A second start with a name a live instance holds fails with `instance "<name>" is already running`. Only named instances persist instance- and workspace-scoped state.
 
 Frame dumps render without a terminal:
 
