@@ -16,6 +16,15 @@ func pluginServer(t *testing.T, dir string) *fakeServer {
 		switch req.Method {
 		case protocol.MethodPluginList:
 			c.send(protocol.Message{ID: req.ID, Result: json.RawMessage(pluginRows)})
+		case protocol.MethodPluginRemove:
+			var p struct{ Plugin string }
+			_ = json.Unmarshal(req.Params, &p)
+			if p.Plugin != "alpha" {
+				c.fail(req, protocol.CodeNotFound, "no plugin "+p.Plugin)
+				return
+			}
+			c.reply(req, map[string]any{"plugin": "alpha", "status": "exited", "log": "/l/alpha.log",
+				"reports": []map[string]any{{"service": "settings", "gen": 2, "applied": false}}})
 		case protocol.MethodPluginLog:
 			var p struct{ Plugin string }
 			_ = json.Unmarshal(req.Params, &p)
@@ -115,7 +124,10 @@ func TestPluginUsageErrorsSendNothing(t *testing.T) {
 	srv := pluginServer(t, dir)
 	for _, args := range [][]string{
 		{"plugin"},
-		{"plugin", "remove", "alpha"},
+		{"plugin", "remove"},
+		{"plugin", "remove", "a", "b"},
+		{"plugin", "remove", ""},
+		{"plugin", "purge", "alpha"},
 		{"plugin", "list", "extra"},
 		{"plugin", "log"},
 		{"plugin", "log", "a", "b"},
@@ -128,5 +140,37 @@ func TestPluginUsageErrorsSendNothing(t *testing.T) {
 	}
 	if srv.connections() != 0 {
 		t.Fatalf("%d connections for usage errors", srv.connections())
+	}
+}
+
+// remove prints the reply whatever the reports say (exit 0), in both formats;
+// an error reply is exit 1.
+func TestPluginRemoveSendsTheIdAndPrintsTheReply(t *testing.T) {
+	dir := shortDir(t)
+	srv := pluginServer(t, dir)
+	h := newHarness(t, dir, nil)
+	if got := h.run("plugin", "remove", "alpha", "--socket", srv.Socket, "--format", "json"); got != 0 {
+		t.Fatalf("exit %d: %s", got, h.errb.String())
+	}
+	var rep struct {
+		Plugin, Status string
+		Reports        []struct{ Applied bool }
+	}
+	if err := json.Unmarshal(h.out.Bytes(), &rep); err != nil || rep.Plugin != "alpha" || rep.Status != "exited" || len(rep.Reports) != 1 || rep.Reports[0].Applied {
+		t.Fatalf("stdout = %q (%v)", h.out.String(), err)
+	}
+	if req := lastRequest(t, srv); req.Method != protocol.MethodPluginRemove || string(req.Params) != `{"plugin":"alpha"}` {
+		t.Fatalf("request = %s %s", req.Method, req.Params)
+	}
+	h = newHarness(t, dir, nil)
+	if got := h.run("plugin", "remove", "alpha", "--format", "table"); got != 0 || !strings.Contains(h.out.String(), "exited") {
+		t.Fatalf("table exit %d stdout %q", got, h.out.String())
+	}
+	h = newHarness(t, dir, nil)
+	if got := h.run("plugin", "remove", "ghost", "--format", "json"); got != output.ExitRemote {
+		t.Fatalf("exit %d", got)
+	}
+	if code, _, _ := errObject(t, h); code != "not_found" {
+		t.Fatalf("code %q", code)
 	}
 }
