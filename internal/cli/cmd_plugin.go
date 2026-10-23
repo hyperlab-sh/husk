@@ -11,11 +11,11 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
-// pluginCommand is the plugin noun: list, log and remove, each a named
+// pluginCommand is the plugin noun: list, log, add and remove, each a named
 // wrapper over one socket method (docs/docs/design/pods.md, "plugin.* wire
 // shapes"). Who may call them is the instance's rule; a plugin's token comes
-// back as denied. Remove has the longer default timeout because it waits for
-// the stop policy and a Services reload.
+// back as denied. Add and remove have longer default timeouts for launch/stop
+// and the Services reload.
 func pluginCommand() command {
 	return command{
 		usage: "husk plugin",
