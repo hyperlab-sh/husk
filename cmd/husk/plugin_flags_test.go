@@ -150,17 +150,18 @@ func TestAddPluginPreservesConfiguredPaths(t *testing.T) {
 func TestAddPluginPreservesNamedInstanceConfig(t *testing.T) {
 	for _, tc := range []struct {
 		name, key, flag string
-		instance        any
+		user, instance  any
 		otherFlags      []string
 		want            []string
 		invalid         bool
 	}{
-		{"instance paths replace user", "paths", "--add-plugin", nil, nil, []string{"instance", "added"}, false},
-		{"instance dirs replace user", "dirs", "--add-plugin-dir", nil, nil, []string{"instance", "added"}, false},
-		{"invalid instance paths retain user", "paths", "--add-plugin", 42, nil, []string{"user", "added"}, true},
-		{"invalid instance dirs retain user", "dirs", "--add-plugin-dir", 42, nil, []string{"user", "added"}, true},
-		{"invalid instance paths with other flags", "paths", "--add-plugin", 42, []string{"--bundle", ""}, []string{"user", "added"}, true},
-		{"invalid instance dirs with other flags", "dirs", "--add-plugin-dir", 42, []string{"--bundle", ""}, []string{"user", "added"}, true},
+		{"instance paths replace user", "paths", "--add-plugin", nil, nil, nil, []string{"instance", "added"}, false},
+		{"instance dirs replace user", "dirs", "--add-plugin-dir", nil, nil, nil, []string{"instance", "added"}, false},
+		{"invalid instance paths retain user", "paths", "--add-plugin", nil, 42, nil, []string{"user", "added"}, true},
+		{"invalid instance dirs retain user", "dirs", "--add-plugin-dir", nil, 42, nil, []string{"user", "added"}, true},
+		{"invalid instance paths with other flags", "paths", "--add-plugin", nil, 42, []string{"--bundle", ""}, []string{"user", "added"}, true},
+		{"invalid instance dirs with other flags", "dirs", "--add-plugin-dir", nil, 42, []string{"--bundle", ""}, []string{"user", "added"}, true},
+		{"invalid instance and user paths", "paths", "--add-plugin", 42, 42, nil, []string{"added"}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -200,8 +201,12 @@ func TestAddPluginPreservesNamedInstanceConfig(t *testing.T) {
 			if !tc.invalid {
 				instance = []string{relative}
 			}
+			user := tc.user
+			if user == nil {
+				user = []string{paths["user"]}
+			}
 			for file, value := range map[string]any{
-				filepath.Join(configDir, "config.json"):   []string{paths["user"]},
+				filepath.Join(configDir, "config.json"):   user,
 				filepath.Join(instanceDir, "config.json"): instance,
 			} {
 				data, err := json.Marshal(map[string]any{"husk": map[string]any{"plugins": map[string]any{tc.key: value}}})
@@ -236,19 +241,27 @@ func TestAddPluginPreservesNamedInstanceConfig(t *testing.T) {
 			if err != nil || !reflect.DeepEqual(got, want) || source != "instance" {
 				t.Fatalf("%s = %v (%s, %v), want %v from instance", tc.key, got, source, err, want)
 			}
-			found := false
+			wantProblems := map[string]int{}
+			if tc.invalid {
+				wantProblems["instance"] = 1
+			}
+			if tc.user != nil {
+				wantProblems["user"] = 1
+			}
+			found := map[string]int{}
 			for _, report := range h.Frontend().StartupReports() {
 				for _, p := range report.Problems {
 					if p.Code == "invalid_value" && p.Key == "husk.plugins."+tc.key {
-						if p.Layer != "instance" || p.Source == nil || p.Source.Layer != "instance" || p.Source.File != "instances/add-flags/config.json" {
-							t.Fatalf("invalid instance array provenance = %+v", p)
+						file := map[string]string{"instance": "instances/add-flags/config.json", "user": "config.json"}[p.Layer]
+						if file == "" || p.Source == nil || p.Source.Layer != p.Layer || p.Source.File != file {
+							t.Fatalf("invalid array provenance = %+v", p)
 						}
-						found = true
+						found[p.Layer]++
 					}
 				}
 			}
-			if found != tc.invalid {
-				t.Fatalf("invalid instance array diagnostic present = %v, want %v", found, tc.invalid)
+			if !reflect.DeepEqual(found, wantProblems) {
+				t.Fatalf("invalid array diagnostics = %v, want %v", found, wantProblems)
 			}
 		})
 	}

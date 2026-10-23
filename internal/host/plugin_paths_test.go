@@ -226,15 +226,17 @@ func TestStartupFatalAdditions(t *testing.T) {
 	for _, tc := range []struct {
 		name, key, layer string
 		additions        map[string][]string
+		source           *protocol.Source
 		want             bool
 	}{
-		{"matching lower paths", "husk.plugins.paths", "user", map[string][]string{"paths": {"added"}}, false},
-		{"cross array stays fatal", "husk.plugins.paths", "user", map[string][]string{"dirs": {"added"}}, true},
-		{"instance error stays fatal", "husk.plugins.paths", "instance", map[string][]string{"paths": {"added"}}, true},
-		{"bundle error stays fatal", "husk.bundle", "user", map[string][]string{"paths": {"added"}}, true},
+		{"matching lower paths", "husk.plugins.paths", "user", map[string][]string{"paths": {"added"}}, nil, false},
+		{"cross array stays fatal", "husk.plugins.paths", "user", map[string][]string{"dirs": {"added"}}, nil, true},
+		{"instance error stays fatal", "husk.plugins.paths", "instance", map[string][]string{"paths": {"added"}}, nil, true},
+		{"instance file error is not fatal", "husk.plugins.paths", "instance", map[string][]string{"paths": {"added"}}, &protocol.Source{Layer: "instance", File: "instances/x/config.json"}, false},
+		{"bundle error stays fatal", "husk.bundle", "user", map[string][]string{"paths": {"added"}}, nil, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			reports := []services.Report{{Service: "settings", Problems: []services.Problem{{Severity: "error", Code: "invalid_value", Key: tc.key, Layer: tc.layer}}}}
+			reports := []services.Report{{Service: "settings", Problems: []services.Problem{{Severity: "error", Code: "invalid_value", Key: tc.key, Layer: tc.layer, Source: tc.source}}}}
 			if got := startupFatal(reports, errors.New("service reload incomplete"), tc.additions); got != tc.want {
 				t.Fatalf("startupFatal(%+v, additions=%v)=%v want %v", reports, tc.additions, got, tc.want)
 			}
