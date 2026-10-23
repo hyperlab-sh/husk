@@ -23,13 +23,33 @@ type ServerHandler struct {
 	Closing context.Context
 }
 
+// retainsContext lists the methods whose port keeps the request context after
+// Serve returns and unregisters when it ends: the watch methods, the only ones
+// that use the Notifier (contracts.Notifier: "Only watch methods use it").
+// Cancelling their context on return would silence the watch.
+var retainsContext = map[string]bool{
+	protocol.MethodEventWatch: true,
+	protocol.MethodStateWatch: true,
+}
+
 // Serve implements server.Handler.
 func (a ServerHandler) Serve(ctx context.Context, c server.Caller, req protocol.Message, n server.Notifier) protocol.Message {
 	if a.Closing != nil {
 		var cancel context.CancelCauseFunc
 		ctx, cancel = context.WithCancelCause(ctx)
-		defer cancel(nil)
-		defer context.AfterFunc(a.Closing, func() { cancel(contracts.ErrShutdown) })()
+		// Every request context is released when Serve returns, so a
+		// long-lived connection sending requests all day does not accumulate
+		// children on its context. Only the watches keep their context past
+		// Serve; theirs ends with the connection instead.
+		stop := context.AfterFunc(a.Closing, func() { cancel(contracts.ErrShutdown) })
+		if retainsContext[req.Method] {
+			// A watch still hears the shutdown after Serve returns; the hook
+			// goes when its context ends.
+			context.AfterFunc(ctx, func() { stop() })
+		} else {
+			defer cancel(nil)
+			defer stop()
+		}
 	}
 	return a.Handler.Serve(ctx, FromServerCaller(c), req, n)
 }
