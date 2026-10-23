@@ -668,13 +668,15 @@ introspection; the shapes are in [Hooks](hooks.md).
    distributions ship host-side extensions, `husk.*` handlers may need a
    registry outside `cmd/husk`. Recommended: defer; `RegisterHost` already
    covers it.
-6. **Terminal deliveries (Level 1, protocol minor 2.2).** `terminal.input` and
-   `terminal.link` are host-to-plugin deliveries like `input.key`: direct,
-   never on the Event bus, never coalesced (a byte stream must arrive whole
-   and in order), sent only to the Pod occupying the attached surface, and
-   homed as `Outbound` in `MethodHomes`. `surface.open`, `terminal.attach`,
-   `terminal.write` and `terminal.detach` are plugin-only inbound methods on
-   the Surface and Terminal ports ([Pods](pods.md), Frontend seams).
+6. **Terminal deliveries (protocol minor 2.5).** `terminal.input` (landed)
+   and `terminal.link` (deferred) are host-to-plugin deliveries like
+   `input.key`: direct, never on the Event bus, never coalesced (a byte
+   stream must arrive in order), sent only to the Pod occupying the attached
+   surface through its bounded queue, which drops and logs when full rather
+   than block the loop, and homed as `Outbound` in `MethodHomes`.
+   `terminal.attach`, `terminal.write` and `terminal.detach` are plugin-only
+   inbound methods on the Terminal port; `surface.open` (deferred) will be
+   one on the Surface port ([Pods](pods.md), Frontend seams).
    Recommended: keep them out of the bus; a watcher that wants terminal
    activity reads `husk.surfaces.terminals` through `state.watch`.
 7. Items 6 to 10 of earlier drafts recorded what the hook cut-out did that
