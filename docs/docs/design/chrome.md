@@ -37,6 +37,11 @@ This spec fixes four things:
    the right**, around the key hints. The theme name is clickable; it runs
    `husk.settings.open` with `tab: theme`, which opens the Settings center on
    its Theme tab, the theme selector, once that lands.
+5. **The frame is drawn with surfaces, borders and inks only.** The accent
+   marks exactly the focused or selected element and the status colours
+   appear only on status glyphs, badges and toasts; see "Colour discipline".
+   Today's chrome uses `warning` in ten places and `accent` in seven, and
+   the frame reads as loud whatever palette it is given.
 
 Husk has no normal/insert modes and this spec introduces none. Where this
 spec's requirements say "mode", they mean the layout label defined under "The
@@ -225,8 +230,9 @@ background `surface_elevated`, icon `ink`. **Idle**: no tile; the icon alone in
 `ink_muted` on the rail background. While Alt is held (or latched) every button
 is drawn as a tile (the active one on `surface_selected`, the others on
 `surface_elevated`) with its effective key (`KeysFor(id)[0]`, spelled as the
-rail spells it today, `ctrl+p` as `^P`) centred on the middle row in `warning`,
-bold, clipped to the 5 cells; a button with no key keeps its icon. The hit zone of a button is its 3 rows across the
+rail spells it today, `ctrl+p` as `^P`) centred on the middle row in `ink`,
+bold, clipped to the 5 cells (today's `warning` breaks the colour discipline:
+a key badge is not a status); a button with no key keeps its icon. The hit zone of a button is its 3 rows across the
 rail's width, as today. `husk.hotspots.toggle_stage` and `husk.palette.open`
 keep their tiles; what the rail holds with no plugins is unchanged (home, the
 slot explorer, the palette).
@@ -234,10 +240,13 @@ slot explorer, the palette).
 ### The top bar
 
 Row 0, full width, background `surface`. From the left: the **brand**, the text
-`◈ HUSK` in `canvas` on `accent`, bold, one cell of padding on each side. From
+`◈ HUSK` in `ink` on `surface_elevated`, bold, one cell of padding on each side
+(not `canvas` on `accent` as today: the brand is not the focused element). From
 the right: the **transient pills**, exactly the ones drawn today and in the
 same priority (dragging a divider, hovering a divider, hovering a rail button,
-Alt held), one at a time. Nothing else: the layout label, the plugin count, the
+Alt held), one at a time, each in `ink` on `surface_elevated`, bold (the
+dragging pill on `surface_selected`: the divider under drag is the selected
+element); today's `canvas` on `success` and on `warning` go. Nothing else: the layout label, the plugin count, the
 theme pill and the "Rail: …" key reminder are removed. The space between is
 blank bar background.
 
@@ -257,11 +266,13 @@ The last row, full width, background `surface`. Three parts:
    `ink_muted`. Defined under "The layout label".
 2. **The key hints**, after the label, separated from it and from each other by
    ` │ ` in `border`: the groups [Keybindings](keybindings.md) lists, in that
-   order, with the docks group filtered as above. Key in `accent` bold,
-   description in `ink_muted`.
+   order, with the docks group filtered as above. Key in `ink` bold,
+   description in `ink_muted` (today's `accent` on every key is the single
+   largest source of accent in the frame; a hint is not a focused element).
 3. **The theme name**, at the right edge, `✦ <name>` with one cell of padding
-   on each side, in `accent_secondary` on `surface_elevated` (the pill the top
-   bar showed, moved down).
+   on each side, in `ink_muted` on `surface_elevated` (the pill the top bar
+   showed, moved down and taken off `accent_secondary`, which is a plugin
+   colour).
 
 The cells between the last hint and the theme name are blank bar background.
 
@@ -274,14 +285,15 @@ dropped whole, never clipped. The `ipc: N` counter is removed and
 
 **The theme name** is the served palette's `name` (`protocol.Palette.Name`, the
 value `theme.changed` carries). Theme copies the `theme.name` setting into it,
-and that setting's default is the built-in palette's name
-([Services](services.md), "Theme"), so with `theme.name` unset the slot shows
-`CharmTone`. Should the name be empty (`theme.name` set to `""`) the slot
-shows `theme`, so the click target below keeps a visible extent. With named
-themes ([Services](services.md), "Named themes"; not landed) the name is
-always the selected theme's name and `""` selects the built-in palette, so the
-empty case then cannot arise; the `theme` fallback stays as a guard. The
-frontend reads the name from `Frontend.Palette()`, never from Settings.
+and that setting's default is `charm`, the default built-in theme
+([Services](services.md), "Theme"; [Built-in themes](themes.md)), so with
+`theme.name` unset the slot shows `charm`. Should the name be empty
+(`theme.name` set to `""`) the slot shows `theme`, so the click target below
+keeps a visible extent. With named themes ([Services](services.md), "Named
+themes"; not landed) the name is always the selected theme's name and `""`
+selects `charm`, so the empty case then cannot arise; the `theme` fallback
+stays as a guard. The frontend reads the name from `Frontend.Palette()`,
+never from Settings.
 
 **Clicking the theme name** (a left click on any cell of the pill) opens the
 Settings center on its Theme tab, the theme selector: it runs the host action
@@ -317,6 +329,82 @@ not fit. The word "Mode" and the forms `Full-Canvas Mode`,
 only sense in which the frontend has a "mode": a label. No key is read
 differently because of it, and nothing may introduce normal/insert or similar
 input modes under this name.
+
+### Colour discipline
+
+Binding on `cmd/husk`, whatever theme is selected ([Built-in themes](themes.md)
+supplies the colours; this section says which role each piece of chrome may be
+drawn with). The frame must read as calm under every theme, the vibrant ones
+included: the rule, not the palette, is what keeps it so.
+
+1. **The frame is surfaces, borders and inks.** Bars, the rail and its tiles,
+   pills, dividers, declared frames and their labels, empty-surface names, key
+   hints, the layout label, the theme name, popups and their text use only
+   `canvas`, `surface`, `surface_elevated`, `surface_hover`,
+   `surface_selected`, `slot_background`, `border`, `border_subtle`,
+   `border_focused`, `ink`, `ink_muted` and `ink_subtle`. Weight (bold) is
+   not colour and stays where it is.
+2. **`accent` marks exactly the focused or selected element, nowhere else.**
+   The complete list: the active rail tile's icon; the palette prompt glyph
+   `❯` (the palette is the focused element while it is open); the divider
+   under drag; the marker on the current theme in the theme selector. The
+   focused surface's border is `border_focused`, a role of its own. No key,
+   hint, brand, label, title or badge is accent-coloured.
+3. **`accent_secondary` and `accent_soft` are for plugins.** The chrome never
+   draws them.
+4. **`success`, `warning`, `danger` and `info` appear only on status glyphs,
+   badges and toasts** whose meaning is that status: a toast's `●` glyph and
+   title in the toast's level colour; a status badge a later spec defines.
+   Never as decoration, never as a border (a toast's border is `border`, its
+   background `surface_elevated`), never on keys, hints, callouts or dev
+   overlays. Today's chrome breaks this in ten places.
+5. The rule governs **roles drawn, not hex values**. Two roles may hold the
+   same colour in a theme (`charm`'s `border_focused` and `accent_soft` are
+   both its indigo); drawing `border_focused` is allowed where drawing
+   `accent_soft` is not.
+6. A host modal (the theme selector, any later one) follows the same rules:
+   rows on `surface`, the cursor row on `surface_selected`, text in `ink`
+   and `ink_muted`, the frame in `border_focused`.
+
+**Audit of today's `cmd/husk/render.go`**, every use that breaks a rule and
+where it moves. Uses not listed (rail and bar backgrounds, idle icons, frame
+borders and `border_focused` on the focused surface, close glyphs, palette
+rows, the shadow's resolution colours, the slot fill) already comply.
+
+| Element (function) | Today | After |
+| :--- | :--- | :--- |
+| Rail: Alt-held key badge, active and inactive tiles (`renderActivityRailBox`) | `warning` bold | `ink` bold on the tile background |
+| Top bar: brand (`renderTopWorkbenchBar`) | `canvas` on `accent` | `ink` bold on `surface_elevated` |
+| Top bar: plugin count badge | `success` on `surface_elevated` | Removed (this spec, "The top bar") |
+| Top bar: theme pill | `accent_secondary` on `surface_elevated` | Moves to the bottom bar in `ink_muted` on `surface_elevated` |
+| Top bar: dragging pill | `canvas` on `success` | `ink` bold on `surface_selected` |
+| Top bar: divider-hover pill | `canvas` on `warning` | `ink` bold on `surface_elevated` |
+| Top bar: Alt-held pill | `canvas` on `warning` | `ink` bold on `surface_elevated` |
+| Top bar: rail key reminder | `info` on `surface_elevated` | Removed (this spec, "The top bar") |
+| Bottom bar: hint keys (`renderBottomKeybindBar`) | `accent` bold | `ink` bold |
+| Hotspot callout badge (`drawSurface`) | `warning` bold | `ink` bold on `surface_selected` (a dev overlay, not a status) |
+| Borderless frame label (`drawChrome`) | `accent` bold | `ink_muted` bold, as the bordered label already is; `ink` bold on the focused surface |
+| Hovered divider edge (`dividerEdgeStyles`) | `warning` bold | `ink` bold |
+| Dragged divider edge (`dividerEdgeStyles`) | `success` bold | `accent` bold (the one element under manipulation) |
+| Slot explorer title (`renderSlotExplorer`) | `accent` bold | `ink` bold |
+| Slot explorer number badge | `canvas` on `warning` | `ink` bold on `surface_elevated` (`surface_selected` on the selected row) |
+| Slot explorer surface title | `accent_secondary` | `ink_muted` |
+| Slot explorer owner | `success` | `ink_subtle` |
+| Toast border (`drawToast`) | the level colour | `border`; the `●` glyph and title keep the level colour |
+| Palette header (`drawCommandPalette`) | `warning` bold | `ink_muted` bold |
+| Palette row tag (`paletteRow`) | `accent_secondary` | `ink_subtle` |
+| Palette row shortcut (`paletteRow`) | `warning` | `ink_muted` |
+
+After the migration the chrome draws `accent` in four places (rule 2),
+`warning` in none, `success`/`danger`/`info` only inside `drawToast`, and
+`accent_secondary`/`accent_soft` nowhere. `TestChromeColourDiscipline` pins
+it: a source-level test over `cmd/husk/*.go` (excluding tests) that counts
+`m.palette.<Role>` references per role and fails when `AccentSecondary` or
+`AccentSoft` appears, when `Warning` appears outside `drawToast`, or when
+`Success`/`Danger`/`Info` appears outside `drawToast`; and a rendering test
+that the empty workbench's frame contains the accent colour's escape sequence
+only on the active rail tile. Every golden changes with these moves and is
+regenerated once with the layout change ("Tests and goldens").
 
 ### Failure modes
 
@@ -356,8 +444,10 @@ rewrites, each named for the behaviour it pins:
 - the footer omits the sidebar key under `full-canvas`, and the panel and
   cycle keys under `stage`;
 - the layout label for each row of the table above;
-- the theme slot shows `CharmTone` with no override, the override with one, and
+- the theme slot shows `charm` with no override, the override with one, and
   `theme` for an empty name; a click on it does not reach any surface;
+- the colour discipline holds: the source-level role count and the one-accent
+  frame described under "Colour discipline";
 - the top bar is brand plus at most one transient pill, no plugin count, no
   layout label, no rail reminder;
 - rail tiles are 5x3 whole cells with a one-row gap, and the Alt badge is
@@ -381,6 +471,7 @@ All in `package main` under `cmd/husk`. `pkg/` is untouched.
 | `drawSurface`: content or blank canvas | Content, or the humanised name when the slot is a region slot and `surfaceOwner(slot) == ""` (never for `full-canvas` or `workspace-stage`; `drawModal` is unchanged) |
 | `dropVanishedSides`, `leaveUndrawnSides` | Unchanged; a side column now vanishes only by its dock or the fit rule, never because a plugin left |
 | `totalIPCEvents` | Removed |
+| Every role use listed under "Colour discipline" | Moved to the role in the table's last column; `drawToast` keeps the level colour for glyph and title only |
 | `mode_label_test.go` | Rewritten for the table above and the inverted layout rule; other `cmd/husk` tests that assume zero plugins lay out no side rects, or read the top-bar label (`focus_fallback_test.go`, `surface_owner_test.go`), are updated the same way |
 
 A click on the theme pill is routed in `input.go` before surface hit-testing,
@@ -439,10 +530,27 @@ size", "Input routing"), [Services](services.md) ("Settings", `theme.name`),
     for an open modal today). Husk is mode-free; the label is a readout.
 11. **The theme slot reads `Palette.Name`**, not the `theme.name` setting
     directly, because Theme already folds the setting into the served palette
-    and the frontend has no Settings read seam. `CharmTone` when unset (the
-    setting's default); an empty name shows `theme`.
+    and the frontend has no Settings read seam. `charm` when unset (the
+    setting's default, [Built-in themes](themes.md)); an empty name shows
+    `theme`.
 12. **Hint groups are dropped whole from the end**, never clipped, so a
     half-shown key never misleads; the label and theme name always draw.
+13. **The colour discipline is a drawing rule, not a palette.** The operator's
+    complaint ("too many colours, some very vibrant") could be answered by a
+    greyer default alone, but Dracula and Base16 ship too, and a frame that
+    only looks calm under one theme is not calm. Fixing which role each piece
+    of chrome may use makes every theme calm in the frame and leaves vibrancy
+    to the plugins, which own the accents.
+14. **The dragged divider takes the accent; the hovered one does not.** Drag
+    is the one moment a divider is the element under the user's hand (rule 2);
+    hover is a hint and gets `ink`. Both lose their status colours.
+15. **Toasts keep their level colour on glyph and title only.** A coloured
+    border makes the toast the loudest rectangle on screen; the glyph says the
+    same thing in one cell, and rule 4 names toasts as a place status colours
+    belong.
+16. **Dev overlays (hotspot badges, the slot explorer) are inks**, not status
+    colours: a callout number is not a warning. They are developer tools and
+    read fine in `ink` bold on a raised surface.
 
 ## Open questions
 
@@ -453,3 +561,7 @@ size", "Input routing"), [Services](services.md) ("Settings", `theme.name`),
    opens the Settings center on its Theme tab, the theme selector
    ([Settings center](settings-center.md); [Services](services.md), "The theme
    selector").
+3. Status badges. Rule 4 of "Colour discipline" allows status colours on
+   badges, but after the plugin-count badge goes the chrome has none; whether
+   a later spec adds one (a plugin-crashed count in `danger`, say) and where it
+   sits is open. Nothing in this spec needs it.
