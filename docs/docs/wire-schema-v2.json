@@ -634,6 +634,9 @@
         "badge": {
           "type": "string"
         },
+        "capture": {
+          "type": "boolean"
+        },
         "hit_targets": {
           "items": {
             "$ref": "#/$defs/RowHitTarget"
