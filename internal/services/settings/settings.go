@@ -373,7 +373,10 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 		if known || kept {
 			key = p.Path
 		}
-		r.Problems = append(r.Problems, c.Problem{Severity: "warning", Code: "type_clash", Layer: string(p.Layer), Key: key, Message: fmt.Sprintf("%s: the %s layer replaces a value of a different type from the %s layer", p.Path, p.Layer, p.LowerLayer), Source: sourceOf(string(p.Layer), layerFiles)})
+		problem := StoreProblem(p, layerFiles)
+		problem.Key = key
+		problem.Source = sourceOf(string(p.Layer), layerFiles)
+		r.Problems = append(r.Problems, problem)
 	}
 	for key, raw := range flat {
 		layer := originOf(in.Doc.Origins, key)
