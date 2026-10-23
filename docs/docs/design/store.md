@@ -89,7 +89,8 @@ func Open(opts Options) (*Store, error)
 
 type Options struct {
 	Instance     InstanceRef  // who this process is
-	Distribution fs.FS        // read-only distribution layer; nil: none
+	Distribution fs.FS        // read-only distribution layer, first part: an embedding application's files; nil: none
+	Bundle       fs.FS        // read-only distribution layer, second part: a bundle's config files ([Bundles](bundles.md)); nil: none
 	InstanceDocs map[DocName]Doc // instance layer built by cmd/husk from flags
 	Env          Env          // XDG lookups; injectable for tests
 	Clock        Clock        // injectable for debounce and GC tests
@@ -299,6 +300,34 @@ settings keys under the host's `husk.*` namespace in document `config`
 Store does not know these paths mean anything; `cmd/husk` owns the flag table
 and Services own the schema.
 
+Distribution layer: two parts merged in order with the same rules, the
+embedding application's `Options.Distribution` files, then the bundle's
+`Options.Bundle` files ([Bundles](bundles.md)). Both are layer `distribution`
+in `Origins`, `Problems` and `LayerDoc`; a `LayerDoc.File` for a document both
+parts supply is `""`, as for the flag-folded instance layer. `Profiles` and
+`ProfileSources` list profile directories from both parts as `distribution`.
+Either part may be nil.
+
+One setting must be known before Store opens, because it names what the
+distribution layer is made of: `husk.bundle`. `cmd/husk` reads it with
+`ReadBootstrap`, which is the one Store read that happens before `Open`:
+
+```go
+// ReadBootstrap reads the layers that can be known before Open: the user
+// config.json, then the named instance's instances/<name>/config.json, then the
+// flag-folded instance documents, merged in that order with the layer rules. It
+// returns the value of each bootstrap key (v1: "husk.bundle") and the layer
+// that set it. A file it cannot parse counts as absent for this read; Resolve
+// reports the parse problem later as for any layer. It opens no directory,
+// creates nothing and caches nothing.
+func ReadBootstrap(env Env, inst InstanceRef, instanceDocs map[DocName]Doc) (Bootstrap, error)
+
+type Bootstrap struct {
+	Bundle      string // "" when no layer names one
+	BundleLayer Layer  // user or instance; "" when Bundle is ""
+}
+```
+
 File format: config documents are HuJSON (JSON plus comments and trailing
 commas, `github.com/tailscale/hujson`), extension `.json`. HuJSON keeps `null`,
 which the delete rule needs, and its patch support keeps user comments when
@@ -455,7 +484,7 @@ func (s *Store) OpenPluginLog(pluginID string) (*os.File, error)
 
 func (s *Store) GC(ctx context.Context) (GCReport, error)
 func (s *Store) Check(ctx context.Context) (CheckReport, error)
-func (s *Store) Paths() Paths // every resolved directory, for `husk store paths`
+func (s *Store) Paths() Paths // every resolved directory, for `husk store paths`; Bundle is the loaded bundle's directory or ""
 
 // ResetSecrets deletes every sealed secrets/<ns>.age file (and the
 // .<ns>.age.tmp-* crash temps of their writes), the keyring identity and
@@ -538,7 +567,9 @@ $XDG_RUNTIME_DIR/husk/                  fallback /tmp/husk-<uid>/   0700, rule o
   <instance id>.sock                    the instance socket, 0600, written by the Server
   <instance id>.json                    registration entry, written by the Server
 
-<distribution fs.FS or dir>/            read-only, supplied by a distribution
+<distribution fs.FS>/                   read-only, embedded by an application (first part)
+  <doc>.json, profiles/<profile>/<doc>.json
+<bundle dir>/                           read-only, named by --bundle or husk.bundle (second part, [Bundles](bundles.md))
   <doc>.json, profiles/<profile>/<doc>.json
 ```
 
@@ -661,7 +692,10 @@ secrets. Explicit `GC` and `ResetSecrets` still do what they say.
 
 ### Startup and shutdown order
 
-1. `cmd/husk` parses flags into `InstanceDocs` and calls `store.Open`.
+1. `cmd/husk` parses flags into `InstanceDocs`, calls `ReadBootstrap`, loads
+   the bundle it names if any (a bad bundle stops the start here,
+   [Bundles](bundles.md)), and calls `store.Open` with the bundle's config as
+   `Options.Bundle`.
 2. State is created with Store as `Hydrator`; `Store.Attach` registers the
    `husk.store` slice and the `Listener`.
 3. Stem, Services and Pods register their slices; each persistent one is
@@ -699,7 +733,9 @@ secrets. Explicit `GC` and `ResetSecrets` still do what they say.
   `husk.layout.rail`, `husk.input.hold_alt`) passed in `Options.InstanceDocs`; their
   consumers read the resolved document through Services instead of `main`
   locals. `--dump-frame`, `--demo-frame` and `--demo` stay process flags, not
-  config. New flags: `--instance <name>`, `--distribution <dir>`,
+  config. New flags: `--instance <name>`, `--bundle <dir>` (folded into
+  `husk.bundle`; the directory form of the distribution layer is a bundle,
+  [Bundles](bundles.md), so no separate `--distribution <dir>` flag is added),
   `--profile <name>` ([Services](services.md)). `main`
   opens Store before the listener and closes it after `model.cleanup`.
 - `pkg/manifest`: deleted in the retirement; `internal/pods/manifest` reads
@@ -750,6 +786,11 @@ secrets. Explicit `GC` and `ResetSecrets` still do what they say.
 17. Store reports its own health in a non-persistent `husk.store` State slice.
 18. No file watching in v1; config changes take effect on `husk config reload`.
 19. Slice namespaces and instance names are validated, never sanitized.
+20. The distribution layer has two parts, an application's embedded files then
+    a bundle's files, merged in order like the instance layer's two parts; a
+    bundle therefore wins over embedded defaults and loses to the user without
+    a fifth layer ([Bundles](bundles.md)). The one setting that names the
+    second part, `husk.bundle`, is read by `ReadBootstrap` before `Open`.
 
 ## Open questions
 
@@ -760,10 +801,11 @@ secrets. Explicit `GC` and `ResetSecrets` still do what they say.
 2. Should a plugin get a private data directory (for caches, databases) in
    addition to its slice? The notes say a plugin persists only through its
    slice. Recommended: no for v1; revisit when a plugin needs more than its 256 KiB slice.
-3. Should the distribution layer also be loadable from a directory flag in
-   `cmd/husk`, or only as an `fs.FS` from an application that embeds Husk?
-   This spec allows both because a bundle is plain files. Recommended: keep
-   both.
+3. **Resolved:** the distribution layer is loadable both as an `fs.FS` from an
+   application that embeds Husk (`Options.Distribution`) and from a directory
+   (`Options.Bundle`); the directory form is a bundle, named by `--bundle` or
+   `husk.bundle`, and the two are the two parts of one layer
+   ([Bundles](bundles.md)). No `--distribution <dir>` flag exists.
 4. **Resolved:** a fallback identity is allowed after definite absence of the
    identity, supported keyring platform, Secret Service or session bus, followed
    by a failed keyring write. This supports headless Linux without treating a

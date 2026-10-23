@@ -63,7 +63,7 @@ Dependencies:
 | 3 | `user` | `keymap.json` in the user config directory | global and surface |
 | 4 (strongest) | `profile` | `keymap.json` in the active profile's directory | global and surface |
 
-The Store `instance` layer (run flags) does not carry a keymap. Store has one distribution source (`Options.Distribution`, [Store](store.md)); an application that bundles plugins ships one merged distribution keymap. The rank order is fixed; no file changes it.
+The Store `instance` layer (run flags) does not carry a keymap. Store has one distribution layer, in two parts merged in order: an application's embedded files (`Options.Distribution`) and a bundle's files (`Options.Bundle`, [Store](store.md), [Bundles](bundles.md)); since `bind` is an array, a bundle `keymap.json` replaces an embedded one whole, so the layer still yields one distribution keymap. The rank order is fixed; no file changes it.
 
 ### Which binding wins
 
