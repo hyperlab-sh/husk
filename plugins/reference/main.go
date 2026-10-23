@@ -660,14 +660,14 @@ func (p *plugin) typeKey(s protocol.SurfaceID, key string) error {
 
 // captureField is the capture member of the next frame for surface s: true
 // while s is in text mode, false once after leaving it, otherwise absent.
-func (p *plugin) captureField(s protocol.SurfaceID) *bool {
+func (p *plugin) captureField(s protocol.SurfaceID) *protocol.CaptureValue {
 	switch {
 	case p.textMode[s]:
-		on := true
+		on := protocol.CaptureTrue
 		return &on
 	case p.sendOff[s]:
 		delete(p.sendOff, s)
-		off := false
+		off := protocol.CaptureFalse
 		return &off
 	}
 	return nil

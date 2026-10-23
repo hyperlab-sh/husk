@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	uv "github.com/charmbracelet/ultraviolet"
 	"maps"
 	"slices"
 	"strings"
@@ -22,12 +23,16 @@ import (
 // from defaultKeys. Snapshot is nil, so the model never rebuilds its catalog
 // from State: tests seed the catalog directly (addPlugin).
 type fakeFE struct {
-	mu        sync.Mutex
-	Keys      []keySent
-	Mice      []mouseSent
-	KeyStates []keyStateSent
-	Invoked   []invoked
-	Registers []string
+	TerminalDrawers map[protocol.SurfaceID]contracts.TerminalDrawer
+	TerminalKeys    []uv.KeyPressEvent
+	TerminalMice    []uv.MouseEvent
+	TerminalPastes  []string
+	mu              sync.Mutex
+	Keys            []keySent
+	Mice            []mouseSent
+	KeyStates       []keyStateSent
+	Invoked         []invoked
+	Registers       []string
 	// Writer calls retain their callbacks until a test explicitly delivers a reply.
 	ServiceRev                                 uint64
 	SchemaReads, SettingReads, KeyListingReads int

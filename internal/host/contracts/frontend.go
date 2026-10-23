@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/hyperlab-sh/husk/internal/substrate/state"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
@@ -130,6 +131,16 @@ type Frontend interface {
 	SendMouse(plugin string, params protocol.SurfaceMouseParams) error
 	// SendKeyState delivers input.key_state; errors as SendKey. Loop only.
 	SendKeyState(plugin string, params protocol.KeyStateParams) error
+
+	// TerminalView returns the attached emulator's drawer, nil for a line
+	// surface. Loop only; callers must not retain it across an Update.
+	TerminalView(surface protocol.SurfaceID) TerminalDrawer
+	// SendTerminalKey encodes a press for an attached surface. Loop only.
+	SendTerminalKey(surface protocol.SurfaceID, key uv.KeyPressEvent)
+	// SendTerminalMouse encodes an inner-relative mouse event. Loop only.
+	SendTerminalMouse(surface protocol.SurfaceID, event uv.MouseEvent)
+	// SendTerminalPaste encodes raw or bracketed paste. Loop only.
+	SendTerminalPaste(surface protocol.SurfaceID, text string)
 
 	// RailItems lists the rail items every declared plugin carries, from the
 	// declared plugins documents (the catalog, pods.md "Pod and manifest
@@ -325,7 +336,7 @@ type KeyContext struct {
 	ModalAction string
 	// Capture is set while the focused occupant takes text input on
 	// FocusSurface (husk.surfaces.capture).
-	Capture bool
+	Capture protocol.CaptureMode
 	Frozen  bool
 }
 

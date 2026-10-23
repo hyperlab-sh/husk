@@ -6,9 +6,10 @@ import (
 
 	"github.com/hyperlab-sh/husk/internal/services/keybinding"
 	"github.com/hyperlab-sh/husk/internal/substrate/store"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
-var captureCtx = keybinding.KeyContext{FocusSurface: "stage", FocusOwner: "a", Capture: true}
+var captureCtx = keybinding.KeyContext{FocusSurface: "stage", FocusOwner: "a", Capture: protocol.CaptureText}
 
 // While Capture is set, a global binding on a text key is removed from every
 // layer; modified keys, function keys, esc and surface-scoped entries stay.
@@ -48,7 +49,7 @@ func TestCaptureRemovesGlobalTextKeyCandidates(t *testing.T) {
 				t.Errorf("capturing Resolve(%q) = %s, want %s", tc.key, got, tc.want)
 			}
 			free := captureCtx
-			free.Capture = false
+			free.Capture = protocol.CaptureNone
 			if got := resolved(kb, free, tc.key); got != tc.free {
 				t.Errorf("Resolve(%q) = %s, want %s", tc.key, got, tc.free)
 			}
@@ -60,7 +61,7 @@ func TestCaptureHidesGlobalTextKeySequences(t *testing.T) {
 	kb := rankKeys(t, map[store.Layer]string{store.LayerUser: bind(
 		`{"keys":["g","h"],"action":"u.gh"}`, `{"keys":["ctrl+k","ctrl+s"],"action":"u.save"}`, `{"keys":["ctrl+k","x"],"action":"u.kx"}`)}, "")
 	free := captureCtx
-	free.Capture = false
+	free.Capture = protocol.CaptureNone
 	if got := resolved(kb, free, "g"); got != "<prefix>" {
 		t.Fatalf("without capture g = %s, want prefix", got)
 	}
@@ -80,7 +81,7 @@ func TestCaptureHidesGlobalTextKeySequences(t *testing.T) {
 func TestCaptureModalExemptionNeedsAnOpenModal(t *testing.T) {
 	kb := rankKeys(t, map[store.Layer]string{store.LayerUser: bind(
 		`{"key":"n","action":"d.open"}`, `{"key":"c","action":"husk.modal.close"}`, `{"key":"x","action":"u.other"}`)}, "")
-	modal := keybinding.KeyContext{FocusSurface: "modal-surface", ModalOpen: true, ModalAction: "d.open", Capture: true}
+	modal := keybinding.KeyContext{FocusSurface: "modal-surface", ModalOpen: true, ModalAction: "d.open", Capture: protocol.CaptureText}
 	for _, tc := range []struct{ key, want string }{
 		{"n", "d.open"}, {"c", "husk.modal.close"}, {"x", "<none>"}, {"q", "<none>"}, {"esc", "husk.modal.close"},
 	} {
@@ -89,7 +90,7 @@ func TestCaptureModalExemptionNeedsAnOpenModal(t *testing.T) {
 		}
 	}
 	// With no modal open there is no exemption and ModalAction is not compared.
-	noModal := keybinding.KeyContext{FocusSurface: "stage", FocusOwner: "a", Capture: true, ModalAction: "d.open"}
+	noModal := keybinding.KeyContext{FocusSurface: "stage", FocusOwner: "a", Capture: protocol.CaptureText, ModalAction: "d.open"}
 	for _, key := range []string{"n", "c"} {
 		if got := resolved(kb, noModal, key); got != "<none>" {
 			t.Errorf("no modal, Resolve(%q) = %s, want none", key, got)
@@ -102,7 +103,7 @@ func TestCaptureKeepsTombstones(t *testing.T) {
 		store.LayerDistribution: bind(`{"key":"n","action":"d.open"}`),
 		store.LayerUser:         bind(`{"key":"n","disable":true}`),
 	}, "")
-	modal := keybinding.KeyContext{FocusSurface: "modal-surface", ModalOpen: true, ModalAction: "d.open", Capture: true}
+	modal := keybinding.KeyContext{FocusSurface: "modal-surface", ModalOpen: true, ModalAction: "d.open", Capture: protocol.CaptureText}
 	// A filtered-out tombstone would let the exempt d.open binding through.
 	if got := resolved(kb, modal, "n"); got != "<none>" {
 		t.Errorf("tombstone on the modal's own key = %s, want none", got)
@@ -131,7 +132,7 @@ func TestCaptureHintsInheritTheFilter(t *testing.T) {
 		return fmt.Sprint(out)
 	}
 	free := captureCtx
-	free.Capture = false
+	free.Capture = protocol.CaptureNone
 	if got, want := texts(free), "[S G CG]"; got != want {
 		t.Errorf("Hints without capture = %s, want %s", got, want)
 	}

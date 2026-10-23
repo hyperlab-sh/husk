@@ -41,6 +41,14 @@ const (
 	MethodSurfaceClose = "surface.close"
 	// MethodSurfaceResized reports geometry; see design/protocol.md.
 	MethodSurfaceResized = "surface.resized"
+	// MethodTerminalAttach allocates a host emulator for an occupied surface.
+	MethodTerminalAttach = "terminal.attach"
+	// MethodTerminalWrite feeds encoded program output to an emulator.
+	MethodTerminalWrite = "terminal.write"
+	// MethodTerminalDetach discards an emulator.
+	MethodTerminalDetach = "terminal.detach"
+	// MethodTerminalInput delivers encoded input and emulator replies.
+	MethodTerminalInput = "terminal.input"
 	// MethodInputKey delivers a key; see design/keybindings.md.
 	MethodInputKey = "input.key"
 	// MethodInputMouse delivers a mouse event; see design/protocol.md.
@@ -108,7 +116,7 @@ func Methods() []string {
 	return []string{MethodSessionPing, MethodProtocolError, MethodActionInvoke, MethodActionList,
 		MethodEventEmit, MethodEventDeliver, MethodEventWatch, MethodHookCall, MethodHookList,
 		MethodStateGet, MethodStateSet, MethodStatePatch, MethodStateSnapshot, MethodStateWatch, MethodStateClear, MethodStateChanged,
-		MethodSurfaceUpdate, MethodSurfaceClose, MethodSurfaceResized, MethodInputKey, MethodInputMouse, MethodInputKeyState,
+		MethodSurfaceUpdate, MethodSurfaceClose, MethodSurfaceResized, MethodTerminalAttach, MethodTerminalWrite, MethodTerminalDetach, MethodTerminalInput, MethodInputKey, MethodInputMouse, MethodInputKeyState,
 		MethodThemeChanged, MethodThemeGet, MethodThemeList, MethodThemeCheck, MethodSlotContribute, MethodSlotContributions, MethodToastShow,
 		MethodSettingsGet, MethodSettingsList, MethodSettingsSchema, MethodSettingsValidate, MethodSettingsSet,
 		MethodSecretsGet, MethodSecretsNames, MethodSecretsSet, MethodSecretsGrant, MethodSecretsRevoke, MethodSecretsReveal,

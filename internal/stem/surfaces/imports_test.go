@@ -11,10 +11,11 @@ import (
 
 // TestImportsStayWithinAllowList keeps the engine on its declared
 // dependencies: the host contracts (the frozen entry shapes), State and its
-// surfaces value types, and the wire package — never Calls, Pods, Services
+// surfaces value types, the terminal emulator, and the wire package — never Calls, Pods, Services
 // or the Server.
 func TestImportsStayWithinAllowList(t *testing.T) {
 	allowed := map[string]bool{
+		"github.com/hyperlab-sh/husk/internal/stem/terminals":           true,
 		"github.com/hyperlab-sh/husk/internal/host/contracts":           true,
 		"github.com/hyperlab-sh/husk/internal/substrate/state":          true,
 		"github.com/hyperlab-sh/husk/internal/substrate/state/surfaces": true,

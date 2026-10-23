@@ -72,7 +72,8 @@ func form(method string) string {
 	case protocol.MethodProtocolError, protocol.MethodEventDeliver, protocol.MethodStateChanged,
 		protocol.MethodSurfaceUpdate, protocol.MethodSurfaceClose, protocol.MethodSurfaceResized,
 		protocol.MethodInputKey, protocol.MethodInputMouse, protocol.MethodInputKeyState,
-		protocol.MethodThemeChanged, protocol.MethodSlotContributions, protocol.MethodToastShow:
+		protocol.MethodThemeChanged, protocol.MethodSlotContributions, protocol.MethodToastShow,
+		protocol.MethodTerminalWrite, protocol.MethodTerminalDetach, protocol.MethodTerminalInput:
 		return "notification"
 	default:
 		return "request"
@@ -91,6 +92,14 @@ func payloadTypes(method string) (reflect.Type, reflect.Type) {
 		return reflect.TypeFor[protocol.SurfaceCloseParams](), nil
 	case protocol.MethodSurfaceResized:
 		return reflect.TypeFor[protocol.SurfaceResizedParams](), nil
+	case protocol.MethodTerminalAttach:
+		return reflect.TypeFor[protocol.TerminalAttachParams](), reflect.TypeFor[protocol.TerminalAttachResult]()
+	case protocol.MethodTerminalWrite:
+		return reflect.TypeFor[protocol.TerminalWriteParams](), nil
+	case protocol.MethodTerminalDetach:
+		return reflect.TypeFor[protocol.TerminalDetachParams](), nil
+	case protocol.MethodTerminalInput:
+		return reflect.TypeFor[protocol.TerminalInputParams](), nil
 	case protocol.MethodInputKey:
 		return reflect.TypeFor[protocol.SurfaceKeyParams](), nil
 	case protocol.MethodInputMouse:
@@ -195,6 +204,9 @@ func (g *generator) typeSchema(t reflect.Type) map[string]any {
 			"propertyNames":        map[string]any{"enum": roles},
 			"additionalProperties": map[string]any{"type": "integer", "minimum": 0, "maximum": 15},
 		}
+	}
+	if t == reflect.TypeFor[protocol.CaptureValue]() {
+		return map[string]any{"oneOf": []any{map[string]any{"type": "boolean"}, map[string]any{"type": "string", "enum": []string{"text", "all"}}}}
 	}
 	if t == reflect.TypeFor[json.RawMessage]() {
 		return map[string]any{}

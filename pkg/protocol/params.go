@@ -122,10 +122,9 @@ type SurfaceUpdateParams struct {
 	Lines      []string       `json:"lines"`
 	HitTargets []RowHitTarget `json:"hit_targets,omitempty"`
 	StatusMeta map[string]any `json:"status_meta,omitempty"`
-	// Capture says whether the surface is taking text input (minor 2.1).
-	// Nil leaves the surface's current value unchanged, false turns it off
-	// and true turns it on.
-	Capture *bool `json:"capture,omitempty"`
+	// Capture sets the key policy. Nil leaves it unchanged; boolean spellings
+	// retain their original meaning, and text/all select explicit modes.
+	Capture *CaptureValue `json:"capture,omitempty"`
 }
 
 // SurfaceCloseParams closes the named dynamic surface.

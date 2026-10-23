@@ -55,7 +55,7 @@ type KeyContext struct {
 	ModalAction  string
 	// Capture is set while the focused occupant takes text input on
 	// FocusSurface: global candidates on a text key are removed.
-	Capture bool
+	Capture protocol.CaptureMode
 	Frozen  bool
 }
 
@@ -246,7 +246,7 @@ func (s *Service) Resolve(ctx KeyContext, keys []string) Result {
 		// Capture keeps plain typing: a global text-key candidate is removed
 		// in every layer, except the modal's close keys while a modal is open.
 		// Tombstones stay, as under the other filters.
-		if ctx.Capture && !b.Disable && b.Focus == "" && keyspelling.IsTextKey(b.Keys[0]) &&
+		if ctx.Capture == protocol.CaptureText && !b.Disable && b.Focus == "" && keyspelling.IsTextKey(b.Keys[0]) &&
 			!(ctx.ModalOpen && (b.Action == "husk.modal.close" || ctx.ModalAction != "" && b.Action == ctx.ModalAction)) {
 			continue
 		}

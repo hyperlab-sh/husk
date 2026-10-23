@@ -70,6 +70,11 @@ func MethodHomes() map[string]MethodHome {
 		protocol.MethodSurfaceClose:   home("SurfacePort", "SurfaceClose", pluginOnly),
 		protocol.MethodSurfaceResized: {Port: Outbound},
 
+		protocol.MethodTerminalAttach: home("TerminalPort", "TerminalAttach", pluginOnly),
+		protocol.MethodTerminalWrite:  home("TerminalPort", "TerminalWrite", pluginOnly),
+		protocol.MethodTerminalDetach: home("TerminalPort", "TerminalDetach", pluginOnly),
+		protocol.MethodTerminalInput:  {Port: Outbound},
+
 		protocol.MethodInputKey:      {Port: Outbound},
 		protocol.MethodInputMouse:    {Port: Outbound},
 		protocol.MethodInputKeyState: {Port: Outbound},

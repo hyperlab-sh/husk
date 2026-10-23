@@ -40,6 +40,19 @@ func (p *Pod) ProcessDone() <-chan struct{} {
 	return p.process.Done()
 }
 
+// QueueSender captures the current process queue on the loop. The returned
+// function is worker-safe and never consults mutable Pod metadata; a terminal
+// input drain can therefore enqueue without reading the loop-owned Pod map.
+func (p *Pod) QueueSender() func(protocol.Message) error {
+	process := p.process
+	return func(m protocol.Message) error {
+		if process == nil {
+			return wrapper.ErrNotLive
+		}
+		return process.Send(m)
+	}
+}
+
 // Notify implements the Message kinds Sink for this plugin alone.
 func (p *Pod) Notify(method string, params any) error {
 	var raw json.RawMessage

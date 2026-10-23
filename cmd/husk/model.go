@@ -82,7 +82,7 @@ type surfaceCatalog struct {
 	Occupants map[protocol.SurfaceID]string
 	// Capture holds the surfaces whose occupant said it is taking text
 	// input (husk.surfaces.capture); Input reads it and never writes it.
-	Capture map[protocol.SurfaceID]bool
+	Capture map[protocol.SurfaceID]protocol.CaptureMode
 	Slots   map[string]*publishedSlot
 	Frames  map[string]map[protocol.SurfaceID]protocol.FrameSpec
 }
@@ -90,7 +90,7 @@ type surfaceCatalog struct {
 func newSurfaceCatalog() *surfaceCatalog {
 	return &surfaceCatalog{
 		Occupants: map[protocol.SurfaceID]string{},
-		Capture:   map[protocol.SurfaceID]bool{},
+		Capture:   map[protocol.SurfaceID]protocol.CaptureMode{},
 		Slots:     map[string]*publishedSlot{},
 		Frames:    map[string]map[protocol.SurfaceID]protocol.FrameSpec{},
 	}
@@ -883,10 +883,8 @@ func (m *WorkbenchModel) refresh() bool {
 	for id, occ := range res.Occupants {
 		cat.Occupants[id] = occ.Plugin
 	}
-	for id, on := range res.Capture {
-		if on {
-			cat.Capture[id] = true
-		}
+	for id, mode := range res.Capture {
+		cat.Capture[id] = mode
 	}
 	for plugin, frames := range m.fe.SurfaceFrames() {
 		if live[plugin] {

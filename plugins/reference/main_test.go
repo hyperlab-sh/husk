@@ -665,7 +665,7 @@ func TestManifestsAreValidV2AndMatchThePlugin(t *testing.T) {
 
 // captureOf reports the wire state of a frame's capture member: nil when the
 // member is absent, otherwise the value.
-func captureOf(u protocol.SurfaceUpdateParams) *bool { return u.Capture }
+func captureOf(u protocol.SurfaceUpdateParams) *protocol.CaptureValue { return u.Capture }
 
 func TestTextModeTogglesCaptureOnFrames(t *testing.T) {
 	h := start(t, false)
@@ -683,7 +683,7 @@ func TestTextModeTogglesCaptureOnFrames(t *testing.T) {
 
 	h.key("main-stage", "i")
 	on := h.update()
-	if on.Capture == nil || !*on.Capture {
+	if on.Capture == nil || *on.Capture != protocol.CaptureTrue {
 		t.Fatalf("entering text mode: capture = %v, want true", on.Capture)
 	}
 	if last := on.Lines[len(on.Lines)-1]; last != "> " {
@@ -700,7 +700,7 @@ func TestTextModeTogglesCaptureOnFrames(t *testing.T) {
 			continue // not text: ignored, no frame
 		}
 		u := h.update()
-		if u.Capture == nil || !*u.Capture {
+		if u.Capture == nil || *u.Capture != protocol.CaptureTrue {
 			t.Errorf("step %d: frame in text mode must carry capture=true, got %v", i, u.Capture)
 		}
 		if got := u.Lines[len(u.Lines)-1]; got != step.echo {
@@ -710,13 +710,13 @@ func TestTextModeTogglesCaptureOnFrames(t *testing.T) {
 
 	// A frame rendered for another reason (resize) still carries true.
 	h.send(resized("main-stage", 40, 12, true, true))
-	if u := h.update(); u.Capture == nil || !*u.Capture {
+	if u := h.update(); u.Capture == nil || *u.Capture != protocol.CaptureTrue {
 		t.Errorf("resize frame in text mode: capture = %v, want true", u.Capture)
 	}
 
 	h.key("main-stage", "enter")
 	off := h.update()
-	if off.Capture == nil || *off.Capture {
+	if off.Capture == nil || *off.Capture != protocol.CaptureFalse {
 		t.Fatalf("leaving text mode: capture = %v, want false", off.Capture)
 	}
 	if got := off.Lines[len(off.Lines)-1]; got != "> qjr " {
@@ -731,11 +731,11 @@ func TestTextModeTogglesCaptureOnFrames(t *testing.T) {
 
 	// j is a shortcut again, and esc also leaves text mode.
 	h.key("main-stage", "i")
-	if u := h.update(); u.Capture == nil || !*u.Capture {
+	if u := h.update(); u.Capture == nil || *u.Capture != protocol.CaptureTrue {
 		t.Fatalf("re-entering: capture = %v", u.Capture)
 	}
 	h.key("main-stage", "esc")
-	if u := h.update(); u.Capture == nil || *u.Capture {
+	if u := h.update(); u.Capture == nil || *u.Capture != protocol.CaptureFalse {
 		t.Fatalf("esc must leave text mode with capture=false, got %v", u.Capture)
 	}
 	h.key("main-stage", "j")
@@ -835,7 +835,7 @@ func TestCaptureFieldIsPerSurface(t *testing.T) {
 	if c := p.captureField(other); c != nil {
 		t.Errorf("other surface consumed or sent the off frame: %v", *c)
 	}
-	if c := p.captureField(protocol.SurfaceMainStage); c == nil || *c {
+	if c := p.captureField(protocol.SurfaceMainStage); c == nil || *c != protocol.CaptureFalse {
 		t.Errorf("main-stage off frame = %v, want false", c)
 	}
 	if c := p.captureField(protocol.SurfaceMainStage); c != nil {
