@@ -406,7 +406,7 @@ func TestStdoutEOFFailsOnlyAfterInjectedReapGrace(t *testing.T) {
 	}
 	f.clock.Advance(1)
 	exit := awaitNotice[ExitMsg](t, f)
-	if exit.Info.Status != Failed || !strings.Contains(exit.Info.LastError, ErrStdoutClosed.Error()) || closedCount(f) != 1 {
+	if exit.Info.Status != Failed || exit.Info.LastError != "stopped reading: "+ErrStdoutClosed.Error() || closedCount(f) != 1 {
 		t.Fatalf("%+v", exit)
 	}
 }
@@ -425,7 +425,7 @@ func TestCleanAndCrashExitsRouteClosedBeforeLiveness(t *testing.T) {
 					if mode == "clean" && closed.Reason.Error() != "exited" {
 						t.Fatal("clean reason:", closed.Reason)
 					}
-					if mode == "crash" && !strings.Contains(closed.Reason.Error(), "crashed (exit status 7)") {
+					if mode == "crash" && closed.Reason.Error() != "crashed (exit status 7): exit status 7" {
 						t.Fatal("crash reason:", closed.Reason)
 					}
 				}
@@ -433,7 +433,7 @@ func TestCleanAndCrashExitsRouteClosedBeforeLiveness(t *testing.T) {
 			if mode == "clean" && exit.Info.Status != Exited {
 				t.Fatal(exit)
 			}
-			if mode == "crash" && (exit.Info.Status != Failed || strings.Join(exit.Info.StderrTail, ",") != "two,three,last") {
+			if mode == "crash" && (exit.Info.Status != Failed || exit.Info.LastError != "exit status 7" || strings.Join(exit.Info.StderrTail, ",") != "two,three,last") {
 				t.Fatal(exit)
 			}
 			if !errors.Is(f.w.Send(protocol.Message{}), ErrNotLive) {
@@ -449,14 +449,14 @@ func TestForeignSignalExitFailsWithCauseBeforeLiveness(t *testing.T) {
 	f := newFixture(t, "selfkill", nil)
 	f.start(t)
 	exit := awaitNotice[ExitMsg](t, f)
-	if exit.Info.Status != Failed || !strings.Contains(exit.Info.LastError, "signal") {
+	if exit.Info.Status != Failed || exit.Info.LastError != "signal: killed" {
 		t.Fatalf("exit = %+v, want failed with a signal cause", exit.Info)
 	}
 	if closedCount(f) != 1 {
 		t.Fatal("Closed was not posted exactly once before Exit")
 	}
 	for _, notice := range f.notices {
-		if closed, ok := notice.(ClosedMsg); ok && !strings.Contains(closed.Reason.Error(), "signal") {
+		if closed, ok := notice.(ClosedMsg); ok && closed.Reason.Error() != "crashed (signal: killed): signal: killed" {
 			t.Fatal("closed reason:", closed.Reason)
 		}
 	}
@@ -496,11 +496,11 @@ func TestStdinOverflowAndTimeoutAreFatal(t *testing.T) {
 			if exit.Info.Status != Failed {
 				t.Fatal(exit)
 			}
-			want := "send queue full"
+			want := "stopped reading: protocol: send queue full (1 messages)"
 			if mode == "timeout" {
-				want = "write timed out"
+				want = "stopped reading: protocol: write timed out after 5s"
 			}
-			if !strings.HasPrefix(exit.Info.LastError, "stopped reading: ") || !strings.Contains(exit.Info.LastError, want) {
+			if exit.Info.LastError != want {
 				t.Fatal(exit.Info.LastError)
 			}
 		})
