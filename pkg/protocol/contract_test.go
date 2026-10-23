@@ -209,6 +209,18 @@ func TestSurfaceUpdateCaptureRoundTrip(t *testing.T) {
 			if (p.Capture == nil) != (tc.want == nil) || p.Capture != nil && *p.Capture != *tc.want {
 				t.Fatalf("Capture = %v, want %v", p.Capture, tc.want)
 			}
+			if p.Capture != nil {
+				wantMode := CaptureNone
+				switch tc.name {
+				case "true", "text":
+					wantMode = CaptureText
+				case "all":
+					wantMode = CaptureAll
+				}
+				if p.Capture.Mode() != wantMode {
+					t.Fatalf("mode %q, want %q", p.Capture.Mode(), wantMode)
+				}
+			}
 			b, err := json.Marshal(p)
 			if err != nil {
 				t.Fatal(err)

@@ -68,6 +68,9 @@ func (c *CaptureValue) UnmarshalJSON(b []byte) error {
 		if err := json.Unmarshal(b, &s); err != nil {
 			return invalid("capture must be true, false, text or all")
 		}
+		if s != "text" && s != "all" {
+			return invalid("capture string must be text or all")
+		}
 		value = CaptureValue(s)
 	}
 	if !value.Valid() {
