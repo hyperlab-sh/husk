@@ -212,7 +212,13 @@ built-in catalog is empty and catalog diagnostics do not affect reload reports.
 
 `store.Problem` is Store's own diagnostic type (it shapes the `husk.store` slice
 and `husk store check` output), not `protocol.Problem`; Services convert load
-problems into `protocol.Problem` in one place, `services/settings`.
+problems into `protocol.Problem` in one place, `services/settings`. Absolute
+local source names are made relative to Store's actual config root, not inferred
+from path segments; an outside-root file is shown by base name only. Distribution
+load problems name their root-relative file (`<doc>.json` or
+`profiles/<profile>/<doc>.json`) as well. Consequently the coordinator's
+`store_error` for an unreadable distribution document names that file rather than
+using the generic configuration-load message.
 
 #### Declared-document schema (Services / Pods boundary)
 
