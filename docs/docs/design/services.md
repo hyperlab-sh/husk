@@ -330,7 +330,7 @@ CLI: `husk settings get <key>`, `husk settings list [--source]`, `husk settings 
 
 #### Writing one key
 
-`settings.set` is the user-layer write API earlier versions of this spec left out, specified for exactly one key at a time. It is **general** (any registered key, any owner) and **narrow** (one key, one value, the `user` layer, no batch, no `profile` or `instance` layer, no removal). It exists because two frontend features need a setting to change without a text editor: the theme selector writes `theme.name` ("The theme selector"), and `profile.use --save` will write `profile.default`. A later `plugin.add --save` appending to `husk.plugins.paths` is a third user; it needs no new method, only a value of type `strings`.
+`settings.set` is the user-layer write API earlier versions of this spec left out, specified for exactly one key at a time. It is **general** (any registered key, any owner) and **narrow** (one key, one value, the `user` layer, no batch, no `profile` or `instance` layer, no removal). It exists because settings must change without a text editor: the Settings center's Theme tab, the theme selector, writes `theme.name` ("The theme selector"), its General tab writes any registered key ([Settings center](settings-center.md)), and `profile.use --save` will write `profile.default`. A later `plugin.add --save` appending to `husk.plugins.paths` is a third user; it needs no new method, only a value of type `strings`.
 
 Params: `key`, a fully qualified settings key; `value`, the JSON value to write, in the JSON form the schema type accepts (Schema table: a `duration` is an integral number of milliseconds, a `strings` is an array of strings). The sequence, in order, on the Server handler goroutine except where said:
 

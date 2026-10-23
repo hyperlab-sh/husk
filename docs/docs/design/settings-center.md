@@ -222,7 +222,7 @@ The built-in catalog is empty: the host embeds no `catalog.json`. A distribution
 
 ### huh
 
-Forms are built with **`github.com/charmbracelet/huh/v2`**, the line of huh that targets Bubble Tea v2, because Husk is on Bubble Tea v2 (`charmbracelet/x/exp/teatest/v2`, `charmbracelet/ultraviolet` in `go.mod`); the v1 module targets Bubble Tea v1 and cannot be mixed in.
+Forms are built with **`charm.land/huh/v2`** (the canonical vanity path, like `charm.land/bubbletea/v2`; not the old GitHub module path), the line of huh that targets Bubble Tea v2, because Husk is on Bubble Tea v2 (`charmbracelet/x/exp/teatest/v2`, `charmbracelet/ultraviolet` in `go.mod`); the v1 module targets Bubble Tea v1 and cannot be mixed in.
 
 **The compatibility check comes first.** Before writing a field, the implementer adds the dependency and builds `cmd/husk` with the **pinned** `ultraviolet` and Bubble Tea v2 versions in `go.mod`: huh v2 must build against them without moving either pin, and a `tea.Program` with a huh form inside the workbench model must render under `teatest/v2`. If it builds only by bumping a pin, the bump is a separate commit that the golden frames pass on; if it does not build at all, or the bump breaks the compositor, huh is **not** used and the fallback below is.
 
