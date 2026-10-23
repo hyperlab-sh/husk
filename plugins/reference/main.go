@@ -128,6 +128,15 @@ type plugin struct {
 	answered bool   // a hook.call reply arrived
 	status   string // what the last refresh gate decided, shown in the status line
 
+	// Text mode: `i` enters it, enter or esc leaves it. While it is on every
+	// frame carries capture=true so the host's value is the same whatever
+	// frame arrives last; the frame after leaving carries capture=false once.
+	// Outside both, frames omit the field (absent means unchanged).
+	textMode bool
+	sendOff  bool
+	typed    []rune // keys typed in text mode, kept after leaving it
+	typedAny bool   // a text mode ran, so the echo line is shown
+
 	arm     func()
 	retries int
 	gaveUp  bool
@@ -543,7 +552,13 @@ func (p *plugin) refresh() error {
 }
 
 func (p *plugin) key(key string) error {
+	if p.textMode {
+		return p.typeKey(key)
+	}
 	switch key {
+	case "i":
+		p.textMode, p.typedAny, p.typed = true, true, nil
+		return p.renderAll()
 	case "j", "down":
 		p.selected = (p.selected + 1) % len(rows)
 	case "k", "up":
@@ -559,6 +574,40 @@ func (p *plugin) key(key string) error {
 		return err
 	}
 	return p.renderAll()
+}
+
+// typeKey handles a key in text mode: enter or esc leaves it, backspace
+// deletes, a single rune (the wire space included) is echoed, anything else is
+// ignored. Every case re-renders so the frame carries the echo and the bit.
+func (p *plugin) typeKey(key string) error {
+	switch r := []rune(key); {
+	case key == "enter" || key == "esc":
+		p.textMode, p.sendOff = false, true
+	case key == "backspace":
+		if len(p.typed) > 0 {
+			p.typed = p.typed[:len(p.typed)-1]
+		}
+	case len(r) == 1:
+		p.typed = append(p.typed, r[0])
+	default:
+		return nil
+	}
+	return p.renderAll()
+}
+
+// captureField is the capture member of the next frame: true while in text
+// mode, false once after leaving it, otherwise absent.
+func (p *plugin) captureField() *bool {
+	switch {
+	case p.textMode:
+		on := true
+		return &on
+	case p.sendOff:
+		p.sendOff = false
+		off := false
+		return &off
+	}
+	return nil
 }
 
 // lines builds the surface content for one surface size. Row actions are OSC
@@ -580,11 +629,15 @@ func (p *plugin) lines(size protocol.SurfaceSize) []string {
 	if p.answered {
 		result = p.status
 	}
-	return append(out,
+	out = append(out,
 		"",
 		clip(fmt.Sprintf("size %dx%d · replies: %s", size.Width, size.Height, result), width),
-		clip("j/k select (event)  r refresh (hook)", width),
+		clip("j/k select (event)  r refresh (hook)  i type", width),
 	)
+	if p.typedAny {
+		out = append(out, clip("> "+string(p.typed), width))
+	}
+	return out
 }
 
 // clip cuts s to at most width runes. The lines here carry no ANSI.
@@ -606,7 +659,7 @@ func (p *plugin) render(s protocol.SurfaceID) error {
 		return nil
 	}
 	return p.notify(protocol.MethodSurfaceUpdate, protocol.SurfaceUpdateParams{
-		Surface: s, Title: "Reference plugin", Lines: p.lines(size),
+		Surface: s, Title: "Reference plugin", Lines: p.lines(size), Capture: p.captureField(),
 	})
 }
 

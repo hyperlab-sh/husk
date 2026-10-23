@@ -659,3 +659,108 @@ func TestManifestsAreValidV2AndMatchThePlugin(t *testing.T) {
 		t.Errorf("argv = %q, %q", pc, ac)
 	}
 }
+
+// captureOf reports the wire state of a frame's capture member: nil when the
+// member is absent, otherwise the value.
+func captureOf(u protocol.SurfaceUpdateParams) *bool { return u.Capture }
+
+func TestTextModeTogglesCaptureOnFrames(t *testing.T) {
+	h := start(t, false)
+	h.send(resized("main-stage", 60, 20, true, true))
+	if u := h.update(); captureOf(u) != nil {
+		t.Fatalf("first frame must omit capture, got %v", *u.Capture)
+	}
+
+	// A selection frame outside text mode omits the member too.
+	h.key("main-stage", "j")
+	h.sockNext(protocol.MethodEventEmit)
+	if u := h.update(); captureOf(u) != nil {
+		t.Fatalf("frame outside text mode must omit capture, got %v", *u.Capture)
+	}
+
+	h.key("main-stage", "i")
+	on := h.update()
+	if on.Capture == nil || !*on.Capture {
+		t.Fatalf("entering text mode: capture = %v, want true", on.Capture)
+	}
+	if last := on.Lines[len(on.Lines)-1]; last != "> " {
+		t.Errorf("echo line on entry = %q, want %q", last, "> ")
+	}
+
+	// j, k and r are text here, not shortcuts: no event, no hook, one frame each.
+	for i, step := range []struct{ key, echo string }{
+		{"q", "> q"}, {"j", "> qj"}, {"r", "> qjr"}, {" ", "> qjr "}, {"ö", "> qjr ö"},
+		{"backspace", "> qjr "}, {"tab", "> qjr "},
+	} {
+		h.key("main-stage", step.key)
+		if step.key == "tab" {
+			continue // not text: ignored, no frame
+		}
+		u := h.update()
+		if u.Capture == nil || !*u.Capture {
+			t.Errorf("step %d: frame in text mode must carry capture=true, got %v", i, u.Capture)
+		}
+		if got := u.Lines[len(u.Lines)-1]; got != step.echo {
+			t.Errorf("step %d: echo = %q, want %q", i, got, step.echo)
+		}
+	}
+
+	// A frame rendered for another reason (resize) still carries true.
+	h.send(resized("main-stage", 40, 12, true, true))
+	if u := h.update(); u.Capture == nil || !*u.Capture {
+		t.Errorf("resize frame in text mode: capture = %v, want true", u.Capture)
+	}
+
+	h.key("main-stage", "enter")
+	off := h.update()
+	if off.Capture == nil || *off.Capture {
+		t.Fatalf("leaving text mode: capture = %v, want false", off.Capture)
+	}
+	if got := off.Lines[len(off.Lines)-1]; got != "> qjr " {
+		t.Errorf("echo kept after leaving = %q", got)
+	}
+
+	// The false rides one frame only; the next one omits the member again.
+	h.send(resized("main-stage", 50, 15, true, true))
+	if u := h.update(); u.Capture != nil {
+		t.Errorf("frame after the toggle must omit capture, got %v", *u.Capture)
+	}
+
+	// j is a shortcut again, and esc also leaves text mode.
+	h.key("main-stage", "i")
+	if u := h.update(); u.Capture == nil || !*u.Capture {
+		t.Fatalf("re-entering: capture = %v", u.Capture)
+	}
+	h.key("main-stage", "esc")
+	if u := h.update(); u.Capture == nil || *u.Capture {
+		t.Fatalf("esc must leave text mode with capture=false, got %v", u.Capture)
+	}
+	h.key("main-stage", "j")
+	h.sockNext(protocol.MethodEventEmit)
+	h.update()
+}
+
+func TestCaptureFieldWireShape(t *testing.T) {
+	for name, tc := range map[string]struct {
+		textMode, sendOff bool
+		want              string
+	}{
+		"outside":    {false, false, ""},
+		"in mode":    {true, false, "true"},
+		"after exit": {false, true, "false"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := &plugin{textMode: tc.textMode, sendOff: tc.sendOff}
+			b, err := json.Marshal(protocol.SurfaceUpdateParams{Surface: protocol.SurfaceMainStage, Lines: []string{}, Capture: p.captureField()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var m map[string]json.RawMessage
+			_ = json.Unmarshal(b, &m)
+			got, has := m["capture"]
+			if tc.want == "" && has || tc.want != "" && string(got) != tc.want {
+				t.Errorf("capture on the wire = %q (present %v), want %q", got, has, tc.want)
+			}
+		})
+	}
+}
