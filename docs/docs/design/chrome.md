@@ -26,8 +26,9 @@ glyphs.
 This spec fixes four things:
 
 1. **Every surface the layout has a place for is laid out, occupied or not.**
-   An unoccupied region slot is drawn with its humanised surface name so the layout
-   is visible. The footer's dock keys never point at a dock that pressing them
+   An unoccupied region slot other than the rail, which always draws its host
+   rail buttons, is drawn with its humanised surface name so the layout is
+   visible. The footer's dock keys never point at a dock that pressing them
    cannot bring on screen: a dock key is shown only when pressing it changes
    the frame.
 2. **Rail buttons are tiles, closer to square**, drawn from whole cells.
@@ -343,7 +344,8 @@ lands the layout change, and the commit body says what changed in each. The
 rewrites, each named for the behaviour it pins:
 
 - zero plugins lay out rail, sidebar bands, header, stage and (when wide
-  enough) side panel, and every empty one shows its humanised name centred;
+  enough) side panel, and every empty one except the rail shows its humanised
+  name centred;
 - the humanised name is computed from the id (a table-driven test over all
   twelve ids);
 - a plugin that claims `sidebar-list` replaces the name with its content; its
