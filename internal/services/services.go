@@ -446,12 +446,13 @@ func (co *Coordinator) loadInput(f *flight) inputResult {
 	selected := ""
 	var selectionProblems []Problem
 	var profileWrite bool
+	profileNames := co.opts.Store.Profiles()
 	if co.opts.Profile != nil {
 		layers, err := co.opts.Store.Layers("config", "")
 		if err != nil {
 			return inputResult{err: err}
 		}
-		selected, selectionProblems, profileWrite = co.opts.Profile(f != nil && f.reason == ReasonStartup, layers, co.opts.Store.Profiles())
+		selected, selectionProblems, profileWrite = co.opts.Profile(f != nil && f.reason == ReasonStartup, layers, profileNames)
 	}
 	if f != nil {
 		co.mu.Lock()
@@ -475,7 +476,7 @@ func (co *Coordinator) loadInput(f *flight) inputResult {
 	if err != nil {
 		return inputResult{err: err}
 	}
-	return inputResult{in: ReloadInput{Doc: resolved, Layers: layers, ConfigLayers: configLayers, Declared: map[store.DocName]map[string]store.Doc{store.DeclaredPlugins: co.opts.Store.Declared(store.DeclaredPlugins), store.DeclaredKeymap: co.opts.Store.Declared(store.DeclaredKeymap)}, Profile: &selected, ProfileProblems: selectionProblems, ProfileWrite: profileWrite}}
+	return inputResult{in: ReloadInput{Doc: resolved, Layers: layers, ConfigLayers: configLayers, Declared: map[store.DocName]map[string]store.Doc{store.DeclaredPlugins: co.opts.Store.Declared(store.DeclaredPlugins), store.DeclaredKeymap: co.opts.Store.Declared(store.DeclaredKeymap)}, Profile: &selected, ProfileNames: profileNames, ProfileProblems: selectionProblems, ProfileWrite: profileWrite}}
 }
 
 // Inputs collects fresh user-authorized disk input for dry validation/checks.

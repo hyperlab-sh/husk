@@ -227,7 +227,11 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 			r.Problems = append(r.Problems, c.Problem{Severity: "warning", Code: "profile_default_ignored", Layer: string(l.Layer), Key: "profile.default", Message: "profile.default is honoured from the user layer only", Source: &c.Source{Layer: string(l.Layer), File: l.File}})
 		}
 	}
-	names := s.opts.Store.Profiles()
+	names := in.ProfileNames
+	if in.Profile == nil {
+		names = s.opts.Store.Profiles()
+	}
+	names = append([]string(nil), names...)
 	sources := map[string]store.Layer{}
 	if inventory, ok := s.opts.Store.(interface{ ProfileSources() map[string]store.Layer }); ok {
 		sources = inventory.ProfileSources()

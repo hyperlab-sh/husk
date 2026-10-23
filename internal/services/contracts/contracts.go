@@ -54,6 +54,9 @@ type ReloadInput struct {
 	Settings     SettingsSnapshot
 	Profile      *string
 	ConfigLayers []store.LayerDoc
+	// ProfileNames are the names Store.Profiles listed in this flight's step 2,
+	// the same set used for profile selection.
+	ProfileNames []string
 	// ProfileProblems are the selection warnings the coordinator's step 2
 	// raised (unknown_profile); Profile adds them to its report.
 	ProfileProblems []Problem

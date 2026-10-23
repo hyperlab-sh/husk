@@ -61,18 +61,17 @@ type rig struct {
 	rt    *Runtime
 	tree  *state.State
 	posts chan func()
-	st    *recStore
 }
 
-func newRig(t *testing.T, st *recStore, flag *string) *rig {
+func newRig(t *testing.T, st StoreReader, flag *string) *rig {
 	t.Helper()
 	return newRigWith(t, st, flag, state.Options{})
 }
 
-func newRigWith(t *testing.T, st *recStore, flag *string, opts state.Options) *rig {
+func newRigWith(t *testing.T, st StoreReader, flag *string, opts state.Options) *rig {
 	t.Helper()
 	tree := state.New(opts)
-	r := &rig{tree: tree, posts: make(chan func(), 16), st: st}
+	r := &rig{tree: tree, posts: make(chan func(), 16)}
 	rt, err := New(RuntimeOptions{Store: st, State: tree, ProfileFlag: flag, Post: func(f func()) bool { r.posts <- f; return true }, Clock: clock(), Crypto: &memoryCrypto{data: map[string][]byte{}}, Publisher: c.PublishFunc(func(string, any) {})})
 	if err != nil {
 		t.Fatal(err)
@@ -222,6 +221,154 @@ func startedRig(t *testing.T) (*rig, *recStore) {
 		t.Fatal("startup did not activate work", r.rt.Profile.Active())
 	}
 	return r, st
+}
+
+// changingProfilesStore simulates a directory vanishing after the first listing.
+// Its own lock avoids mutating fakeStore.profiles while a worker is reading it.
+type changingProfilesStore struct {
+	recStore
+	profilesMu sync.Mutex
+	calls      int
+	first      []string
+}
+
+func (s *changingProfilesStore) Profiles() []string {
+	s.profilesMu.Lock()
+	defer s.profilesMu.Unlock()
+	s.calls++
+	if s.calls == 1 {
+		return append([]string(nil), s.first...)
+	}
+	return []string{}
+}
+
+func (s *changingProfilesStore) profileCalls() int {
+	s.profilesMu.Lock()
+	defer s.profilesMu.Unlock()
+	return s.calls
+}
+
+func TestProfileNamesConsistentWithinFlight(t *testing.T) {
+	st := &changingProfilesStore{
+		recStore: recStore{fakeStore: fakeStore{resolved: store.Resolved{Doc: doc(`{}`)}}, layers: []store.LayerDoc{userLayer(`{"profile":{"default":"work"}}`)}},
+		first:    []string{"work"},
+	}
+	r := newRig(t, st, nil)
+	reports, err := r.rt.Coordinator.Reload(context.Background(), ReasonStartup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.settle()
+	if got := st.profileCalls(); got != 1 {
+		t.Errorf("Profiles calls = %d, want 1", got)
+	}
+	if got := r.rt.Profile.Active(); got != "work" {
+		t.Errorf("active = %q, want work", got)
+	}
+	list := r.rt.Profile.List()
+	if len(list) != 1 || list[0].Name != "work" || !list[0].Active {
+		t.Errorf("profile.list = %+v, want active work", list)
+	}
+	if p, ok := findProblem(problemsOf(reports), "unknown_profile"); ok {
+		t.Errorf("unexpected unknown_profile: %+v", p)
+	}
+	if got := st.Resolved(); !reflect.DeepEqual(got, []string{"work"}) {
+		t.Errorf("Resolve calls = %q, want [work]", got)
+	}
+
+	// A later flight observes the vanished directory and attributes the one
+	// warning to the default that selected it, not to a second list read.
+	reports, err = r.rt.Coordinator.Reload(context.Background(), ReasonCLI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.settle()
+	if got := st.profileCalls(); got != 2 {
+		t.Errorf("Profiles calls after next flight = %d, want 2", got)
+	}
+	if got := r.rt.Profile.Active(); got != "" {
+		t.Errorf("next active = %q, want no profile", got)
+	}
+	if got := st.Resolved(); !reflect.DeepEqual(got, []string{"work", ""}) {
+		t.Errorf("Resolve calls = %q, want [work empty]", got)
+	}
+	var unknown []Problem
+	for _, p := range problemsOf(reports) {
+		if p.Code == "unknown_profile" {
+			unknown = append(unknown, p)
+		}
+	}
+	if len(unknown) != 1 || unknown[0].Layer != "user" || unknown[0].Key != "profile.default" {
+		t.Errorf("next unknown_profile problems = %+v, want exactly one at user/profile.default", unknown)
+	}
+}
+
+func TestProfileNamesCapturedForDryRun(t *testing.T) {
+	for _, selector := range []bool{true, false} {
+		name := "with selector"
+		if !selector {
+			name = "without selector"
+		}
+		t.Run(name, func(t *testing.T) {
+			st := &changingProfilesStore{recStore: recStore{fakeStore: fakeStore{resolved: store.Resolved{Doc: doc(`{}`)}}}, first: []string{"work"}}
+			r := newRig(t, st, nil)
+			if !selector {
+				r.rt.Coordinator.opts.Profile = nil
+			}
+			in, err := r.rt.Coordinator.Inputs(context.Background(), Caller{Kind: "cli"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := st.profileCalls(); got != 1 {
+				t.Errorf("Profiles calls = %d, want 1", got)
+			}
+			if in.Profile == nil || !reflect.DeepEqual(in.ProfileNames, []string{"work"}) {
+				t.Errorf("dry-run Profile = %v, ProfileNames = %q, want a selection and [work]", in.Profile, in.ProfileNames)
+			}
+		})
+	}
+}
+
+func TestProfileRebuildUsesCapturedNamesWithoutMutation(t *testing.T) {
+	st := &changingProfilesStore{}
+	r := newRig(t, st, nil)
+	selected := "work"
+	names := []string{"work", "alpha"}
+	cand, _, err := r.rt.Profile.Rebuild(context.Background(), ReloadInput{Profile: &selected, ProfileNames: names})
+	if err != nil || cand == nil {
+		t.Fatalf("Rebuild: candidate=%v err=%v", cand, err)
+	}
+	if got := st.profileCalls(); got != 0 {
+		t.Errorf("Profiles calls = %d, want 0", got)
+	}
+	if !reflect.DeepEqual(names, []string{"work", "alpha"}) {
+		t.Errorf("Rebuild mutated input names: %q", names)
+	}
+	if rep := cand.Apply(); !rep.Applied {
+		t.Fatalf("Apply = %+v", rep)
+	}
+	list := r.rt.Profile.List()
+	if len(list) != 2 || list[0].Name != "alpha" || list[1].Name != "work" || !list[1].Active || r.rt.Profile.Active() != "work" {
+		t.Errorf("profile.list = %+v, active = %q", list, r.rt.Profile.Active())
+	}
+}
+
+func TestProfileRebuildWithoutSelectionReadsStore(t *testing.T) {
+	st := &changingProfilesStore{first: []string{"work"}}
+	r := newRig(t, st, nil)
+	cand, _, err := r.rt.Profile.Rebuild(context.Background(), ReloadInput{})
+	if err != nil || cand == nil {
+		t.Fatalf("Rebuild: candidate=%v err=%v", cand, err)
+	}
+	if got := st.profileCalls(); got < 1 {
+		t.Errorf("Profiles calls = %d, want at least 1", got)
+	}
+	if rep := cand.Apply(); !rep.Applied {
+		t.Fatalf("Apply = %+v", rep)
+	}
+	if list := r.rt.Profile.List(); len(list) != 1 || list[0].Name != "work" {
+		t.Errorf("profile.list = %+v, want work from Store", list)
+	}
 }
 
 type useResult struct {
