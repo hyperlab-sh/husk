@@ -32,7 +32,7 @@ var _ host.SettingsPort = Settings{}
 // Get implements contracts.SettingsPort. The value is the validated typed
 // value; the source is the layer it came from.
 func (p Settings) Get(ctx context.Context, hc host.Caller, key string) (any, string, error) {
-	value, source, err := p.Svc.Get(caller(hc), key)
+	value, source, err := p.Svc.Get(hc, key)
 	if err != nil {
 		return nil, "", narrowUndeclared(err)
 	}
@@ -41,14 +41,14 @@ func (p Settings) Get(ctx context.Context, hc host.Caller, key string) (any, str
 
 // List implements contracts.SettingsPort: the caller's filtered value map.
 func (p Settings) List(ctx context.Context, hc host.Caller) (map[string]any, error) {
-	values, err := p.Svc.List(caller(hc))
+	values, err := p.Svc.List(hc)
 	return values, coded(err)
 }
 
 // Schema implements contracts.SettingsPort. An empty owner lists the whole
 // schema the caller may see; otherwise entries are filtered to that owner.
 func (p Settings) Schema(ctx context.Context, hc host.Caller, owner string) ([]host.SettingEntry, error) {
-	entries, err := p.Svc.SchemaFor(caller(hc), owner)
+	entries, err := p.Svc.SchemaFor(hc, owner)
 	if err != nil {
 		return nil, coded(err)
 	}
@@ -77,7 +77,7 @@ func (p Settings) Validate(ctx context.Context, hc host.Caller) (host.Validation
 	if err != nil {
 		return host.ValidationResult{}, err
 	}
-	report, err := p.Svc.Validate(ctx, caller(hc), in)
+	report, err := p.Svc.Validate(ctx, hc, in)
 	if err != nil {
 		return host.ValidationResult{}, coded(err)
 	}
@@ -103,8 +103,8 @@ func validationResult(r c.Report) host.ValidationResult {
 }
 
 func (p Settings) dryInput(ctx context.Context, hc host.Caller) (services.ReloadInput, error) {
-	sc := caller(hc)
-	if !sc.User() {
+	sc := hc
+	if !c.IsUser(sc) {
 		return services.ReloadInput{}, coded(c.RequireUser(sc))
 	}
 	in, err := p.Inputs.Inputs(ctx, sc)

@@ -259,7 +259,7 @@ func TestSyntaxIsCheckedBeforeOwnershipForEveryCaller(t *testing.T) {
 			col := &collector{}
 			wantCode(t, g.r.Call(c, id, nil, col.onDone), protocol.CodeInvalidParams)
 			if col.n != 0 {
-				t.Fatalf("%s %q: onDone ran for a refused call", c.label(), id)
+				t.Fatalf("%s %q: onDone ran for a refused call", callerLabel(c), id)
 			}
 		}
 	}

@@ -148,7 +148,7 @@ func (d *Dispatcher) Invoke(req ActionRequest) {
 	params, err := json.Marshal(wireParams{
 		Action: req.Action,
 		Args:   args,
-		Caller: wireCaller{Kind: req.Caller.Kind.String(), PluginID: req.Caller.PluginID},
+		Caller: req.Caller,
 		Focus:  focus,
 	})
 	if err != nil {
@@ -164,15 +164,10 @@ func (d *Dispatcher) Invoke(req ActionRequest) {
 	d.pending[h] = reply
 }
 
-type wireCaller struct {
-	Kind     string `json:"kind"`
-	PluginID string `json:"plugin_id,omitempty"`
-}
-
 type wireParams struct {
 	Action string          `json:"action"`
 	Args   json.RawMessage `json:"args,omitempty"`
-	Caller wireCaller      `json:"caller"`
+	Caller Caller          `json:"caller"`
 	Focus  FocusContext    `json:"focus"`
 }
 

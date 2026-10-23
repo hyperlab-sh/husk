@@ -15,6 +15,7 @@ import (
 	stheme "github.com/hyperlab-sh/husk/internal/services/theme"
 	"github.com/hyperlab-sh/husk/internal/substrate/state"
 	"github.com/hyperlab-sh/husk/internal/substrate/store"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
 func TestReviewEmptyCallerDeniedOnEveryUserOnlyMethod(t *testing.T) {
@@ -53,8 +54,8 @@ func TestReviewEmptyCallerDeniedOnEveryUserOnlyMethod(t *testing.T) {
 	if _, err := sec.Read(zero, "x"); err == nil {
 		t.Fatal("empty caller read secrets")
 	}
-	for _, kind := range []string{"cli", "host", "input"} {
-		if !(Caller{Kind: kind}).User() {
+	for _, kind := range []protocol.CallerKind{"cli", "host", "input"} {
+		if !c.IsUser(Caller{Kind: kind}) {
 			t.Fatal("explicit user kind refused", kind)
 		}
 	}

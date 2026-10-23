@@ -112,7 +112,7 @@ func (n *noteRecorder) messages() []protocol.Message {
 
 var (
 	callerCLI   = contracts.Caller{Kind: contracts.CallerCLI}
-	callerStem  = contracts.Caller{Kind: contracts.CallerStem}
+	callerStem  = contracts.Caller{Kind: contracts.CallerHost}
 	callerAtlas = contracts.Caller{Kind: contracts.CallerPlugin, PluginID: "atlas"}
 	callerOther = contracts.Caller{Kind: contracts.CallerPlugin, PluginID: "other"}
 	callerTiny  = contracts.Caller{Kind: contracts.CallerPlugin, PluginID: "tiny"}

@@ -117,12 +117,12 @@ func TestRegisterDeniesUnattributedCallers(t *testing.T) {
 		for name, c := range map[string]contracts.Caller{
 			"zero kind":         {},
 			"plugin without id": {Kind: contracts.CallerPlugin},
-			"unknown kind":      {Kind: contracts.CallerKind(99)},
+			"unknown kind":      {Kind: "bogus"},
 			// Stem owns none of the Services methods: no method home below
 			// includes it. A future services method that wants Stem must add
 			// its home — and this row is what fails first if someone widens
 			// an existing home instead of ruling it.
-			"stem": {Kind: contracts.CallerStem},
+			"stem": {Kind: contracts.CallerHost},
 		} {
 			rec.Reset()
 			reply := m.Serve(context.Background(), c, protocol.Message{Method: method, Params: json.RawMessage(params)}, nil)

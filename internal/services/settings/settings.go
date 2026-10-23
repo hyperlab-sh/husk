@@ -137,7 +137,7 @@ func (s *Service) Snapshot() Snapshot { return s.current.Load() }
 // SnapshotFor filters access to exact declared keys plus public husk.* keys.
 // Snapshot itself is trusted Stem access and must not be handed to plugins.
 func (s *Service) SnapshotFor(caller c.Caller) Snapshot {
-	if caller.User() {
+	if c.IsUser(caller) {
 		return s.Snapshot()
 	}
 	old := s.current.Load()
@@ -173,8 +173,11 @@ func (s *Service) Schema() []Entry {
 
 // Get authorizes exact declared settings ownership; prefixes are not identities.
 func (s *Service) Get(caller c.Caller, key string) (any, string, error) {
+	if err := c.CheckCaller(caller); err != nil {
+		return nil, "", err
+	}
 	snap := s.current.Load()
-	if !caller.User() && (caller.PluginID == "" || !strings.HasPrefix(key, "husk.") && snap.schema[key].Owner != "plugin:"+caller.PluginID) {
+	if !c.IsUser(caller) && (caller.PluginID == "" || !strings.HasPrefix(key, "husk.") && snap.schema[key].Owner != "plugin:"+caller.PluginID) {
 		return nil, "", c.Failure("denied", "undeclared_setting")
 	}
 	v, ok := snap.Raw(key)

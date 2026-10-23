@@ -14,6 +14,7 @@ import (
 
 	"github.com/hyperlab-sh/husk/internal/substrate/state"
 	"github.com/hyperlab-sh/husk/internal/substrate/store"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
 // Generation increases after each successfully applied candidate.
@@ -111,20 +112,53 @@ func Failure(code, reason string) error {
 	return &Error{Code: code, Reason: reason, Message: code + ": " + reason}
 }
 
-// Caller is verified by the Server, never decoded from request params.
-type Caller struct {
-	Kind     string
-	PluginID string
+// Caller is the verified identity of whoever invokes a Service method; it is
+// the one shared type, never decoded from request params.
+type Caller = protocol.Caller
+
+// ValidCaller reports whether c is a well-formed identity: a known kind, a
+// plugin id exactly when the kind is plugin.
+func ValidCaller(c Caller) bool {
+	if !c.Kind.Valid() {
+		return false
+	}
+	return (c.Kind == protocol.CallerPlugin) == (c.PluginID != "")
 }
 
-// User reports whether caller may use user-only operations.
-func (c Caller) User() bool {
-	return c.PluginID == "" && (c.Kind == "cli" || c.Kind == "input" || c.Kind == "host")
+// CheckCaller answers denied/invalid_caller for a zero value, an unknown kind,
+// a plugin without an id, or any other kind with one.
+func CheckCaller(c Caller) error {
+	if !ValidCaller(c) {
+		return Failure("denied", "invalid_caller")
+	}
+	return nil
 }
 
-// RequireUser protects mutation and CLI-only exposure methods.
+// IsUser reports whether c may use user-only operations: a valid cli, host or
+// input caller. The host kinds are trusted for reading and reload but never
+// handle a secret value (see RequireCLI).
+func IsUser(c Caller) bool {
+	return ValidCaller(c) && c.Kind != protocol.CallerPlugin
+}
+
+// RequireUser protects mutation and user-only exposure methods.
 func RequireUser(c Caller) error {
-	if !c.User() {
+	if err := CheckCaller(c); err != nil {
+		return err
+	}
+	if !IsUser(c) {
+		return Failure("denied", "user_only")
+	}
+	return nil
+}
+
+// RequireCLI protects the secret operations only the user's own shell may do:
+// the host and input kinds are denied them.
+func RequireCLI(c Caller) error {
+	if err := CheckCaller(c); err != nil {
+		return err
+	}
+	if c.Kind != protocol.CallerCLI {
 		return Failure("denied", "user_only")
 	}
 	return nil

@@ -109,8 +109,8 @@ func TestCallsInvoke(t *testing.T) {
 		if reply.Error != nil {
 			t.Fatalf("error = %+v", reply.Error)
 		}
-		if calls := rec.Calls(); calls[0].Kind != contracts.CallerStem {
-			t.Fatalf("kind = %d", calls[0].Kind)
+		if calls := rec.Calls(); calls[0].Kind != contracts.CallerHost {
+			t.Fatalf("kind = %s", calls[0].Kind)
 		}
 	})
 }

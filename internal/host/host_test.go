@@ -450,7 +450,7 @@ func TestEveryInboundMethodIsRegistered(t *testing.T) {
 			continue
 		}
 		id := protocol.NewStringID("x")
-		reply := h.root.mux.Serve(t.Context(), contracts.Caller{Kind: contracts.CallerKind(99)}, protocol.Message{ID: &id, Method: method}, nil)
+		reply := h.root.mux.Serve(t.Context(), contracts.Caller{Kind: "bogus"}, protocol.Message{ID: &id, Method: method}, nil)
 		if reply.Error == nil || reply.Error.Code != protocol.CodeDenied {
 			t.Errorf("%s: reply = %+v, want denied for an unknown caller kind", method, reply.Error)
 		}

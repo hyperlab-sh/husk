@@ -10,9 +10,9 @@ import (
 
 // ServerHandler adapts a contracts.Handler — the Mux, or any single adapter —
 // to the Server's Handler shape, so port adapters and the Server stay
-// independent types. The Server attributes only CLI and plugin callers; a
-// Stem caller never crosses the socket, so FromServerCaller never produces
-// one. server.Notifier already satisfies contracts.Notifier, and the
+// independent types. The two share one Caller type; the Server attributes
+// only CLI and plugin callers, so a host or input caller never crosses the
+// socket. server.Notifier already satisfies contracts.Notifier, and the
 // connection's notifier outlives the request, which is what the watch methods
 // need.
 type ServerHandler struct {
@@ -51,20 +51,5 @@ func (a ServerHandler) Serve(ctx context.Context, c server.Caller, req protocol.
 			defer stop()
 		}
 	}
-	return a.Handler.Serve(ctx, FromServerCaller(c), req, n)
-}
-
-// FromServerCaller converts the Server's caller attribution to a
-// contracts.Caller: identical fields, kind by kind. A kind the Server does
-// not attribute — the zero kind — stays the zero kind, so Admit denies it
-// (D36) instead of handing it CLI privileges.
-func FromServerCaller(c server.Caller) contracts.Caller {
-	out := contracts.Caller{PluginID: c.PluginID, ConnID: c.ConnID}
-	switch c.Kind {
-	case server.CallerPlugin:
-		out.Kind = contracts.CallerPlugin
-	case server.CallerCLI:
-		out.Kind = contracts.CallerCLI
-	}
-	return out
+	return a.Handler.Serve(ctx, c, req, n)
 }

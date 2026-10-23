@@ -331,7 +331,7 @@ func (s *Service) Listing() Listing { return c.Clone(s.current.Load().listing) }
 func (s *Service) ListFor(caller c.Caller) Listing {
 	snap := s.current.Load()
 	out := c.Clone(snap.listing)
-	if caller.User() {
+	if c.IsUser(caller) {
 		return out
 	}
 	if caller.PluginID == "" {

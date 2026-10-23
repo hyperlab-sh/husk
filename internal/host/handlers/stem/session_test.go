@@ -13,7 +13,7 @@ var (
 	ctx      = context.Background()
 	cli      = contracts.Caller{Kind: contracts.CallerCLI}
 	plugin   = contracts.Caller{Kind: contracts.CallerPlugin, PluginID: "atlas"}
-	stemSide = contracts.Caller{Kind: contracts.CallerStem}
+	stemSide = contracts.Caller{Kind: contracts.CallerHost}
 	nobody   = contracts.Caller{} // D36: unattributed, denied everywhere
 )
 

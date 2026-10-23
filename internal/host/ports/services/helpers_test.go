@@ -57,7 +57,7 @@ func (s staticInputs) Inputs(context.Context, services.Caller) (services.ReloadI
 var (
 	userCaller  = host.Caller{Kind: host.CallerCLI}
 	filesCaller = host.Caller{Kind: host.CallerPlugin, PluginID: "files"}
-	stemHost    = host.Caller{Kind: host.CallerStem}
+	stemHost    = host.Caller{Kind: host.CallerHost}
 )
 
 // hostState builds a fresh state tree for secrets tests.

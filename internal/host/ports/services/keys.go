@@ -20,7 +20,7 @@ var _ host.KeybindingPort = Keys{}
 
 // List implements contracts.KeybindingPort.
 func (p Keys) List(ctx context.Context, hc host.Caller) (host.KeyListing, error) {
-	listing := p.Svc.ListFor(caller(hc))
+	listing := p.Svc.ListFor(hc)
 	out := host.KeyListing{
 		Entries:  make([]host.KeyEntry, 0, len(listing.Entries)),
 		Problems: make([]host.KeyProblem, 0, len(listing.Problems)),

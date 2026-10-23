@@ -31,7 +31,7 @@ func TestAdmit(t *testing.T) {
 		{"plugin ping", protocol.MethodSessionPing, contracts.Caller{Kind: contracts.CallerPlugin, PluginID: "p"}, ""},
 		{"plugin state.set", protocol.MethodStateSet, contracts.Caller{Kind: contracts.CallerPlugin, PluginID: "p"}, ""},
 		{"cli state.set denied", protocol.MethodStateSet, contracts.Caller{Kind: contracts.CallerCLI}, protocol.CodeDenied},
-		{"stem state.set denied", protocol.MethodStateSet, contracts.Caller{Kind: contracts.CallerStem}, protocol.CodeDenied},
+		{"stem state.set denied", protocol.MethodStateSet, contracts.Caller{Kind: contracts.CallerHost}, protocol.CodeDenied},
 		{"unattributed caller denied", protocol.MethodStateSet, contracts.Caller{}, protocol.CodeDenied},
 		{"unattributed caller denied on an any-caller method", protocol.MethodSessionPing, contracts.Caller{}, protocol.CodeDenied},
 		{"cli settings.list", protocol.MethodSettingsList, contracts.Caller{Kind: contracts.CallerCLI}, ""},

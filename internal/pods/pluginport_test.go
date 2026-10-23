@@ -67,7 +67,7 @@ func TestPluginPortDeniesNonCLICallers(t *testing.T) {
 		c    contracts.Caller
 	}{
 		{"plugin", contracts.Caller{Kind: contracts.CallerPlugin, PluginID: "a"}},
-		{"stem", contracts.Caller{Kind: contracts.CallerStem}},
+		{"stem", contracts.Caller{Kind: contracts.CallerHost}},
 		{"zero", contracts.Caller{}},
 	} {
 		if _, err := port.List(context.Background(), kind.c); contracts.CodeOf(err) != string(protocol.CodeDenied) {
