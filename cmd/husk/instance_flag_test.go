@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"runtime/debug"
 	"strings"
 	"testing"
 )
@@ -94,14 +95,32 @@ func TestLeftoverPositionalExits2AndCreatesNothing(t *testing.T) {
 	}
 }
 
-func TestBuildVersion(t *testing.T) {
+func TestPickVersion(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		ldflags string
+		bi      *debug.BuildInfo
+		ok      bool
+		want    string
+	}{
+		{"ldflags wins", "1.2.3", &debug.BuildInfo{Main: debug.Module{Version: "v9.9.9"}}, true, "1.2.3"},
+		{"module version", "", &debug.BuildInfo{Main: debug.Module{Version: "v0.4.0"}}, true, "v0.4.0"},
+		{"devel is no version", "", &debug.BuildInfo{Main: debug.Module{Version: "(devel)"}}, true, ""},
+		{"empty module version", "", &debug.BuildInfo{}, true, ""},
+		{"no build info", "", nil, false, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := pickVersion(tc.ldflags, tc.bi, tc.ok); got != tc.want {
+				t.Errorf("pickVersion = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBuildVersionPrefersLdflags(t *testing.T) {
 	defer func(v string) { version = v }(version)
 	version = "1.2.3"
 	if got := buildVersion(); got != "1.2.3" {
 		t.Errorf("buildVersion() = %q, want the ldflags version", got)
-	}
-	version = ""
-	if got := buildVersion(); got == "(devel)" {
-		t.Errorf("buildVersion() = %q; a devel build carries no version", got)
 	}
 }
