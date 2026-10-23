@@ -3,33 +3,50 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/hyperlab-sh/husk/internal/cli/output"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
-// runPlugin dispatches `husk plugin <verb>`: list and log, each a named
+// pluginCommand is the plugin noun: list, log and remove, each a named
 // wrapper over one socket method (docs/docs/design/pods.md, "plugin.* wire
 // shapes"). Who may call them is the instance's rule; a plugin's token comes
-// back as denied.
-func runPlugin(ctx context.Context, inv *Invocation, args []string) error {
-	if len(args) == 0 {
-		return output.Usage("plugin takes a verb: list or log <id>")
+// back as denied. Remove has the longer default timeout because it waits for
+// the stop policy and a Services reload.
+func pluginCommand() command {
+	return command{
+		usage: "husk plugin",
+		verbs: map[string]command{
+			"list":   {usage: "husk plugin list", timeout: 5 * time.Second, run: runPluginList},
+			"log":    {usage: "husk plugin log <id>", timeout: 5 * time.Second, run: runPluginLog},
+			"remove": {usage: "husk plugin remove <id>", timeout: 10 * time.Second, run: runPluginRemove},
+		},
 	}
-	switch verb, rest := args[0], args[1:]; verb {
-	case "list":
-		if len(rest) != 0 {
-			return output.Usage("plugin list takes no arguments")
-		}
-		return pluginCall(ctx, inv, protocol.MethodPluginList, map[string]string{})
-	case "log":
-		if len(rest) != 1 || rest[0] == "" {
-			return output.Usage("plugin log takes one <id>")
-		}
-		return pluginCall(ctx, inv, protocol.MethodPluginLog, map[string]string{"plugin": rest[0]})
-	default:
-		return output.Usage("unknown plugin verb %q: use list or log <id>", verb)
+}
+
+func runPluginList(ctx context.Context, inv *Invocation, args []string) error {
+	if len(args) != 0 {
+		return output.Usage("plugin list takes no arguments")
 	}
+	return pluginCall(ctx, inv, protocol.MethodPluginList, map[string]string{})
+}
+
+func runPluginLog(ctx context.Context, inv *Invocation, args []string) error {
+	if len(args) != 1 || args[0] == "" {
+		return output.Usage("plugin log takes one <id>")
+	}
+	return pluginCall(ctx, inv, protocol.MethodPluginLog, map[string]string{"plugin": args[0]})
+}
+
+// runPluginRemove is husk plugin remove: the reply ({plugin, status, log,
+// reports}) is printed whatever the reports say; only an error reply is a
+// failure.
+func runPluginRemove(ctx context.Context, inv *Invocation, args []string) error {
+	if len(args) != 1 || args[0] == "" {
+		return output.Usage("plugin remove takes one <id>")
+	}
+	return pluginCall(ctx, inv, protocol.MethodPluginRemove, map[string]string{"plugin": args[0]})
 }
 
 // pluginCall sends one request and prints the reply's result: the document in
