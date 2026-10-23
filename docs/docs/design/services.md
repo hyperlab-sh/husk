@@ -145,7 +145,7 @@ Codes raised by the coordinator or by a candidate's `Apply`, in any report; on a
 
 | Code | Raised by | Condition | Severity | Effect |
 | :--- | :--- | :--- | :--- | :--- |
-| `store_error` | coordinator, step 2 | Store could not resolve or load a layer (parse error, over a limit); the message names the config-relative file | error | no Service rebuilds; every report carries it; `config.reload` answers `unavailable` `store_error` |
+| `store_error` | coordinator, step 2 | Store could not resolve or load a layer (parse error, over a limit); the message carries Store's code, the config-relative file, the layer and the line and column when Store knows them, never a value or Store's own text, and the problem's `source` holds the layer, file and line; an error Store returns without a problem gets a coded reason instead (`invalid_path` and so on) | error | no Service rebuilds; every report carries it; `config.reload` answers `unavailable` `store_error` |
 | `timed_out` | coordinator, step 4 | the 2 s deadline passed before this Service published | error | this and every later Service keeps its snapshot; candidates already published stay |
 | `cancelled` | coordinator | the coordinator closed during the flight | error | the Services not yet published keep their snapshots; `config.reload` answers `cancelled` `shutdown` |
 | `settings_unchanged` | coordinator, step 3 | Settings produced no candidate, so Theme was skipped (message `settings unchanged; palette unchanged`) | warning | Theme's report only: no rebuild, `applied:false`, the palette stays; the only `applied:false` report that carries no `error` |
