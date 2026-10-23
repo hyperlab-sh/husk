@@ -165,7 +165,7 @@ params}`. This spec fixes the `method` names and `params` shapes.
 // and the hook runner; no module defines its own copy.
 type Caller = protocol.Caller // Kind: CallerInput | CallerPlugin | CallerCLI | CallerHost; PluginID set only for CallerPlugin; ConnID set by the Server
 
-// FocusContext is protocol.FocusContext ([Protocol](protocol.md), "Caller"):
+// FocusContext is protocol.FocusContext ([Protocol](protocol.md), "FocusContext"):
 // the focus slice of State at dispatch time, or Input's own snapshot for an
 // `input` caller. One type, wire-visible as params.focus; no module copies it.
 type FocusContext = protocol.FocusContext // Surface: surface id, "" when nothing has focus; Owner: plugin id occupying it, "" when unoccupied or host
