@@ -806,6 +806,13 @@
     "plugin.log.result": {
       "description": "Result owned by design/pods.md; no additional field constraints specified here."
     },
+    "plugin.remove.params": {
+      "description": "Payload owned by design/pods.md; no additional field constraints specified here.",
+      "type": "object"
+    },
+    "plugin.remove.result": {
+      "description": "Result owned by design/pods.md; no additional field constraints specified here."
+    },
     "profile.list.params": {
       "description": "Payload owned by design/services.md; no additional field constraints specified here.",
       "type": "object"
@@ -1138,6 +1145,15 @@
       },
       "result": {
         "$ref": "#/$defs/plugin.log.result"
+      }
+    },
+    "plugin.remove": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/plugin.remove.params"
+      },
+      "result": {
+        "$ref": "#/$defs/plugin.remove.result"
       }
     },
     "profile.list": {
