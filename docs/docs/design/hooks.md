@@ -256,6 +256,14 @@ and its namespace is no longer owned.
    every real case; rule 2 is the defensive invariant that makes a
    contested id unfireable rather than letting launch order pick an owner.
 
+Where a refusal under rule 1 or 2 is reported: the catalog build is not a
+reload, so its problems are not Services problems and ride no
+`config.reload` report. Each refused id is logged once per
+`DeclaredRevision` at `warning`, naming the declarer and the plugin it
+collides with, and is simply absent from `hook.list`, which lists catalog
+entries and has no problems field. "A problem on the declarer" in the rules
+above and in the failure table means that log line.
+
 Calls already in flight keep their subscriber set (invariant 10).
 
 Host hooks are declared in-process by the composition root, with the same
@@ -736,7 +744,7 @@ socket client. Rejected: palette entries that fire hooks, and a
    imports Calls and nothing else from Stem.
 9. The per-leg timeout is the hook's declared value, never the firer's choice;
    an owner that wants to wait less uses its own deadline and the legs drain.
-10. A hook has no history: a registration added by reload applies to the next
+10. A hook has no history: a registration added by a catalog rebuild applies to the next
     `Call`, never to one in flight; an in-flight call keeps the subscriber
     list it started with.
 11. `Results` is in priority order for every kind, so an outcome is the same
