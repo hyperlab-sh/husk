@@ -7,8 +7,9 @@ description: "What the frontend draws around plugin content: every surface laid 
 
 Status: landed for layout, empty surfaces, rail geometry, bar composition and
 colour discipline. The built-in theme migration remains specified, not landed;
-until it lands the frontend keeps the `CharmTone` default name. Scope: `cmd/husk` layout and rendering (the frontend). No wire,
-manifest or plugin-visible change; `husk.surfaces.visible` and
+until it lands the frontend keeps the `CharmTone` default name.
+Scope: `cmd/husk` layout and rendering (the frontend). No wire, manifest or
+plugin-visible change; `husk.surfaces.visible` and
 `husk.geometry.rects` change content, not shape.
 
 ## Level 0: What and why
@@ -42,8 +43,9 @@ This spec fixes five things:
 5. **The frame is drawn with surfaces, borders and inks only.** The accent
    marks exactly the focused or selected element and the status colours
    appear only on status glyphs, badges and toasts; see "Colour discipline".
-   Today's chrome (`cmd/husk`) uses `warning` in twelve places and `accent`
-   in eight, and the frame reads as loud whatever palette it is given.
+   Before the colour-discipline migration the chrome (`cmd/husk`) used
+   `warning` in twelve places and `accent` in eight, and the frame read as
+   loud whatever palette it was given.
 
 Husk has no normal/insert modes and this spec introduces none. Where this
 spec's requirements say "mode", they mean the layout label defined under "The
@@ -233,9 +235,10 @@ background `surface_elevated`, icon `ink`. **Idle**: no tile; the icon alone in
 is drawn as a tile (the active one on `surface_selected`, the others on
 `surface_elevated`) with its effective key (`KeysFor(id)[0]`, spelled as the
 rail spells it today, `ctrl+p` as `^P`) centred on the middle row in `ink`,
-bold, clipped to the 5 cells (today's `warning` breaks the colour discipline:
-a key badge is not a status); a button with no key keeps its icon. The hit zone of a button is its 3 rows across the
-rail's width, as today. `husk.hotspots.toggle_stage` and `husk.palette.open`
+bold, clipped to the 5 cells (the earlier `warning` broke the colour
+discipline: a key badge is not a status); a button with no key keeps its icon
+and its active `accent` or inactive `ink` colour. The hit zone of a button is
+its 3 rows across the rail's width, as before. `husk.hotspots.toggle_stage` and `husk.palette.open`
 keep their tiles; what the rail holds with no plugins is unchanged (home, the
 slot explorer, the palette).
 
@@ -243,13 +246,14 @@ slot explorer, the palette).
 
 Row 0, full width, background `surface`. From the left: the **brand**, the text
 `◈ HUSK` in `ink` on `surface_elevated`, bold, one cell of padding on each side
-(not `canvas` on `accent` as today: the brand is not the focused element). From
+(not the earlier `canvas` on `accent`: the brand is not the focused element). From
 the right: the **transient pills**, exactly the ones drawn today and in the
 same priority (dragging a divider, hovering a divider, hovering a rail button,
 Alt held), one at a time, each in `ink` on `surface_elevated`, bold (the
 dragging pill on `surface_selected`: the divider under drag is the selected
-element); today's `canvas` on `success` and on `warning` go. Nothing else: the layout label, the plugin count, the
-theme pill and the "Rail: …" key reminder are removed. The space between is
+element); the earlier `canvas` on `success` and on `warning` are gone. Nothing
+else: the layout label, the plugin count, the theme pill and the "Rail: …" key
+reminder are removed. The space between is
 blank bar background.
 
 The glyph: `◈` (U+25C8, white diamond containing black small diamond) replaces
@@ -269,8 +273,9 @@ The last row, full width, background `surface`. Three parts:
 2. **The key hints**, after the label, separated from it and from each other by
    ` │ ` in `border`: the groups [Keybindings](keybindings.md) lists, in that
    order, with the docks group filtered as above. Key in `ink` bold,
-   description in `ink_muted` (today's `accent` on every key is the single
-   largest source of accent in the frame; a hint is not a focused element).
+   description in `ink_muted` (the earlier `accent` on every key was the
+   single largest source of accent in the frame; a hint is not a focused
+   element).
 3. **The theme name**, at the right edge, `✦ <name>` with one cell of padding
    on each side, in `ink_muted` on `surface_elevated` (the pill the top bar
    showed, moved down and taken off `accent_secondary`, which is a plugin
@@ -369,8 +374,8 @@ included: the rule, not the palette, is what keeps it so.
    or warning line in a modal is `ink` after a `✕` in `danger` or a `⚠` in
    `warning`, never a line of coloured text. Never as decoration, never as a border (a toast's
    border is `border`, its background `surface_elevated`), never on keys,
-   hints, titles, callouts or dev overlays. Today's chrome breaks this in
-   sixteen elements (the audit below).
+   hints, titles, callouts or dev overlays. The pre-migration chrome broke
+   this in sixteen elements (the audit below).
 5. The rule governs **roles drawn, not hex values**. Two roles may hold the
    same colour in a theme (`base16`'s `border_focused` and `accent` are both
    ANSI index `5`); drawing `border_focused` is allowed where drawing
@@ -380,13 +385,14 @@ included: the rule, not the palette, is what keeps it so.
    `surface_selected`, text in `ink` and `ink_muted`, the frame in
    `border_focused`.
 
-**Audit of today's `cmd/husk`** (`render.go` and `secretprompt.go`, the only
-files that draw a status or accent role), every use that breaks a rule and
-where it moves. Uses not listed (rail and bar backgrounds, idle icons, frame
-borders and `border_focused` on the focused surface, close glyphs, palette
-rows, the shadow's resolution colours, the slot fill) already comply.
+**Audit of the pre-migration `cmd/husk`** (`render.go` and `secretprompt.go`,
+the only files that drew a status or accent role), every use that broke a
+rule and where it moved. Uses not listed (rail and bar backgrounds, idle
+icons, frame borders and `border_focused` on the focused surface, close
+glyphs, palette rows, the shadow's resolution colours, the slot fill) already
+complied.
 
-| Element (function) | Today | After |
+| Element (function) | Before | After |
 | :--- | :--- | :--- |
 | Rail: Alt-held key badge, active and inactive tiles (`renderActivityRailBox`) | `warning` bold | `ink` bold on the tile background |
 | Top bar: brand (`renderTopWorkbenchBar`) | `canvas` on `accent` | `ink` bold on `surface_elevated` |
@@ -420,16 +426,20 @@ draws `accent` in three places: the active rail icon, the palette prompt and
 the dragged divider. The Settings center adds its own rule-2 uses (the Theme
 tab's current-theme marker, the focused tab label, the focused form field).
 Status roles appear only inside `drawToast` and in the shared `statusMark`
-helper (`cmd/husk/status.go`), which draws a status glyph or a short status badge in its level
-colour, used by the secret prompt (its `⚠`) and the Settings center (its
-problem and warning lines and its status cells); `accent_secondary` and
+helper (`cmd/husk/status.go`), which draws a status glyph or a one-word status
+badge in its level colour, used by the secret prompt (its `⚠`) and the
+Settings center (its problem and warning lines and its status cells);
+`accent_secondary` and
 `accent_soft` appear nowhere. `TestChromeColourDiscipline` pins it: a
 source-level test over `cmd/husk/*.go` (excluding tests) that counts
-`m.palette.<Role>` references per role and fails when `AccentSecondary` or
-`AccentSoft` appears, or when `Success`, `Warning`, `Danger` or `Info`
-appears outside `drawToast` and the shared status helper; and a rendering test that the empty workbench's frame contains
-the accent colour's escape sequence only on the active rail tile. Every golden changes with these moves and is
-regenerated once with the layout change ("Tests and goldens").
+`m.palette.<Role>` references per role and receiver-qualified method,
+including package initializers, and rejects palette aliases. It fails when
+`AccentSecondary` or `AccentSoft` appears, or when `Success`, `Warning`,
+`Danger` or `Info` appears outside `WorkbenchModel`'s `drawToast` and shared
+status helper. A rendering test checks that the empty workbench's frame uses
+the accent colour only on the active rail tile, in its foreground, never
+its background or elsewhere (including underline colours). Every golden was
+regenerated for these moves ("Tests and goldens").
 
 ### Failure modes
 
