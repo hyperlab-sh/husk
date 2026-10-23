@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"path/filepath"
 	"reflect"
@@ -130,6 +131,66 @@ func TestPluginAddLaunchOutcomesControlExitAndPreserveResult(t *testing.T) {
 					}
 				} else if h.errb.String() != "husk: "+message+"\n" {
 					t.Fatalf("diagnostic=%s", h.errb.String())
+				}
+			})
+		}
+	}
+}
+
+func TestPluginAddDistinguishesLaunchFailureFromRefusalsAndReloadProblems(t *testing.T) {
+	for _, format := range []string{"json", "table"} {
+		for _, tc := range []struct {
+			name, status     string
+			refused, applied bool
+			exit             int
+		}{
+			{"failed with applied reload", "failed", false, true, output.ExitRemote},
+			{"live with reload problems", "live", false, false, output.ExitOK},
+			{"refusal only", "", true, true, output.ExitOK},
+			{"empty batch", "", false, true, output.ExitOK},
+			{"removed with reload problems", "removed", false, false, output.ExitOK},
+			{"failed with refusal and reload problems", "failed", true, false, output.ExitRemote},
+		} {
+			t.Run(format+"/"+tc.name, func(t *testing.T) {
+				added, refused, reports := []any{}, []any{}, []any{}
+				if tc.status != "" {
+					added = append(added, map[string]any{"plugin": "alpha", "status": tc.status, "log": "/logs/alpha.log", "warnings": []any{}})
+					for _, service := range []string{"profile", "settings", "theme", "keybinding", "secrets"} {
+						reports = append(reports, map[string]any{"service": service, "gen": 1, "applied": tc.applied, "changed": false})
+					}
+				}
+				if tc.refused {
+					refused = append(refused, map[string]string{"path": "/plugins/bad", "plugin": "", "code": "conversion", "message": "bad manifest"})
+				}
+				result := map[string]any{"added": added, "refused": refused, "reports": reports}
+				dir := shortDir(t)
+				srv := serve(t, dir, "a", pingOK("a", func(c *srvConn, req protocol.Message) { c.reply(req, result) }))
+				h := newHarness(t, dir, nil)
+				if code := h.run("plugin", "add", "--dir", "/plugins", "--socket", srv.Socket, "--format", format); code != tc.exit {
+					t.Fatalf("exit=%d stdout=%s stderr=%s", code, h.out.String(), h.errb.String())
+				}
+				raw, err := json.Marshal(result)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var want bytes.Buffer
+				if err := (output.Options{Format: output.Format(format), Stdout: &want}).Result(raw); err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(want.Bytes(), h.out.Bytes()) {
+					t.Fatalf("batch result changed: %s", h.out.String())
+				}
+				if tc.exit == output.ExitOK {
+					if h.errb.Len() != 0 {
+						t.Fatalf("nonfailure produced stderr: %s", h.errb.String())
+					}
+				} else {
+					if !strings.Contains(h.errb.String(), "plugins failed to launch: alpha") {
+						t.Fatalf("missing failed plugin: %s", h.errb.String())
+					}
+					if format == "json" && !strings.Contains(h.errb.String(), `"code":"failed"`) {
+						t.Fatalf("missing failed code: %s", h.errb.String())
+					}
 				}
 			})
 		}
