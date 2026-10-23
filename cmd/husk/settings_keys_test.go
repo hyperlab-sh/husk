@@ -29,23 +29,25 @@ func TestSettingsKeysListsShadowedFiltersAndNeverWrites(t *testing.T) {
 	view := ansi.Strip(m.View().Content)
 	for _, want := range []string{"KEY", "SCOPE", "ACTION", "LAYER", "STATE", "ctrl+k ctrl+s", "shadowed by", "focus-local (p)", "main-stage (p)", "edit keymap.json to change a key"} {
 		if !strings.Contains(view, want) {
-			t.Fatalf("missing %q", want)
+			t.Errorf("missing %q", want)
 		}
 	}
 	for query, want := range map[string]string{"CTRL+K": "husk.settings.open", "p.open": "p.open", "ZETA": "q.run"} {
-		m.settings.keyQuery = query
-		rows := m.settingsKeyRows()
-		if len(rows) != 1 || rows[0].Action != want {
-			t.Fatalf("filter %q: %+v", query, rows)
-		}
+		t.Run(query, func(t *testing.T) {
+			m.settings.keyQuery = query
+			rows := m.settingsKeyRows()
+			if len(rows) != 1 || rows[0].Action != want {
+				t.Fatalf("filter %q: %+v", query, rows)
+			}
+		})
 	}
 	m.settings.keyQuery = "x p.op"
 	if len(m.settingsKeyRows()) != 0 {
-		t.Fatal("filter matched across column boundaries")
+		t.Error("filter matched across column boundaries")
 	}
 	m.settings.keyQuery = "zeta"
-	if strings.Contains(ansi.Strip(strings.Join(m.settingsKeysLines(), "\n")), "global (zeta)") {
-		t.Fatal("global scope carries a plugin suffix")
+	if strings.Contains(ansi.Strip(strings.Join(m.settingsKeysLines(), "\n")), "global (") {
+		t.Error("global scope carries a plugin suffix")
 	}
 	m.settings.keyQuery = ""
 	settingsPress(m, "ctrl+s")
