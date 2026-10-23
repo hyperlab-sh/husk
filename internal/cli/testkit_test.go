@@ -59,6 +59,7 @@ type fakeServer struct {
 	Socket string
 	mu     sync.Mutex
 	reqs   []protocol.Message
+	conns  int
 }
 
 // handler serves one request. It runs on the connection's goroutine.
@@ -96,6 +97,9 @@ func serve(t *testing.T, dir, id string, h handler) *fakeServer {
 			if err != nil {
 				return
 			}
+			s.mu.Lock()
+			s.conns++
+			s.mu.Unlock()
 			go s.serveConn(conn, h)
 		}
 	}()
@@ -116,11 +120,27 @@ func (s *fakeServer) serveConn(conn net.Conn, h handler) {
 	}, nil)
 }
 
+// connections returns how many connections the server accepted.
+func (s *fakeServer) connections() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.conns
+}
+
 // requests returns what the server received, including pings.
 func (s *fakeServer) requests() []protocol.Message {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]protocol.Message(nil), s.reqs...)
+}
+
+// methods returns the methods the server received, in order.
+func (s *fakeServer) methods() []string {
+	var out []string
+	for _, r := range s.requests() {
+		out = append(out, r.Method)
+	}
+	return out
 }
 
 func register(t *testing.T, dir, id, sock, version string) {
@@ -146,7 +166,7 @@ func newHarness(t *testing.T, dir string, getenv map[string]string) *harness {
 		Stderr:     &h.errb,
 		Stdin:      bytes.NewReader(nil),
 		Getenv:     func(k string) string { return getenv[k] },
-		RuntimeDir: func() (string, error) { return dir, nil },
+		RuntimeDir: func() (string, bool, error) { return dir, true, nil },
 	}
 	return h
 }

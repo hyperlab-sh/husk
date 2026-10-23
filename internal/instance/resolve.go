@@ -66,9 +66,15 @@ type Resolved struct {
 // what the caller parsed from flags and read from the environment; Resolve
 // reads no process state itself, so tests set the fields directly.
 type ResolveOptions struct {
-	// Dir is the runtime directory, already resolved by the caller with
-	// RuntimeDir. Required; an empty Dir is a usage error.
+	// Dir is the runtime directory, already resolved by the caller (the CLI
+	// uses LookupRuntimeDir). Required unless DirAbsent is set; an empty Dir
+	// otherwise is a usage error.
 	Dir string
+
+	// DirAbsent says the runtime directory does not exist: the registry is
+	// empty, so a lookup by id and discovery both find no instance. Resolve
+	// never creates the directory.
+	DirAbsent bool
 
 	// Instance is the --instance flag value, empty when the flag is
 	// absent. An id: a pid id or a name id.
@@ -105,8 +111,8 @@ const (
 	// environment chose one. The spec's exit 4; Candidates carries them.
 	KindAmbiguous
 
-	// KindTransport: a target was named but did not answer (or the
-	// runtime directory could not be read). The spec's exit 5.
+	// KindTransport: discovery found only unresponsive entries, or the
+	// registry could not be read. The spec's exit 5.
 	KindTransport
 
 	// KindTaken: the instance name is held by a live process. The Server
@@ -204,100 +210,65 @@ func (e *Error) Unwrap() error { return e.Err }
 
 // Resolve picks exactly one socket for a CLI command, applying the spec's
 // order: --socket, --instance, HUSK_SOCKET_PATH, HUSK_INSTANCE, discovery.
-// The first rule that applies wins even when it then fails — a stale
+// The first rule that applies wins even when it then fails: a stale
 // HUSK_INSTANCE or an unregistered --instance is an error, never a silent
-// switch to another rule. Discovery pings every entry in parallel, removes
-// the stale ones, and fails unless exactly one live instance remains.
+// switch to another rule. Explicit targets are not probed: the command's own
+// connection (session.ping first) is their liveness check, and the caller
+// runs stale recovery when that connection is refused. Only discovery pings,
+// every entry in parallel, and it fails unless exactly one live instance
+// remains.
 func Resolve(opts ResolveOptions) (Resolved, error) {
-	if opts.Dir == "" {
+	if opts.Dir == "" && !opts.DirAbsent {
 		return Resolved{}, &Error{Kind: KindUsage, Message: "runtime directory is not set"}
 	}
 	if opts.Socket != "" && opts.Instance != "" {
 		return Resolved{}, &Error{Kind: KindUsage, Message: "--socket and --instance are mutually exclusive"}
 	}
 	if opts.Socket != "" {
-		return lookupSocketPath(opts.Socket, SourceSocketFlag, opts.Deps)
+		return Resolved{Socket: opts.Socket, Source: SourceSocketFlag}, nil
 	}
 	if opts.Instance != "" {
-		return lookup(opts.Dir, opts.Instance, SourceFlag, opts.Deps)
+		return lookup(opts, opts.Instance, SourceFlag)
 	}
 	if opts.EnvSocketPath != "" {
-		return lookupSocketPath(opts.EnvSocketPath, SourceEnv, opts.Deps)
+		return Resolved{Socket: opts.EnvSocketPath, Source: SourceEnv}, nil
 	}
 	if opts.EnvInstance != "" {
-		return lookup(opts.Dir, opts.EnvInstance, SourceEnv, opts.Deps)
+		return lookup(opts, opts.EnvInstance, SourceEnv)
 	}
-	return discover(opts.Dir, opts.Deps)
+	return discover(opts)
 }
 
-// lookupSocketPath applies a bare socket-path rule (--socket or
-// HUSK_SOCKET_PATH): no registration backs the path, so a ping is the only
-// proof anyone is listening. Missing or refused is exit 3 — for the env
-// step the spec's own wording, and it never falls through to discovery;
-// a path that does not answer is exit 5.
-func lookupSocketPath(path string, src Source, d *Deps) (Resolved, error) {
-	err := d.pingFor(path, LookupPingTimeout)
-	switch pingVerdict(err) {
-	case VerdictLive:
-		return Resolved{Socket: path, Source: src}, nil
-	case VerdictStale:
-		if src == SourceEnv {
-			return Resolved{}, &Error{
-				Kind:    KindNoInstance,
-				Message: "HUSK_SOCKET_PATH points at a socket nobody is listening on; unset it or pass --instance",
-				Err:     err,
-			}
-		}
-		return Resolved{}, &Error{
-			Kind:    KindNoInstance,
-			Message: fmt.Sprintf("socket %q points at a socket nobody is listening on", path),
-			Err:     err,
-		}
-	default:
-		return Resolved{}, &Error{
-			Kind:    KindTransport,
-			Message: fmt.Sprintf("socket %q did not answer within %s", path, LookupPingTimeout),
-			Err:     err,
-		}
-	}
-}
-
-// lookup resolves one id from the runtime directory: the --instance flag
-// and the HUSK_INSTANCE steps. The entry must exist and answer a ping; a
-// stale entry is removed and reported, an unresponsive one is kept and
-// reported as a transport failure. Explicit lookups wait the spec's 2 s
-// (LookupPingTimeout), not the discovery 500 ms.
-func lookup(dir, id string, src Source, d *Deps) (Resolved, error) {
+// lookup resolves one id from the registry: the --instance flag and the
+// HUSK_INSTANCE steps. The entry must exist; whether it answers is the
+// connection's business.
+func lookup(opts ResolveOptions, id string, src Source) (Resolved, error) {
 	if err := ValidID(id); err != nil {
 		return Resolved{}, &Error{Kind: KindUsage, Message: err.Error(), Err: err}
 	}
-	e, err := readEntry(dir, id+".json")
+	notRunning := &Error{Kind: KindNoInstance, Message: fmt.Sprintf("instance %q is not running", id)}
+	if opts.DirAbsent {
+		return Resolved{}, notRunning
+	}
+	e, err := readEntry(opts.Dir, id+".json")
 	if err != nil {
-		return Resolved{}, &Error{Kind: KindNoInstance, Message: fmt.Sprintf("instance %q is not running", id)}
+		return Resolved{}, notRunning
 	}
-	switch pingVerdict(d.pingFor(e.Socket, LookupPingTimeout)) {
-	case VerdictLive:
-		return Resolved{Entry: &e, Socket: e.Socket, Source: src}, nil
-	case VerdictStale:
-		_ = RemoveIfStale(dir, e)
-		return Resolved{}, &Error{
-			Kind:    KindNoInstance,
-			Message: fmt.Sprintf("instance %q is not running (stale entry removed)", id),
-		}
-	default:
-		return Resolved{}, &Error{
-			Kind:    KindTransport,
-			Message: fmt.Sprintf("instance %q did not answer within %s", id, LookupPingTimeout),
-		}
-	}
+	return Resolved{Entry: &e, Socket: e.Socket, Source: src}, nil
 }
 
-// discover implements the last rule: list the runtime directory, remove
-// stale entries, and resolve only when exactly one live instance remains.
-// Zero is "no instance is running"; several is the ambiguity error carrying
-// the list. Unresponsive entries are skipped, never candidates.
-func discover(dir string, d *Deps) (Resolved, error) {
-	statuses, err := Survey(dir, d)
+// discover implements the last rule: survey the registry (stale entries are
+// removed there) and resolve only when exactly one live instance remains.
+// No entries at all is "no instance is running" (exit 3); only unresponsive
+// ones is a transport failure naming them (exit 5), so a script that starts
+// an instance on exit 3 never starts one beside a hung one; several live is
+// the ambiguity error carrying the list. Unresponsive entries are never
+// candidates.
+func discover(opts ResolveOptions) (Resolved, error) {
+	if opts.DirAbsent {
+		return Resolved{}, &Error{Kind: KindNoInstance, Message: "no instance is running"}
+	}
+	statuses, err := Survey(opts.Dir, opts.Deps)
 	if err != nil {
 		return Resolved{}, &Error{Kind: KindTransport, Message: "read runtime dir: " + err.Error(), Err: err}
 	}
@@ -315,7 +286,22 @@ func discover(dir string, d *Deps) (Resolved, error) {
 		e := live[0].Entry
 		return Resolved{Entry: &e, Socket: e.Socket, Source: SourceDiscovery, Skipped: skipped}, nil
 	case 0:
-		return Resolved{}, &Error{Kind: KindNoInstance, Message: "no instance is running", Skipped: skipped}
+		if len(skipped) == 0 {
+			return Resolved{}, &Error{Kind: KindNoInstance, Message: "no instance is running"}
+		}
+		ids := make([]string, len(skipped))
+		for i, st := range skipped {
+			ids[i] = st.Entry.ID
+		}
+		noun := "instances are"
+		if len(ids) == 1 {
+			noun = "instance is"
+		}
+		return Resolved{}, &Error{
+			Kind:    KindTransport,
+			Message: fmt.Sprintf("%d %s registered but none answered within %s: %s", len(ids), noun, DiscoveryPingTimeout, strings.Join(ids, ", ")),
+			Skipped: skipped,
+		}
 	default:
 		return Resolved{}, &Error{
 			Kind:       KindAmbiguous,

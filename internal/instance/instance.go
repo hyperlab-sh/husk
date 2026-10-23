@@ -160,6 +160,35 @@ func RuntimeDir() (string, error) {
 	return runtimeDir(os.Getenv("XDG_RUNTIME_DIR"), "/tmp", os.Getuid())
 }
 
+// LookupRuntimeDir resolves and checks the runtime directory like RuntimeDir
+// but never creates it: the CLI is a reader, and an absent directory only
+// means no instance is running. found is false (and err nil) when the
+// directory does not exist; an existing one that is a symlink, not a
+// directory, foreign-owned or not private is an error. The returned path is
+// the cleaned directory either way.
+func LookupRuntimeDir() (dir string, found bool, err error) {
+	return lookupRuntimeDir(os.Getenv("XDG_RUNTIME_DIR"), "/tmp", os.Getuid())
+}
+
+// lookupRuntimeDir is LookupRuntimeDir with the roots injected, as runtimeDir.
+func lookupRuntimeDir(xdg, tmpBase string, uid int) (string, bool, error) {
+	dir := filepath.Join(tmpBase, fmt.Sprintf("husk-%d", uid))
+	if xdg != "" {
+		dir = filepath.Join(xdg, "husk")
+	}
+	st, err := os.Lstat(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return dir, false, nil
+		}
+		return dir, false, fmt.Errorf("runtime dir %s: %w", dir, err)
+	}
+	if err := checkDir(st, dir, uid); err != nil {
+		return dir, false, err
+	}
+	return dir, true, nil
+}
+
 // CheckRuntimeDir creates dir if absent and verifies the same private-directory
 // rule as RuntimeDir. It never falls back to another directory.
 func CheckRuntimeDir(dir string) error { return ensureDir(dir, os.Getuid()) }

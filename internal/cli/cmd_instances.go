@@ -2,65 +2,71 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
+	"strconv"
 	"time"
 
+	"github.com/hyperlab-sh/husk/internal/cli/output"
 	"github.com/hyperlab-sh/husk/internal/instance"
 )
 
 // instanceRow is one element of the JSON form of `husk instances`: the
-// registration entry plus its liveness.
+// registration entry as the spec spells it, plus its liveness.
 type instanceRow struct {
-	instance.Entry
-	Status string `json:"status"`
+	ID              string    `json:"id"`
+	PID             int       `json:"pid"`
+	Socket          string    `json:"socket"`
+	StartedAt       time.Time `json:"started_at"`
+	ProtocolVersion string    `json:"protocol_version"`
+	HostVersion     string    `json:"host_version"`
+	Status          string    `json:"status"`
 }
 
-// runInstances lists the runtime directory. It never resolves, so the
-// target flags do not apply; stale entries are removed by the survey.
-func runInstances(ctx context.Context, inv *Invocation, args []string) error {
+// runInstances lists the registry. It never resolves and takes no target
+// flag; stale entries are removed by the survey and do not appear. An absent
+// runtime directory is an empty list: nothing is running.
+func runInstances(_ context.Context, inv *Invocation, args []string) error {
 	if len(args) != 0 {
-		return usageErr("instances takes no arguments")
+		return output.Usage("instances takes no arguments")
 	}
-	dir, err := inv.env.RuntimeDir()
+	dir, found, err := inv.env.RuntimeDir()
 	if err != nil {
-		return runtimeDirErr(err)
+		return output.Environment(err, "%v", err)
 	}
-	ctx, cancel := inv.withTimeout(ctx)
-	defer cancel()
-	type surveyed struct {
-		st  []instance.Status
-		err error
+	var statuses []instance.Status
+	if found {
+		if statuses, err = instance.Survey(dir, inv.env.Deps); err != nil {
+			return output.Transport(err, "read runtime dir: %v", err)
+		}
 	}
-	ch := make(chan surveyed, 1)
-	go func() {
-		st, err := instance.Survey(dir, inv.env.Deps)
-		ch <- surveyed{st, err}
-	}()
-	var s surveyed
-	select {
-	case s = <-ch:
-	case <-ctx.Done():
-		return transportErr(ctx.Err(), "listing instances: %v", ctx.Err())
+	rows := make([]instanceRow, 0, len(statuses))
+	for _, st := range statuses {
+		e := st.Entry
+		rows = append(rows, instanceRow{
+			ID: e.ID, PID: e.PID, Socket: e.Socket, StartedAt: e.StartedAt,
+			ProtocolVersion: e.ProtocolVersion, HostVersion: e.HuskVersion, Status: st.Verdict.String(),
+		})
 	}
-	if s.err != nil {
-		return transportErr(s.err, "read runtime dir: %v", s.err)
-	}
-
-	rows := make([]instanceRow, 0, len(s.st))
-	for _, st := range s.st {
-		rows = append(rows, instanceRow{Entry: st.Entry, Status: st.Verdict.String()})
-	}
-	if inv.format == formatJSON {
+	if inv.out.Format == output.JSON {
 		raw, err := jsonMarshal(rows)
 		if err != nil {
 			return err
 		}
-		return inv.writeJSON(raw)
+		return inv.out.WriteJSON(raw)
 	}
-	table := make([][]string, 0, len(rows))
+	cells := make([][]string, 0, len(rows))
 	for _, r := range rows {
-		table = append(table, []string{
-			r.ID, r.Name, itoa(r.PID), r.StartedAt.UTC().Format(time.RFC3339), r.ProtocolVersion, r.Status,
+		cells = append(cells, []string{
+			r.ID, strconv.Itoa(r.PID), r.StartedAt.UTC().Format(time.RFC3339), r.ProtocolVersion, r.Status,
 		})
 	}
-	return writeTable(inv.env.Stdout, []string{"ID", "NAME", "PID", "STARTED", "PROTO", "STATUS"}, table)
+	return output.WriteTable(inv.out.Stdout, []string{"ID", "PID", "STARTED", "PROTO", "STATUS"}, cells)
+}
+
+func jsonMarshal(v any) ([]byte, error) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil, output.Protocol(err, "%v", err)
+	}
+	return b, nil
 }

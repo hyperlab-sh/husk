@@ -7,12 +7,10 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/signal"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -41,13 +39,11 @@ func repeatable(name, usage string) *stringFlag {
 }
 
 func main() {
-	// A first non-flag argument is a subcommand: a socket client of a
-	// running instance. Everything else starts an instance.
+	// argv[1] decides the mode: a first argument that does not start with
+	// "-" is a subcommand. The CLI installs no signal handler; a signal ends
+	// it by the signal.
 	if len(os.Args) > 1 && !strings.HasPrefix(os.Args[1], "-") {
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-		code := cli.Main(ctx, os.Args[1:], cli.OSEnv())
-		stop()
-		os.Exit(code)
+		os.Exit(cli.Main(context.Background(), os.Args[1:], cli.OSEnv()))
 	}
 	dumpFrame := flag.Bool("dump-frame", false, "Render one live frame after plugin sync and exit")
 	demoFrame := flag.Bool("demo-frame", false, "Render one frame from a built-in demo plugin that declares a border+label+close frame and exit")
