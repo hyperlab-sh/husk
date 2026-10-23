@@ -500,3 +500,29 @@ func TestFailuresInLaterSettlesJoinTheShowingToast(t *testing.T) {
 		t.Fatalf("fresh toast = %+v, want only the new failure", tt)
 	}
 }
+
+// A config notice becomes one toast with the exact error count, shown once.
+func TestConfigNoticeToastsOnce(t *testing.T) {
+	m := goldenModel()
+	fe := withFE(m)
+	m.settle()
+	if m.activeToast != nil {
+		t.Fatalf("toast with no notice: %+v", m.activeToast)
+	}
+	fe.Notices = []contracts.ConfigNotice{{Reason: "startup", Errors: 3}}
+	m.settle()
+	tt := m.activeToast
+	if tt == nil || tt.Message != "3 configuration problems; run husk config reload" {
+		t.Fatalf("toast = %+v", tt)
+	}
+	m.activeToast = nil
+	m.settle()
+	if m.activeToast != nil {
+		t.Fatalf("notice toasted twice: %+v", m.activeToast)
+	}
+	fe.Notices = append(fe.Notices, contracts.ConfigNotice{Reason: "plugin", Errors: 1})
+	m.settle()
+	if tt := m.activeToast; tt == nil || tt.Message != "1 configuration problems; run husk config reload" {
+		t.Fatalf("second notice toast = %+v", tt)
+	}
+}

@@ -35,6 +35,7 @@ func Reports(reports []services.Report) []host.ReloadReport {
 			Service: r.Service,
 			Gen:     uint64(r.Gen),
 			Applied: r.Applied,
+			Changed: r.Changed,
 		}
 		rep.Problems = append(rep.Problems, r.Problems...)
 		out = append(out, rep)

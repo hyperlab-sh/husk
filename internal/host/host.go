@@ -83,6 +83,9 @@ type Root struct {
 	lastSizes  map[protocol.SurfaceID]pushedSize // what each surface's occupant was last told
 	refusalsMu sync.Mutex                        // guards refusals
 	refusals   []contracts.PluginRefusal         // plugins refused before a Pod existed
+	reloadSeq  atomic.Uint64                     // keys services.reloaded events apart
+	noticesMu  sync.Mutex                        // guards notices
+	notices    []contracts.ConfigNotice          // reloads that ended with errors
 	declWarnMu sync.Mutex                        // guards declWarned
 	declWarned map[string]bool                   // plugins whose declared document failed to decode
 
@@ -508,6 +511,11 @@ func (r *Root) buildPods() error {
 		return err
 	}
 	r.pods = h
+	// Pods own the theme.changed push: an in-process watcher of the same
+	// event cli watchers get, not a callback Services make.
+	if _, err := r.bus.Subscribe(reloadWatcher{r}, servicesReloadedEvent); err != nil {
+		return fmt.Errorf("services.reloaded watcher: %w", err)
+	}
 	return nil
 }
 

@@ -117,6 +117,12 @@ type Frontend interface {
 	// launch failure gets. Any goroutine.
 	Refusals() []PluginRefusal
 
+	// ConfigNotices lists the reloads the user did not start from the CLI
+	// (startup, profile, plugin) that finished with at least one error
+	// problem, in order. The list only grows; a frontend remembers how many it
+	// has shown and toasts the rest. Any goroutine.
+	ConfigNotices() []ConfigNotice
+
 	// OwnSlices registers the frontend's owner handles (husk.layout,
 	// husk.geometry, husk.focus). It may be called once, before the loop
 	// runs or on it after Run has started (a persistent husk.layout hydrates
@@ -164,6 +170,14 @@ type Toast struct {
 type PluginRefusal struct {
 	Plugin string
 	Reason string
+}
+
+// ConfigNotice is one reload that ended with error problems the user has not
+// seen: Reason is the reload's trigger and Errors the error count across the
+// five reports.
+type ConfigNotice struct {
+	Reason string
+	Errors int
 }
 
 // HostActionHandler serves one host action on the loop. args is the

@@ -214,6 +214,7 @@ type WorkbenchModel struct {
 	toastPollOn    bool
 	toastSeq       int
 	refusalsShown  int      // host refusals already reported
+	noticesShown   int      // host config notices already toasted
 	failures       []string // plugin failures noted, not yet toasted
 	shownFailures  []string // lines of the failure toast now up
 	failureSeq     int      // toastSeq of that toast
@@ -746,6 +747,24 @@ func (m *WorkbenchModel) noteRefusals() {
 	m.refusalsShown = len(refused)
 }
 
+// noteConfigNotices toasts the newest reload the user did not start that
+// ended with errors. Each reload is one toast; several that land together
+// show the last, which carries the current count.
+func (m *WorkbenchModel) noteConfigNotices() {
+	if m.fe == nil {
+		return
+	}
+	notices := m.fe.ConfigNotices()
+	fresh := notices[min(m.noticesShown, len(notices)):]
+	m.noticesShown = len(notices)
+	if len(fresh) == 0 {
+		return
+	}
+	last := fresh[len(fresh)-1]
+	m.logf("configuration: %d problems after %s reload", last.Errors, last.Reason)
+	m.cmds = append(m.cmds, m.showLocalToast("warn", "Configuration", fmt.Sprintf("%d configuration problems; run husk config reload", last.Errors)))
+}
+
 // toastFailures shows the failures noted since the last call. A failure that
 // arrives while the failure toast is still up joins it instead of replacing
 // it (refusals land at boot, launch failures in later Updates), so the toast
@@ -900,6 +919,7 @@ func (m *WorkbenchModel) settle() {
 			m.host.Tick()
 		}
 		m.noteRefusals()
+		m.noteConfigNotices()
 		m.pollToast()
 		if !changed && !wrote {
 			return
