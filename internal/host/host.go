@@ -384,6 +384,7 @@ func (r *Root) buildServices() error {
 		}
 	}
 	rt, err := services.New(services.RuntimeOptions{
+		Writer:      r.store,
 		Store:       r.store,
 		State:       r.st,
 		Post:        r.post,

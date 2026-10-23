@@ -912,6 +912,13 @@
     "settings.schema.result": {
       "description": "Result owned by design/services.md; no additional field constraints specified here."
     },
+    "settings.set.params": {
+      "description": "Payload owned by design/services.md; no additional field constraints specified here.",
+      "type": "object"
+    },
+    "settings.set.result": {
+      "description": "Result owned by design/services.md; no additional field constraints specified here."
+    },
     "settings.validate.params": {
       "description": "Payload owned by design/services.md; no additional field constraints specified here.",
       "type": "object"
@@ -1297,6 +1304,15 @@
       },
       "result": {
         "$ref": "#/$defs/settings.schema.result"
+      }
+    },
+    "settings.set": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/settings.set.params"
+      },
+      "result": {
+        "$ref": "#/$defs/settings.set.result"
       }
     },
     "settings.validate": {

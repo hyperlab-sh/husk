@@ -315,6 +315,7 @@ type Settings struct {
 	Values     []contracts.SettingValue
 	Entries    []contracts.SettingEntry
 	Validation contracts.ValidationResult
+	Written    contracts.SettingSetResult
 	Err        error
 }
 
@@ -325,6 +326,12 @@ func NewSettings(rec *Recorder) *Settings { return &Settings{callLog: callLog{r:
 func (f *Settings) Get(_ context.Context, c contracts.Caller, key string) (any, string, error) {
 	f.RecordCaller("Settings.Get", c, key)
 	return f.Value, f.Source, f.Err
+}
+
+// Set implements contracts.SettingsPort.
+func (f *Settings) Set(_ context.Context, c contracts.Caller, key string, value any) (contracts.SettingSetResult, error) {
+	f.RecordCaller("Settings.Set", c, key, value)
+	return f.Written, f.Err
 }
 
 // List implements contracts.SettingsPort.

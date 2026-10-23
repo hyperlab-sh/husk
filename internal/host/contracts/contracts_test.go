@@ -160,7 +160,7 @@ func TestCLIOnlyMethodsListOnlyCLI(t *testing.T) {
 		protocol.MethodPluginLog, protocol.MethodConfigReload, protocol.MethodStateClear,
 		protocol.MethodSecretsSet, protocol.MethodSecretsGrant, protocol.MethodSecretsRevoke,
 		protocol.MethodSecretsReveal, protocol.MethodThemeCheck,
-		protocol.MethodSettingsList, protocol.MethodSettingsSchema, protocol.MethodSettingsValidate,
+		protocol.MethodSettingsList, protocol.MethodSettingsSchema, protocol.MethodSettingsValidate, protocol.MethodSettingsSet,
 	} {
 		k := homes[m].Kinds
 		if len(k) != 1 || k[0] != contracts.CallerCLI {

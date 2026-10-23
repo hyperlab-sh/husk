@@ -36,6 +36,10 @@ func TestNamedThemeRules(t *testing.T) {
 			if len(r.Problems) != 1 || r.Problems[0].Code != tc.code || r.Problems[0].Severity != "warning" || r.Problems[0].Key != "themes."+tc.name || r.Problems[0].Source.File != "themes.json" {
 				t.Fatalf("%+v", r.Problems)
 			}
+			rows, _ := th.List(Caller{Kind: "cli"})
+			if len(rows) != 2 || rows[1].Name != "valid" {
+				t.Fatalf("dropped definition listed: %+v", rows)
+			}
 		})
 	}
 }

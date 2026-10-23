@@ -37,6 +37,15 @@ func (p Settings) Get(ctx context.Context, hc host.Caller, key string) (any, str
 	return value, source, nil
 }
 
+// Set implements contracts.SettingsPort on the handler goroutine.
+func (p Settings) Set(ctx context.Context, hc host.Caller, key string, value any) (host.SettingSetResult, error) {
+	source, reports, err := p.Svc.Set(ctx, hc, key, value)
+	if err != nil {
+		return host.SettingSetResult{}, coded(err)
+	}
+	return host.SettingSetResult{Key: key, Value: c.Clone(value), Source: source, Reports: Reports(reports)}, nil
+}
+
 // List implements contracts.SettingsPort: every known and retained key.
 func (p Settings) List(ctx context.Context, hc host.Caller) ([]host.SettingValue, error) {
 	rows, err := p.Svc.List(hc)

@@ -34,6 +34,7 @@ var servicesParams = map[string]string{
 	"settings.list":     `{}`,
 	"settings.schema":   `{"owner":"husk"}`,
 	"settings.validate": `{}`,
+	"settings.set":      `{"key":"theme.name","value":"evening"}`,
 	"secrets.get":       `{"name":"token"}`,
 	"secrets.names":     `{}`,
 	"secrets.set":       `{"name":"token","value":"v"}`,

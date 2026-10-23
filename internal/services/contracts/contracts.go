@@ -144,6 +144,8 @@ type Error struct {
 	Code    string
 	Reason  string
 	Message string
+	// Key identifies the setting rejected before a write.
+	Key string
 }
 
 func (e *Error) Error() string { return e.Message }

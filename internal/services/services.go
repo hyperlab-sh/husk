@@ -45,6 +45,8 @@ const (
 	ReasonProfile Reason = "profile"
 	// ReasonPlugin denotes changed plugin declarations.
 	ReasonPlugin Reason = "plugin"
+	// ReasonSettings denotes a validated user-layer setting write.
+	ReasonSettings Reason = "settings"
 )
 
 // StoreReader is the complete reload input port; no filesystem API escapes it.
@@ -277,6 +279,17 @@ func (co *Coordinator) AwaitProfile(name string) profile.Waiter {
 	co.expect, co.hasExpect = name, true
 	co.mu.Unlock()
 	return co.waiter(co.request(ReasonProfile, true))
+}
+
+// AwaitSettings registers a setting write on the loop before Tick captures
+// inputs. Requests after capture join the single queued follow-up flight.
+func (co *Coordinator) AwaitSettings() settings.Waiter {
+	if co.ctx.Err() != nil {
+		f := &flight{done: make(chan struct{}), reason: ReasonSettings, started: true, err: shutdown()}
+		close(f.done)
+		return co.waiter(f)
+	}
+	return co.waiter(co.request(ReasonSettings, true))
 }
 
 // Settled implements profile.Reloader. An applied name alone is insufficient:
@@ -786,6 +799,8 @@ type Runtime struct {
 
 // RuntimeOptions injects the same ports without importing a Pod implementation.
 type RuntimeOptions struct {
+	// Writer is handed only to Settings, not to the coordinator.
+	Writer    settings.StoreWriter
 	Store     StoreReader
 	State     c.Tree
 	Post      c.Post
@@ -810,7 +825,7 @@ func New(opts RuntimeOptions) (*Runtime, error) {
 	if p == nil {
 		return nil, err
 	}
-	set, setErr := settings.New(settings.Options{Schema: opts.Schema, Warn: opts.Warn})
+	set, setErr := settings.New(settings.Options{Schema: opts.Schema, Warn: opts.Warn, Store: opts.Writer, Post: opts.Post})
 	if setErr != nil {
 		return nil, setErr
 	}
@@ -826,6 +841,7 @@ func New(opts RuntimeOptions) (*Runtime, error) {
 		return nil, coErr
 	}
 	p.Bind(co)
+	set.Bind(co)
 	return &Runtime{co, p, set, th, kb, sec}, errors.Join(err, secretErr)
 }
 

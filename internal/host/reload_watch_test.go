@@ -109,6 +109,7 @@ func TestConfigNoticesForUnattendedReloadsWithErrors(t *testing.T) {
 		{"plugin", "plugin", []reportData{{Service: "keybinding", Problems: errs(1)}}, 1},
 		{"warnings only", "startup", []reportData{{Service: "settings", Problems: warning}}, 0},
 		{"cli reload shows nothing", "cli", []reportData{{Service: "theme", Problems: errs(4)}}, 0},
+		{"settings requester holds reports", "settings", []reportData{{Service: "theme", Problems: errs(4)}}, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			before, _ := fe.LatestConfigNotice()

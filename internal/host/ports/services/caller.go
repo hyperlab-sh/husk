@@ -63,6 +63,12 @@ func coded(err error) error {
 		if serr.Reason != "" {
 			e.data = map[string]any{"reason": serr.Reason}
 		}
+		if serr.Key != "" {
+			if e.data == nil {
+				e.data = map[string]any{}
+			}
+			e.data["key"] = serr.Key
+		}
 		return e
 	}
 	if errors.Is(err, context.Canceled) {

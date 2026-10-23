@@ -88,6 +88,7 @@ func MethodHomes() map[string]MethodHome {
 		protocol.MethodSettingsList:     home("SettingsPort", "List", cliOnly),
 		protocol.MethodSettingsSchema:   home("SettingsPort", "Schema", cliOnly),
 		protocol.MethodSettingsValidate: home("SettingsPort", "Validate", cliOnly),
+		protocol.MethodSettingsSet:      home("SettingsPort", "Set", cliOnly),
 
 		protocol.MethodSecretsGet:    home("SecretsPort", "Get", anyCaller),
 		protocol.MethodSecretsNames:  home("SecretsPort", "Names", anyCaller),
