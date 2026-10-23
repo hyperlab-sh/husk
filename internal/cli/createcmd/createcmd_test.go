@@ -1,6 +1,7 @@
 package createcmd
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -8,12 +9,15 @@ import (
 	"flag"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
+	"syscall"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/hyperlab-sh/husk/internal/cli/output"
 	"github.com/hyperlab-sh/husk/internal/substrate/store"
@@ -178,7 +182,9 @@ func tree(t *testing.T, root string) map[string]string {
 
 func TestGoldenBundleTreeModesAndOutput(t *testing.T) {
 	root := t.TempDir()
+	mask := syscall.Umask(0077)
 	text, err := invoke(t, root, []string{"bundle", "demo"}, output.JSON, writeFile)
+	syscall.Umask(mask)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,6 +252,56 @@ func TestGoldenBundleTreeModesAndOutput(t *testing.T) {
 	}
 	if manifest.Protocol != protocol.Major {
 		t.Fatalf("major=%d want %d", manifest.Protocol, protocol.Major)
+	}
+}
+
+// A shell plugin must keep its protocol stdout open while draining stdin;
+// closing it announces a broken channel to the process supervisor.
+func TestHelloKeepsProtocolPipeOpenUntilStdinCloses(t *testing.T) {
+	root := t.TempDir()
+	if _, err := invoke(t, root, []string{"bundle", "demo"}, output.JSON, writeFile); err != nil {
+		t.Fatal(err)
+	}
+	// The stand-in CLI succeeds without needing a server. The stand-in cat
+	// signals entry through the preserved protocol descriptor, then drains stdin.
+	for name, text := range map[string]string{
+		"host": "#!/bin/sh\nexit 0\n",
+		"cat":  "#!/bin/sh\nprintf 'ready\\n' >&3\nexec /bin/cat\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(text), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, filepath.Join(root, "demo", "plugins", "hello", "hello"))
+	cmd.Env = []string{"PATH=" + root, "HUSK_BIN_PATH=" + filepath.Join(root, "host")}
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stdin.Close(); _ = cmd.Process.Kill() })
+	line, err := bufio.NewReader(stdout).ReadString('\n')
+	if err != nil || line != "ready\n" {
+		_ = stdin.Close()
+		_ = cmd.Wait()
+		t.Fatalf("protocol stdout closed before stdin: line=%q err=%v stderr=%s", line, err, stderr.String())
+	}
+	if _, err := stdin.Write([]byte("host notification\n")); err != nil {
+		t.Fatal(err)
+	}
+	_ = stdin.Close()
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("hello exit: %v stderr=%s", err, stderr.String())
 	}
 }
 
