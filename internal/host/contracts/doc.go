@@ -49,7 +49,7 @@
 //
 // # Launch seams and pods.Host
 //
-// The launch sequence in pods.md runs inside pods.Host.Add and Handle, which
+// The launch sequence in pods.md runs inside pods.Host.AddPod and Handle, which
 // already reject duplicate ids, wait for the gate and start wrappers. The
 // seams do not replace them; host-launch's pods.Loop implementation sits on
 // them:
@@ -58,9 +58,9 @@
 //	                      + Reloader.Reload (step 3 to 6, one reload per batch)
 //	pods.Loop.Liveness  = PodRegistry.SetStatus (the husk.pods writes);
 //	                      Reserve and Release guard the entry itself. The
-//	                      launch sequence calls Reserve inside pods.Host.Add
-//	                      before the duplicate check Add performs today;
-//	                      host-launch deletes that old check.
+//	                      launch sequence calls Reserve inside pods.Host.AddPod
+//	                      after its local duplicate check; neither path
+//	                      replaces an existing Pod.
 //	pods.Host.Handle    starts the wrappers after the gate through
 //	                      WrapperStarter.Start with the opening messages
 //	pods.Loop.Opening   produces those opening messages: theme.changed,
