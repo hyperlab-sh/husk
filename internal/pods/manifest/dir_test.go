@@ -17,7 +17,7 @@ func TestPluginDirLoadForms(t *testing.T) {
 		t.Fatal(err)
 	}
 	exe := filepath.Join(root, "bare")
-	if err := os.WriteFile(exe, []byte("#!/bin/sh\n"), 0700); err != nil {
+	if err := os.WriteFile(exe, []byte("executable fixture"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	r := NewRegistry()
