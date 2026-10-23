@@ -118,16 +118,29 @@ func convert(src Source, modern bool) (*Spec, []Warning, error) {
 		for _, f := range []struct {
 			key  string
 			dest any
-		}{{"actions", &s.Actions}, {"surfaces", &s.Surfaces}, {"subscriptions", &s.Subscriptions}, {"events_declared", &s.EventsDeclared}, {"hooks_declared", &s.HooksDeclared}, {"hook_registrations", &s.HookRegistrations}} {
+		}{{"actions", &s.Actions}, {"surfaces", &s.Surfaces}, {"subscriptions", &s.Subscriptions}, {"events_declared", &s.EventsDeclared}} {
 			if err := decodeField(fields, f.key, f.dest); err != nil {
 				return nil, nil, err
 			}
 		}
-		for i := range s.HooksDeclared {
-			if s.HooksDeclared[i].TimeoutMs == 0 {
-				s.HooksDeclared[i].TimeoutMs = DefaultHookTimeoutMs
-			}
+		// The catalog-form members take the same entry parsers as "hooks".
+		var rawDecls, rawRegs []json.RawMessage
+		if err := decodeField(fields, "hooks_declared", &rawDecls); err != nil {
+			return nil, nil, fmt.Errorf("hooks_declared: %w", err)
 		}
+		if err := decodeField(fields, "hook_registrations", &rawRegs); err != nil {
+			return nil, nil, fmt.Errorf("hook_registrations: %w", err)
+		}
+		decls, err := parsePublish("hooks_declared", rawDecls)
+		if err != nil {
+			return nil, nil, err
+		}
+		regs, err := parseSubscribe("hook_registrations", rawRegs)
+		if err != nil {
+			return nil, nil, err
+		}
+		s.HooksDeclared = append(s.HooksDeclared, decls...)
+		s.HookRegistrations = append(s.HookRegistrations, regs...)
 		if err := alias(fields, "slice", "state", &s.Slice); err != nil {
 			return nil, nil, err
 		}

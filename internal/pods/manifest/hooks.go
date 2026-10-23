@@ -15,13 +15,14 @@ const maxHookIDLen = 256
 var integerLiteral = regexp.MustCompile(`^-?(0|[1-9][0-9]*)$`)
 
 // wellFormedHookID is the one id rule of hooks.md (Terms): at least two
-// non-empty dot-separated segments, no whitespace, ';', '=', backslash or '*',
+// non-empty dot-separated segments, no whitespace or control characters, ';',
+// '=', backslash or '*',
 // at most 256 bytes.
 func wellFormedHookID(id string) bool {
 	if id == "" || len(id) > maxHookIDLen {
 		return false
 	}
-	if strings.ContainsFunc(id, unicode.IsSpace) || strings.ContainsAny(id, ";=\\*\x00\x1b") {
+	if strings.ContainsFunc(id, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) || strings.ContainsAny(id, ";=\\*") {
 		return false
 	}
 	parts := strings.Split(id, ".")
@@ -36,8 +37,7 @@ func wellFormedHookID(id string) bool {
 	return true
 }
 
-// parseHooks decodes the v2 "hooks" member and writes the defaults: timeout_ms
-// 10000 and priority 10. It checks shapes only; validateHooks checks values.
+// parseHooks decodes the v2 "hooks" member.
 func parseHooks(raw json.RawMessage) ([]HookDecl, []HookRegistration, error) {
 	var block struct {
 		Publish   []json.RawMessage `json:"publish"`
@@ -46,8 +46,23 @@ func parseHooks(raw json.RawMessage) ([]HookDecl, []HookRegistration, error) {
 	if err := json.Unmarshal(raw, &block); err != nil {
 		return nil, nil, fmt.Errorf("hooks: %w", err)
 	}
+	decls, err := parsePublish("hooks.publish", block.Publish)
+	if err != nil {
+		return nil, nil, err
+	}
+	regs, err := parseSubscribe("hooks.subscribe", block.Subscribe)
+	if err != nil {
+		return nil, nil, err
+	}
+	return decls, regs, nil
+}
+
+// parsePublish decodes publish entries and writes the default timeout_ms
+// (10000). It checks shapes only; validateHooks checks values. Errors are
+// prefixed with label, the member the entries came from.
+func parsePublish(label string, entries []json.RawMessage) ([]HookDecl, error) {
 	var decls []HookDecl
-	for i, entry := range block.Publish {
+	for i, entry := range entries {
 		var d struct {
 			ID          string          `json:"id"`
 			Kind        string          `json:"kind"`
@@ -56,13 +71,13 @@ func parseHooks(raw json.RawMessage) ([]HookDecl, []HookRegistration, error) {
 			TimeoutMs   json.RawMessage `json:"timeout_ms"`
 		}
 		if err := json.Unmarshal(entry, &d); err != nil {
-			return nil, nil, fmt.Errorf("hooks.publish[%d]: %w", i, err)
+			return nil, fmt.Errorf("%s[%d]: %w", label, i, err)
 		}
 		timeout := DefaultHookTimeoutMs
 		if len(d.TimeoutMs) > 0 {
 			n, err := jsonInt(d.TimeoutMs)
 			if err != nil {
-				return nil, nil, fmt.Errorf("hooks.publish[%d].timeout_ms: %w", i, err)
+				return nil, fmt.Errorf("%s[%d].timeout_ms: %w", label, i, err)
 			}
 			if n != 0 {
 				timeout = n
@@ -70,12 +85,18 @@ func parseHooks(raw json.RawMessage) ([]HookDecl, []HookRegistration, error) {
 		}
 		decls = append(decls, HookDecl{ID: d.ID, Kind: HookKind(d.Kind), Title: d.Title, Description: d.Description, TimeoutMs: timeout})
 	}
+	return decls, nil
+}
+
+// parseSubscribe decodes subscribe entries (a hook id string or an
+// {id, priority} object) and writes the default priority (10).
+func parseSubscribe(label string, entries []json.RawMessage) ([]HookRegistration, error) {
 	var regs []HookRegistration
-	for i, entry := range block.Subscribe {
+	for i, entry := range entries {
 		reg := HookRegistration{Priority: DefaultHookPriority}
 		if trimmed := bytes.TrimSpace(entry); len(trimmed) > 0 && trimmed[0] == '"' {
 			if err := json.Unmarshal(trimmed, &reg.ID); err != nil {
-				return nil, nil, fmt.Errorf("hooks.subscribe[%d]: %w", i, err)
+				return nil, fmt.Errorf("%s[%d]: %w", label, i, err)
 			}
 		} else {
 			var o struct {
@@ -83,20 +104,20 @@ func parseHooks(raw json.RawMessage) ([]HookDecl, []HookRegistration, error) {
 				Priority json.RawMessage `json:"priority"`
 			}
 			if err := json.Unmarshal(entry, &o); err != nil {
-				return nil, nil, fmt.Errorf("hooks.subscribe[%d]: want a hook id or an {id, priority} object: %w", i, err)
+				return nil, fmt.Errorf("%s[%d]: want a hook id or an {id, priority} object: %w", label, i, err)
 			}
 			reg.ID = o.ID
 			if len(o.Priority) > 0 {
 				n, err := jsonInt(o.Priority)
 				if err != nil {
-					return nil, nil, fmt.Errorf("hooks.subscribe[%d].priority: %w", i, err)
+					return nil, fmt.Errorf("%s[%d].priority: %w", label, i, err)
 				}
 				reg.Priority = n
 			}
 		}
 		regs = append(regs, reg)
 	}
-	return decls, regs, nil
+	return regs, nil
 }
 
 // jsonInt accepts only a plain JSON integer literal (no fraction, exponent or string).
@@ -123,7 +144,7 @@ func validateHooks(s *Spec) error {
 			return fmt.Errorf("%s.id: %q is not a well-formed hook id", field, h.ID)
 		case h.ID == "husk" || strings.HasPrefix(h.ID, "husk."):
 			return fmt.Errorf("%s.id: %q is in the reserved husk namespace", field, h.ID)
-		case !strings.HasPrefix(h.ID, s.ID+".") || len(h.ID) == len(s.ID)+1:
+		case !strings.HasPrefix(h.ID, s.ID+"."):
 			return fmt.Errorf("%s.id: %q must be %q followed by a name", field, h.ID, s.ID+".")
 		case seen[h.ID]:
 			return fmt.Errorf("%s.id: duplicate hook id %q", field, h.ID)
