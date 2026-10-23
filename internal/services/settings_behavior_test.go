@@ -28,6 +28,7 @@ func TestSettingsVisibilityMatrix(t *testing.T) {
 	in := catalog("a")
 	in.Declared[store.DeclaredPlugins]["b"] = catalog("b").Declared[store.DeclaredPlugins]["b"]
 	in.Doc.Doc = doc(`{"nope":{"x":1}}`)
+	in.Doc.Origins = map[string]store.Layer{"nope.x": store.LayerUser}
 	apply(t, s, in)
 	callers := map[string]Caller{
 		"cli":    {Kind: "cli"},
@@ -61,6 +62,18 @@ func TestSettingsVisibilityMatrix(t *testing.T) {
 			}
 		}
 	}
+	// A plugin's snapshot holds exactly its own entries and the public ones.
+	view := s.SnapshotFor(callers["plugin"])
+	all, err := s.List(callers["cli"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantKeys := map[string]bool{"plugins.a.enabled": true, "dist.pub": true}
+	for _, e := range all {
+		if _, ok := view.Raw(e.Key); ok != wantKeys[e.Key] {
+			t.Errorf("plugin snapshot holds %s = %v, want %v", e.Key, ok, wantKeys[e.Key])
+		}
+	}
 	// An unknown key keeps its raw value for the user listing.
 	list, err := s.List(callers["cli"])
 	if err != nil {
@@ -68,7 +81,7 @@ func TestSettingsVisibilityMatrix(t *testing.T) {
 	}
 	found := false
 	for _, e := range list {
-		if e.Key == "nope.x" && e.Source != "" {
+		if e.Key == "nope.x" && e.Source == "user" {
 			found = true
 		}
 	}
@@ -221,8 +234,18 @@ func TestSettingsTypeClashImported(t *testing.T) {
 	in.Doc.Problems = []store.Problem{{Code: "type_clash", Path: "theme", Layer: store.LayerUser, LowerLayer: store.LayerDistribution}, {Code: "skipped_layer", Path: "other"}}
 	r := apply(t, s, in)
 	p, ok := findProblem(r.Problems, "type_clash")
-	if !ok || p.Severity != "warning" || p.Layer != "user" || p.Key != "theme" {
+	if !ok || p.Severity != "warning" || p.Layer != "user" || !strings.Contains(p.Message, "user") || !strings.Contains(p.Message, "distribution") || !strings.Contains(p.Message, "theme") {
 		t.Fatalf("type_clash = %+v", r.Problems)
+	}
+	// An object node is no settings key; settings.get would refuse it.
+	if p.Key != "" {
+		t.Fatalf("type_clash key %q for an object node", p.Key)
+	}
+	in = input(`{"theme":{"name":"x"}}`)
+	in.Doc.Problems = []store.Problem{{Code: "type_clash", Path: "theme.name", Layer: store.LayerUser, LowerLayer: store.LayerDistribution}}
+	r = apply(t, s, in)
+	if p, _ := findProblem(r.Problems, "type_clash"); p.Key != "theme.name" {
+		t.Fatalf("leaf clash key = %q", p.Key)
 	}
 	if _, ok := findProblem(r.Problems, "skipped_layer"); ok {
 		t.Fatal("only type_clash is imported", r.Problems)
@@ -242,5 +265,46 @@ func TestSettingsWarnSinkFiresOncePerKey(t *testing.T) {
 	want := []string{"settings: unregistered key nope.x", "settings: unregistered key other.y"}
 	if len(got) != 2 || !(got[0] == want[0] && got[1] == want[1] || got[0] == want[1] && got[1] == want[0]) {
 		t.Fatalf("warn = %q, want once each of %q", got, want)
+	}
+}
+
+// A value of the wrong shape for a known key is invalid_value whatever it is,
+// an object included; an empty object at a schema prefix says nothing.
+func TestSettingsWrongShapeForKnownKey(t *testing.T) {
+	cases := []struct {
+		name, doc string
+		code      string // "" means no problem at all
+		key       string
+	}{
+		{"object under string key", `{"theme":{"name":{"x":1}}}`, "invalid_value", "theme.name"},
+		{"object under restart key", `{"profile":{"default":{"a":1}}}`, "invalid_value", "profile.default"},
+		{"object under palette role", `{"theme":{"palette":{"ink":{"a":1}}}}`, "invalid_value", "theme.palette.ink"},
+		{"empty object at prefix", `{"theme":{}}`, "", ""},
+		{"empty object at deeper prefix", `{"theme":{"palette":{}}}`, "", ""},
+		{"empty object at a leaf", `{"theme":{"name":{}}}`, "invalid_value", "theme.name"},
+		{"empty object unknown", `{"nope":{}}`, "unknown_key", "nope"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newSet(settings.Options{})
+			in := input(tc.doc)
+			cand, r, err := s.Rebuild(context.Background(), in)
+			if tc.code == "" {
+				if err != nil || cand == nil || len(r.Problems) != 0 {
+					t.Fatalf("problems = %+v err=%v", r.Problems, err)
+				}
+				return
+			}
+			p, ok := findProblem(r.Problems, tc.code)
+			if !ok || p.Key != tc.key {
+				t.Fatalf("problems = %+v, want %s on %s", r.Problems, tc.code, tc.key)
+			}
+			if tc.code == "invalid_value" && (err == nil || cand != nil || p.Severity != "error") {
+				t.Fatalf("invalid_value must block: err=%v cand=%v", err, cand != nil)
+			}
+			if _, bad := findProblem(r.Problems, "unknown_key"); bad && tc.code == "invalid_value" {
+				t.Fatalf("wrong-shape value also reported as unknown leaves: %+v", r.Problems)
+			}
+		})
 	}
 }

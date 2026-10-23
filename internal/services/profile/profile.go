@@ -149,7 +149,12 @@ func (s *Service) Use(ctx context.Context, caller c.Caller, name string) (string
 			return "", nil, c.Failure("unavailable", "state_write")
 		}
 		reports, err := r.w.Wait(ctx)
-		return name, reports, err
+		if err != nil {
+			return "", reports, err
+		}
+		// The flight may have selected something else: the profile directory can
+		// vanish between validation and step 2.
+		return s.Active(), reports, nil
 	case <-ctx.Done():
 		return "", nil, ctx.Err()
 	}

@@ -91,6 +91,9 @@ func (h Settings) Serve(ctx context.Context, c contracts.Caller, req protocol.Me
 		if err != nil {
 			return handlers.ErrorReply(req, err)
 		}
+		if res.Problems == nil {
+			res.Problems = []protocol.Problem{}
+		}
 		return handlers.Reply(req, res)
 	}
 	return handlers.UnknownMethod(req)

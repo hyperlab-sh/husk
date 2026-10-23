@@ -37,6 +37,9 @@ func (h Theme) Serve(ctx context.Context, c contracts.Caller, req protocol.Messa
 		if err != nil {
 			return handlers.ErrorReply(req, err)
 		}
+		if res.Problems == nil {
+			res.Problems = []protocol.Problem{}
+		}
 		return handlers.Reply(req, res)
 	}
 	return handlers.UnknownMethod(req)

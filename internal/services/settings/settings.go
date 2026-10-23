@@ -353,18 +353,24 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 	for _, l := range in.ConfigLayers {
 		layerFiles[string(l.Layer)] = l.File
 	}
-	for _, p := range in.Doc.Problems {
-		if p.Code == "type_clash" {
-			r.Problems = append(r.Problems, c.Problem{Severity: "warning", Code: "type_clash", Layer: string(p.Layer), Key: p.Path, Message: fmt.Sprintf("%s: the %s layer replaces a value of a different type from the %s layer", p.Path, p.Layer, p.LowerLayer), Source: sourceOf(string(p.Layer), layerFiles)})
-		}
-	}
 	flat := map[string]any{}
-	flatten("", in.Doc.Doc, flat)
-	for key, raw := range flat {
-		layer := string(in.Doc.Origins[key])
-		if layer == "" {
-			layer = "user"
+	flatten("", in.Doc.Doc, schema, flat)
+	// Store reports a clash at an object node as often as at a leaf; the Key is
+	// set only when settings.get accepts it.
+	for _, p := range in.Doc.Problems {
+		if p.Code != "type_clash" {
+			continue
 		}
+		_, known := schema[p.Path]
+		_, kept := flat[p.Path]
+		key := ""
+		if known || kept {
+			key = p.Path
+		}
+		r.Problems = append(r.Problems, c.Problem{Severity: "warning", Code: "type_clash", Layer: string(p.Layer), Key: key, Message: fmt.Sprintf("%s: the %s layer replaces a value of a different type from the %s layer", p.Path, p.Layer, p.LowerLayer), Source: sourceOf(string(p.Layer), layerFiles)})
+	}
+	for key, raw := range flat {
+		layer := originOf(in.Doc.Origins, key)
 		e, known := schema[key]
 		if !known {
 			r.Problems = append(r.Problems, c.Problem{Severity: "warning", Code: "unknown_key", Layer: layer, Key: key, Message: key + ": no schema entry; the value is kept and no plugin sees it", Source: sourceOf(layer, layerFiles)})
@@ -465,6 +471,9 @@ func schemaMessage(code string) string {
 
 // sourceOf names the layer and its config-relative file, as Store reports it.
 func sourceOf(layer string, files map[string]string) *c.Source {
+	if layer == "" {
+		return nil
+	}
 	return &c.Source{Layer: layer, File: files[layer]}
 }
 func wantOf(e Entry) string {
@@ -480,18 +489,53 @@ func jsonText(v any) string {
 	}
 	return string(b)
 }
-func flatten(prefix string, m map[string]any, out map[string]any) {
+
+// originOf is the layer that won key. A value that is an object has origins on
+// its leaves only; the first of those, in key order, speaks for it.
+func originOf(origins map[string]store.Layer, key string) string {
+	if l, ok := origins[key]; ok {
+		return string(l)
+	}
+	best := ""
+	for k := range origins {
+		if strings.HasPrefix(k, key+".") && (best == "" || k < best) {
+			best = k
+		}
+	}
+	return string(origins[best])
+}
+
+// flatten turns a document into dotted keys. It stops at a schema key, so a
+// value of the wrong shape there (an object for a scalar) reaches validation
+// whole instead of becoming unknown leaves. An empty object at a schema
+// prefix says nothing and is dropped.
+func flatten(prefix string, m map[string]any, schema map[string]Entry, out map[string]any) {
 	for k, v := range m {
 		key := k
 		if prefix != "" {
 			key = prefix + "." + k
 		}
-		if obj, ok := v.(map[string]any); ok && len(obj) > 0 {
-			flatten(key, obj, out)
-		} else {
+		obj, isObj := v.(map[string]any)
+		if _, known := schema[key]; known || !isObj {
 			out[key] = v
+			continue
+		}
+		if len(obj) == 0 {
+			if !isSchemaPrefix(schema, key) {
+				out[key] = v
+			}
+			continue
+		}
+		flatten(key, obj, schema, out)
+	}
+}
+func isSchemaPrefix(schema map[string]Entry, key string) bool {
+	for k := range schema {
+		if strings.HasPrefix(k, key+".") {
+			return true
 		}
 	}
+	return false
 }
 func cloneTyped(v any) any {
 	if ss, ok := v.([]string); ok {

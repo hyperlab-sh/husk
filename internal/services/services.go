@@ -195,6 +195,9 @@ func (co *Coordinator) request(reason Reason, onLoop bool) *flight {
 // host calls it at the end of every Update, after State flushed.
 func (co *Coordinator) Tick() {
 	co.mu.Lock()
+	// A profile.use mark is only for the flush of its own tick; a Set that
+	// changed nothing produces no change to consume it.
+	co.hasExpect = false
 	f := co.active
 	if f == nil || f.started {
 		co.mu.Unlock()

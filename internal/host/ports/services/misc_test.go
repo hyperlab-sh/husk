@@ -91,9 +91,34 @@ func TestProfileListAndUseUserOnly(t *testing.T) {
 	go func() { res, err := port.Use(ctx, userCaller, "work"); done <- outcome{res, err} }()
 	runPosted(t, posts)
 	got := <-done
-	if got.err != nil || got.res.Active != "work" || len(got.res.Reports) != 1 || got.res.Reports[0].Gen != 7 {
+	if got.err != nil || got.res.Active != svc.Active() || len(got.res.Reports) != 1 || got.res.Reports[0].Gen != 7 {
 		t.Fatalf("use = %+v err=%v", got.res, got.err)
 	}
+}
+
+// A flight error reaches the wire code unchanged.
+func TestProfileUseFlightErrorKeepsItsCode(t *testing.T) {
+	posts := make(chan func(), 4)
+	svc, err := profile.New(profile.Options{Store: &fakeStoreReader{profiles: []string{"work"}}, State: state.New(state.Options{}), Post: func(f func()) bool { posts <- f; return true }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	applyTo(t, svc, services.ReloadInput{Doc: store.Resolved{Doc: doc(t, `{}`), Origins: map[string]store.Layer{}}})
+	svc.Bind(errReloader{err: c.Failure("unavailable", "flight_boom")})
+	done := make(chan error, 1)
+	go func() { _, err := (Profile{Svc: svc}).Use(context.Background(), userCaller, "work"); done <- err }()
+	runPosted(t, posts)
+	if code, reason := codedOf(t, <-done); code != "unavailable" || reason != "flight_boom" {
+		t.Fatalf("flight error = %s/%s", code, reason)
+	}
+}
+
+type errReloader struct{ err error }
+
+func (f errReloader) AwaitProfile(string) profile.Waiter { return f }
+func (f errReloader) LastReports() []c.Report            { return nil }
+func (f errReloader) Wait(context.Context) ([]c.Report, error) {
+	return nil, f.err
 }
 
 // fakeReloader answers every profile.use registration with canned reports.

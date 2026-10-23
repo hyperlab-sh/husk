@@ -67,7 +67,7 @@ func TestThemeServe(t *testing.T) {
 		}
 	}
 	check := h.Serve(context.Background(), cliCaller, req(t, "theme.check", `{}`), nil)
-	if want := `{"ok":false,"problems":null}`; string(check.Result) != want {
+	if want := `{"ok":false,"problems":[]}`; string(check.Result) != want {
 		t.Fatalf("check = %s, want %s", check.Result, want)
 	}
 	errp := replyErr(t, h.Serve(context.Background(), pluginCaller("files"), protocol.Message{Method: "theme.check"}, nil))
