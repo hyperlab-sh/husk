@@ -5,10 +5,9 @@ description: "What the frontend draws around plugin content: every surface laid 
 
 # Workbench chrome: empty surfaces, rail, bars
 
-Status: landed for layout, empty surfaces, rail geometry and bar composition.
-Colour discipline and the built-in theme migration remain specified, not landed;
-until they land the frontend keeps its existing colour roles and `CharmTone`
-default name. Scope: `cmd/husk` layout and rendering (the frontend). No wire,
+Status: landed for layout, empty surfaces, rail geometry, bar composition and
+colour discipline. The built-in theme migration remains specified, not landed;
+until it lands the frontend keeps the `CharmTone` default name. Scope: `cmd/husk` layout and rendering (the frontend). No wire,
 manifest or plugin-visible change; `husk.surfaces.visible` and
 `husk.geometry.rects` change content, not shape.
 
@@ -420,8 +419,8 @@ After the migration the frame (rail, bars, surfaces, palette, prompts)
 draws `accent` in three places: the active rail icon, the palette prompt and
 the dragged divider. The Settings center adds its own rule-2 uses (the Theme
 tab's current-theme marker, the focused tab label, the focused form field).
-Status roles appear only inside `drawToast` and in one shared status
-helper that draws a status glyph or a one-word status badge in its level
+Status roles appear only inside `drawToast` and in the shared `statusMark`
+helper (`cmd/husk/status.go`), which draws a status glyph or a short status badge in its level
 colour, used by the secret prompt (its `⚠`) and the Settings center (its
 problem and warning lines and its status cells); `accent_secondary` and
 `accent_soft` appear nowhere. `TestChromeColourDiscipline` pins it: a
@@ -502,7 +501,7 @@ All in `package main` under `cmd/husk`. `pkg/` is untouched.
 | `drawSurface`: content or blank canvas | Content, or the humanised name when the slot is a region slot and `surfaceOwner(slot) == ""` (never for `full-canvas` or `workspace-stage`; `drawModal` is unchanged) |
 | `dropVanishedSides`, `leaveUndrawnSides` | Unchanged; a side column now vanishes only by its dock or the fit rule, never because a plugin left |
 | Frontend traffic counter | Removed; frame-dump settling fingerprints published content and Pod status |
-| Every role use listed under "Colour discipline" | Specified, not landed: moves to the role in the table's last column; `drawToast` keeps the level colour for glyph and title only |
+| Every role use listed under "Colour discipline" | Landed: uses the role in the table's last column; `drawToast` keeps the level colour for glyph and title only |
 | `mode_label_test.go` | Rewritten for the table above and the inverted layout rule; other `cmd/husk` tests that assume zero plugins lay out no side rects, or read the top-bar label (`focus_fallback_test.go`, `surface_owner_test.go`), are updated the same way |
 
 A left press on the theme pill is routed in `input.go` before modal, divider,
