@@ -281,16 +281,7 @@ type Binding struct {
 	Focus   string         // surface id; empty means global
 	Plugin  string         // match condition; set by conversion for focus-local
 	Disable bool
-	Source  Source
-}
-
-// Source locates the declaration for problems and `husk keys`.
-type Source struct {
-	Layer  Layer
-	File   string // config-relative path: "keymap.json", "profiles/<name>/keymap.json"; "builtin" for husk; empty for focus-local
-	Line   int    // 1-based when the parser reports one, else 0
-	Plugin string // declaring plugin; focus-local only
-	Order  int    // index in the layer's bind array
+	Source  protocol.Source // where it was declared; the same type a Problem carries ([Protocol](protocol.md), "Problem"); Source.Layer is the Layer name as a string
 }
 
 // KeyContext is what Input knows when a key arrives. Every field comes from the
@@ -466,7 +457,7 @@ JSON output (the reply `result`):
 }
 ```
 
-Entry fields are `keys`, `action`, `args`, `hint`, `focus`, `plugin`, `disable`, `source`, `state`, `shadowed_by`; absent or zero-valued optional fields are omitted. Each problem is Services' `Problem` ([Services](services.md), "Snapshots, rebuilds and reports") serialized as is: `severity`, `code`, `layer`, `key`, `message`, `source`; `source` is the same `Source` struct as an entry's. A problem's `layer` is the layer name, or `plugin:<id>` for a focus-local problem. `source.file` is relative to the config directory of its layer; `husk keys` never prints an absolute path.
+Entry fields are `keys`, `action`, `args`, `hint`, `focus`, `plugin`, `disable`, `source`, `state`, `shadowed_by`; absent or zero-valued optional fields are omitted. Each problem is a `protocol.Problem` ([Protocol](protocol.md), "Problem"; the Service mechanics are in [Services](services.md), "Snapshots, rebuilds and reports") serialized as is: `severity`, `code`, `layer`, `key`, `message`, `source`; `source` is the same `protocol.Source` struct as an entry's. A problem's `layer` is the layer name, or `plugin:<id>` for a focus-local problem. `source.file` is relative to the config directory of its layer; `husk keys` never prints an absolute path.
 
 ### Loader rules and problem codes
 
