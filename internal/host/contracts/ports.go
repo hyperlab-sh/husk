@@ -180,19 +180,11 @@ type ProfilePort interface {
 	Use(ctx context.Context, c Caller, name string) error
 }
 
-// Problem is one validation issue. Messages never contain secret values.
-type Problem struct {
-	Severity string `json:"severity"`
-	Layer    string `json:"layer"`
-	Key      string `json:"key"`
-	Message  string `json:"message"`
-}
-
 // ValidationResult is the outcome of a dry build: whether the candidate would
 // apply and every problem found (all of them, not the first).
 type ValidationResult struct {
-	Applied  bool      `json:"applied"`
-	Problems []Problem `json:"problems,omitempty"`
+	Applied  bool               `json:"applied"`
+	Problems []protocol.Problem `json:"problems,omitempty"`
 }
 
 // ThemeCheckResult is what theme.check reports: every violated pair.
@@ -206,42 +198,24 @@ type ThemePort interface {
 	Check(ctx context.Context, c Caller) (ThemeCheckResult, error)
 }
 
-// KeySource locates one original binding declaration.
-type KeySource struct {
-	Layer    string `json:"layer"`
-	File     string `json:"file,omitempty"`
-	Line     int    `json:"line,omitempty"`
-	PluginID string `json:"plugin,omitempty"`
-	Order    int    `json:"order"`
-}
-
 // KeyEntry is one resolved or shadowed binding as keys.list reports it.
 type KeyEntry struct {
-	Keys       []string       `json:"keys,omitempty"`
-	Action     string         `json:"action,omitempty"`
-	Args       map[string]any `json:"args,omitempty"`
-	Hint       string         `json:"hint,omitempty"`
-	Focus      string         `json:"focus,omitempty"`
-	Plugin     string         `json:"plugin,omitempty"`
-	Disable    bool           `json:"disable,omitempty"`
-	Source     KeySource      `json:"source"`
-	State      string         `json:"state"`
-	ShadowedBy *KeySource     `json:"shadowed_by,omitempty"`
-}
-
-// KeyProblem is one loader or conversion problem.
-type KeyProblem struct {
-	Code    string    `json:"code"`
-	Layer   string    `json:"layer"`
-	Key     string    `json:"key,omitempty"`
-	Message string    `json:"message"`
-	Source  KeySource `json:"source"`
+	Keys       []string         `json:"keys,omitempty"`
+	Action     string           `json:"action,omitempty"`
+	Args       map[string]any   `json:"args,omitempty"`
+	Hint       string           `json:"hint,omitempty"`
+	Focus      string           `json:"focus,omitempty"`
+	Plugin     string           `json:"plugin,omitempty"`
+	Disable    bool             `json:"disable,omitempty"`
+	Source     protocol.Source  `json:"source"`
+	State      string           `json:"state"`
+	ShadowedBy *protocol.Source `json:"shadowed_by,omitempty"`
 }
 
 // KeyListing is the keys.list answer.
 type KeyListing struct {
-	Entries  []KeyEntry   `json:"entries,omitempty"`
-	Problems []KeyProblem `json:"problems,omitempty"`
+	Entries  []KeyEntry         `json:"entries,omitempty"`
+	Problems []protocol.Problem `json:"problems,omitempty"`
 }
 
 // KeybindingPort serves keys.list. A plugin caller sees only its own
@@ -253,10 +227,10 @@ type KeybindingPort interface {
 
 // ReloadReport is one service's outcome in a reload.
 type ReloadReport struct {
-	Service  string    `json:"service"`
-	Gen      uint64    `json:"gen"`
-	Applied  bool      `json:"applied"`
-	Problems []Problem `json:"problems,omitempty"`
+	Service  string             `json:"service"`
+	Gen      uint64             `json:"gen"`
+	Applied  bool               `json:"applied"`
+	Problems []protocol.Problem `json:"problems,omitempty"`
 }
 
 // ConfigPort serves config.reload, a CLI method: a plugin caller gets denied. The Services coordinator implements it;

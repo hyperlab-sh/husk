@@ -5,6 +5,7 @@ import (
 
 	host "github.com/hyperlab-sh/husk/internal/host/contracts"
 	"github.com/hyperlab-sh/husk/internal/services/keybinding"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
 // Keys implements contracts.KeybindingPort over the keybinding service. The
@@ -23,7 +24,7 @@ func (p Keys) List(ctx context.Context, hc host.Caller) (host.KeyListing, error)
 	listing := p.Svc.ListFor(hc)
 	out := host.KeyListing{
 		Entries:  make([]host.KeyEntry, 0, len(listing.Entries)),
-		Problems: make([]host.KeyProblem, 0, len(listing.Problems)),
+		Problems: make([]protocol.Problem, 0, len(listing.Problems)),
 	}
 	for _, e := range listing.Entries {
 		entry := host.KeyEntry{
@@ -34,36 +35,18 @@ func (p Keys) List(ctx context.Context, hc host.Caller) (host.KeyListing, error)
 			Focus:      e.Focus,
 			Plugin:     e.Plugin,
 			Disable:    e.Disable,
-			Source:     keySource(e.Source),
+			Source:     e.Source,
 			State:      e.State,
 			ShadowedBy: nil,
 		}
 		if e.ShadowedBy != nil {
-			shadow := keySource(*e.ShadowedBy)
+			shadow := *e.ShadowedBy
 			entry.ShadowedBy = &shadow
 		}
 		out.Entries = append(out.Entries, entry)
 	}
-	for _, p := range listing.Problems {
-		out.Problems = append(out.Problems, host.KeyProblem{
-			Code:    p.Code,
-			Layer:   p.Layer,
-			Key:     p.Key,
-			Message: p.Message,
-			Source:  keySource(p.Source),
-		})
-	}
+	out.Problems = append(out.Problems, listing.Problems...)
 	return out, nil
-}
-
-func keySource(s keybinding.Source) host.KeySource {
-	return host.KeySource{
-		Layer:    string(s.Layer),
-		File:     s.File,
-		Line:     s.Line,
-		PluginID: s.Plugin,
-		Order:    s.Order,
-	}
 }
 
 // Resolve is the frontend's in-process key lookup (contracts.Frontend). It
@@ -88,7 +71,7 @@ func (p Keys) Resolve(ctx host.KeyContext, keys []string) host.KeyResolution {
 			Focus:   b.Focus,
 			Plugin:  b.Plugin,
 			Disable: b.Disable,
-			Source:  keySource(b.Source),
+			Source:  b.Source,
 			State:   "effective",
 		}
 	}

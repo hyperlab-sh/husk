@@ -199,7 +199,7 @@ var _ contracts.Reloader = Reloader{}
 
 // Reload blocks until the reload has completed (failed and timed-out reloads
 // included) and translates reports into host problems.
-func (r Reloader) Reload(ctx context.Context) (bool, []contracts.Problem) {
+func (r Reloader) Reload(ctx context.Context) (bool, []protocol.Problem) {
 	return reloadProblems(r.Coordinator.Reload(ctx, services.ReasonPlugin))
 }
 
@@ -207,24 +207,30 @@ func (r Reloader) Reload(ctx context.Context) (bool, []contracts.Problem) {
 // Coordinator returns its reports together with the aggregate "incomplete"
 // error, so a failing service is named here (its own problems, or a note that
 // it was not applied) rather than hidden behind the aggregate.
-func reloadProblems(reports []services.Report, err error) (bool, []contracts.Problem) {
+func reloadProblems(reports []services.Report, err error) (bool, []protocol.Problem) {
 	applied := err == nil
-	var problems []contracts.Problem
+	var problems []protocol.Problem
 	for _, report := range reports {
 		if !report.Applied {
 			applied = false
 		}
 		for _, p := range report.Problems {
-			problems = append(problems, contracts.Problem{Severity: p.Severity, Layer: p.Layer, Key: p.Key, Message: report.Service + ": " + p.Message})
+			problems = append(problems, withService(p, report.Service))
 		}
 		if !report.Applied && len(report.Problems) == 0 {
-			problems = append(problems, contracts.Problem{Severity: "error", Layer: "services", Message: report.Service + ": not applied"})
+			problems = append(problems, protocol.Problem{Severity: "error", Code: "not_applied", Layer: "services", Message: report.Service + ": not applied"})
 		}
 	}
 	if err != nil {
-		problems = append(problems, contracts.Problem{Severity: "error", Layer: "services", Message: err.Error()})
+		problems = append(problems, protocol.Problem{Severity: "error", Code: "reload_failed", Layer: "services", Message: err.Error()})
 	}
 	return applied, problems
+}
+
+// withService prefixes a problem's message with the service that reported it.
+func withService(p protocol.Problem, service string) protocol.Problem {
+	p.Message = service + ": " + p.Message
+	return p
 }
 
 // SliceRegistrar is launch step 4 over State.
@@ -330,7 +336,7 @@ func (p Preparer) Prepare(ctx context.Context, gate uint64, specs []manifest.Spe
 // reloadError is the non-blocking launch-gate error carried by Preparation.
 type reloadError struct {
 	applied  bool
-	problems []contracts.Problem
+	problems []protocol.Problem
 }
 
 func (e reloadError) Error() string {

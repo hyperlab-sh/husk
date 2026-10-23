@@ -88,17 +88,7 @@ func (p Settings) Validate(ctx context.Context, hc host.Caller) (host.Validation
 // shape, cloning the problems so the reply shares no slice with a snapshot.
 func validationResult(r c.Report) host.ValidationResult {
 	out := host.ValidationResult{Applied: r.Applied}
-	if len(r.Problems) > 0 {
-		out.Problems = make([]host.Problem, len(r.Problems))
-		for i, p := range r.Problems {
-			out.Problems[i] = host.Problem{
-				Severity: p.Severity,
-				Layer:    p.Layer,
-				Key:      p.Key,
-				Message:  p.Message,
-			}
-		}
-	}
+	out.Problems = append(out.Problems, r.Problems...)
 	return out
 }
 

@@ -124,7 +124,7 @@ func (s *Service) warning(key string) {
 		next[key] = true
 		if s.unknown.CompareAndSwap(old, &next) {
 			if s.opts.Warn != nil {
-				s.opts.Warn(c.Problem{Severity: "warning", Key: key, Message: "unregistered key"})
+				s.opts.Warn(c.Problem{Severity: "warning", Code: "unknown_key", Key: key, Message: "unregistered key"})
 			}
 			return
 		}
@@ -258,7 +258,7 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 			e.Apply = "live"
 		}
 		if _, exists := schema[e.Key]; exists {
-			c.Issue(&r.Problems, "error", e.Owner, e.Key, "duplicate schema key")
+			c.Issue(&r.Problems, "error", "duplicate_schema_key", e.Owner, e.Key, "duplicate schema key")
 			continue
 		}
 		schema[e.Key] = e
@@ -272,19 +272,19 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 		}
 		for _, e := range cat.SettingsDeclared {
 			if !strings.HasPrefix(e.Key, "plugins."+id+".") {
-				c.Issue(&r.Problems, "error", "plugin:"+id, e.Key, "foreign schema key")
+				c.Issue(&r.Problems, "error", "foreign_schema_key", "plugin:"+id, e.Key, "foreign schema key")
 				continue
 			}
 			e.Owner = "plugin:" + id
 			local := strings.TrimPrefix(e.Key, "plugins."+id+".")
 			if secretNames[local] || secretNames[e.Key] {
-				c.Issue(&r.Problems, "error", e.Owner, e.Key, "secrets are not settings")
+				c.Issue(&r.Problems, "error", "secret_as_setting", e.Owner, e.Key, "secrets are not settings")
 			}
 			if e.Apply == "" {
 				e.Apply = "live"
 			}
 			if _, exists := schema[e.Key]; exists {
-				c.Issue(&r.Problems, "error", e.Owner, e.Key, "duplicate schema key")
+				c.Issue(&r.Problems, "error", "duplicate_schema_key", e.Owner, e.Key, "duplicate schema key")
 				continue
 			}
 			schema[e.Key] = e
@@ -292,13 +292,13 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 	}
 	for key, e := range schema {
 		if !validSchemaKey(key, e.Owner) || e.Apply != "live" && e.Apply != "restart" {
-			c.Issue(&r.Problems, "error", e.Owner, key, "invalid schema key or apply policy")
+			c.Issue(&r.Problems, "error", "invalid_schema_entry", e.Owner, key, "invalid schema key or apply policy")
 		}
 		if _, err := validate(e, e.Default); err != nil {
-			c.Issue(&r.Problems, "error", e.Owner, key, "invalid schema default")
+			c.Issue(&r.Problems, "error", "invalid_schema_default", e.Owner, key, "invalid schema default")
 		}
 		if e.Owner == "dist" && !strings.HasPrefix(key, "dist.") {
-			c.Issue(&r.Problems, "error", e.Owner, key, "foreign schema key")
+			c.Issue(&r.Problems, "error", "foreign_schema_key", e.Owner, key, "foreign schema key")
 		}
 	}
 	next := defaults(schema, s.warning)
@@ -320,24 +320,24 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 			}
 			untyped := owner != "" && len(catalog[owner].SettingsDeclared) == 0
 			if untyped {
-				c.Issue(&r.Problems, "warning", layer, key, "plugin has no schema; raw value retained")
+				c.Issue(&r.Problems, "warning", "unknown_key", layer, key, "plugin has no schema; raw value retained")
 				next.raw[key] = c.Clone(raw)
 				next.sources[key] = layer
 			} else {
-				c.Issue(&r.Problems, "error", layer, key, "unregistered settings key")
+				c.Issue(&r.Problems, "error", "unknown_key", layer, key, "unregistered settings key")
 			}
 			continue
 		}
 		v, err := validate(e, raw)
 		if err != nil {
-			c.Issue(&r.Problems, "error", layer, key, err.Error())
+			c.Issue(&r.Problems, "error", "invalid_value", layer, key, err.Error())
 			continue
 		}
 		next.raw[key] = c.Clone(raw)
 		next.sources[key] = layer
 		if _, initialized := old.values[key]; e.Apply == "restart" && initialized && old.gen > 0 && !reflect.DeepEqual(v, old.values[key]) {
 			next.values[key] = cloneTyped(old.values[key])
-			c.Issue(&r.Problems, "warning", layer, key, "restart required")
+			c.Issue(&r.Problems, "warning", "restart_required", layer, key, "restart required")
 		} else {
 			next.values[key] = v
 		}
@@ -347,7 +347,7 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 		for key, e := range schema {
 			if _, initialized := old.values[key]; e.Apply == "restart" && initialized && !reflect.DeepEqual(next.values[key], old.values[key]) {
 				next.values[key] = cloneTyped(old.values[key])
-				c.Issue(&r.Problems, "warning", next.sources[key], key, "restart required")
+				c.Issue(&r.Problems, "warning", "restart_required", next.sources[key], key, "restart required")
 			}
 		}
 	}
