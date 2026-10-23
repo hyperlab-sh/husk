@@ -544,6 +544,8 @@ namespaces while "Migration from today" had the TUI's `recomputeLayout` and
   and resolved nothing does nothing, and an identical write pushes nothing. Geometry reaches
   occupants, never the whole workbench.
 
+#### Pod-owned slices
+
 `husk.pods` entries carry the converter-resolved `dir` from their initial `starting` write. The field is always present, including `""` for implicit command lines, and later liveness writes leave it unchanged.
 
 `husk.pods` status is one of `starting` (launch begun, process not yet
