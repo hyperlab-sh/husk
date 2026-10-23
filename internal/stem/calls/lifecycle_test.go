@@ -344,3 +344,26 @@ func TestBulkResultsAreDeterministic(t *testing.T) {
 		}
 	}
 }
+
+// Plugin ids may nest ("a" and "a.b"); DropPlugin matches the id exactly, so a
+// parent's exit leaves the child's pending calls to resolve, and the child's own
+// exit then cancels exactly those.
+func TestDropPluginIsExactForDottedParentAndChild(t *testing.T) {
+	table, _, _ := newTestTable(TableOptions{})
+	parent := mustSend(t, table, "a")
+	child := mustSend(t, table, "a.b")
+	if results := table.DropPlugin("a", "exit"); len(results) != 1 || results[0].Handle != parent {
+		t.Fatalf("parent drop = %v", results)
+	}
+	if table.Stats().PerPlugin[child.Plugin] != 1 {
+		t.Fatal(table.Stats())
+	}
+	if _, ok := table.Resolve(child.Plugin, replyFor(child, `{}`)); !ok {
+		t.Fatal("child call lost when the parent was dropped")
+	}
+	child2 := mustSend(t, table, "a.b")
+	mustSend(t, table, "a")
+	if results := table.DropPlugin("a.b", "exit"); len(results) != 1 || results[0].Handle != child2 {
+		t.Fatalf("child drop = %v", results)
+	}
+}
