@@ -29,10 +29,17 @@ var version string
 // buildVersion returns the version the entry and session.ping report, or ""
 // when the build carries none (a "(devel)" build has none).
 func buildVersion() string {
-	if version != "" {
-		return version
+	bi, ok := debug.ReadBuildInfo()
+	return pickVersion(version, bi, ok)
+}
+
+// pickVersion prefers the ldflags version, then the module version recorded
+// in bi; a "(devel)" module version is no version.
+func pickVersion(ldflags string, bi *debug.BuildInfo, ok bool) string {
+	if ldflags != "" {
+		return ldflags
 	}
-	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "(devel)" {
+	if ok && bi != nil && bi.Main.Version != "(devel)" {
 		return bi.Main.Version
 	}
 	return ""
