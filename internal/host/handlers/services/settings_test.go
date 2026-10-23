@@ -398,3 +398,14 @@ func TestPortErrorsKeepCodeAndReason(t *testing.T) {
 		t.Fatalf("plain = %+v", errp)
 	}
 }
+
+// A port that reports no problems still gives the wire an array.
+func TestSettingsValidateNilProblemsEncodeAsEmptyArray(t *testing.T) {
+	port := fakes.NewSettings(nil)
+	port.Validation = contracts.ValidationResult{OK: true}
+	h := Settings{Port: port}
+	reply := h.Serve(context.Background(), cliCaller, req(t, "settings.validate", `{}`), nil)
+	if want := `{"ok":true,"problems":[]}`; string(reply.Result) != want {
+		t.Fatalf("validate = %s, want %s", reply.Result, want)
+	}
+}

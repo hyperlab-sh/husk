@@ -65,7 +65,12 @@ type rig struct {
 
 func newRig(t *testing.T, st *recStore, flag *string) *rig {
 	t.Helper()
-	tree := state.New(state.Options{})
+	return newRigWith(t, st, flag, state.Options{})
+}
+
+func newRigWith(t *testing.T, st *recStore, flag *string, opts state.Options) *rig {
+	t.Helper()
+	tree := state.New(opts)
 	r := &rig{tree: tree, posts: make(chan func(), 16), st: st}
 	rt, err := New(RuntimeOptions{Store: st, State: tree, ProfileFlag: flag, Post: func(f func()) bool { r.posts <- f; return true }, Clock: clock(), Crypto: &memoryCrypto{data: map[string][]byte{}}, Publisher: c.PublishFunc(func(string, any) {})})
 	if err != nil {
@@ -247,6 +252,7 @@ func TestProfileUseUnknownName(t *testing.T) {
 func TestProfileUseNewNameWaitsForItsFlight(t *testing.T) {
 	r, st := startedRig(t)
 	before := len(st.Resolved())
+	prior := r.rt.Coordinator.LastReports()
 	got := r.use("")
 	post := <-r.posts
 	post()
@@ -255,6 +261,11 @@ func TestProfileUseNewNameWaitsForItsFlight(t *testing.T) {
 	res := <-got
 	if res.err != nil || res.active != "" || len(res.reports) != 5 {
 		t.Fatalf("Use = %+v", res)
+	}
+	// The reply carries the reports of the flight this write caused, not the
+	// previous flight's.
+	if res.reports[0].Service != "profile" || res.reports[0].Gen != prior[0].Gen+1 {
+		t.Fatalf("reply gen %d, previous flight gen %d", res.reports[0].Gen, prior[0].Gen)
 	}
 	if resolves := st.Resolved(); len(resolves) != before+1 || resolves[before] != "" {
 		t.Fatalf("Resolve calls = %q, want exactly one more, for no profile", resolves)
@@ -287,21 +298,22 @@ func TestProfileUseTwoCallsOneTickShareAFlight(t *testing.T) {
 	}
 }
 
-// A flight error reaches the requester unchanged.
+// A flight error reaches the requester unchanged: profile.use fails exactly as
+// config.reload does under the same Store.
 func TestProfileUseFlightErrorPassesThrough(t *testing.T) {
 	r, st := startedRig(t)
-	boom := errors.New("boom")
-	st.set(func() { st.err = boom })
+	st.set(func() { st.err = errors.New("boom") })
+	_, reloadErr := r.rt.Coordinator.Reload(context.Background(), ReasonCLI)
+	if reloadErr == nil {
+		t.Fatal("reload under a failing Store succeeded")
+	}
 	got := r.use("")
 	(<-r.posts)()
 	r.tree.Flush()
 	r.rt.Coordinator.Tick()
 	res := <-got
-	if res.err == nil || !strings.Contains(res.err.Error(), "Store") && !errors.Is(res.err, boom) && !strings.Contains(res.err.Error(), "boom") {
-		t.Fatalf("err = %v", res.err)
-	}
-	if _, synthesized := map[string]bool{"reload_deadline": true, "shutdown": true}[reasonOf(res.err)]; synthesized {
-		t.Fatalf("flight error was rewritten: %v", res.err)
+	if res.err == nil || res.err.Error() != reloadErr.Error() || reasonOf(res.err) != reasonOf(reloadErr) {
+		t.Fatalf("profile.use error %v, config.reload error %v", res.err, reloadErr)
 	}
 }
 
@@ -354,5 +366,83 @@ func TestCoordinatorCaptureIsInvalidate(t *testing.T) {
 	}
 	if got := r.rt.Settings.Snapshot().String("theme.name"); got != "Two" {
 		t.Fatalf("follow-up saw theme.name = %q, want the changed value", got)
+	}
+}
+
+// A name in the slice beats profile.default.
+func TestProfileSliceBeatsDefault(t *testing.T) {
+	st := &recStore{fakeStore: fakeStore{profiles: []string{"work", "other"}, resolved: store.Resolved{Doc: doc(`{}`)}}, layers: []store.LayerDoc{userLayer(`{"profile":{"default":"work"}}`)}}
+	r := newRigWith(t, st, nil, state.Options{Hydrator: profileHydratorOf("other")})
+	if _, err := r.rt.Coordinator.Reload(context.Background(), ReasonStartup); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.Resolved(); len(got) != 1 || got[0] != "other" {
+		t.Fatalf("Resolve calls = %q, want [other]", got)
+	}
+}
+
+type profileHydratorOf string
+
+func (h profileHydratorOf) Hydrate(state.Spec) (json.RawMessage, bool) {
+	return json.RawMessage(`{"active":"` + string(h) + `"}`), true
+}
+
+// The active profile's directory disappears: the next flight selects none,
+// reports unknown_profile and the slice follows without a second flight.
+func TestProfileDirectoryGoneOnLaterFlight(t *testing.T) {
+	r, st := startedRig(t)
+	before := len(st.Resolved())
+	st.set(func() { st.profiles = nil })
+	reports, err := r.rt.Coordinator.Reload(context.Background(), ReasonCLI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := findProblem(problemsOf(reports), "unknown_profile"); !ok {
+		t.Fatalf("no unknown_profile in %+v", problemsOf(reports))
+	}
+	r.settle()
+	if got := st.Resolved(); len(got) != before+1 || got[before] != "" {
+		t.Fatalf("Resolve calls = %q", got)
+	}
+	if r.slice(t) != "" || !r.idle() || len(st.Resolved()) != before+1 {
+		t.Fatalf("slice=%q idle=%v resolves=%d", r.slice(t), r.idle(), len(st.Resolved()))
+	}
+}
+
+// The reply names what the flight selected, not what was asked for, when the
+// profile directory vanished between validation and step 2.
+func TestProfileUseReplyNamesTheSelection(t *testing.T) {
+	st := &recStore{fakeStore: fakeStore{profiles: []string{"work", "other"}, resolved: store.Resolved{Doc: doc(`{}`)}}, layers: []store.LayerDoc{userLayer(`{"profile":{"default":"work"}}`)}}
+	r := newRig(t, st, nil)
+	if _, err := r.rt.Coordinator.Reload(context.Background(), ReasonStartup); err != nil {
+		t.Fatal(err)
+	}
+	r.settle()
+	got := r.use("other")
+	(<-r.posts)()
+	st.set(func() { st.profiles = []string{"work"} })
+	r.tree.Flush()
+	r.rt.Coordinator.Tick()
+	res := <-got
+	if res.err != nil || res.active != "" {
+		t.Fatalf("Use = %+v, want active \"\"", res)
+	}
+	if _, ok := findProblem(problemsOf(res.reports), "unknown_profile"); !ok {
+		t.Fatalf("reply lacks unknown_profile: %+v", problemsOf(res.reports))
+	}
+}
+
+// A profile.use mark whose Set changed nothing must not outlive its tick.
+func TestAwaitProfileMarkDoesNotOutliveTheTick(t *testing.T) {
+	st := &recStore{fakeStore: fakeStore{resolved: store.Resolved{Doc: doc(`{}`)}}}
+	r := newRig(t, st, nil)
+	co := r.rt.Coordinator
+	co.AwaitProfile("x")
+	co.Tick()
+	co.mu.Lock()
+	left := co.hasExpect
+	co.mu.Unlock()
+	if left {
+		t.Fatal("expect mark survived the tick")
 	}
 }
