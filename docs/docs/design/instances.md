@@ -189,12 +189,12 @@ Methods use the two-segment names [Protocol](protocol.md) owns; each subcommand'
 |---|---|---|---|
 | `husk instances` | none (reads the runtime dir; sends `session.ping` to each entry) | list of entries with `status` | 2s total |
 | `husk ping` | `session.ping` | `{id, pid, protocol_version, host_version, uptime_ms}` | 2s |
-| `husk state`, `husk state get`, `husk state dump`, `husk state watch`, `husk state set`, `husk state patch`, `husk state clear` | `state.snapshot`, `state.get`, `state.snapshot`, `state.watch`, `state.set`, `state.patch`, `state.clear` | per [State](state.md) | 5s; `watch` none (runs until interrupted) |
+| `husk state`, `husk state get`, `husk state dump`, `husk state watch`, `husk state set`, `husk state patch`, `husk state clear` | `state.snapshot`, `state.get`, `state.snapshot`, `state.watch`, `state.set`, `state.patch`, `state.clear` | per [State](state.md) | 5s (`state clear` waits at most one 2 s leg of the `husk.before-state-clear` gate, [Hooks](hooks.md)); `watch` none (runs until interrupted) |
 | `husk action list [--owner <id>]` | `action.list` | action catalog entries with `live` | 5s |
 | `husk action invoke <action-id> [--arg k=v]... [--args-json <json>]` | `action.invoke` | the owner's result | 30s |
 | `husk event emit <name> [--data <json>]` | `event.emit` | `{}` once accepted onto the bus | 5s |
 | `husk event watch <pattern>` | `event.watch` | stream of `event.deliver` notifications | none |
-| `husk hook call <id> [--data <json>]` | `hook.call` | the aggregated results | 30s |
+| `husk hook list [--owner <id>]` | `hook.list` | declared hooks with owner, kind, timeout and subscribers ([Hooks](hooks.md)); there is no `husk hook call`, a hook is fired only by its owner from inside its operation | 5s |
 | `husk keys [--action <id>] [--focus <surface>] [--shadowed] [--problems]` | `keys.list` | resolved keymap entries and load problems ([Keybindings](keybindings.md)) | 5s |
 | `husk settings ...`, `husk theme ...`, `husk profile ...`, `husk secrets ...` | `settings.*`, `theme.*`, `profile.*`, `secrets.*` | per [Services](services.md) | 5s |
 | `husk plugin list`, `husk plugin log <id>` | `plugin.list`, `plugin.log` | per [Pods](pods.md) | 5s |

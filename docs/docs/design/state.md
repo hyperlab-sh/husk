@@ -161,8 +161,9 @@ func (h *Handle) Unregister()
 
 // Clear resets a registered slice to its Spec.Initial as a committed write
 // (revision bump, change event). It is the one write that bypasses the
-// Handle: the state.clear handler calls it on the loop, after Store deleted
-// the persisted copies, on behalf of the user. The owner sees it as a change.
+// Handle: the state.clear handler calls it on the loop, after the
+// husk.before-state-clear gate allowed it (see Hooks) and Store deleted the
+// persisted copies, on behalf of the user. The owner sees it as a change.
 func (s *State) Clear(namespace string) (rev uint64, err error)
 
 // Typed convenience for core owners. T must marshal to a JSON object.
@@ -374,7 +375,7 @@ Error codes come from the [Protocol](protocol.md) registry:
 | `husk state dump` | `state.snapshot` with values | Fails with `invalid_params` and points to `husk state get` when the dump exceeds one line. |
 | `husk state watch [<slice>...]` | `state.watch` | One JSON line per change until interrupted. |
 | `husk state set <json>` / `husk state patch <json> [--if-revision N]` | `state.set` / `state.patch` | Only from inside a plugin process; the slice is the caller's own. From a bare shell they fail with `denied`. |
-| `husk state clear <namespace>` | `state.clear` | User only. Store deletes the persisted copies ([Store](store.md)), then the handler calls `State.Clear` on the loop and the slice resets to its `Initial` value. |
+| `husk state clear <namespace> [--force]` | `state.clear` | User only. The handler fires the `husk.before-state-clear` gate ([Hooks](hooks.md)) unless `force` is set; any veto answers `denied` (reason `vetoed`, with the `vetoes`) and nothing changes. The handler waits for the outcome under the request context, at most one 2 s leg timeout since every subscriber is asked at once; if the context ends first it answers `cancelled` and deletes nothing. A `busy` refusal from the hook runner (either cap) is logged and the clear proceeds; a shutdown (the hook cannot be fired, or a leg ended `cancelled` with reason `shutdown`) answers `unavailable` and deletes nothing; any other refusal of the fire is a host bug and answers `internal`, deleting nothing. The hook's data is `{"slice", "owner"}`. Otherwise Store deletes the persisted copies ([Store](store.md)), then the handler calls `State.Clear` on the loop and the slice resets to its `Initial` value. |
 
 ### Initial slices
 

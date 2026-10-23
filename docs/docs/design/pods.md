@@ -230,8 +230,8 @@ type Spec struct {
     FocusBindings   []FocusBinding     // key -> action, active only while one of this plugin's surfaces has focus
     Subscriptions   []string           // event patterns (exact name or "<prefix>.*", [Message kinds](message-kinds.md)) delivered on stdin
     EventsDeclared  []EventDecl        // events this plugin may publish
-    HooksDeclared   []HookDecl         // hook points this plugin publishes
-    HookRegistrations []HookRegistration // hook points this plugin answers (order and veto deferred)
+    HooksDeclared   []HookDecl         // hook points this plugin publishes: id, kind, title, description, timeout_ms ([Hooks](hooks.md))
+    HookRegistrations []HookRegistration // hook points this plugin answers, with priority ([Hooks](hooks.md))
     PublishedSlots  []SlotDecl         // unchanged shape from today's manifest
     Slice           *SliceDecl         // scope, persist, retention, size cap request
     SecretRequests  []SecretRequest    // name and purpose; granting is the Secrets service's job
