@@ -67,6 +67,8 @@ type fakeProcess struct {
 	ignore                             bool
 	marked, closed, terminated, killed bool
 	versionMismatch                    int
+	failGate                           chan struct{} // when set, FailVersionMismatch signals failEntered then waits for it
+	failEntered                        chan struct{}
 	term                               chan struct{}
 	startErr, killErr                  error
 	stubborn, closeEarly               bool
@@ -112,8 +114,12 @@ func (p *fakeProcess) FailVersionMismatch() {
 	p.versionMismatch++
 	p.info.Status = wrapper.Failed
 	p.info.LastError = protocol.LegacyRejectionMessage()
-	info := p.info
+	info, gate, entered := p.info, p.failGate, p.failEntered
 	p.mu.Unlock()
+	if gate != nil {
+		entered <- struct{}{}
+		<-gate
+	}
 	p.opts.Replies.Closed(p.id, errors.New(info.LastError))
 	p.opts.Post(ExitMsg{Info: info})
 	p.once.Do(func() { close(p.done) })

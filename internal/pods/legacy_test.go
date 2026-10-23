@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hyperlab-sh/husk/internal/pods/internal/testclock"
 	"github.com/hyperlab-sh/husk/internal/pods/wrapper"
 )
 
@@ -83,7 +84,20 @@ func TestFailLegacyFailsTheLivePodWithVersionMismatch(t *testing.T) {
 	if _, ok := h.Resolve("test-token-alpha"); !ok {
 		t.Fatal("token not registered")
 	}
+	// The process is failed off the loop: the Wrapper reports through
+	// Loop.Post, so failing it inside Update would deadlock a real loop.
+	// Handle must return while the process fail is still running.
+	alpha := procs["alpha"]
+	alpha.failGate, alpha.failEntered = make(chan struct{}), make(chan struct{}, 1)
 	h.FailLegacy("alpha")
+	handled := make(chan struct{})
+	go func() { h.Handle(testclock.Receive(t, loop.events)); close(handled) }()
+	testclock.Receive(t, handled)
+	testclock.Receive(t, alpha.failEntered)
+	close(alpha.failGate)
+	for h.pods["alpha"].Info().Status != wrapper.Failed {
+		h.Handle(testclock.Receive(t, loop.events))
+	}
 	drain(h, loop)
 
 	if procs["alpha"].versionMismatch != 1 || procs["beta"].versionMismatch != 0 {
