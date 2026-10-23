@@ -203,8 +203,8 @@ func TestBuiltinCommandsMatchTheKeymap(t *testing.T) {
 			t.Errorf("keymap action %s has no palette row", action)
 		}
 	}
-	if len(named) != 16 || len(rows) != len(named) {
-		t.Errorf("keymap plus unbound actions names %d actions and the palette lists %d, want 16 each", len(named), len(rows))
+	if len(named) != 17 || len(rows) != len(named) {
+		t.Errorf("keymap plus unbound actions names %d actions and the palette lists %d, want 17 each", len(named), len(rows))
 	}
 	if r := rows["husk.focus.next"]; !strings.Contains(r.Shortcut, "tab") {
 		t.Errorf("shortcut column of husk.focus.next = %q", r.Shortcut)

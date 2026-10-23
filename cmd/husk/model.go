@@ -174,8 +174,10 @@ type WorkbenchModel struct {
 	// pendingKeys is the prefix of a multi-key binding typed so far. seqGen
 	// counts every start and end of a pending sequence, so a timeout message
 	// from an earlier one is told apart and ignored.
-	pendingKeys []string
-	seqGen      uint64
+	pendingKeys     []string
+	seqGen          uint64
+	captureReleased bool
+	captureGen      uint64
 	// after schedules msg to arrive after d; nil means tea.Tick. Tests set it
 	// to stand in for the clock.
 	after func(d time.Duration, msg tea.Msg) tea.Cmd
@@ -542,6 +544,12 @@ func (m *WorkbenchModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case sequenceTimeoutMsg:
 		if msg.gen == m.seqGen && len(m.pendingKeys) > 0 {
 			m.clearPending()
+		}
+		return m, nil
+
+	case captureTimeoutMsg:
+		if msg.gen == m.captureGen {
+			m.captureReleased = false
 		}
 		return m, nil
 
@@ -1267,7 +1275,8 @@ func (m *WorkbenchModel) hostActionTable() map[string]contracts.HostActionHandle
 			next.Alt = m.altLatched
 			m.syncModifierTransitions(next)
 		}),
-		"husk.modal.close": do(m.closeModal),
+		"husk.modal.close":     do(m.closeModal),
+		"husk.capture.release": do(m.releaseCapture),
 	}
 }
 

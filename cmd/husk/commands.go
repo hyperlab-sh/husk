@@ -245,6 +245,12 @@ func (m *WorkbenchModel) builtinCommands() []paletteCommand {
 			Description: "Latches Alt on or off, so chord shortcuts can be tried without holding it",
 		},
 		{
+			ID:          "husk.capture.release",
+			Title:       "Husk Workbench: Release Capture for One Key",
+			Category:    "Workbench",
+			Description: "Lets the next key reach host bindings",
+		},
+		{
 			ID:          "husk.modal.close",
 			Title:       "Husk Workbench: Close Modal",
 			Category:    "Workbench",
@@ -374,6 +380,9 @@ const maxPluginFooterHints = 4
 // connected nothing application-specific is advertised.
 func (m *WorkbenchModel) footerHints() []footerHint {
 	var hints []footerHint
+	if m.captureReleased {
+		hints = append(hints, footerHint{m.firstKey("husk.capture.release"), "release"})
+	}
 	if k := m.firstKey("husk.home"); k != "" {
 		hints = append(hints, footerHint{keyLabel(k), "\uf015 home"})
 	}

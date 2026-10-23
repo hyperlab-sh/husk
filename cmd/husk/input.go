@@ -171,11 +171,17 @@ func (m *WorkbenchModel) keyContext() contracts.KeyContext {
 		ctx.FocusSurface = string(protocol.SurfaceModal)
 		ctx.FocusOwner = m.modalOwner().PluginID
 		ctx.Capture = m.catalog.Capture[protocol.SurfaceModal]
+		if m.captureReleased {
+			ctx.Capture = protocol.CaptureNone
+		}
 		return ctx
 	}
 	ctx.FocusSurface = string(m.focusedSlot)
 	ctx.FocusOwner = m.keyOwner(m.focusedSlot)
 	ctx.Capture = m.catalog.Capture[m.focusedSlot]
+	if m.captureReleased {
+		ctx.Capture = protocol.CaptureNone
+	}
 	return ctx
 }
 
@@ -189,6 +195,11 @@ func (m *WorkbenchModel) resolveKey(key string) bool {
 		return true
 	}
 	ctx := m.keyContext()
+	released := m.captureReleased
+	if released {
+		m.captureReleased = false
+		m.captureGen++
+	}
 	keys := append(slices.Clone(m.pendingKeys), key)
 	res := m.keys.Resolve(ctx, keys)
 	if res.Outcome == contracts.KeyNoMatch && len(m.pendingKeys) > 0 {
@@ -207,6 +218,9 @@ func (m *WorkbenchModel) resolveKey(key string) bool {
 	case contracts.KeyMatch:
 		m.clearPending()
 		b := res.Binding
+		if released && b.Action == "husk.capture.release" {
+			return false
+		}
 		focus := protocol.FocusContext{Surface: ctx.FocusSurface, Owner: ctx.FocusOwner}
 		// A declined action leaves the key to the occupant, never to a
 		// lower-ranked candidate.
