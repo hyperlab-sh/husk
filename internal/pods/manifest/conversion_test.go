@@ -3,6 +3,7 @@ package manifest
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -365,6 +366,9 @@ func TestCLIOnlySubscriptionsAreDropped(t *testing.T) {
 					t.Fatalf("unexpected problem %+v", p)
 				}
 				got = append(got, p.Index)
+				if !strings.HasSuffix(p.Key, fmt.Sprintf("[%d]", p.Index)) || !strings.Contains(p.Key, "ubscri") {
+					t.Fatalf("problem key %q does not name its member", p.Key)
+				}
 			}
 			if len(got) != len(tc.dropped) {
 				t.Fatalf("problem indexes = %v, want %v", got, tc.dropped)

@@ -589,12 +589,17 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 				Index   int    `json:"index"`
 				Code    string `json:"code"`
 				Message string `json:"message"`
+				Key     string `json:"key"`
 			}
 			c.Decode(doc["problems"], &imported)
 			for _, p := range imported {
 				problemSource := src
-				problemSource.Order = p.Index
-				issue(p.Code, problemSource, "")
+				// A problem that names its member (Key) is not about a
+				// binding position, so Order stays unset.
+				if p.Key == "" {
+					problemSource.Order = p.Index
+				}
+				issue(p.Code, problemSource, p.Key)
 				if p.Message != "" {
 					next.listing.Problems[len(next.listing.Problems)-1].Message = p.Message
 					r.Problems[len(r.Problems)-1].Message = p.Message

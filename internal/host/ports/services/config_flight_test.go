@@ -141,10 +141,19 @@ func TestConfigReloadReplyMapping(t *testing.T) {
 			m := <-reply
 			if tc.wantResult {
 				var res struct {
-					Reports []struct{ Service string }
+					Reports []struct {
+						Service  string
+						Applied  bool
+						Problems []struct{ Severity string }
+					}
 				}
 				if m.Error != nil || json.Unmarshal(m.Result, &res) != nil || len(res.Reports) != 5 {
 					t.Fatalf("reply = error %+v result %s, want a result with five reports", m.Error, m.Result)
+				}
+				for _, r := range res.Reports {
+					if kept := r.Service == "settings"; r.Applied == kept || (kept && (len(r.Problems) != 1 || r.Problems[0].Severity != "error")) || (!kept && len(r.Problems) != 0) {
+						t.Fatalf("report %+v: settings must be applied:false with one error problem, the rest applied:true", r)
+					}
 				}
 				return
 			}

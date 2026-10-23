@@ -775,28 +775,33 @@ func (m *WorkbenchModel) noteConfigNotices() {
 func (m *WorkbenchModel) toastFailures() {
 	cfg := m.pendingConfig
 	m.pendingConfig = ""
-	if len(m.failures) == 0 {
-		if cfg != "" {
-			m.cmds = append(m.cmds, m.showLocalToast("warn", "Configuration", cfg))
-		}
+	if len(m.failures) == 0 && cfg == "" {
 		return
 	}
-	if m.failureSeq == m.toastSeq && m.activeToast != nil && !m.engineToast && len(m.shownFailures) > 0 {
+	// The failure lines and the config line form one joinable toast: while it
+	// is up, whichever arrives next, in this settle or a later one, is added
+	// to it and the toast is re-armed.
+	joinable := m.failureSeq == m.toastSeq && m.activeToast != nil && !m.engineToast &&
+		(len(m.shownFailures) > 0 || m.shownConfig != "")
+	if joinable {
 		m.shownFailures = append(m.shownFailures, m.failures...)
+		if cfg != "" {
+			m.shownConfig = cfg
+		}
 	} else {
 		m.shownFailures = slices.Clone(m.failures)
-		m.shownConfig = ""
-	}
-	m.failures = nil
-	if cfg != "" {
 		m.shownConfig = cfg
 	}
-	title, msg := "Plugin failed", m.shownFailures[0]
-	if n := len(m.shownFailures); n > 1 {
-		title, msg = fmt.Sprintf("%d plugins failed", n), strings.Join(m.shownFailures, "; ")
-	}
-	if m.shownConfig != "" {
-		msg += "; " + m.shownConfig
+	m.failures = nil
+	title, msg := "Configuration", m.shownConfig
+	if len(m.shownFailures) > 0 {
+		title, msg = "Plugin failed", m.shownFailures[0]
+		if n := len(m.shownFailures); n > 1 {
+			title, msg = fmt.Sprintf("%d plugins failed", n), strings.Join(m.shownFailures, "; ")
+		}
+		if m.shownConfig != "" {
+			msg += "; " + m.shownConfig
+		}
 	}
 	m.cmds = append(m.cmds, m.showLocalToast("warn", title, msg))
 	m.failureSeq = m.toastSeq

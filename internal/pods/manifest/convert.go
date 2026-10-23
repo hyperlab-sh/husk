@@ -215,7 +215,7 @@ func convert(src Source, modern bool) (*Spec, []Warning, error) {
 				code, message = "foreign_action", "focus binding must target an own action or husk.*"
 			}
 			if code != "" {
-				s.BindingProblems = append(s.BindingProblems, BindingProblem{i, code, message})
+				s.BindingProblems = append(s.BindingProblems, BindingProblem{Index: i, Code: code, Message: message})
 				warnings = append(warnings, Warning{Code: code, Field: "keybindings", Index: i, Message: message})
 				continue
 			}
@@ -272,7 +272,7 @@ func dropCLIOnly(s *Spec, field string, patterns []string) []string {
 	kept := make([]string, 0, len(patterns))
 	for i, pattern := range patterns {
 		if protocol.CLIOnlyEventPattern(pattern) {
-			s.SubscriptionProblems = append(s.SubscriptionProblems, BindingProblem{Index: i, Code: "cli_only_event", Message: fmt.Sprintf("event %s is delivered to cli watchers only; subscription dropped (%s[%d])", pattern, field, i)})
+			s.SubscriptionProblems = append(s.SubscriptionProblems, BindingProblem{Index: i, Code: "cli_only_event", Key: fmt.Sprintf("%s[%d]", field, i), Message: "event " + pattern + " is delivered to cli watchers only; subscription dropped"})
 			continue
 		}
 		kept = append(kept, pattern)
