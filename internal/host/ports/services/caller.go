@@ -10,29 +10,6 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
-// hostCallerKind spells the services Caller.Kind for each host caller kind.
-// CLI maps to services' "cli"; the host's Stem engine is trusted like the
-// host itself and maps to "host", the unfiltered view D34a gives it; a plugin
-// keeps its exact id (case and dots included) as services' plugin identity.
-// Any other kind maps to "plugin": it invents no privileges, because Admit
-// and admitCall have already denied unattributed callers upstream before a
-// port is ever reached.
-func hostCallerKind(k host.CallerKind) string {
-	switch k {
-	case host.CallerCLI:
-		return "cli"
-	case host.CallerStem:
-		return "host"
-	}
-	return "plugin"
-}
-
-// caller converts the Server's verified contracts.Caller. The Server, not the
-// wire, produces these; conversion never invents identity.
-func caller(cc host.Caller) services.Caller {
-	return services.Caller{Kind: hostCallerKind(cc.Kind), PluginID: cc.PluginID}
-}
-
 // InputSource gathers the user-authorized Store input a dry rebuild needs;
 // *services.Coordinator satisfies it (Coordinator.Inputs, user-only). The
 // settings and theme wrappers use it for settings.validate and theme.check.

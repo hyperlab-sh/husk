@@ -49,7 +49,7 @@ func MethodHomes() map[string]MethodHome {
 
 		protocol.MethodSessionPing: home("SessionPort", "Ping", anyCaller),
 
-		protocol.MethodActionInvoke: home("CallsPort", "ActionInvoke", []CallerKind{CallerCLI, CallerPlugin, CallerStem}),
+		protocol.MethodActionInvoke: home("CallsPort", "ActionInvoke", []CallerKind{CallerCLI, CallerPlugin, CallerHost}),
 		protocol.MethodActionList:   home("CallsPort", "ActionList", anyCaller),
 
 		protocol.MethodEventEmit:    home("EventPort", "Emit", anyCaller),

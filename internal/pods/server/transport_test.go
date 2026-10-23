@@ -112,7 +112,7 @@ func TestCallerAttributionPerRequestAndTokenRevocation(t *testing.T) {
 		token  string
 		want   CallerKind
 		denied bool
-	}{{"", CallerCLI, false}, {`,"token":"valid"`, CallerPlugin, false}, {`,"token":""`, 0, true}, {`,"token":"unknown"`, 0, true}} {
+	}{{"", CallerCLI, false}, {`,"token":"valid"`, CallerPlugin, false}, {`,"token":""`, "", true}, {`,"token":"unknown"`, "", true}} {
 		write(t, c, `{"id":"a","method":"sample.echo"`+tc.token+`}`)
 		got := read(t, r)
 		if got.ID.String() != `"a"` {

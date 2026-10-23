@@ -7,30 +7,26 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
-// CallerKind says how a socket request was attributed.
-type CallerKind uint8
+// CallerKind says how a request was attributed; it is the shared kind type.
+type CallerKind = protocol.CallerKind
 
+// The caller kinds. A socket request is only ever cli or plugin; input and
+// host are in-process Stem or frontend callers acting for the user.
 const (
-	// CallerCLI is the user's uncredentialed client (no token).
-	CallerCLI CallerKind = iota + 1
-	// CallerPlugin carries a valid per-launch plugin token.
-	CallerPlugin
-	// CallerStem is an in-process Stem module (Input, the palette) acting for
-	// the user. It never arrives over the socket.
-	CallerStem
+	CallerCLI    = protocol.CallerCLI
+	CallerPlugin = protocol.CallerPlugin
+	CallerInput  = protocol.CallerInput
+	CallerHost   = protocol.CallerHost
 )
 
-// User reports whether the caller acts as the user: the CLI and the Stem.
-// A plugin never does, whatever it claims in params.
-func (k CallerKind) User() bool { return k == CallerCLI || k == CallerStem }
+// Caller is who sent a request, as the accepting module attributes it. It is
+// the one shared identity type; PluginID is set only for CallerPlugin.
+type Caller = protocol.Caller
 
-// Caller is who sent a request, as the accepting module attributes it. Field
-// names and kinds match the Server's own Caller, so an adapter converts with
-// one struct literal. PluginID is set only for CallerPlugin.
-type Caller struct {
-	Kind     CallerKind
-	PluginID string
-	ConnID   uint64
+// IsUser reports whether k acts as the user: the CLI and the in-process
+// callers (input and host). A plugin never does, whatever it claims in params.
+func IsUser(k CallerKind) bool {
+	return k == CallerCLI || k == CallerInput || k == CallerHost
 }
 
 // Notifier pushes a notification on the caller's connection. Only watch

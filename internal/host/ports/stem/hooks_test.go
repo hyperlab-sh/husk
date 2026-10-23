@@ -263,7 +263,7 @@ func TestHookCallWithoutSubscribersReturnsEmptyReply(t *testing.T) {
 func TestHookCallUnknownHookIsNotFoundForTheHostAndDeniedForOthers(t *testing.T) {
 	r := newHookRig(t, hookSubs{"a.h": nil}, live{})
 	ctx := context.Background()
-	_, err := r.port.HookCall(ctx, contracts.Caller{Kind: contracts.CallerStem}, "husk.nope", nil)
+	_, err := r.port.HookCall(ctx, contracts.Caller{Kind: contracts.CallerHost}, "husk.nope", nil)
 	if code := hookCodeOf(t, err); code != "not_found" {
 		t.Fatalf("host: want not_found, got %s", code)
 	}
@@ -380,9 +380,9 @@ func TestHookCallCallerDeadlineIsTimeout(t *testing.T) {
 // --- caller mapping --------------------------------------------------------
 
 func TestHookCallerMapping(t *testing.T) {
-	// CallerStem is a Host caller for the runner, as the Calls port maps it.
+	// CallerHost is a Host caller for the runner, as the Calls port maps it.
 	r := newHookRig(t, hookSubs{"husk.h": nil}, live{})
-	o, err := r.port.HookCall(context.Background(), contracts.Caller{Kind: contracts.CallerStem}, "husk.h", nil)
+	o, err := r.port.HookCall(context.Background(), contracts.Caller{Kind: contracts.CallerHost}, "husk.h", nil)
 	if err != nil || len(o.Results) != 0 {
 		t.Fatalf("stem caller refused: %v (%d results)", err, len(o.Results))
 	}

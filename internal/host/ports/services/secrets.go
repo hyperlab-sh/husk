@@ -21,13 +21,13 @@ var _ host.SecretsPort = Secrets{}
 
 // Get implements contracts.SecretsPort.
 func (p Secrets) Get(ctx context.Context, hc host.Caller, name string) ([]byte, error) {
-	value, err := p.Svc.Read(caller(hc), name)
+	value, err := p.Svc.Read(hc, name)
 	return value, coded(err)
 }
 
 // Names implements contracts.SecretsPort: metadata only, never values.
 func (p Secrets) Names(ctx context.Context, hc host.Caller) ([]host.SecretInfo, error) {
-	infos, err := p.Svc.Names(caller(hc))
+	infos, err := p.Svc.Names(hc)
 	if err != nil {
 		return nil, coded(err)
 	}
@@ -46,22 +46,22 @@ func (p Secrets) Names(ctx context.Context, hc host.Caller) ([]host.SecretInfo, 
 
 // Set implements contracts.SecretsPort (user-only in the service).
 func (p Secrets) Set(ctx context.Context, hc host.Caller, name string, value []byte) error {
-	return coded(p.Svc.Set(caller(hc), name, value))
+	return coded(p.Svc.Set(hc, name, value))
 }
 
 // Grant implements contracts.SecretsPort (user-only in the service).
 func (p Secrets) Grant(ctx context.Context, hc host.Caller, plugin, name string) error {
-	return coded(p.Svc.Grant(caller(hc), plugin, name))
+	return coded(p.Svc.Grant(hc, plugin, name))
 }
 
 // Revoke implements contracts.SecretsPort (user-only in the service).
 func (p Secrets) Revoke(ctx context.Context, hc host.Caller, plugin, name string) error {
-	return coded(p.Svc.Revoke(caller(hc), plugin, name))
+	return coded(p.Svc.Revoke(hc, plugin, name))
 }
 
 // Reveal implements contracts.SecretsPort (user-only in the service). The
 // service audits the reveal; this wrapper never logs the value.
 func (p Secrets) Reveal(ctx context.Context, hc host.Caller, name string) ([]byte, error) {
-	value, err := p.Svc.Reveal(caller(hc), name)
+	value, err := p.Svc.Reveal(hc, name)
 	return value, coded(err)
 }

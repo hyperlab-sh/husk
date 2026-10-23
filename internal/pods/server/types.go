@@ -10,21 +10,18 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
-// Caller identifies the authenticated source of one socket message.
-type Caller struct {
-	Kind     CallerKind
-	PluginID string
-	ConnID   uint64
-}
+// Caller identifies the authenticated source of one socket message. The Server
+// produces only the cli and plugin kinds.
+type Caller = protocol.Caller
 
-// CallerKind distinguishes a bare CLI from an attributed plugin.
-type CallerKind uint8
+// CallerKind is the kind of a Caller.
+type CallerKind = protocol.CallerKind
 
 const (
 	// CallerCLI is the user's uncredentialed client.
-	CallerCLI CallerKind = iota + 1
+	CallerCLI = protocol.CallerCLI
 	// CallerPlugin carries a valid per-launch token.
-	CallerPlugin
+	CallerPlugin = protocol.CallerPlugin
 )
 
 // Handler serves a message off-loop. A request returns one reply; a notification

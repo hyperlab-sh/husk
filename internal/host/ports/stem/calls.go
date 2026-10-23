@@ -42,14 +42,14 @@ func NewCalls(d *dispatcher.Dispatcher, post Post) *Calls {
 
 func coded(code protocol.Code, msg string) error { return contracts.NewError(code, msg, nil) }
 
-// callerOf maps the port's Caller to the Dispatcher's. CallerStem is a Host
+// callerOf maps the port's Caller to the Dispatcher's. CallerHost is a Host
 // caller: only Input keeps its own focus snapshot, so a Stem caller gets
 // State's.
 func callerOf(c contracts.Caller) (dispatcher.Caller, bool) {
 	switch c.Kind {
 	case contracts.CallerCLI:
 		return dispatcher.Caller{Kind: dispatcher.CallerCLI}, true
-	case contracts.CallerStem:
+	case contracts.CallerHost:
 		return dispatcher.Caller{Kind: dispatcher.CallerHost}, true
 	case contracts.CallerPlugin:
 		if c.PluginID != "" {

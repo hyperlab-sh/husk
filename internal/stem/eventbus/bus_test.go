@@ -602,7 +602,7 @@ func TestConcurrentSubscribeCancel(t *testing.T) {
 }
 
 func TestAuthorize(t *testing.T) {
-	P, C, S := contracts.CallerPlugin, contracts.CallerCLI, contracts.CallerStem
+	P, C, S := contracts.CallerPlugin, contracts.CallerCLI, contracts.CallerHost
 	tests := []struct {
 		name   string
 		kind   contracts.CallerKind
@@ -629,7 +629,7 @@ func TestAuthorize(t *testing.T) {
 		{"stem user", S, "", "user.ping", "user", ""},
 		{"wildcard", C, "", "user.*", "", "invalid_params"},
 		{"empty", C, "", "", "", "invalid_params"},
-		{"unknown kind", 0, "", "user.x", "", "denied"},
+		{"unknown kind", "", "", "user.x", "", "denied"},
 	}
 	for _, tt := range tests {
 		src, err := eventbus.Authorize(tt.kind, tt.id, tt.event)

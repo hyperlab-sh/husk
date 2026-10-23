@@ -240,7 +240,7 @@ func TestOwnerRoundTrip(t *testing.T) {
 	}
 	ch := make(chan res, 1)
 	go func() {
-		o, e := invoke(r, contracts.Caller{Kind: contracts.CallerStem}, "notes.new", `{"title":"Todo"}`)
+		o, e := invoke(r, contracts.Caller{Kind: contracts.CallerHost}, "notes.new", `{"title":"Todo"}`)
 		ch <- res{o, e}
 	}()
 	req := r.serve(t, `{"result":{"path":"/notes/todo.md"}}`)
@@ -360,9 +360,9 @@ func TestActionListFiltersPerCaller(t *testing.T) {
 		{ID: "notes.new", Owner: "notes", Live: true},
 		{ID: "notes.pub", Owner: "notes", Public: true, Live: true},
 	}
-	for _, c := range []contracts.Caller{cli, {Kind: contracts.CallerStem}} {
+	for _, c := range []contracts.Caller{cli, {Kind: contracts.CallerHost}} {
 		if got := ids(c); !reflect.DeepEqual(got, all) {
-			t.Errorf("kind %d: %+v", c.Kind, got)
+			t.Errorf("kind %s: %+v", c.Kind, got)
 		}
 	}
 	wantOther := []contracts.ActionInfo{all[0], all[2], all[4]}

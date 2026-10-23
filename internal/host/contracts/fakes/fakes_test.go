@@ -240,7 +240,7 @@ func TestPortsRecordCallerAndReturn(t *testing.T) {
 
 	// Every port call was attributed; the callerless seams are not in this log.
 	for _, c := range rec.Calls() {
-		if c.Method != "Host.Run" && c.Method != "Host.Close" && c.Kind == 0 {
+		if c.Method != "Host.Run" && c.Method != "Host.Close" && c.Kind == "" {
 			t.Errorf("%s recorded no caller", c.Method)
 		}
 	}

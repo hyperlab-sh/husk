@@ -19,7 +19,7 @@ var _ host.ConfigPort = Config{}
 
 // Reload implements contracts.ConfigPort.
 func (p Config) Reload(ctx context.Context, hc host.Caller) ([]host.ReloadReport, error) {
-	reports, err := p.Co.ReloadFor(ctx, caller(hc))
+	reports, err := p.Co.ReloadFor(ctx, hc)
 	if err != nil {
 		return nil, coded(err)
 	}

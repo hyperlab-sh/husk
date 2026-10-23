@@ -105,7 +105,7 @@ type Caller struct {
 }
 
 // label names the caller for log lines.
-func (c Caller) label() string {
+func callerLabel(c Caller) string {
 	if c.Kind == CallerPlugin {
 		return "plugin " + c.PluginID
 	}
@@ -381,7 +381,7 @@ func (r *Runner) Call(caller Caller, hook string, data map[string]any, onDone fu
 func (r *Runner) authorize(caller Caller, hook string) (HookDef, error) {
 	def, ok := r.opts.Catalog.Lookup(hook)
 	denied := func() (HookDef, error) {
-		r.logf("hooks: %s denied firing %q", caller.label(), hook)
+		r.logf("hooks: %s denied firing %q", callerLabel(caller), hook)
 		return HookDef{}, &HookError{Code: CodeDenied, Message: fmt.Sprintf("only the owner of %q may fire it", hook)}
 	}
 	switch caller.Kind {

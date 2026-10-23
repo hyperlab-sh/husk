@@ -94,7 +94,7 @@ func TestCallerKindsEnforced(t *testing.T) {
 	plugin := contracts.Caller{Kind: contracts.CallerPlugin, PluginID: "alpha.files"}
 	other := contracts.Caller{Kind: contracts.CallerPlugin, PluginID: "beta.notes"}
 	cli := contracts.Caller{Kind: contracts.CallerCLI}
-	stem := contracts.Caller{Kind: contracts.CallerStem}
+	stem := contracts.Caller{Kind: contracts.CallerHost}
 
 	update := protocol.SurfaceUpdateParams{Surface: protocol.SurfaceMainStage}
 	closeP := protocol.SurfaceCloseParams{Surface: protocol.SurfaceMainStage}
@@ -208,7 +208,7 @@ func TestZeroAndUnknownCallerKindsDenied(t *testing.T) {
 	ctx := context.Background()
 	for name, c := range map[string]contracts.Caller{
 		"zero kind": {},
-		"kind 9":    {Kind: contracts.CallerKind(9)},
+		"kind 9":    {Kind: "bogus"},
 	} {
 		calls := map[string]func() error{
 			"surface.update": func() error {

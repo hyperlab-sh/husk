@@ -47,27 +47,6 @@ func TestServerHandlerServes(t *testing.T) {
 	}
 }
 
-func TestFromServerCaller(t *testing.T) {
-	cases := []struct {
-		in   server.Caller
-		want contracts.CallerKind
-	}{
-		{server.Caller{Kind: server.CallerCLI}, contracts.CallerCLI},
-		{server.Caller{Kind: server.CallerCLI, PluginID: "", ConnID: 3}, contracts.CallerCLI},
-		{server.Caller{Kind: server.CallerPlugin, PluginID: "p", ConnID: 4}, contracts.CallerPlugin},
-		{server.Caller{Kind: 0, ConnID: 5}, contracts.CallerKind(0)},
-	}
-	for _, tc := range cases {
-		got := FromServerCaller(tc.in)
-		if got.Kind != tc.want || got.PluginID != tc.in.PluginID || got.ConnID != tc.in.ConnID {
-			t.Fatalf("FromServerCaller(%+v) = %+v", tc.in, got)
-		}
-		if got.Kind == contracts.CallerStem {
-			t.Fatal("a Stem caller never crosses the socket")
-		}
-	}
-}
-
 // ctxHandler keeps the request context it was served with.
 type ctxHandler struct{ ctx context.Context }
 

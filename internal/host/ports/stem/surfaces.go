@@ -106,7 +106,7 @@ func (p *SurfacePort) ToastShow(ctx context.Context, c contracts.Caller, params 
 // allowCaller reports whether c's kind may call method, per the homes the
 // consumer contracts declare, and whether a plugin-kind caller is
 // authenticated: a plugin caller with an empty PluginID has no identity to
-// authorize, like the Calls port's callerOf. CallerStem is in-process and
+// authorize, like the Calls port's callerOf. CallerHost is in-process and
 // never arrives through a port.
 func allowCaller(method string, c contracts.Caller) error {
 	home, ok := contracts.MethodHomes()[method]
@@ -130,8 +130,10 @@ func kindName(kind contracts.CallerKind) string {
 		return "CLI"
 	case contracts.CallerPlugin:
 		return "plugin"
-	case contracts.CallerStem:
-		return "Stem"
+	case contracts.CallerHost:
+		return "host"
+	case contracts.CallerInput:
+		return "input"
 	default:
 		return "unknown"
 	}

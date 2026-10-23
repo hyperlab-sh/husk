@@ -109,7 +109,7 @@ func Authorize(kind contracts.CallerKind, pluginID, name string) (string, error)
 			return "", contracts.NewError(protocol.CodeDenied, "event "+name+" is outside the caller's namespace", nil)
 		}
 		return pluginID, nil
-	case kind.User():
+	case contracts.IsUser(kind):
 		if !strings.HasPrefix(name, UserPrefix) || len(name) == len(UserPrefix) {
 			return "", contracts.NewError(protocol.CodeDenied, "a user may emit only under \"user.\"", nil)
 		}

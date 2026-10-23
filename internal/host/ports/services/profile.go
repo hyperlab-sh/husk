@@ -18,7 +18,7 @@ var _ host.ProfilePort = Profile{}
 
 // List implements contracts.ProfilePort.
 func (p Profile) List(ctx context.Context, hc host.Caller) ([]host.ProfileInfo, error) {
-	infos, err := p.Svc.ListFor(caller(hc))
+	infos, err := p.Svc.ListFor(hc)
 	if err != nil {
 		return nil, coded(err)
 	}
@@ -31,5 +31,5 @@ func (p Profile) List(ctx context.Context, hc host.Caller) ([]host.ProfileInfo, 
 
 // Use implements contracts.ProfilePort.
 func (p Profile) Use(ctx context.Context, hc host.Caller, name string) error {
-	return coded(p.Svc.Use(caller(hc), name))
+	return coded(p.Svc.Use(hc, name))
 }

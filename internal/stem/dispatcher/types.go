@@ -8,7 +8,11 @@
 // It imports neither Store, Pods, Services nor the Server.
 package dispatcher
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/hyperlab-sh/husk/pkg/protocol"
+)
 
 // MaxArgsBytes bounds the encoded size of ActionRequest.Args.
 const MaxArgsBytes = 1 << 20
@@ -34,51 +38,22 @@ const (
 	CodeInternal      = "internal"
 )
 
-// CallerKind says who started a request.
-type CallerKind uint8
+// Caller says who started a request; it is the one shared identity type.
+type Caller = protocol.Caller
 
+// CallerKind is the kind of a Caller.
+type CallerKind = protocol.CallerKind
+
+// The caller kinds, as the owner receives them in params.caller.kind.
 const (
-	// CallerInput is the user pressing a key or choosing a palette entry.
-	CallerInput CallerKind = iota + 1
-	// CallerPlugin is an authenticated plugin.
-	CallerPlugin
-	// CallerCLI is a shell outside any plugin: the user typing.
-	CallerCLI
-	// CallerHost is a host module acting on its own.
-	CallerHost
+	CallerInput  = protocol.CallerInput
+	CallerPlugin = protocol.CallerPlugin
+	CallerCLI    = protocol.CallerCLI
+	CallerHost   = protocol.CallerHost
 )
 
-// String returns the wire spelling of the kind, as the owner receives it in
-// params.caller.kind.
-func (k CallerKind) String() string {
-	switch k {
-	case CallerInput:
-		return "input"
-	case CallerPlugin:
-		return "plugin"
-	case CallerCLI:
-		return "cli"
-	case CallerHost:
-		return "host"
-	}
-	return "unknown"
-}
-
-// Caller says who started a request. It is set by the module that accepts the
-// request, never read from params.
-type Caller struct {
-	Kind CallerKind
-	// PluginID is set only when Kind is CallerPlugin.
-	PluginID string
-}
-
-// FocusContext is the focus slice of State at dispatch time.
-type FocusContext struct {
-	// Surface is the focused surface id, "" when nothing has focus.
-	Surface string `json:"surface"`
-	// Owner is the plugin id occupying Surface, "" when unoccupied or host.
-	Owner string `json:"owner"`
-}
+// FocusContext is the focus at dispatch time; it is the one shared focus type.
+type FocusContext = protocol.FocusContext
 
 // ActionRequest is one request to run an action.
 type ActionRequest struct {

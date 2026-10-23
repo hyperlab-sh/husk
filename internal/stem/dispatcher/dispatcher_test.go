@@ -495,14 +495,6 @@ func TestHostHandlerPanicRepliesOnce(t *testing.T) {
 	}
 }
 
-func TestCallerKindString(t *testing.T) {
-	for k, want := range map[dispatcher.CallerKind]string{dispatcher.CallerInput: "input", dispatcher.CallerPlugin: "plugin", dispatcher.CallerCLI: "cli", dispatcher.CallerHost: "host", 0: "unknown"} {
-		if k.String() != want {
-			t.Errorf("%d = %s", k, k.String())
-		}
-	}
-}
-
 func TestStateViews(t *testing.T) {
 	s := state.New(state.Options{})
 	reg := func(ns, owner string) *state.Handle {

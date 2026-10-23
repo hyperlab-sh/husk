@@ -35,8 +35,10 @@ func KindName(k contracts.CallerKind) string {
 		return "CLI"
 	case contracts.CallerPlugin:
 		return "plugin"
-	case contracts.CallerStem:
-		return "Stem"
+	case contracts.CallerHost:
+		return "host"
+	case contracts.CallerInput:
+		return "input"
 	}
 	return "unknown kind"
 }

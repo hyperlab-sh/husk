@@ -9,6 +9,7 @@ import (
 	c "github.com/hyperlab-sh/husk/internal/services/contracts"
 	"github.com/hyperlab-sh/husk/internal/substrate/state"
 	"github.com/hyperlab-sh/husk/internal/substrate/store"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 	"sort"
 	"strings"
 	"sync"
@@ -156,6 +157,14 @@ func (s *Service) event(name, plugin, outcome string) {
 
 // Read implements secrets.get. Only its successful return carries secret bytes.
 func (s *Service) Read(caller Caller, name string) (value []byte, err error) {
+	// The host and input kinds never handle a secret value, and an invalid
+	// caller is refused before it can be attributed an event.
+	if err := c.CheckCaller(caller); err != nil {
+		return nil, err
+	}
+	if caller.Kind == protocol.CallerHost || caller.Kind == protocol.CallerInput {
+		return nil, c.Failure("denied", "user_only")
+	}
 	outcome, reported := "unavailable", name
 	defer func() { s.event(reported, caller.PluginID, outcome) }()
 	if !validName(name) {
@@ -167,7 +176,7 @@ func (s *Service) Read(caller Caller, name string) (value []byte, err error) {
 	if s.ctx.Err() != nil {
 		return nil, c.SafeError("unavailable")
 	}
-	if !caller.User() {
+	if !c.IsUser(caller) {
 		req, ok := s.current.Load().declarations[caller.PluginID][name]
 		if !ok {
 			outcome = "not_declared"
@@ -268,7 +277,7 @@ func (s *Service) writeGrant(plugin, name, digest string) {
 
 // Grant accepts user consent and posts the only State write path.
 func (s *Service) Grant(caller Caller, plugin, name string) error {
-	if err := c.RequireUser(caller); err != nil {
+	if err := c.RequireCLI(caller); err != nil {
 		return err
 	}
 	req, ok := s.current.Load().declarations[plugin][name]
@@ -288,7 +297,7 @@ func (s *Service) Grant(caller Caller, plugin, name string) error {
 
 // Revoke posts removal of one grant; a plugin can never revoke consent.
 func (s *Service) Revoke(caller Caller, plugin, name string) error {
-	if err := c.RequireUser(caller); err != nil {
+	if err := c.RequireCLI(caller); err != nil {
 		return err
 	}
 	if s.opts.Post == nil || !s.opts.Post(func() {
@@ -308,7 +317,7 @@ func (s *Service) Revoke(caller Caller, plugin, name string) error {
 
 // Set accepts values from a user-only Server stdin adapter, never from argv.
 func (s *Service) Set(caller Caller, name string, value []byte) error {
-	if err := c.RequireUser(caller); err != nil {
+	if err := c.RequireCLI(caller); err != nil {
 		return err
 	}
 	if !validName(name) {
@@ -325,7 +334,7 @@ func (s *Service) Set(caller Caller, name string, value []byte) error {
 
 // Reveal is user-only and audits the name, never the value.
 func (s *Service) Reveal(caller Caller, name string) ([]byte, error) {
-	if err := c.RequireUser(caller); err != nil {
+	if err := c.RequireCLI(caller); err != nil {
 		return nil, err
 	}
 	v, err := s.Read(caller, name)
@@ -337,10 +346,13 @@ func (s *Service) Reveal(caller Caller, name string) ([]byte, error) {
 
 // Names exposes metadata for declared names (plus stored names to the user).
 func (s *Service) Names(caller Caller) ([]SecretInfo, error) {
+	if err := c.CheckCaller(caller); err != nil {
+		return nil, err
+	}
 	snap := s.current.Load()
 	names := map[string]bool{}
 	for plugin, decls := range snap.declarations {
-		if caller.User() || plugin == caller.PluginID {
+		if c.IsUser(caller) || plugin == caller.PluginID {
 			for name := range decls {
 				names[name] = true
 			}
@@ -353,7 +365,7 @@ func (s *Service) Names(caller Caller) ([]SecretInfo, error) {
 		broken = err != nil
 		for _, name := range keys {
 			set[name] = true
-			if caller.User() {
+			if c.IsUser(caller) {
 				names[name] = true
 			}
 		}
@@ -362,7 +374,7 @@ func (s *Service) Names(caller Caller) ([]SecretInfo, error) {
 	for name := range names {
 		info := SecretInfo{Name: name, Set: set[name], Broken: broken}
 		for plugin, decls := range snap.declarations {
-			if req, ok := decls[name]; ok && (caller.User() || caller.PluginID == plugin) {
+			if req, ok := decls[name]; ok && (c.IsUser(caller) || caller.PluginID == plugin) {
 				info.Declared = append(info.Declared, plugin)
 				if s.hasGrant(plugin, name, req) {
 					info.Granted = append(info.Granted, plugin)

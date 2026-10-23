@@ -31,8 +31,8 @@ type Call struct {
 func (c Call) String() string {
 	var b strings.Builder
 	b.WriteString(c.Method)
-	if c.Kind != 0 {
-		fmt.Fprintf(&b, " [%d:%s]", c.Kind, c.PluginID)
+	if c.Kind != "" {
+		fmt.Fprintf(&b, " [%s:%s]", c.Kind, c.PluginID)
 	}
 	for _, a := range c.Args {
 		fmt.Fprintf(&b, " %v", a)
