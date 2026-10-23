@@ -2,6 +2,7 @@ package settings
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
@@ -79,6 +80,8 @@ func TestSettingsSetInvalidValueWritesNothingAndNamesKey(t *testing.T) {
 		{Entry{Key: "dist.n", Type: TypeInt, Default: int64(1), Max: &bound}, 4},
 		{Entry{Key: "dist.n", Type: TypeInt, Default: int64(3), Min: &bound}, 2},
 		{Entry{Key: "dist.n", Type: TypeInt, Default: int64(1)}, 1.5},
+		{Entry{Key: "dist.n", Type: TypeInt, Default: int64(1)}, json.Number("9223372036854775807.1")},
+		{Entry{Key: "dist.n", Type: TypeInt, Default: int64(1)}, json.Number("9223372036854775808.0")},
 		{Entry{Key: "dist.n", Type: TypeDuration, Default: int64(1)}, "1ms"},
 		{Entry{Key: "dist.n", Type: TypeEnum, Default: "yes", Enum: []string{"yes"}}, "no"},
 		{Entry{Key: "dist.n", Type: TypeStrings, Default: []string{}}, []any{1}},
@@ -106,6 +109,20 @@ func TestSettingsSetNullRefused(t *testing.T) {
 		t.Fatal("null wrote or reloaded")
 	}
 }
+func TestSettingsSetAcceptsExactIntegralJSONNumbers(t *testing.T) {
+	for _, value := range []json.Number{"1.0", "1e3", "9223372036854775807.0", "-9223372036854775808e0"} {
+		t.Run(string(value), func(t *testing.T) {
+			s, w, _ := writeService(t, Entry{Key: "dist.n", Owner: "dist", Type: TypeInt, Default: int64(0)})
+			if _, _, err := s.Set(context.Background(), c.Caller{Kind: protocol.CallerCLI}, "dist.n", value); err != nil {
+				t.Fatal(err)
+			}
+			if w.calls != 1 {
+				t.Fatal("valid integer was not persisted")
+			}
+		})
+	}
+}
+
 func TestSettingsSetStoreFailureNoReload(t *testing.T) {
 	s, w, r := writeService(t)
 	w.err = errors.New("cannot patch existing document")

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math/big"
 	"reflect"
 	"slices"
 	"sort"
@@ -627,8 +628,17 @@ func validKey(k string) bool {
 func integer(v any) (int64, bool) {
 	switch n := v.(type) {
 	case json.Number:
-		i, e := n.Int64()
-		return i, e == nil
+		if i, err := n.Int64(); err == nil {
+			return i, true
+		}
+		// Decimal and exponent spellings are integral too. Keep enough
+		// precision to reject fractional tails without float64 rounding.
+		f, _, err := big.ParseFloat(string(n), 10, uint(len(n)*4+64), big.ToNearestEven)
+		if err != nil {
+			return 0, false
+		}
+		i, accuracy := f.Int64()
+		return i, accuracy == big.Exact
 	case int:
 		return int64(n), true
 	case int64:
