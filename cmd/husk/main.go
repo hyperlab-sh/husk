@@ -146,7 +146,7 @@ func pluginInstanceDocs(fs *flag.FlagSet) map[string]map[string]any {
 }
 
 // pluginAdditions keeps additive flags separate until Settings resolves the
-// selected profile and the layers below instance.
+// effective configured layers, including the named-instance file.
 func pluginAdditions(fs *flag.FlagSet) (map[string][]string, error) {
 	out := map[string][]string{}
 	given := map[string]bool{}

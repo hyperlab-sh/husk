@@ -824,8 +824,8 @@ type RuntimeOptions struct {
 	// ProfileFlag is the --profile start flag: a selection input of the
 	// startup flight only.
 	ProfileFlag *string
-	// PluginAdditions contains CLI-only paths/dirs appended to lower-layer
-	// settings to produce instance values.
+	// PluginAdditions contains CLI-only paths/dirs appended to the effective
+	// configured value (named-instance file included) to produce instance values.
 	PluginAdditions map[string][]string
 	ProfileSource   func(string) string
 	Schema          []settings.Entry
