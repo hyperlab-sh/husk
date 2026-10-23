@@ -74,7 +74,7 @@ func (m *WorkbenchModel) railButtons() []railButton {
 		} else {
 			btns[i].startY = curY
 			btns[i].endY = curY + 2
-			curY += 3
+			curY += 4
 		}
 	}
 	return btns
@@ -90,7 +90,7 @@ func (m *WorkbenchModel) detectRailHoverAt(x, y int) int {
 	}
 	relY := y - railRect.Y
 	for i, b := range m.railButtons() {
-		if relY >= b.startY && relY <= b.endY {
+		if b.endY < railRect.Height && relY >= b.startY && relY <= b.endY {
 			return i
 		}
 	}
