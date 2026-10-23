@@ -93,7 +93,7 @@ func (r *Root) buildServer() error {
 		Limiter:  servicesh.NewWindowLimiter(r.clock, contracts.RateLimitPerSecond),
 	})
 	mux.Register("terminal", stemh.Terminal{Port: portsstem.TerminalPort{
-		Engine: r.engine, Loop: r.loopSeam, Content: r.cfg.Content,
+		Engine: r.engine, Loop: r.loopSeam, Content: r.cfg.Content, Logf: r.logf,
 		Size: func(plugin string, id protocol.SurfaceID) protocol.TerminalAttachResult {
 			for _, size := range r.occupiedSizes(plugin) {
 				if size.Surface == id {
@@ -110,7 +110,7 @@ func (r *Root) buildServer() error {
 				return contracts.NewError(protocol.CodeUnavailable, "plugin is not live", nil)
 			}
 		},
-	}})
+	}, Logf: r.logf})
 	mux.Register("plugin", pluginh.Plugin{Port: r.pods})
 	r.mux = mux
 

@@ -33,7 +33,7 @@ func payloads() map[string]payload {
 		protocol.MethodProtocolError:     {protocol.ProtocolErrorParams{Code: protocol.CodeParseError, Message: "bad", Method: "a.b", Data: json.RawMessage(`{"line":1}`)}, nil},
 		protocol.MethodSurfaceUpdate:     {protocol.SurfaceUpdateParams{PluginID: "notes", Surface: protocol.SurfaceMainStage, Title: "t", Subtitle: "s", Badge: "b", Lines: []string{"x"}, HitTargets: hit, StatusMeta: map[string]any{"n": 1}, Capture: &yes}, nil},
 		protocol.MethodSurfaceClose:      {protocol.SurfaceCloseParams{Surface: protocol.SurfaceModal}, nil},
-		protocol.MethodTerminalAttach:    {protocol.TerminalAttachParams{Surface: protocol.SurfaceMainStage, Capture: protocol.CaptureAll, Scrollback: &history}, protocol.TerminalAttachResult{Width: 80, Height: 24}},
+		protocol.MethodTerminalAttach:    {protocol.TerminalAttachParams{Surface: protocol.SurfaceMainStage, Capture: protocol.CaptureValueAll.Ptr(), Scrollback: &history}, protocol.TerminalAttachResult{Width: 80, Height: 24}},
 		protocol.MethodTerminalWrite:     {protocol.TerminalWriteParams{Surface: protocol.SurfaceMainStage, Data: "eA=="}, nil},
 		protocol.MethodTerminalDetach:    {protocol.TerminalDetachParams{Surface: protocol.SurfaceMainStage}, nil},
 		protocol.MethodTerminalInput:     {protocol.TerminalInputParams{Surface: protocol.SurfaceMainStage, Data: "eA=="}, nil},

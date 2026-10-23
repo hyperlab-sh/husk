@@ -49,7 +49,10 @@ func (p *Pod) QueueSender() func(protocol.Message) error {
 		if process == nil {
 			return wrapper.ErrNotLive
 		}
-		return process.Send(m)
+		if sender, ok := process.(interface{ TrySend(protocol.Message) error }); ok {
+			return sender.TrySend(m)
+		}
+		return protocol.ErrSendQueueFull
 	}
 }
 

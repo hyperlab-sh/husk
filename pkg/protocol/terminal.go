@@ -31,6 +31,17 @@ const (
 	CaptureValueAll CaptureValue = "all"
 )
 
+// Ptr returns an optional capture value for a wire parameter.
+func (c CaptureValue) Ptr() *CaptureValue { return &c }
+
+// CaptureBool migrates an optional boolean capture declaration to the wire type.
+func CaptureBool(on bool) *CaptureValue {
+	if on {
+		return CaptureTrue.Ptr()
+	}
+	return CaptureFalse.Ptr()
+}
+
 // Valid reports whether c is one of the wire spellings.
 func (c CaptureValue) Valid() bool {
 	return c == CaptureFalse || c == CaptureTrue || c == CaptureValueText || c == CaptureValueAll
@@ -85,9 +96,9 @@ const MaxTerminalBytes = 64 * 1024
 
 // TerminalAttachParams attaches an emulator to an occupied surface.
 type TerminalAttachParams struct {
-	Surface    SurfaceID   `json:"surface"`
-	Capture    CaptureMode `json:"capture,omitempty"`
-	Scrollback *int        `json:"scrollback,omitempty"`
+	Surface    SurfaceID     `json:"surface"`
+	Capture    *CaptureValue `json:"capture,omitempty"`
+	Scrollback *int          `json:"scrollback,omitempty"`
 }
 
 // Validate checks the attachment's limits and capture policy.
@@ -95,8 +106,8 @@ func (p TerminalAttachParams) Validate() error {
 	if !p.Surface.Valid() {
 		return invalid("terminal.attach requires a valid surface")
 	}
-	if p.Capture != CaptureNone && p.Capture != CaptureText && p.Capture != CaptureAll {
-		return invalid("capture must be text or all")
+	if p.Capture != nil && !p.Capture.Valid() {
+		return invalid("capture must be true, false, text or all")
 	}
 	if p.Scrollback != nil && (*p.Scrollback < 0 || *p.Scrollback > 20000) {
 		return invalid("scrollback must be between 0 and 20000")

@@ -1,5 +1,4 @@
-// Command terminal is a reference plugin hosting an arbitrary argv on a PTY.
-// Add argv after -- in the manifest command; without it the user's SHELL runs.
+// Command terminal hosts arbitrary argv on a plugin-owned PTY.
 package main
 
 import (
@@ -8,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"os"
 	"os/signal"
@@ -25,7 +25,6 @@ func main() {
 		os.Exit(1)
 	}
 }
-
 func launch(ctx context.Context, argv []string) error {
 	if len(argv) > 0 && argv[0] == "--" {
 		argv = argv[1:]
@@ -52,6 +51,10 @@ func launch(ctx context.Context, argv []string) error {
 type incoming struct {
 	msg protocol.Message
 	err error
+}
+type outputChunk struct {
+	params protocol.TerminalWriteParams
+	ack    chan error
 }
 
 func run(ctx context.Context, argv []string, token string, stdin io.Reader, socket io.ReadWriteCloser) error {
@@ -81,8 +84,7 @@ func run(ctx context.Context, argv []string, token string, stdin io.Reader, sock
 	go read(stdin)
 	go read(socket)
 	writer := protocol.NewWriter(socket)
-	const surface = protocol.SurfaceMainStage
-	request := func(id string, method string, params any) error {
+	request := func(id, method string, params any) error {
 		raw, err := json.Marshal(params)
 		if err != nil {
 			return err
@@ -94,19 +96,38 @@ func run(ctx context.Context, argv []string, token string, stdin io.Reader, sock
 		}
 		return writer.Send(protocol.Message{ID: rid, Method: method, Params: raw, Token: token})
 	}
+	var surface protocol.SurfaceID
 	var child *ptyhost.Child
+	var inputDone <-chan struct{}
 	defer func() {
+		cancel()
 		if child != nil {
 			_ = child.Close()
+			if inputDone != nil {
+				<-inputDone
+			}
 			_ = child.Wait()
 		}
 	}()
-	var ended = make(chan error, 1)
+	ended := make(chan error, 1)
+	output := make(chan outputChunk)
+	input := make(chan protocol.TerminalInputParams, 16)
+	inputErr := make(chan error, 1)
+	var pending chan error
 	attaching := false
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
+		case err := <-inputErr:
+			return err
+		case chunk := <-output:
+			// Exactly one acknowledged output chunk is in flight. This both applies
+			// PTY backpressure and preserves order through concurrent server handlers.
+			pending = chunk.ack
+			if err := request("write", protocol.MethodTerminalWrite, chunk.params); err != nil {
+				return err
+			}
 		case err := <-ended:
 			if err != nil {
 				return err
@@ -125,11 +146,19 @@ func run(ctx context.Context, argv []string, token string, stdin io.Reader, sock
 				return entry.err
 			}
 			msg := entry.msg
+			if msg.Method == protocol.MethodProtocolError {
+				return errors.New("host rejected terminal transport message")
+			}
 			if msg.ID != nil && msg.Method == "" {
 				if msg.Error != nil {
 					return fmt.Errorf("host refused terminal operation: %s", msg.Error.Code)
 				}
 				switch msg.ID.String() {
+				case `"write"`:
+					if pending != nil {
+						pending <- nil
+						pending = nil
+					}
 				case `"attach"`:
 					var size protocol.TerminalAttachResult
 					if err := json.Unmarshal(msg.Result, &size); err != nil {
@@ -140,8 +169,40 @@ func run(ctx context.Context, argv []string, token string, stdin io.Reader, sock
 					if err != nil {
 						return err
 					}
+					done := make(chan struct{})
+					inputDone = done
 					go func(c *ptyhost.Child) {
-						err := c.Pump(surface, func(p protocol.TerminalWriteParams) error { return request("", protocol.MethodTerminalWrite, p) })
+						defer close(done)
+						for {
+							select {
+							case <-ctx.Done():
+								return
+							case p := <-input:
+								if err := c.Input(p); err != nil {
+									select {
+									case inputErr <- err:
+									case <-ctx.Done():
+									}
+									return
+								}
+							}
+						}
+					}(child)
+					go func(c *ptyhost.Child) {
+						err := c.Pump(surface, func(p protocol.TerminalWriteParams) error {
+							ack := make(chan error, 1)
+							select {
+							case output <- outputChunk{p, ack}:
+							case <-ctx.Done():
+								return ctx.Err()
+							}
+							select {
+							case err := <-ack:
+								return err
+							case <-ctx.Done():
+								return ctx.Err()
+							}
+						})
 						_ = c.Wait()
 						ended <- err
 					}(child)
@@ -157,7 +218,13 @@ func run(ctx context.Context, argv []string, token string, stdin io.Reader, sock
 					return err
 				}
 				for _, p := range sizes.Surfaces {
-					if p.Surface != surface || p.Width < 1 || p.Height < 1 {
+					if !p.Surface.Valid() || p.Width < 1 || p.Height < 1 {
+						continue
+					}
+					if surface == "" {
+						surface = p.Surface
+					}
+					if p.Surface != surface {
 						continue
 					}
 					if child != nil {
@@ -166,7 +233,7 @@ func run(ctx context.Context, argv []string, token string, stdin io.Reader, sock
 						}
 					} else if !attaching {
 						attaching = true
-						if err := request("attach", protocol.MethodTerminalAttach, protocol.TerminalAttachParams{Surface: surface, Capture: protocol.CaptureAll}); err != nil {
+						if err := request("attach", protocol.MethodTerminalAttach, protocol.TerminalAttachParams{Surface: surface, Capture: protocol.CaptureValueAll.Ptr()}); err != nil {
 							return err
 						}
 					}
@@ -177,8 +244,10 @@ func run(ctx context.Context, argv []string, token string, stdin io.Reader, sock
 					return err
 				}
 				if p.Surface == surface && child != nil {
-					if err := child.Input(p); err != nil {
-						return err
+					select {
+					case input <- p:
+					default:
+						log.Printf("terminal: dropped input: child input queue full")
 					}
 				}
 			}

@@ -10,18 +10,22 @@ import (
 	"os/exec"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/creack/pty"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
+	"golang.org/x/sys/unix"
 )
 
 // Child owns a session leader, its PTY, and a single process reaper.
 type Child struct {
-	file *os.File
-	cmd  *exec.Cmd
-	done chan struct{}
-	err  error
-	once sync.Once
+	file  *os.File
+	cmd   *exec.Cmd
+	done  chan struct{}
+	err   error
+	once  sync.Once
+	grace time.Duration
+	after func(time.Duration) <-chan time.Time
 }
 
 // Start launches argv on a new session's PTY; it never invokes a shell implicitly.
@@ -30,6 +34,13 @@ func Start(argv []string, o Options) (*Child, error) {
 		return nil, errors.New("invalid terminal command or geometry")
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)
+	parentDeath(cmd)
+	if o.StopGrace <= 0 {
+		o.StopGrace = 500 * time.Millisecond
+	}
+	if o.After == nil {
+		o.After = time.After
+	}
 	env := o.Env
 	if env == nil {
 		env = os.Environ()
@@ -39,7 +50,27 @@ func Start(argv []string, o Options) (*Child, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Child{file: f, cmd: cmd, done: make(chan struct{})}
+	// creack/pty returns a blocking descriptor. Rewrap a nonblocking duplicate
+	// so Go's poller can interrupt both a saturated write and a pending read
+	// when Close closes the master. Merely closing a blocking Unix fd does not
+	// cancel a write already inside the kernel.
+	fd, err := unix.FcntlInt(f.Fd(), unix.F_DUPFD_CLOEXEC, 0)
+	if err == nil {
+		err = syscall.SetNonblock(fd, true)
+	}
+	if err != nil {
+		if fd >= 0 {
+			_ = syscall.Close(fd)
+		}
+		_ = f.Close()
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		_ = cmd.Wait()
+		return nil, err
+	}
+	name := f.Name()
+	_ = f.Close()
+	f = os.NewFile(uintptr(fd), name)
+	c := &Child{file: f, cmd: cmd, done: make(chan struct{}), grace: o.StopGrace, after: o.After}
 	go func() { c.err = cmd.Wait(); close(c.done) }()
 	return c, nil
 }
@@ -89,6 +120,21 @@ func (c *Child) Wait() error { <-c.done; return c.err }
 // and closes the PTY so a blocked output pump is released. Wait reaps the leader.
 func (c *Child) Close() error {
 	var err error
-	c.once.Do(func() { _ = syscall.Kill(-c.cmd.Process.Pid, syscall.SIGHUP); err = c.file.Close() })
+	c.once.Do(func() {
+		_ = syscall.Kill(-c.cmd.Process.Pid, syscall.SIGHUP)
+		err = c.file.Close()
+		select {
+		case <-c.done:
+			return
+		default:
+		}
+		select {
+		case <-c.done:
+			return
+		case <-c.after(c.grace):
+		}
+		_ = syscall.Kill(-c.cmd.Process.Pid, syscall.SIGKILL)
+		<-c.done
+	})
 	return err
 }

@@ -128,7 +128,9 @@ type sendQueue struct {
 	closing bool
 }
 
-func (q *sendQueue) enqueue(b []byte) error {
+func (q *sendQueue) enqueue(b []byte) error { return q.offer(b, true) }
+
+func (q *sendQueue) offer(b []byte, failFull bool) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if q.err != nil {
@@ -141,6 +143,9 @@ func (q *sendQueue) enqueue(b []byte) error {
 	case q.ch <- b:
 		return nil
 	default:
+		if !failFull {
+			return ErrSendQueueFull
+		}
 		q.stopLocked(fmt.Errorf("%w (%d messages)", ErrSendQueueFull, cap(q.ch)), true)
 		return q.err
 	}

@@ -168,9 +168,11 @@ type Engine struct {
 	slotWatchers   map[string]map[*watcher]struct{}
 	pluginWatchers map[string]map[*watcher]struct{}
 
-	toasts    []Toast
-	stats     Stats
-	terminals map[protocol.SurfaceID]attachment
+	toasts        []Toast
+	stats         Stats
+	terminals     map[protocol.SurfaceID]attachment
+	terminalFocus map[protocol.SurfaceID]bool
+	terminalDirty bool
 }
 
 // New creates the engine on st, registering husk.surfaces and the State
@@ -708,6 +710,10 @@ func (e *Engine) Resized(sizes []protocol.SurfaceSize) {
 	res := e.slice.Get()
 	byPlugin := map[string][]protocol.SurfaceSize{}
 	for _, size := range sizes {
+		if e.terminalFocus == nil {
+			e.terminalFocus = map[protocol.SurfaceID]bool{}
+		}
+		e.terminalFocus[size.Surface] = size.Focused && size.Visible
 		if a, ok := e.terminals[size.Surface]; ok {
 			a.term.Resize(size.Width, size.Height)
 			a.term.Focus(size.Focused && size.Visible)
