@@ -36,6 +36,11 @@ type Notifier interface{ Notify(protocol.Message) error }
 // TokenResolver resolves current launch credentials; it must be worker-safe.
 type TokenResolver interface{ Resolve(string) (string, bool) }
 
+// LegacyPeer fails the live plugin named by a major-1 `hello` that opened a
+// connection. It must be worker-safe and must not block; an id that names no
+// live plugin is a no-op.
+type LegacyPeer interface{ FailLegacy(pluginID string) }
+
 // Config supplies instance identity, the checked runtime path and loop bridge.
 // Post runs on workers and must return after shutdown. Clock controls queue
 // watchdogs, diagnostic rate windows and uptime; native socket probes use deadlines.
@@ -44,8 +49,10 @@ type Config struct {
 	RuntimeDir string
 	Entry      instance.Entry
 	Tokens     TokenResolver
-	Post       func(any) bool
-	Clock      protocol.Clock
+	// Legacy, when set, is told of each connection opened by a major-1 hello.
+	Legacy LegacyPeer
+	Post   func(any) bool
+	Clock  protocol.Clock
 }
 
 // Server is a single-use listener with pre-start prefix registration.

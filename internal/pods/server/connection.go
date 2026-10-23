@@ -118,13 +118,36 @@ func (c *connection) run() {
 	defer c.publishDiagnostic()
 	defer c.close()
 	go c.runNotifications()
-	_ = protocol.ReadLoop(c.raw, c.receive, func(e *protocol.LineError) {
+	_ = protocol.ReadLoopFirst(c.raw, c.rejectLegacyHello, c.receive, func(e *protocol.LineError) {
 		if m, ok := e.Response(); ok {
 			c.respond(m)
 		} else {
 			c.noteDiagnostic(e.Code)
 		}
 	})
+}
+
+// rejectLegacyHello sees only the first line of the connection. A major-1
+// hello gets the one major-1 line, the connection is closed once it has
+// flushed, and the plugin the hello names is failed through Config.Legacy. The
+// line reaches no handler and is not an invalid_message diagnostic.
+func (c *connection) rejectLegacyHello(line []byte) bool {
+	pluginID, ok := protocol.IsLegacyHello(line)
+	if !ok {
+		return false
+	}
+	name := pluginID
+	if name == "" {
+		name = "unknown plugin"
+	}
+	c.server.post(c.id, "warn", "plugin "+name+" spoke protocol major 1 on the socket")
+	if err := c.writer.SendLine(protocol.LegacyRejectionLine()); err == nil {
+		c.drain()
+	}
+	if c.server.cfg.Legacy != nil {
+		c.server.cfg.Legacy.FailLegacy(pluginID)
+	}
+	return true
 }
 
 // Notify implements Notifier for this connection, including after a watch
