@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"os"
 	"slices"
 	"sync"
 	"time"
@@ -42,9 +41,11 @@ type Host struct {
 	preparing map[string]bool
 	nextGate  uint64
 	closing   bool
-	tokenMu   sync.RWMutex
-	tokens    map[string]string
-	byPlugin  map[string]string
+	// removing holds one entry per plugin.remove in progress (removal.go).
+	removing map[string]*removal
+	tokenMu  sync.RWMutex
+	tokens   map[string]string
+	byPlugin map[string]string
 }
 
 // New constructs a Host without launching processes or writing State.
@@ -73,7 +74,7 @@ func New(loop Loop, opts Options) (*Host, error) {
 	if opts.Factory == nil {
 		opts.Factory = func(s manifest.Spec, o wrapper.Options) (wrapper.Process, error) { return wrapper.New(s, o) }
 	}
-	return &Host{loop: loop, opts: opts, ctx: ctx, cancel: cancel, pods: make(map[string]*Pod), handles: make(map[string]contracts.SliceHandle), gates: make(map[uint64][]string), preparing: make(map[string]bool), tokens: make(map[string]string), byPlugin: make(map[string]string)}, nil
+	return &Host{loop: loop, opts: opts, ctx: ctx, cancel: cancel, pods: make(map[string]*Pod), handles: make(map[string]contracts.SliceHandle), gates: make(map[uint64][]string), removing: make(map[string]*removal), preparing: make(map[string]bool), tokens: make(map[string]string), byPlugin: make(map[string]string)}, nil
 }
 
 // Add registers a starting Pod but never starts it. Duplicate ids fail without
@@ -194,6 +195,12 @@ func (h *Host) Handle(msg tea.Msg) bool {
 		// arrive in Failed and are handled once here, with the declaration
 		// failures.
 		for _, id := range ids {
+			if _, removing := h.removing[id]; removing {
+				// A removing Pod is never started: the gate has settled, so
+				// step 3 hands it straight to the teardown, in this tick.
+				h.teardown(id, false)
+				continue
+			}
 			p, ok := h.pods[id]
 			if !ok {
 				// Torn down while this gate was pending: the starter must not
@@ -272,41 +279,10 @@ func (h *Host) Handle(msg tea.Msg) bool {
 		}
 		return true
 	case TeardownMsg:
-		if _, ok := h.pods[m.PluginID]; !ok {
-			return true
-		}
-		h.revoke(m.PluginID)
-		h.handlesMu.Lock()
-		handle, hasHandle := h.handles[m.PluginID]
-		if hasHandle {
-			delete(h.handles, m.PluginID)
-		}
-		h.handlesMu.Unlock()
-		if hasHandle {
-			handle.Unregister()
-		}
-		delete(h.pods, m.PluginID)
-		delete(h.preparing, m.PluginID)
-		// A teardown while a launch gate is pending must carry into that
-		// gate: drop the id so the later PreparedMsg neither starts the
-		// removed plugin nor dereferences its missing Pod.
-		for gate, ids := range h.gates {
-			kept := ids[:0]
-			for _, id := range ids {
-				if id != m.PluginID {
-					kept = append(kept, id)
-				}
-			}
-			if len(kept) == 0 {
-				delete(h.gates, gate)
-			} else {
-				h.gates[gate] = kept
-			}
-		}
-		if h.opts.Registry != nil {
-			h.opts.Registry.Release(h.ctx, m.PluginID)
-		}
-		h.loop.Log(LogMsg{PluginID: m.PluginID, Level: "info", Message: "torn down plugin " + m.PluginID + ": slice unregistered, registry id released"})
+		h.teardown(m.PluginID, m.Unreaped)
+		return true
+	case RemoveDoneMsg:
+		h.finishRemoval(m)
 		return true
 	case LaunchFailedMsg:
 		p := h.pods[m.PluginID]
@@ -391,17 +367,11 @@ func (h *Host) publishExited(info wrapper.Info) {
 // Pod returns a loop-owned Pod for per-subscriber notification delivery.
 func (h *Host) Pod(id string) (*Pod, bool) { p, ok := h.pods[id]; return p, ok }
 
-// Teardown posts TeardownMsg for one plugin; run the command through the
-// same Update path as every other lifecycle message.
-func (h *Host) Teardown(id string) tea.Cmd {
-	return func() tea.Msg { return TeardownMsg{PluginID: id} }
-}
-
 // PodSlices adapts the Host's stored slice handles to the host's
 // SliceHandles lookup seam: the Stem State port resolves a plugin's write
 // capability by namespace here. The lookup runs off the loop on the Stem
 // write path, so it reads the guarded map (handlesMu); a handle exists only
-// while the Pod is registered (from RegisterSlicesMsg until TeardownMsg).
+// while the Pod is registered (from RegisterSlicesMsg until the removal's teardown).
 type PodSlices struct{ host *Host }
 
 // NewPodSlices wraps h. The adapter exists because Host already has a
@@ -512,6 +482,7 @@ func (h *Host) Stop() tea.Cmd {
 		return nil
 	}
 	h.closing = true
+	h.cancelRemovals()
 	var processes []wrapper.Process
 	for _, p := range h.pods {
 		if p.process != nil {
@@ -525,28 +496,7 @@ func (h *Host) Stop() tea.Cmd {
 		}
 	}
 	return func() tea.Msg {
-		stopAt := h.opts.Wrapper.Clock.Now().Add(h.opts.Wrapper.StopGrace)
-		for _, p := range processes {
-			p.CloseStdin()
-		}
-		h.cancel()
-		for _, p := range processes {
-			_ = p.Terminate()
-		}
-		if h.waitAll(processes, stopAt) {
-			return StoppedMsg{}
-		}
-		killAt := h.opts.Wrapper.Clock.Now().Add(h.opts.Wrapper.KillWait)
-		for _, p := range processes {
-			select {
-			case <-p.Done():
-			default:
-				if err := p.Kill(); !errors.Is(err, os.ErrProcessDone) {
-					h.loop.Post(LogMsg{PluginID: p.PluginID(), Level: "warn", Message: fmt.Sprintf("plugin %s did not exit within %s of SIGTERM; killing it", p.PluginID(), h.opts.Wrapper.StopGrace)})
-				}
-			}
-		}
-		if h.waitAll(processes, killAt) {
+		if h.stopProcesses(processes, h.cancel) {
 			return StoppedMsg{}
 		}
 		return StoppedMsg{Err: errors.New("plugins did not exit within the shared kill wait")}

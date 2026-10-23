@@ -478,7 +478,7 @@ func TestNewOccupantOfAnUnchangedSurfaceIsTold(t *testing.T) {
 		// Dropping the holder's declarations changes no husk.surfaces write
 		// before engine.Flush resolves the waiting claim, so only the
 		// revision read around Flush notices.
-		{"holder is torn down", func(h *harness) { h.root.cfg.Post(pods.TeardownMsg{PluginID: "alpha"}) }},
+		{"holder is torn down", func(h *harness) { h.mustRemove("alpha") }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			beta := writeFrontendPlugin(t, "beta", []string{"sidebar-list"}, nil)

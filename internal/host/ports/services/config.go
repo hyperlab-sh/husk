@@ -23,6 +23,12 @@ func (p Config) Reload(ctx context.Context, hc host.Caller) ([]host.ReloadReport
 	if err != nil {
 		return nil, coded(err)
 	}
+	return Reports(reports), nil
+}
+
+// Reports converts the Coordinator's reports to the wire-facing type shared by
+// config.reload and plugin.remove.
+func Reports(reports []services.Report) []host.ReloadReport {
 	out := make([]host.ReloadReport, 0, len(reports))
 	for _, r := range reports {
 		rep := host.ReloadReport{
@@ -33,5 +39,5 @@ func (p Config) Reload(ctx context.Context, hc host.Caller) ([]host.ReloadReport
 		rep.Problems = append(rep.Problems, r.Problems...)
 		out = append(out, rep)
 	}
-	return out, nil
+	return out
 }

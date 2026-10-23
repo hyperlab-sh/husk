@@ -87,6 +87,16 @@ func newRecordedLoop(t *testing.T, ctx context.Context, registry contracts.PodRe
 		},
 		OpeningFn: func(string) []protocol.Message { return opening },
 		LogFn:     func(m pods.LogMsg) { l.mu.Lock(); l.logs = append(l.logs, m); l.mu.Unlock() },
+		DoFn: func(ctx context.Context, fn func()) error {
+			done := make(chan struct{})
+			l.work <- func() { fn(); close(done) }
+			select {
+			case <-done:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		},
 	}
 	h, err := pods.New(l, pods.Options{Registry: registry, Starter: starter})
 	if err != nil {
@@ -718,7 +728,7 @@ func (l stemTestLoop) Post(fn func()) bool {
 	}
 }
 
-// Teardown is the loop half of Pod teardown: the plugin's slice is
+// plugin.remove's teardown is the loop half of Pod removal: the plugin's slice is
 // unregistered through its stored owner handle, the registry id released,
 // the credential revoked, and the id is launchable again. Store
 // undeclaration and the follow-up reload belong to the composition root.
@@ -746,8 +756,12 @@ func TestTeardownUnregistersSliceAndReleasesId(t *testing.T) {
 		t.Fatal("slice handle missing before teardown")
 	}
 
-	if !h.Handle(h.Teardown("files")()) {
-		t.Fatal("teardown not handled")
+	removal, err := h.Remove(t.Context(), contracts.Caller{Kind: contracts.CallerCLI}, "files")
+	if err != nil {
+		t.Fatal("remove", err)
+	}
+	if removal.Plugin != "files" || removal.Status != contracts.PodExited {
+		t.Fatalf("removal = %+v", removal)
 	}
 
 	if _, ok := tree.Snapshot().Slices["files.state"]; ok {

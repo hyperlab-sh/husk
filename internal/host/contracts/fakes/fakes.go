@@ -775,7 +775,9 @@ type Plugins struct {
 	callLog
 	Infos []contracts.PluginInfo
 	Path  string
-	Err   error
+	// Removal is what Remove answers.
+	Removal contracts.PluginRemoval
+	Err     error
 }
 
 // NewPlugins returns a Plugins logging to rec.
@@ -791,6 +793,12 @@ func (f *Plugins) List(_ context.Context, c contracts.Caller) ([]contracts.Plugi
 func (f *Plugins) Log(_ context.Context, c contracts.Caller, id string) (string, error) {
 	f.RecordCaller("Plugins.Log", c, id)
 	return f.Path, f.Err
+}
+
+// Remove implements contracts.PluginPort.
+func (f *Plugins) Remove(_ context.Context, c contracts.Caller, id string) (contracts.PluginRemoval, error) {
+	f.RecordCaller("Plugins.Remove", c, id)
+	return f.Removal, f.Err
 }
 
 // Surfaces fakes contracts.SurfacePort.

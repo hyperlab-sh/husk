@@ -138,6 +138,22 @@ func (h *harness) loop(fn func()) {
 	}
 }
 
+// remove runs plugin.remove through the Pods port as the user's CLI would and
+// returns once the reply is ready.
+func (h *harness) remove(id string) (contracts.PluginRemoval, error) {
+	h.t.Helper()
+	return h.root.pods.Remove(h.t.Context(), contracts.Caller{Kind: contracts.CallerCLI}, id)
+}
+
+func (h *harness) mustRemove(id string) contracts.PluginRemoval {
+	h.t.Helper()
+	res, err := h.remove(id)
+	if err != nil {
+		h.t.Fatalf("plugin.remove %s: %v", id, err)
+	}
+	return res
+}
+
 func (h *harness) leftovers() []string {
 	var out []string
 	entries, _ := os.ReadDir(h.dir)
@@ -757,13 +773,13 @@ func TestPublishedSlotCatalogChangeCallsCatalogChanged(t *testing.T) {
 	})
 	// Tearing the publisher down changes the catalog again; tearing down a
 	// plugin that published nothing does not.
-	h.root.cfg.Post(pods.TeardownMsg{PluginID: "plain"})
+	h.mustRemove("plain")
 	h.loop(func() {
 		if calls != 1 {
 			t.Errorf("calls after unrelated teardown = %d, want 1", calls)
 		}
 	})
-	h.root.cfg.Post(pods.TeardownMsg{PluginID: "pub"})
+	h.mustRemove("pub")
 	h.loop(func() {
 		if calls != 2 {
 			t.Errorf("calls after publisher teardown = %d, want 2", calls)
@@ -788,7 +804,7 @@ func TestTeardownDropsOccupantsAndDeclarations(t *testing.T) {
 			t.Errorf("precondition: occupants = %+v", res.Occupants)
 		}
 	})
-	h.root.cfg.Post(pods.TeardownMsg{PluginID: "alpha"})
+	h.mustRemove("alpha")
 	h.loop(func() {
 		res, _ := decodeSurfaces(h.root.st.Snapshot())
 		if occ, ok := res.Occupants["sidebar-list"]; ok {
@@ -839,11 +855,11 @@ func TestSpawnRefusedOnceClosing(t *testing.T) {
 	}
 }
 
-// TeardownMsg handled after closing is set must not Add to the worker group.
-// Shutdown is parked in the "pods" hook, before wg.Wait starts, with a held
-// worker keeping wg above zero; one TeardownMsg for a live Pod is then
-// delivered through Update and its Reload worker must be refused.
-func TestTeardownAfterClosingIsSetRefusesTheWorker(t *testing.T) {
+// A TeardownMsg handled after the shutdown mark is ignored: it starts no
+// reload worker, so it cannot Add to the worker group. Shutdown is parked in
+// the "pods" hook, before wg.Wait starts, with a held worker keeping wg above
+// zero; one TeardownMsg for a live Pod is then delivered through Update.
+func TestTeardownAfterShutdownMarkStartsNoWorker(t *testing.T) {
 	hook, ready := readyHook("")
 	f := newFakes()
 	var mu sync.Mutex
@@ -886,8 +902,8 @@ func TestTeardownAfterClosingIsSetRefusesTheWorker(t *testing.T) {
 	got := append([]bool(nil), accepted[before:]...)
 	mu.Unlock()
 	close(proceed)
-	if len(got) != 1 || got[0] {
-		t.Errorf("spawn results during shutdown = %v, want one refusal", got)
+	if len(got) != 0 {
+		t.Errorf("spawn attempts after the shutdown mark = %v, want none", got)
 	}
 	select {
 	case err := <-closed:

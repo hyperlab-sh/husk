@@ -12,6 +12,7 @@ import (
 type fakePort struct {
 	infos   []contracts.PluginInfo
 	path    string
+	removal contracts.PluginRemoval
 	err     error
 	gotID   string
 	gotKind contracts.CallerKind
@@ -28,6 +29,12 @@ func (f *fakePort) Log(_ context.Context, c contracts.Caller, id string) (string
 	f.calls++
 	f.gotKind, f.gotID = c.Kind, id
 	return f.path, f.err
+}
+
+func (f *fakePort) Remove(_ context.Context, c contracts.Caller, id string) (contracts.PluginRemoval, error) {
+	f.calls++
+	f.gotKind, f.gotID = c.Kind, id
+	return f.removal, f.err
 }
 
 func req(method, params string) protocol.Message {
@@ -66,6 +73,13 @@ func TestServe(t *testing.T) {
 		{"log needs a plugin", cli, req(protocol.MethodPluginLog, `{}`), &fakePort{}, protocol.CodeInvalidParams, "", 0},
 		{"log rejects wrong type", cli, req(protocol.MethodPluginLog, `{"plugin":3}`), &fakePort{}, protocol.CodeInvalidParams, "", 0},
 		{"log not found passes the code", cli, req(protocol.MethodPluginLog, `{"plugin":"zz"}`), &fakePort{err: contracts.NewError(protocol.CodeNotFound, "nope", nil)}, protocol.CodeNotFound, "", 1},
+		{"remove", cli, req(protocol.MethodPluginRemove, `{"plugin":"a"}`), &fakePort{removal: contracts.PluginRemoval{Plugin: "a", Status: contracts.PodExited, Log: "/x/a.log", Reports: []contracts.ReloadReport{{Service: "profile", Gen: 4, Applied: true}}}}, "", `{"plugin":"a","status":"exited","log":"/x/a.log","reports":[{"service":"profile","gen":4,"applied":true}]}`, 1},
+		{"remove reports are an array", cli, req(protocol.MethodPluginRemove, `{"plugin":"a"}`), &fakePort{removal: contracts.PluginRemoval{Plugin: "a", Status: contracts.PodExited}}, "", `"reports":[]`, 1},
+		{"remove denies plugin before the port", plug, req(protocol.MethodPluginRemove, `{"plugin":"a"}`), &fakePort{}, protocol.CodeDenied, "", 0},
+		{"remove needs a plugin", cli, req(protocol.MethodPluginRemove, `{}`), &fakePort{}, protocol.CodeInvalidParams, "", 0},
+		{"remove rejects an empty plugin", cli, req(protocol.MethodPluginRemove, `{"plugin":""}`), &fakePort{}, protocol.CodeInvalidParams, "", 0},
+		{"remove rejects wrong type", cli, req(protocol.MethodPluginRemove, `{"plugin":3}`), &fakePort{}, protocol.CodeInvalidParams, "", 0},
+		{"remove not found passes the code", cli, req(protocol.MethodPluginRemove, `{"plugin":"zz"}`), &fakePort{err: contracts.NewError(protocol.CodeNotFound, "nope", nil)}, protocol.CodeNotFound, "", 1},
 		{"other plugin method is unknown", cli, req("plugin.restart", ""), &fakePort{}, protocol.CodeUnknownMethod, "", 0},
 	}
 	for _, tc := range tests {

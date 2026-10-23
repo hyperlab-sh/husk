@@ -384,6 +384,7 @@ func (r *Root) buildPods() error {
 	h, err := pods.New(loop, pods.Options{
 		Registry:  registry,
 		Publisher: publisher{r},
+		Remover:   remover{r},
 		Factory:   r.opts.factory,
 		Wrapper: wrapper.Options{
 			Context:    r.ctx,
