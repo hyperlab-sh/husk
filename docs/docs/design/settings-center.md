@@ -9,7 +9,7 @@ tags: [architecture-v2, frontend, services, pods]
 
 # Settings center
 
-**Landed:** the center shell, host actions, bottom-bar entry point, General, Keys and Theme tabs, profile corner, host seams and catalog reader. Store and Installed are selectable but their content panes remain specified, not landed.
+**Landed:** the center shell, host actions, bottom-bar entry point, all five tabs (General, Keys, Theme, Store and Installed), profile corner, host seams and catalog reader.
 
 ## Level 0: What and why
 
@@ -155,6 +155,8 @@ The theme selector of [Services](services.md) ("The theme selector"), as a tab. 
 
 #### Plugins → Installed
 
+**Landed:** State-driven rows, claimed versus held surfaces, source directories, status badges and confirmed instance-only removal with pending and error feedback. The pane caches its derived content until its State, input, size or theme changes.
+
 The live plugins of this instance: one row per entry of `husk.pods.plugins` in the State snapshot, sorted by id, with `id`, `status` (coloured by value: `live` in `success`, `starting` in `ink`, `exited` in `ink_muted`, `failed` in `danger`), the **claimed surfaces** (the keys of the plugin's `<id>.occupants` declaration slice, with the ones it currently holds, present in `husk.surfaces.occupants` with this plugin, in `ink` and the refused or pending ones in `ink_muted`; `none` when it claims nothing), and the **source path**: the plugin's directory as the converter resolved it, from the new `dir` field of the `husk.pods` entry ("Changes to other specs"), or `(command line)` when the plugin was given as an executable with arguments and has no directory. `last_error` is shown under a `failed` row. The table refreshes from every `husk.pods` and `husk.surfaces` change while the tab is open.
 
 **Remove.** `enter` or `x` on a row (or a click on its `Remove` cell) opens a huh `Confirm` in the content: `Remove <id> from this instance? It is unloaded, not uninstalled: its files, settings and saved state stay, and the next start loads it again.` Confirming calls `plugin.remove` through the seam `RemovePlugin(id, reply)` with a `host` caller; the row shows `removing…` until the reply or until the `husk.pods` entry disappears, whichever comes first. The reply's `status` and `log` are not shown (the row is gone); an error reply (`not_found` because the plugin went away meanwhile, `conflict`, `unavailable` `shutdown`, `cancelled`) is shown under the table as `<code>: <message>` until the next key. A second Remove of the same id while one is pending joins it, as the method does. `esc` or `no` on the Confirm returns to the table.
@@ -162,6 +164,8 @@ The live plugins of this instance: one row per entry of `husk.pods.plugins` in t
 **No Add.** `plugin.add` is CLI-only by ruling; the tab's last row shows the exact command to run, `husk plugin add <path>` and `husk plugin add --dir <dir>`, with `<path>` and `<dir>` literal, in a selectable-looking box; there is no clipboard integration (Open questions). After the user runs it, the new Pod appears in the table through `husk.pods`.
 
 #### Plugins → Store
+
+**Landed:** the optional catalog list and detail pane, surface Select and text query, installed and taken markers, path and URL command instructions, empty-catalog example and bounded diagnostics. The pane compares the host cache to catch catalog workers that finish after a reload; it derives content only when its inputs change. It performs no installation or filesystem/network action.
 
 A **catalog view**: what plugins exist that the user could add, from the `catalog` document ("The catalog document"), read through the seam `Catalog()`. It never downloads, builds or runs anything.
 
@@ -188,7 +192,7 @@ A `services.reloaded` event advances the host's `ServicesRevision()` cache-inval
 
 ### The catalog document
 
-**Landed:** the layered reader and off-loop host cache, exposed by `Frontend.Catalog()`. The Store tab UI remains specified, not landed.
+**Landed:** the layered reader and off-loop host cache, exposed by `Frontend.Catalog()`, and the read-only Store tab UI.
 
 The catalog is a layered Store document named **`catalog`**, file `catalog.json` in each layer ([Store](store.md): the distribution's root, `catalog.json` in the user layer, `profiles/<name>/catalog.json`, a named instance's file), read **unmerged** through `Store.Layers("catalog", profile)` so that every entry has one source layer, exactly as `themes` is read. Store knows nothing of its meaning.
 
@@ -250,7 +254,7 @@ Styling: a `huh.Theme` is built from the served `Palette` and its index map (`Pa
 
 ### Frontend seams
 
-**Landed:** the center's host seams, including `Themes` and `SetSetting`, are available through `contracts.Frontend`. The shell, General, Keys and Theme tabs and profile corner are landed; Store and Installed content is specified, not landed.
+**Landed:** the center's host seams, including `Themes` and `SetSetting`, are available through `contracts.Frontend`. The shell, all five tabs and profile corner are landed.
 
 The center drives the host through `contracts.Frontend` ([Pods](pods.md), "Frontend seams") and nothing else. It uses `Snapshot`, `Palette`, `Themes`, `SetSetting` and the `PaletteANSI` seam that [Built-in themes](themes.md) adds. The seams below use a `host` caller with the authorization that caller has in [Services](services.md) and [Pods](pods.md), except `KeyListing`, which explicitly requests the full `cli` view:
 
@@ -339,13 +343,14 @@ Each named for the behaviour it pins, in `cmd/husk` on the recording fake fronte
 
 ## Level 2: Migration from today
 
-The shell, General, Keys and Theme tabs and profile corner are landed, along with the host seams and catalog reader. The Theme tab is the only selector; no standalone selector was introduced. Store and Installed content remains to land. Implementation order:
+The shell, all five tabs and profile corner are landed, along with the host seams and catalog reader. The Theme tab is the only selector; no standalone selector was introduced. Implementation order:
 
 1. **huh compatibility check — landed**, as "huh" says: huh v2 builds and renders with the existing pins. One commit, no workbench behaviour.
 2. **Seams — landed.** `contracts.Frontend` exposes `Themes`, `SetSetting`, `SettingsSchema`, `Setting`, `KeyListing`, `Profiles`, `UseProfile`, `RemovePlugin` and `ConfigDir` (`Catalog` landed with the reader, step 3). The root implements them over the existing Services ports and Pods; `KeyListing` calls the same Keybinding port as the handler with a `cli` caller. Writes run on tracked workers and reply only through the loop. `plugin.remove` admits a `host` caller in process ("Changes to other specs"). `husk.pods` entries and `plugin.list` carry `dir`.
 3. **The catalog reader — landed**, a small package beside Services (`internal/services/catalog`), with the rules of "The catalog document", importing `pkg/protocol`, Store's layer types and the shared Store-to-Problem conversion in `services/settings`, and nothing else; tested on fixtures. The host warms its cache on a worker after the startup flight and after each `services.reloaded` and posts the result to the loop. Construction drains the initial worker's post before handing ownership to the frontend; later reloads never wait for the cache. Late workers cannot replace a newer refresh. The cache uses the serving Profile snapshot's active name.
-4. **The center shell, Theme and profile corner — landed** in `cmd/husk`: the modal, five-tab list, focus and input isolation, profile Select, both host actions, `overlays.settings_center`, bottom-bar click and golden frames. The theme selector is implemented **as the Theme tab**, never as a standalone modal. Store and Installed currently have empty content panes; their implementations and goldens remain specified.
+4. **The center shell, Theme and profile corner — landed** in `cmd/husk`: the modal, five-tab list, focus and input isolation, profile Select, both host actions, `overlays.settings_center`, bottom-bar click and golden frames. The theme selector is implemented **as the Theme tab**, never as a standalone modal. Store and Installed content and goldens landed in step 6.
 5. **General and Keys — landed** in `cmd/husk`: the six schema field types, plugin-group collapse, single-flight key-ordered saves, persistent restart warnings, failure continuation and dirty-preserving snapshot refresh; the read-only Keys table with filtering and at most 20 problems. Three frame goldens cover General, its restart/error state and filtered Keys.
+6. **Installed and Store — landed** in `cmd/husk`: State-derived Installed rows with unload confirmation and asynchronous removal, and the cached read-only catalog with surface/text filters, details, command instructions, occupancy markers and diagnostics. Three frame goldens cover an empty catalog, a fixture catalog and Installed with the removal confirmation.
 
 The specs this one amends, each with the minimal consistent edit: [Services](services.md) ("The theme selector" becomes the Theme tab's contract; the toast rule names the center), [State](state.md) (`overlays.settings_center` replaces `overlays.theme_selector`; `husk.pods` gains `dir`), [Keybindings](keybindings.md) (`husk.settings.open` joins the host actions; the context filter row), [Store](store.md) (the `catalog` document in the document list and the directory tree), [Protocol](protocol.md) (`plugin.remove` admits the host; `plugin.list` gains `dir` in minor 2.3), [Pods](pods.md) (the same, and the seams), [Workbench chrome](chrome.md) (the theme pill's click runs `husk.settings.open` with `tab: theme`), [Bundles](bundles.md) (`themes` and `catalog` join the document names a bundle may ship).
 
@@ -377,6 +382,7 @@ The specs this one amends, each with the minimal consistent edit: [Services](ser
 ## Spec gaps resolved
 
 - A duration default that is not a whole millisecond is displayed as integer milliseconds, truncated toward zero, with `(ms)` after its label. Saves still send an integer number of milliseconds.
+- A catalog entry whose id is present in the Pod set is `installed` even when that Pod is `failed` or `exited`. Remove then add is the relaunch path; process liveness is not installation state.
 
 ## Open questions
 
