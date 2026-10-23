@@ -154,11 +154,11 @@ Shared rules:
 |---|---|
 | `husk-bundle.json` | `{"manifest_version": 1, "id": "<name>", "name": "<name>", "description": "", "version": "0.1.0"}`, indented. |
 | `config.json` | A HuJSON file whose every entry is a comment: the layer order, where the user's files live, and one commented-out `plugins.<id>.<key>` example setting. It must parse to `{}`. |
-| `keymap.json` | `{"version": 1, "bind": [{"key": "f2", "action": "guide.toggle"}]}`, with a comment showing the `builtin` switch. |
+| `keymap.json` | `{"version": 1, "bind": [{"key": "f2", "action": "guide.toggle", "hint": "guide"}]}`, with a comment showing the `builtin` switch. |
 | `README.md` | The layout above in three paragraphs, how to run it (`husk --bundle .`) and how a plugin folder may be a symlink. |
 | `plugins/hello/husk-plugin.json` | The example plugin's manifest (below). |
 | `plugins/hello/hello` | The example plugin's executable (below), mode 0755. |
-| `plugins/guide/...` | The guide plugin (specified separately), copied from the `fs.FS` the package `plugins/guide` exports from its `embed.go`. `guide-plugin.md` owns the plugin's contents; that package only embeds them. |
+| `plugins/guide/...` | The guide plugin's non-executable files, copied byte for byte from `plugins/guide.Files` in `embed.go`, plus a mode 0755 `guide` POSIX launcher: `exec "$HUSK_BIN_PATH" __guide-plugin`. The hidden local verb runs the guide carried by the Husk binary, so no build step or Go toolchain is needed. `guide-plugin.md` owns the plugin's contents. |
 
 The example plugin is deliberately the smallest valid v2 plugin: a POSIX shell script, no build step, no language runtime beyond `/bin/sh`, so the bundle runs the moment it is written. Its manifest:
 
@@ -184,10 +184,11 @@ Its executable:
 # The example plugin "husk create" wrote. It draws two lines into the surface
 # it occupies and then waits for Husk to close its stdin.
 "$HUSK_BIN_PATH" rpc surface.update '{"surface":"main-stage","lines":["Hello from <name>","","Edit plugins/hello to make this plugin yours."]}' >/dev/null
-exec cat >/dev/null
+# Keep the protocol stdout pipe open while cat drains host notifications.
+exec cat 3>&1 >/dev/null
 ```
 
-What it exercises, on purpose: `HUSK_BIN_PATH` ([Instances](instances.md), "Plugin and shell environment") so the plugin calls the CLI of the same build; `surface.update` through `husk rpc`, attributed to the plugin by its token; and the stdio contract, since `cat` drains stdin until Husk closes it at shutdown and the plugin exits 0 (`exited`, no toast). It declares no actions and no settings, so Husk never waits on a reply from it and the bundle's `config.json` can start empty. The `protocol` field is the running build's major, written by `husk create`, not a constant in a template.
+What it exercises, on purpose: `HUSK_BIN_PATH` ([Instances](instances.md), "Plugin and shell environment") so the plugin calls the CLI of the same build; `surface.update` through `husk rpc`, attributed to the plugin by its token; and the stdio contract, since `cat` drains stdin until Husk closes it at shutdown and the plugin exits 0 (`exited`, no toast). Descriptor 3 preserves the protocol stdout pipe while cat's normal output is discarded; closing every reference to that pipe before process exit would make the supervisor report a broken channel. It declares no actions and no settings, so Husk never waits on a reply from it and the bundle's `config.json` can start empty. The `protocol` field is the running build's major, written by `husk create`, not a constant in a template.
 
 **`husk create tui <name> [<module>]`** writes everything `create bundle` writes, under `bundle/`, plus:
 
@@ -267,10 +268,10 @@ The scaffolded application therefore has exactly two configuration inputs, both 
 - **Landed — `internal/pods/manifest`:** `Loader.LoadDir` follows symlinked directories while preserving the existing manifest escape boundary.
 - **Landed — `internal/services/settings`:** `Builtins` registers private restart-only `husk.bundle`; `Service.Rebuild` uses only user/instance values and reports `bundle_setting_ignored` for distribution/profile declarations.
 - **Landed — `internal/bundle`:** standard-library-only `Load`, `Bundle`, `Manifest`, `Warning` and coded `Error`, with a filtered config filesystem.
-- `internal/cli/createcmd`: new command package; `husk create bundle` lands now, `husk create tui` with the public-package move.
+- **Landed — `internal/cli/createcmd`:** `Command` writes `husk create bundle` from embedded templates and `guide.Files`, with strict names, empty-target checks, explicit modes and lexical JSON/table output. `cmd/husk` registers it alongside the hidden local `__guide-plugin` runner. `husk create tui` remains unregistered until the public-package move.
 - `plugins/`: the example plugin that `husk create` writes is a template inside `createcmd`, not a directory in this repository. New: `plugins/guide/embed.go`, a small package that embeds the guide plugin's files and exports them as an `fs.FS` for `createcmd`; the host still loads no plugin by default.
 - **Landed loading tests:** `TestLoadFatalCodesAndMessages`, `TestManifestFieldTypesAndLimits`, `TestManifestSizeBoundaryAndUnknownFields`, `TestBundleDirectorySymlink`, `TestUnreadableDirectoryAndManifest`, `TestPluginWarningsAndConfigVisibility`, `TestImportsStandardLibraryOnly`; `TestReadBootstrapPrecedencePathsAndNoWrites`, `TestBundleDistributionPrecedenceProfilesOriginsAndReload`, `TestBundleTypeClashDoesNotFreezeReloadOrLoseLastGood`; `TestBundleSettingAllowedLayersIgnoredWarningsAndRestart`, `TestBundleSettingInstanceOverridesUserAndNullClears`; `TestLoadDirFollowsSymlinkedPluginAndKeepsEscapeBoundary`; `TestBundleFatalErrorsBeforeAnyDirectoryCreation`, `TestBundlePrecedenceActuallyLaunchesSelectedPlugins`, `TestBundlePluginRefusalAndExplicitPriority`, `TestBundleKeymapReachesKeysList`, `TestBundleWithoutPluginsLogsWarningWithoutRefusal`; `TestBundleFlagInstanceDocument`.
-- Remaining scaffold tests: `husk create bundle` output matches a golden tree and the written bundle loads under `--bundle`; `husk create` refuses a non-empty directory and writes nothing; the example plugin's `protocol` equals the running major.
+- **Landed scaffold tests:** `TestNamesAndArgumentsBeforeFilesystem`, `TestTargetStatesWriteNothingOnRefusal`, `TestWriteFailureAtEveryFileLeavesEarlierFiles`, `TestGoldenBundleTreeModesAndOutput`, `TestHelloKeepsProtocolPipeOpenUntilStdinCloses`, `TestRealGuideFilesCopiedByteForByte`, `TestImportsStayWithinAllowList`, `TestCreateLocalFlagsUsageAndHiddenHelp`, `TestHiddenGuideVerbStartsWatchAndSpeaksOnPipes` and `TestCreatedBundleLoadsBothPluginsAndDistributionKeymap`.
 
 ## Decisions made here
 
