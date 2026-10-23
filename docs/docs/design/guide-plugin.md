@@ -18,7 +18,7 @@ It exists for people building on the framework. A developer wiring a first plugi
 It is **not**:
 
 - loaded by default. `husk` starts with no plugins ([Pods](pods.md)); the guide is loaded like any other, by `--plugin-dir` or `--plugin`, and the project scaffolds (specified separately) include it in what they generate.
-- part of the host's UI or services. It is a process speaking the protocol, with a manifest, a surface claim and one action. The only host wiring is the hidden local `__guide-plugin` command used by generated bundles; it runs the bundled plugin body and does not load it into an instance by default.
+- part of the host's UI or services. It is a process speaking the protocol, with a manifest, a surface claim and one action. The only code outside `plugins/guide` that names it is the create command package, which copies its files into scaffolds and provides the hidden local `__guide-plugin` command their launcher runs, and that command's registration in `cmd/husk`. Neither loads the guide into an instance.
 - a replacement for the host's slot explorer (`husk.hotspots.toggle_stage`, `husk.hotspots.badges`). The explorer is host UI that describes the fixed surfaces; the guide shows what is true now, through the same wire a third-party plugin would use. In the dogfooding sense it is the proof that a plugin can draw a tour or a debugging overlay without host privileges.
 - interactive. v1 has one action, `guide.toggle`, and one view (callouts plus legend). It takes no keys, no mouse and no focus.
 
