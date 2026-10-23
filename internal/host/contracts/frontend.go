@@ -33,6 +33,11 @@ type Frontend interface {
 	// Palette returns the active theme palette. Any goroutine.
 	Palette() protocol.Palette
 
+	// Catalog returns a detached view of the optional catalog cache. Any
+	// goroutine; never performs Store I/O. Warmed off-loop after startup and
+	// every services.reloaded event, then published on the loop.
+	Catalog() CatalogResult
+
 	// Resolve resolves the typed key sequence against the effective keymap.
 	// It is pure and lock-free. Any goroutine.
 	Resolve(ctx KeyContext, keys []string) KeyResolution

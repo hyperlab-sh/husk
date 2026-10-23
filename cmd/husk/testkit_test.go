@@ -159,6 +159,7 @@ type invoked struct {
 
 func (f *fakeFE) Snapshot() *state.Snapshot                { return f.Snap }
 func (f *fakeFE) StartupReports() []contracts.ReloadReport { return nil }
+func (f *fakeFE) Catalog() contracts.CatalogResult         { return contracts.CatalogResult{} }
 
 func (f *fakeFE) Hints(ctx contracts.KeyContext) []contracts.KeyHint {
 	if f.HintsFn == nil {

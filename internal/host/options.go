@@ -7,6 +7,7 @@ import (
 
 	"github.com/hyperlab-sh/husk/internal/pods"
 	"github.com/hyperlab-sh/husk/internal/pods/server"
+	"github.com/hyperlab-sh/husk/internal/services/catalog"
 	"github.com/hyperlab-sh/husk/internal/services/secrets"
 	"github.com/hyperlab-sh/husk/internal/substrate/store"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
@@ -23,14 +24,15 @@ type options struct {
 	modifiers func() protocol.ModifierState
 
 	// Test seams.
-	newServer  func(server.Config) server.Server
-	afterStage func(stage string) error
-	onClose    func(step string)
-	loopWait   time.Duration // overrides the package loopWait when set
-	afterFail  func(*Root)   // called with the partial root after New's cleanup
-	onSpawn    func(accepted bool)
-	keyring    store.Keyring // replaces the OS keyring under Store when set
-	workerWait time.Duration // overrides storeCloseTimeout for the worker wait when set
+	catalogReader catalog.Reader
+	newServer     func(server.Config) server.Server
+	afterStage    func(stage string) error
+	onClose       func(step string)
+	loopWait      time.Duration // overrides the package loopWait when set
+	afterFail     func(*Root)   // called with the partial root after New's cleanup
+	onSpawn       func(accepted bool)
+	keyring       store.Keyring // replaces the OS keyring under Store when set
+	workerWait    time.Duration // overrides storeCloseTimeout for the worker wait when set
 }
 
 func (o *options) workerWaitOr(d time.Duration) time.Duration {
