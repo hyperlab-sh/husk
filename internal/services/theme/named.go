@@ -34,7 +34,7 @@ func resolveThemes(layers []store.LayerDoc, problems *[]c.Problem) map[string]de
 				issue("reserved_theme_name", "theme "+name+": built-in name is reserved")
 				continue
 			}
-			roles, reason := themeRoles(name, themes[name])
+			roles, reason := themeRoles(l, name, themes[name])
 			if reason != "" {
 				issue("invalid_theme", "theme "+name+": "+reason)
 				continue
@@ -45,7 +45,7 @@ func resolveThemes(layers []store.LayerDoc, problems *[]c.Problem) map[string]de
 	return out
 }
 
-func themeRoles(name string, raw any) (map[string]string, string) {
+func themeRoles(l store.LayerDoc, name string, raw any) (map[string]string, string) {
 	if !themeName.MatchString(name) {
 		return nil, "invalid name"
 	}
@@ -60,7 +60,7 @@ func themeRoles(name string, raw any) (map[string]string, string) {
 	roles := map[string]string{}
 	known := palette.Roles(palette.Default())
 	// OrderedMembers gives deterministic diagnostics for programmatic maps too.
-	for _, role := range (store.LayerDoc{}).OrderedMembers("", values) {
+	for _, role := range l.OrderedMembers("/themes/"+name+"/palette", values) {
 		hex, ok := values[role].(string)
 		if _, exists := known[role]; !exists || role == "name" {
 			return nil, "unknown role " + role
