@@ -158,11 +158,18 @@ func (s *Store) Resolve(name DocName, profile string) (Resolved, error)
 func (s *Store) Layers(name DocName, profile string) ([]LayerDoc, error)
 
 type LayerDoc struct {
-	Layer Layer
-	File  string // config-relative, slash-separated; distribution relative to its root;
-	             // "" for a layer with no single file (flag-folded instance)
-	Doc   Doc
+	Layer       Layer
+	File        string              // config-relative, slash-separated; distribution relative to its root;
+	                                // "" for a layer with no single file (flag-folded instance)
+	Doc         Doc
+	MemberOrder map[string][]string // object keys in file order, keyed by JSON pointer;
+	                                // detached from Store's cache
 }
+
+// OrderedMembers returns the keys of object (the member at pointer) in file
+// order, so a bounded reader keeps the first declarations; keys without order
+// metadata (a programmatic layer) follow in lexical order.
+func (l LayerDoc) OrderedMembers(pointer string, object Doc) []string
 
 // Profiles lists the profile names that have a directory in the user or
 // distribution layer. The Profile service validates the active name against it.
@@ -201,11 +208,6 @@ func (s *Store) Declare(name DocName, source string, d Doc)
 func (s *Store) Undeclare(source string)
 func (s *Store) Declared(name DocName) map[string]Doc // source -> doc
 ```
-
-`LayerDoc.MemberOrder` preserves object member order by JSON pointer so bounded
-readers can keep the first declarations in file order. `OrderedMembers` completes
-missing metadata in lexical order for programmatic documents; returned metadata
-is detached from Store's cache.
 
 The `catalog` document reader and its off-loop frontend cache are landed. The
 built-in catalog is empty and catalog diagnostics do not affect reload reports.
