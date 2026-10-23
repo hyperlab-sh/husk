@@ -57,6 +57,8 @@ type Command struct {
 	Noun string
 	// Usage is the synopsis shown in the usage text.
 	Usage string
+	// Hidden omits an internal command from the general help listing.
+	Hidden bool
 	// Run executes the command and returns nil or an error, normally an
 	// *Error; any other error is reported as a transport failure.
 	Run func(ctx context.Context, args []string, o Options) error

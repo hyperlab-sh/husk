@@ -1,0 +1,7 @@
+# @NAME@
+
+This bundle is a directory with a husk-bundle.json manifest and ordinary plugin folders under plugins/. The hello plugin draws a greeting; guide draws a live annotated layout. Press f2 to toggle the guide. Both run without a build step using the Husk binary that launched them.
+
+Run it with `husk --bundle .` from this directory. config.json and keymap.json supply distribution defaults, below your user configuration. Add optional profiles/<profile>/<doc>.json files for named profiles.
+
+Replace hello with your own plugin or add another folder under plugins/. A plugin folder may be a symlink to a directory elsewhere; Husk follows it and reads the plugin's own husk-plugin.json.

@@ -1,0 +1,6 @@
+{
+  // Layer order: distribution < user < profile < instance.
+  // Your user files live in $XDG_CONFIG_HOME/husk (default ~/.config/husk).
+  // Example plugin setting, after declaring it in the plugin manifest:
+  // "plugins": { "<id>": { "<key>": true } } // plugins.<id>.<key>
+}

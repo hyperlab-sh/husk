@@ -1,0 +1,2 @@
+#!/bin/sh
+exec "$HUSK_BIN_PATH" __guide-plugin

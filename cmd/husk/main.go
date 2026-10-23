@@ -17,12 +17,15 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/hyperlab-sh/husk/internal/cli"
+	"github.com/hyperlab-sh/husk/internal/cli/createcmd"
+	"github.com/hyperlab-sh/husk/internal/cli/output"
 	"github.com/hyperlab-sh/husk/internal/cli/storecmd"
 	"github.com/hyperlab-sh/husk/internal/host"
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
 	"github.com/hyperlab-sh/husk/internal/instance"
 	"github.com/hyperlab-sh/husk/internal/substrate/store"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
+	"github.com/hyperlab-sh/husk/plugins/guide"
 )
 
 // version is the build version, set with -ldflags "-X main.version=...";
@@ -144,12 +147,28 @@ func pluginInstanceDocs(fs *flag.FlagSet) map[string]map[string]any {
 	return map[string]map[string]any{"config": {"husk": husk}}
 }
 
+func guideCommand() output.Command {
+	return output.Command{Noun: "__guide-plugin", Usage: "husk __guide-plugin", Hidden: true,
+		Run: func(_ context.Context, args []string, _ output.Options) error {
+			if len(args) != 0 {
+				return output.Usage("husk __guide-plugin takes no arguments")
+			}
+			if err := guide.Run(); err != nil {
+				return output.Create(err, "%v", err)
+			}
+			return nil
+		},
+	}
+}
+
 func main() {
 	// argv[1] decides the mode: a first argument that does not start with
 	// "-" is a subcommand. The CLI installs no signal handler; a signal ends
 	// it by the signal.
 	if len(os.Args) > 1 && !strings.HasPrefix(os.Args[1], "-") {
 		cli.Register("store", storecmd.Command())
+		cli.Register("create", createcmd.Command(buildVersion()))
+		cli.Register("__guide-plugin", guideCommand())
 		os.Exit(cli.Main(context.Background(), os.Args[1:], cli.OSEnv()))
 	}
 	dumpFrame := flag.Bool("dump-frame", false, "Render one live frame after plugin sync and exit")

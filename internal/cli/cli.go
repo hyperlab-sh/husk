@@ -69,7 +69,8 @@ func isTerminal(f *os.File) bool { return term.IsTerminal(int(f.Fd())) }
 // command is one subcommand of the table.
 type command struct {
 	// usage is the one-line synopsis shown in the usage text.
-	usage string
+	usage  string
+	hidden bool
 	// timeout is the default --timeout; zero means none.
 	timeout time.Duration
 	// local commands talk to no single instance: they reject --instance,
@@ -141,8 +142,9 @@ func table() map[string]command {
 	for noun, c := range registered {
 		run := c.Run
 		t[noun] = command{
-			usage: c.Usage,
-			local: true,
+			usage:  c.Usage,
+			hidden: c.Hidden,
+			local:  true,
 			run: func(ctx context.Context, inv *Invocation, args []string) error {
 				return run(ctx, args, inv.out)
 			},
@@ -411,8 +413,10 @@ func commandUsage(w io.Writer, cmd command, _ string) {
 
 func usage(w io.Writer, cmds map[string]command) {
 	nouns := make([]string, 0, len(cmds))
-	for n := range cmds {
-		nouns = append(nouns, n)
+	for n, cmd := range cmds {
+		if !cmd.hidden {
+			nouns = append(nouns, n)
+		}
 	}
 	sort.Strings(nouns)
 	var b strings.Builder
