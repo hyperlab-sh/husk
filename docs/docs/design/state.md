@@ -454,7 +454,7 @@ occupant with `capture: true` sets the entry, `capture: false` removes it, and
 an absent field changes nothing ([Protocol](protocol.md) 2.1). The engine
 removes the entry whenever the surface's occupant changes, releases or closes
 the surface, or its Pod leaves `live`, so a dead or departed plugin never
-leaves a surface capturing (D93). An unoccupied surface has no entry. It
+leaves a surface capturing (D93). An unoccupied surface has no entry, and the map is always present in the slice, `{}` when empty. It
 also records the cross-plugin contribution order itself, since the
 declarations carry no sequence: each slot's combined list follows a
 per-slot sequence of `(plugin, id)` pairs in the order the engine first
