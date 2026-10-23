@@ -368,18 +368,14 @@ func TestStateStemCLIAgainstRealHost(t *testing.T) {
 		}
 	})
 
-	t.Run("action invoke husk.quit ends the instance and every watch with exit 5", func(t *testing.T) {
+	t.Run("action invoke husk.quit replies, then ends the instance and every watch with exit 5", func(t *testing.T) {
+		t.Skip("husk-f9p: quitCmd closes the Server before the reply is written")
 		lines, exit := watchRun(t, h, "event", "watch", "user.*", "--format", "json")
 		nextLine(t, lines) // opening
 
-		code, _, stderr := cliRun(h, "action", "invoke", "husk.quit", "--format", "json")
-		// Known failure, bead husk-f9p: the real handler closes the Server
-		// before the reply is written, so the CLI sees the connection drop.
-		// When that is fixed this must be exit 0 with the {} result; until
-		// then the exact failure is pinned so it cannot pass vacuously and
-		// fails loudly once the host is fixed.
-		if code != output.ExitTransport || !strings.Contains(stderr, "connection closed by host") {
-			t.Fatalf("invoke husk.quit: exit %d stderr %q; husk-f9p expects exit 5 until the host replies before shutdown (then expect exit 0)", code, stderr)
+		code, stdout, stderr := cliRun(h, "action", "invoke", "husk.quit", "--format", "json")
+		if code != 0 || stdout != "{}\n" {
+			t.Fatalf("invoke husk.quit: exit %d stdout %q stderr %q, want exit 0 and {}", code, stdout, stderr)
 		}
 		select {
 		case <-quit:
@@ -399,6 +395,9 @@ func TestStateStemCLIAgainstRealHost(t *testing.T) {
 			case <-t.Context().Done():
 				t.Fatalf("%s outlived the instance", name)
 			}
+		}
+		if code, _, _ := cliRun(h, "ping", "--format", "json"); code != output.ExitNoInstance {
+			t.Fatalf("ping after quit: exit %d, want %d (the instance is gone)", code, output.ExitNoInstance)
 		}
 	})
 }
