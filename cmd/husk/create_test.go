@@ -71,7 +71,9 @@ func TestCreateTUIStaysUnregisteredUntilUIScaffold(t *testing.T) {
 				}
 				const usage = "usage: husk create bundle <name>"
 				if format == "json" {
-					var reply struct{ Error struct{ Code, Message string } }
+					var reply struct {
+						Error struct{ Code, Message string }
+					}
 					if err := json.Unmarshal(stderr.Bytes(), &reply); err != nil {
 						t.Fatalf("stderr is not a JSON error: %s: %v", &stderr, err)
 					}
