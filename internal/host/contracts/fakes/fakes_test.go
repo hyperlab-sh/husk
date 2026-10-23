@@ -157,7 +157,7 @@ func TestPortsRecordCallerAndReturn(t *testing.T) {
 		t.Fatal(rev, err)
 	}
 	st.Err = denied
-	if contracts.CodeOf(st.Clear(ctx, plugin, "a.state")) != "denied" {
+	if contracts.CodeOf(st.Clear(ctx, plugin, "a.state", true)) != "denied" {
 		t.Fatal("clear")
 	}
 	cl := fakes.NewCalls(rec)
@@ -209,9 +209,13 @@ func TestPortsRecordCallerAndReturn(t *testing.T) {
 		t.Fatal(r)
 	}
 	hk := fakes.NewHooks(rec)
-	hk.Results = []contracts.HookResult{{Plugin: "p", Err: contracts.NewError(protocol.CodeTimeout, "t", nil)}}
-	if r, _ := hk.HookCall(ctx, cli, "a.h", nil); contracts.CodeOf(r[0].Err) != "timeout" {
-		t.Fatal(r)
+	hk.Outcome = contracts.HookOutcome{Kind: "collect", Results: []contracts.HookResult{{Plugin: "p", Err: contracts.NewError(protocol.CodeTimeout, "t", nil)}}}
+	if o, _ := hk.HookCall(ctx, plugin, "a.h", nil); contracts.CodeOf(o.Results[0].Err) != "timeout" {
+		t.Fatal(o)
+	}
+	hk.Infos = []contracts.HookInfo{{ID: "a.h"}}
+	if i, _ := hk.HookList(ctx, cli); i[0].ID != "a.h" {
+		t.Fatal(i)
 	}
 	pl := fakes.NewPlugins(rec)
 	pl.Infos, pl.Path = []contracts.PluginInfo{{ID: "a", Status: contracts.PodLive}}, "/l"

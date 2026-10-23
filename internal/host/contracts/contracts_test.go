@@ -143,6 +143,16 @@ func TestHomesNameRealPortMethodsAndKinds(t *testing.T) {
 	}
 }
 
+func TestHookMethodCallers(t *testing.T) {
+	homes := contracts.MethodHomes()
+	if k := homes[protocol.MethodHookCall].Kinds; len(k) != 1 || k[0] != contracts.CallerPlugin {
+		t.Errorf("hook.call kinds = %v, want [Plugin]", k)
+	}
+	if k := homes[protocol.MethodHookList].Kinds; len(k) != 2 || k[0] != contracts.CallerCLI || k[1] != contracts.CallerPlugin {
+		t.Errorf("hook.list kinds = %v, want [CLI Plugin]", k)
+	}
+}
+
 func TestCLIOnlyMethodsListOnlyCLI(t *testing.T) {
 	homes := contracts.MethodHomes()
 	for _, m := range []string{

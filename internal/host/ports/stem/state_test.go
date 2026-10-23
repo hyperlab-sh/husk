@@ -392,7 +392,7 @@ func TestStatePortWriteErrors(t *testing.T) {
 				_, err := w.Patch(ctxBG, callerAtlas, "atlas.state", json.RawMessage(`{}`), 0)
 				return err
 			},
-			func() error { return w.Clear(ctxBG, callerCLI, "atlas.state") },
+			func() error { return w.Clear(ctxBG, callerCLI, "atlas.state", false) },
 		} {
 			wantPortCode(t, call(), protocol.CodeUnavailable)
 		}
@@ -591,7 +591,7 @@ func TestStatePortClear(t *testing.T) {
 		if _, err := w.Set(ctxBG, callerAtlas, "atlas.state", json.RawMessage(`{"dirty":1}`)); err != nil {
 			t.Fatal(err)
 		}
-		if err := w.Clear(ctxBG, callerCLI, "atlas.state"); err != nil {
+		if err := w.Clear(ctxBG, callerCLI, "atlas.state", false); err != nil {
 			t.Fatal(err)
 		}
 		if fmt.Sprint(cl.deletedNS()) != "[atlas.state]" {
@@ -607,25 +607,25 @@ func TestStatePortClear(t *testing.T) {
 	})
 	t.Run("stem callers are denied, clear is the user's CLI action", func(t *testing.T) {
 		w, _, _ := newPort(t, StatePortOptions{}, specAtlas)
-		if err := w.Clear(ctxBG, callerStem, "atlas.state"); contracts.CodeOf(err) != string(protocol.CodeDenied) {
+		if err := w.Clear(ctxBG, callerStem, "atlas.state", false); contracts.CodeOf(err) != string(protocol.CodeDenied) {
 			t.Fatalf("code = %v", err)
 		}
 	})
 	t.Run("plugin callers are denied", func(t *testing.T) {
 		w, _, _ := newPort(t, StatePortOptions{}, specAtlas)
-		if err := w.Clear(ctxBG, callerAtlas, "atlas.state"); contracts.CodeOf(err) != string(protocol.CodeDenied) {
+		if err := w.Clear(ctxBG, callerAtlas, "atlas.state", false); contracts.CodeOf(err) != string(protocol.CodeDenied) {
 			t.Fatalf("code = %v", err)
 		}
 	})
 	t.Run("cleaner failure is internal", func(t *testing.T) {
 		cl := &cleaner{err: errors.New("disk on fire")}
 		w, _, _ := newPort(t, StatePortOptions{Cleaner: cl}, specAtlas)
-		err := w.Clear(ctxBG, callerCLI, "atlas.state")
+		err := w.Clear(ctxBG, callerCLI, "atlas.state", false)
 		wantPortCode(t, err, protocol.CodeInternal)
 	})
 	t.Run("unknown namespace is not_found", func(t *testing.T) {
 		w, _, _ := newPort(t, StatePortOptions{}, specAtlas)
-		err := w.Clear(ctxBG, callerCLI, "nope.state")
+		err := w.Clear(ctxBG, callerCLI, "nope.state", false)
 		wantPortCode(t, err, protocol.CodeNotFound)
 	})
 }

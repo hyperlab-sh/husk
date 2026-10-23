@@ -39,7 +39,8 @@ func home(port, method string, kinds []CallerKind) MethodHome {
 // Reading of protocol.md: "plugin or CLI" is CLI and Plugin; "CLI to Husk"
 // is CLI only; state.set and state.patch are plugin only (a bare CLI is
 // denied, state.md); action.invoke also accepts Stem (Input and the palette
-// act for the user); settings.list is CLI only (plugins use settings.get
+// act for the user); hook.call is plugin only (the CLI is not at any
+// owner's point, hooks.md "Who fires a hook"); settings.list is CLI only (plugins use settings.get
 // on their own keys).
 func MethodHomes() map[string]MethodHome {
 	return map[string]MethodHome{
@@ -54,7 +55,8 @@ func MethodHomes() map[string]MethodHome {
 		protocol.MethodEventWatch:   home("EventPort", "Watch", anyCaller),
 		protocol.MethodEventDeliver: {Port: Outbound},
 
-		protocol.MethodHookCall: home("HookPort", "HookCall", anyCaller),
+		protocol.MethodHookCall: home("HookPort", "HookCall", pluginOnly),
+		protocol.MethodHookList: home("HookPort", "HookList", anyCaller),
 
 		protocol.MethodStateGet:      home("StatePort", "Get", anyCaller),
 		protocol.MethodStateSet:      home("StatePort", "Set", pluginOnly),

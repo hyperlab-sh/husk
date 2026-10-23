@@ -263,8 +263,8 @@ func (f *State) Push(m protocol.Message) int { return f.w.push(m) }
 func (f *State) Watching() int { return f.w.count() }
 
 // Clear implements contracts.StatePort.
-func (f *State) Clear(_ context.Context, c contracts.Caller, namespace string) error {
-	f.RecordCaller("State.Clear", c, namespace)
+func (f *State) Clear(_ context.Context, c contracts.Caller, namespace string, force bool) error {
+	f.RecordCaller("State.Clear", c, namespace, force)
 	return f.Err
 }
 
@@ -749,7 +749,9 @@ func (f *Events) Watching() int { return f.w.count() }
 // Hooks fakes contracts.HookPort.
 type Hooks struct {
 	callLog
-	Results []contracts.HookResult
+	// Outcome is what HookCall returns; Infos is what HookList returns.
+	Outcome contracts.HookOutcome
+	Infos   []contracts.HookInfo
 	Err     error
 }
 
@@ -757,9 +759,15 @@ type Hooks struct {
 func NewHooks(rec *Recorder) *Hooks { return &Hooks{callLog: callLog{r: orNew(rec)}} }
 
 // HookCall implements contracts.HookPort.
-func (f *Hooks) HookCall(_ context.Context, c contracts.Caller, hook string, _ json.RawMessage) ([]contracts.HookResult, error) {
+func (f *Hooks) HookCall(_ context.Context, c contracts.Caller, hook string, _ json.RawMessage) (contracts.HookOutcome, error) {
 	f.RecordCaller("Hooks.HookCall", c, hook)
-	return f.Results, f.Err
+	return f.Outcome, f.Err
+}
+
+// HookList implements contracts.HookPort.
+func (f *Hooks) HookList(_ context.Context, c contracts.Caller) ([]contracts.HookInfo, error) {
+	f.RecordCaller("Hooks.HookList", c)
+	return f.Infos, f.Err
 }
 
 // Plugins fakes contracts.PluginPort.
