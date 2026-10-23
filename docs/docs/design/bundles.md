@@ -138,7 +138,7 @@ The fatal codes are printed as `husk: bundle <dir>: <message>` on stderr; the ex
 | Synopsis | Writes | Status |
 |---|---|---|
 | `husk create bundle <name>` | `<name>/`, the bundle layout with one example plugin, the guide plugin and a README | lands with this spec |
-| `husk create tui <name> [<module>]` | `<name>/`, a Go module that embeds Husk, with a `bundle/` in the same layout | specified here; the required host packages are now public under `pkg/`, but the scaffold implementation is still a separate follow-up. The verb is not registered yet. |
+| `husk create tui <name> [<module>]` | `<name>/`, a Go module that embeds Husk, with a `bundle/` in the same layout | specified here; the verb is not registered yet. It is gated on two things: the workbench UI leaving `cmd/husk`'s `package main` for an importable package, and the scaffold implementation that follows it. The public-package move alone does not satisfy it: it made the host packages public under `pkg/`, but the Bubble Tea model is still in `package main`. |
 
 Shared rules:
 
@@ -195,7 +195,7 @@ What it exercises, on purpose: `HUSK_BIN_PATH` ([Instances](instances.md), "Plug
 | File | Content |
 |---|---|
 | `go.mod` | `module <module>` (the optional second argument, default `<name>`), the Go version of the running build, and `require github.com/hyperlab-sh/husk <host_version>`. When the build carries no version (`host_version` is `""`), the `require` line is omitted and the README says to run `go get github.com/hyperlab-sh/husk@latest`. |
-| `main.go` | Embeds Husk as a library. It declares `//go:embed bundle/*.json bundle/profiles` as the application's distribution layer, so the binary carries its defaults even when no bundle directory is beside it; takes `--bundle <dir>` with the default `bundle/` next to the executable when that directory exists (`os.Executable`), so the plugins of the scaffolded bundle load without flags from a build directory; and runs the Bubble Tea program. The identifiers it imports are the ones the public-package move exports; this spec fixes the behaviour, and a test pins the generated file against a golden once the move lands. |
+| `main.go` | Embeds Husk as a library. It declares `//go:embed bundle/*.json bundle/profiles` as the application's distribution layer, so the binary carries its defaults even when no bundle directory is beside it; takes `--bundle <dir>` with the default `bundle/` next to the executable when that directory exists (`os.Executable`), so the plugins of the scaffolded bundle load without flags from a build directory; and runs the Bubble Tea program. Running the workbench needs the UI that lives in `cmd/husk`'s `package main` today, which no Go module can import, so the identifiers `main.go` imports are fixed by the UI's move into an importable package, not by the public-package move. This spec fixes the behaviour; the scaffold implementation that follows the UI move registers the verb and adds a test that pins the generated file against a golden. |
 | `README.md` | How to build and run (`go build && ./<name>`), where the plugins and config live, and that `bundle/` is the format `husk --bundle` loads, so the same directory runs under a plain `husk` too. |
 
 The scaffolded application therefore has exactly two configuration inputs, both already specified: an embedded distribution layer and a bundle. Its `bundle/` is byte-for-byte what `husk create bundle` writes, so a developer can move between "my own binary" and "plain husk with a bundle" without changing a file. `husk create tui` adds no settings schema (`dist.*`) and no host action; those are the application's to add in `main.go`.
@@ -232,7 +232,7 @@ The scaffolded application therefore has exactly two configuration inputs, both 
 | `husk create` with an invalid name | create command | Nothing written | `husk: invalid name "My App": use [a-z0-9][a-z0-9._-]{0,63}`, exit 2 |
 | `husk create` target exists and is not empty | create command | Nothing written | `husk: <dir> exists and is not empty`, exit 1, code `create` |
 | `husk create` write fails midway | create command | Stops at the failed file; written files stay | `husk: write <file>: <err>`, exit 1, code `create` |
-| `husk create tui` before the public-package move | CLI | Verb unknown | Usage on stderr, exit 2 |
+| `husk create tui` before its scaffold implementation lands | CLI | Verb unknown | Usage on stderr, exit 2 |
 
 ### Limits
 
@@ -252,7 +252,7 @@ The scaffolded application therefore has exactly two configuration inputs, both 
 | `husk --bundle <dir>` | start mode | this spec; the flag folds into `husk.bundle` in the instance layer |
 | `husk settings get husk.bundle` | no | [Services](services.md): the value in force, and `restart_required` when a layer now says otherwise |
 | `husk create bundle <name>` | yes | this spec |
-| `husk create tui <name>` | yes | this spec, after the public-package move |
+| `husk create tui <name>` | yes | this spec, once the UI leaves `package main` and the scaffold implementation lands |
 
 ### Dependency directions
 
@@ -268,7 +268,7 @@ The scaffolded application therefore has exactly two configuration inputs, both 
 - **Landed — `pkg/pods/manifest`:** `Loader.LoadDir` follows symlinked directories while preserving the existing manifest escape boundary.
 - **Landed — `pkg/services/settings`:** `Builtins` registers private restart-only `husk.bundle`; `Service.Rebuild` uses only user/instance values and reports `bundle_setting_ignored` for distribution/profile declarations.
 - **Landed — `pkg/bundle`:** standard-library-only `Load`, `Bundle`, `Manifest`, `Warning` and coded `Error`, with a filtered config filesystem.
-- **Landed — `pkg/cli/createcmd`:** `Command` writes `husk create bundle` from embedded templates and `guide.Files`, with strict names, empty-target checks, explicit modes and lexical JSON/table output. `cmd/husk` registers it alongside the hidden local `__guide-plugin` runner. `husk create tui` remains unregistered pending its scaffold implementation.
+- **Landed — `pkg/cli/createcmd`:** `Command` writes `husk create bundle` from embedded templates and `guide.Files`, with strict names, empty-target checks, explicit modes and lexical JSON/table output. `cmd/husk` registers it alongside the hidden local `__guide-plugin` runner. `husk create tui` remains unregistered pending the UI's move out of `package main` and its scaffold implementation.
 - `plugins/`: the example plugin that `husk create` writes is a template inside `createcmd`, not a directory in this repository. Landed with the guide plugin: `plugins/guide/embed.go` exports the guide plugin's non-executable files as the `fs.FS` `guide.Files` for `createcmd`; the host still loads no plugin by default.
 - **Landed loading tests:** `TestLoadFatalCodesAndMessages`, `TestManifestFieldTypesAndLimits`, `TestManifestSizeBoundaryAndUnknownFields`, `TestBundleDirectorySymlink`, `TestUnreadableDirectoryAndManifest`, `TestPluginWarningsAndConfigVisibility`, `TestImportsStandardLibraryOnly`; `TestReadBootstrapPrecedencePathsAndNoWrites`, `TestBundleDistributionPrecedenceProfilesOriginsAndReload`, `TestBundleTypeClashDoesNotFreezeReloadOrLoseLastGood`; `TestBundleSettingAllowedLayersIgnoredWarningsAndRestart`, `TestBundleSettingInstanceOverridesUserAndNullClears`; `TestLoadDirFollowsSymlinkedPluginAndKeepsEscapeBoundary`; `TestBundleFatalErrorsBeforeAnyDirectoryCreation`, `TestBundlePrecedenceActuallyLaunchesSelectedPlugins`, `TestBundlePluginRefusalAndExplicitPriority`, `TestBundleKeymapReachesKeysList`, `TestBundleWithoutPluginsLogsWarningWithoutRefusal`; `TestBundleFlagInstanceDocument`.
 - **Landed scaffold tests:** `TestNamesAndArgumentsBeforeFilesystem`, `TestTargetStatesWriteNothingOnRefusal`, `TestWriteFailureAtEveryFileLeavesEarlierFiles`, `TestGoldenBundleTreeModesAndOutput`, `TestHelloKeepsProtocolPipeOpenUntilStdinCloses`, `TestRealGuideFilesCopiedByteForByte`, `TestImportsStayWithinAllowList`, `TestCreateLocalFlagsUsageAndHiddenHelp`, `TestHiddenGuideVerbStartsWatchAndSpeaksOnPipes` and `TestCreatedBundleLoadsBothPluginsAndDistributionKeymap`.

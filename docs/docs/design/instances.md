@@ -333,7 +333,7 @@ The complete v1 command set. The synopsis column fixes the spelling of every sub
 | `husk store reset-secrets` | none: local, the store command package; refuses while `Survey` finds any live or unresponsive instance | [Store](store.md) | not applicable |
 | `husk create bundle <name>` | none: local, the create command package | [Bundles](bundles.md) | not applicable |
 | `husk __guide-plugin` (hidden from help) | none: local, the bundled guide runner in the create command package | [Guide plugin](guide-plugin.md) | not applicable |
-| `husk create tui <name> [<module>]` | none: local, the create command package; registration awaits the scaffold implementation | [Bundles](bundles.md) | not applicable |
+| `husk create tui <name> [<module>]` | none: local, the create command package; registration awaits the UI's move out of `package main` and the scaffold implementation | [Bundles](bundles.md) | not applicable |
 
 Rules that apply across the table:
 
