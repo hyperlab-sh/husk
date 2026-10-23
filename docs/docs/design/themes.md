@@ -180,9 +180,15 @@ What an index role does downstream:
   therefore a theme the contrast floor does not vouch for, and its table
   says so; the same holds for any user theme that uses indices, which is the
   user's choice.
-- **Frontend.** `cmd/husk` draws an index role as the ANSI basic colour
+- **Frontend.** The index map lives in the Theme Service's snapshot beside
+  the palette, never inside `theme.Palette` or `protocol.Palette`, which stay
+  comparable structs of strings. The frontend seam keeps `Palette()
+  protocol.Palette` unchanged and gains `PaletteANSI() map[string]int` (a
+  detached copy of the serving snapshot's index map, empty for a hex theme).
+  `cmd/husk` reads it to draw an index role as the ANSI basic colour
   `ansi.BasicColor(n)`, never as the hex in `palette`, so the terminal
-  renders its own colour N.
+  renders its own colour N; the popup shadow and the OSC 11 check below read
+  the same map.
 - **Popup shadow.** The shadow leaves a cell whose resolved foreground,
   background or underline colour is an ANSI basic or 256-colour indexed
   colour exactly as it is: the terminal decides what that colour looks like,
@@ -498,7 +504,7 @@ is the selection. Every chromatic role moved: Latte's accents are mid-tone.
 | `slot_background` | `#e5e7eb` | derived |
 | `border` | `#6c6f85` | subtext0 (the lightest neutral at 3:1 on elevated) |
 | `border_subtle` | `#acb0be` | surface2 |
-| `border_focused` | `#5e73e9` | adjusted from lavender `#7287fd` (2.1:1 on elevated) |
+| `border_focused` | `#5e73e9` | adjusted from lavender `#7287fd` (2.3:1 on elevated) |
 | `ink` | `#4c4f69` | text |
 | `ink_muted` | `#555870` | adjusted from subtext1 `#5c5f77` (4.1:1 on selected) |
 | `ink_subtle` | `#5d6076` | adjusted from subtext0 `#6c6f85` (3.7:1 on elevated) |
@@ -709,6 +715,11 @@ In `pkg/theme`, each named for what it pins:
 - `TestDefaultIsCharm`: `Default()` equals the `charm` entry, with `name`
   `charm`, so the frontend's fallback palette (used before the first reload)
   and the Theme Service's base agree.
+- `TestOverrideKeepsThemeSlot`: `rose-pine` with a `theme.palette.accent`
+  override still serves `slot_background` `#21202e` (the theme's value, not
+  the derived `#201e2b`); `base16` with an override keeps `slot_background`
+  `#000000` and `ansi.slot_background` `0`; a theme that sets no slot and
+  no override derives it once from the final canvas.
 - `TestIndexCanvasSlot`: a theme whose canvas is an index and which leaves
   `slot_background` unset builds `slot_background` with the canvas's index
   (same hex, same `ansi` entry), not a value derived from the xterm default.
@@ -747,10 +758,14 @@ blends a hex neighbour in the same shadow band.
 | `theme.name` default `CharmTone` ([Services](services.md), Settings) | Default `charm` |
 | `theme.list`: built-in first, then by name | The nine in document order, then by name |
 | `themes` document role values: `#RRGGBB` strings only | `#rrggbb` or an integer `0`–`15` in every layer; Theme resolves an integer to its xterm default and records it in the index map (Services, "Named themes", rule 2) |
-| `Overlay` validates `#RRGGBB` only | Unchanged: it only ever sees resolved hex values and the hex-only overrides |
+| `Overlay` validates `#RRGGBB` only, and re-derives `slot_background` from `canvas` on every call whose map lacks it | Still hex-only (it only sees resolved hex values and the hex-only overrides), but it **stops deriving `slot_background`**: today the override pass, whose map rarely names the slot, wipes a theme-set slot (`rose-pine` `#21202e` would serve `#201e2b`, `rose-pine-moon` `#2a283e` → `#2b283e`, `base16` `#000000` → a grey while `ansi` says `0`). The build derives the slot once, after the theme and the overrides, only when neither set it ([Services](services.md), build step 4) |
 | `CheckContrast`: an unparsable value is a violation | Unchanged for hex; it takes the index map and skips every pair with an index role on either side |
 | `protocol.Palette` comment: `#RRGGBB` strings | Unchanged: values stay `#rrggbb`. The `theme.get` result and `theme.changed` params gain an optional `ansi` object (role → `0`–`15`), minor 2.4; [Protocol](protocol.md) "ANSI palette roles (minor 2.4)" and the `theme_changed` row, and [Architecture](../architecture.md) "Theme", amended. The wire schema gains it in the change that serves it, generated from `pkg/protocol` |
-| `cmd/husk` draws every role from its hex | Index roles drawn as `ansi.BasicColor(n)`; the View's `BackgroundColor` (OSC 11) is set only for a hex canvas |
+| Theme Service snapshot: `gen`, `palette`, `overrides` | Gains the index map (role → `0`–`15`), built with the palette; `Wire()` stays a plain conversion of the palette |
+| `contracts.Frontend` (`internal/host/contracts/frontend.go`): `Palette() protocol.Palette` | Unchanged, plus `PaletteANSI() map[string]int`, a detached copy of the serving snapshot's index map. Any goroutine |
+| `internal/host/frontend.go`: `Root.Palette()` returns `Theme.Wire()` | Plus `Root.PaletteANSI()` returning the Theme Service's index map |
+| Theme handler (`internal/host/handlers/services/theme.go`): `themeGetResult{Palette}` | Gains `ANSI map[string]int` with `json:"ansi,omitempty"`, filled from the same snapshot as the palette; the `theme.changed` pushes (`internal/host/loop.go` at launch, `internal/host/reload_watch.go` on change) fill the params' `ansi` the same way |
+| `cmd/husk` draws every role from its hex | Reads `PaletteANSI()` with `Palette()`: index roles drawn as `ansi.BasicColor(n)`; `castShadow` skips cells with basic or indexed colours; the View's `BackgroundColor` (OSC 11) is set only when `canvas` is not in the map |
 | `internal/compose` `castShadow` blends every cell's colours | Leaves a cell with an ANSI basic or indexed colour unblended ([Cell-buffer compositor](cell-buffer-compositor.md), "Popup shadow") |
 | `cmd/husk` goldens show `✦ CharmTone` and today's colours | Regenerated once with the chrome spec's colour changes |
 | `AGENTS.md`, `README.md`: "one palette, CharmTone, do not add other themes" | Rewritten by the landing commit to name `charm` and the built-in layer; this spec does not edit them because they describe the code as it is |
@@ -767,12 +782,11 @@ blends a hex neighbour in the same shadow band.
 3. **Partial themes inherit from `charm`, not from a frozen "built-in
    palette".** There is one base, and it is the default theme; a
    distribution that replaces `charm` changes that base knowingly.
-4. **Charm's canvas is grey 234, one below the ramp the brief names;
+4. **Charm's canvas is grey 234, one below the greys the theme names;
    accepted.** With `235` as canvas the raised steps fall where the theme's
    own fuchsia, green and red fail 4.5:1 and would all have to move; one
    step down, only the red moves, and the canvas stays close to today's. The
-   brief's greys `237`, `238`, `243`, `248` and `252` are all used. The step
-   was reviewed and accepted as the theme's canvas.
+   theme's named greys `237`, `238`, `243`, `248` and `252` are all used.
 5. **One mechanical adjustment rule** (Lab lightness, hue fixed, away from
    the canvas) rather than hand-picked substitutes, so every adjusted value
    is reproducible from its source and the floor is the same for all
