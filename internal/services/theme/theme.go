@@ -71,7 +71,7 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 		if in.Settings.Source(key) != "default" {
 			hex := in.Settings.String(key)
 			if _, err := palette.RelativeLuminance(hex); err != nil {
-				c.Issue(&r.Problems, "error", "invalid_value", in.Settings.Source(key), key, "role "+role+": want #RRGGBB")
+				c.Issue(&r.Problems, "error", "invalid_color", in.Settings.Source(key), key, "role "+role+": want #RRGGBB")
 			}
 			overrides[role] = strings.ToLower(hex)
 		}
@@ -82,7 +82,7 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 	}
 	p, err := palette.Overlay(palette.Default(), overrides)
 	if err != nil {
-		c.Issue(&r.Problems, "error", "invalid_value", "user", "theme.palette", err.Error())
+		c.Issue(&r.Problems, "error", "invalid_color", "user", "theme.palette", err.Error())
 		return nil, r, c.Invalid(r.Problems)
 	}
 	allow := in.Settings.Bool("theme.allow_low_contrast")

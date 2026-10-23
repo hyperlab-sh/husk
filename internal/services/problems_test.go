@@ -3,11 +3,14 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/hyperlab-sh/husk/internal/services/keybinding"
 	"github.com/hyperlab-sh/husk/internal/services/profile"
+	"github.com/hyperlab-sh/husk/internal/services/secrets"
 	"github.com/hyperlab-sh/husk/internal/services/settings"
+	stheme "github.com/hyperlab-sh/husk/internal/services/theme"
 	"github.com/hyperlab-sh/husk/internal/substrate/state"
 	"github.com/hyperlab-sh/husk/internal/substrate/store"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
@@ -87,7 +90,67 @@ func TestInvalidPluginCatalogCode(t *testing.T) {
 	in := input(`{}`)
 	in.Declared[store.DeclaredPlugins] = map[string]store.Doc{"a": doc(`{"id":"b"}`)}
 	_, rep, _ := keybinding.New().Rebuild(context.Background(), in)
-	if p := codes(rep.Problems)["invalid_plugin_catalog"]; p.Layer != "plugin:a" {
+	if p := codes(rep.Problems)["invalid_plugin_catalog"]; p.Layer != "plugin:a" || p.Severity != "warning" {
 		t.Fatalf("problems = %+v", rep.Problems)
+	}
+}
+
+type failingService struct{ *fakeService }
+
+func (s failingService) Rebuild(ctx context.Context, in ReloadInput) (Candidate, Report, error) {
+	return nil, Report{Service: s.name, Gen: s.Generation(), Problems: []Problem{{Severity: "error", Code: "invalid_value", Message: "bad"}}}, errors.New("invalid")
+}
+
+// Theme is skipped with the settings_unchanged warning, which is the only
+// applied:false report with no error.
+func TestThemeSkippedCarriesSettingsUnchangedWarning(t *testing.T) {
+	services := fakeServices()
+	services["settings"] = failingService{services["settings"].(*fakeService)}
+	co, err := NewCoordinator(Options{Store: &fakeStore{}, Services: services, Clock: clock()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer co.Close()
+	reports, _ := co.Reload(context.Background(), ReasonCLI)
+	for _, r := range reports {
+		if r.Service != "theme" {
+			continue
+		}
+		if r.Applied || len(r.Problems) != 1 || r.Problems[0].Code != "settings_unchanged" || r.Problems[0].Severity != "warning" || r.Problems[0].Message != "settings unchanged; palette unchanged" {
+			t.Fatalf("theme report = %+v", r)
+		}
+		return
+	}
+	t.Fatal("no theme report")
+}
+
+// Bad secret declarations are dropped with warnings; the rebuild still
+// produces a candidate and the good declaration stands.
+func TestSecretDeclarationProblemsAreWarnings(t *testing.T) {
+	s, _ := secrets.New(secrets.Options{State: state.New(state.Options{}), Post: func(f func()) bool { f(); return true }, Clock: clock(), Crypto: &memoryCrypto{data: map[string][]byte{}}})
+	defer s.Close()
+	in := input(`{}`)
+	in.Declared[store.DeclaredPlugins] = map[string]store.Doc{"a": doc(`{"id":"a","name":"A","secret_requests":[{"name":"Bad Name","purpose":"p"},{"name":"git.token","purpose":"p"},{"name":"git.token","purpose":"p"}]}`)}
+	rep := apply(t, s, in)
+	got := codes(rep.Problems)
+	for _, code := range []string{"invalid_secret_name", "duplicate_secret"} {
+		if got[code].Severity != "warning" || got[code].Layer != "plugin:a" {
+			t.Errorf("%s = %+v", code, got[code])
+		}
+	}
+	if names, _ := s.Names(Caller{Kind: protocol.CallerCLI}); len(names) != 1 {
+		t.Fatalf("names = %+v", names)
+	}
+}
+
+// A bad color override is invalid_color, an error that blocks the palette.
+func TestThemeBadColorIsInvalidColor(t *testing.T) {
+	in := input(`{"theme":{"palette":{"ink":"red"}}}`)
+	st := settings.New(settings.Options{})
+	apply(t, st, in)
+	in.Settings = st.Snapshot()
+	_, rep, err := stheme.New().Rebuild(context.Background(), in)
+	if err == nil || codes(rep.Problems)["invalid_color"].Severity != "error" {
+		t.Fatalf("err=%v problems=%+v", err, rep.Problems)
 	}
 }

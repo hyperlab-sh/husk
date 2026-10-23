@@ -240,7 +240,7 @@ func (co *Coordinator) reload(parent context.Context, reason Reason, f *flight) 
 		timeout = true
 	}
 	if timeout || input.err != nil {
-		message, code := "Store resolution failed", "store_unavailable"
+		message, code := "Store resolution failed", "store_error"
 		if timeout {
 			message, code = "timed out", "timed_out"
 		}
@@ -260,7 +260,7 @@ func (co *Coordinator) reload(parent context.Context, reason Reason, f *flight) 
 			continue
 		}
 		if name == "theme" && settingsFailed {
-			reports = append(reports, Report{Service: name, Gen: service.Generation(), Problems: []Problem{{Severity: "error", Code: "settings_unchanged", Message: "Settings failed; palette unchanged"}}})
+			reports = append(reports, Report{Service: name, Gen: service.Generation(), Problems: []Problem{{Severity: "warning", Code: "settings_unchanged", Message: "settings unchanged; palette unchanged"}}})
 			continue
 		}
 		in := input.in

@@ -288,7 +288,7 @@ func Catalogs(in ReloadInput) (map[string]Catalog, []Problem) {
 	for id, doc := range in.Declared[store.DeclaredPlugins] {
 		var c Catalog
 		if err := Decode(doc, &c); err != nil || c.ID != id {
-			Issue(&ps, "error", "invalid_plugin_catalog", "plugin:"+id, "", "invalid plugin catalog")
+			Issue(&ps, "warning", "invalid_plugin_catalog", "plugin:"+id, "", "invalid plugin catalog")
 			continue
 		}
 		out[id] = c
