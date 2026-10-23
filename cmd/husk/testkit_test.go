@@ -39,7 +39,7 @@ type fakeFE struct {
 	Toast *contracts.Toast
 	// Refused is what Refusals reports.
 	Refused []contracts.PluginRefusal
-	// Notices is what ConfigNotices reports.
+	// Notices is what LatestConfigNotice reports: its length and last entry.
 	Notices []contracts.ConfigNotice
 	// Snap, Rails, PubSlots and Frames are what the host would report; Snap
 	// nil keeps the model's directly seeded catalog.
@@ -217,10 +217,13 @@ func (f *fakeFE) SurfaceFrames() map[string]map[protocol.SurfaceID]protocol.Fram
 	return f.Frames
 }
 func (f *fakeFE) Refusals() []contracts.PluginRefusal { return f.Refused }
-func (f *fakeFE) ConfigNotices() []contracts.ConfigNotice {
+func (f *fakeFE) LatestConfigNotice() (uint64, contracts.ConfigNotice) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([]contracts.ConfigNotice(nil), f.Notices...)
+	if len(f.Notices) == 0 {
+		return 0, contracts.ConfigNotice{}
+	}
+	return uint64(len(f.Notices)), f.Notices[len(f.Notices)-1]
 }
 func (f *fakeFE) ActiveToast() (contracts.Toast, bool) {
 	if f.Toast == nil {

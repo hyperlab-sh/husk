@@ -526,3 +526,27 @@ func TestConfigNoticeToastsOnce(t *testing.T) {
 		t.Fatalf("second notice toast = %+v", tt)
 	}
 }
+
+// A config notice and a plugin failure raised in one settle (the boot case)
+// both reach the user: the failure toast ends with the configuration line.
+func TestConfigNoticeSurvivesAFailureInTheSameSettle(t *testing.T) {
+	m := goldenModel()
+	fe := withFE(m)
+	fe.pods, fe.occ, fe.podErr = map[string]string{}, map[protocol.SurfaceID]string{}, map[string]string{}
+	m.settle()
+	fe.Refused = []contracts.PluginRefusal{{Plugin: "dup", Reason: "duplicate plugin id"}}
+	fe.Notices = []contracts.ConfigNotice{{Reason: "startup", Errors: 2}}
+	m.settle()
+	tt := m.activeToast
+	if tt == nil || tt.Title != "Plugin failed" || !strings.Contains(tt.Message, "dup: duplicate plugin id") || !strings.Contains(tt.Message, "2 configuration problems; run husk config reload") {
+		t.Fatalf("toast = %+v, want the refusal and the configuration line", tt)
+	}
+	// A later failure joins the toast and keeps the configuration line.
+	fe.pods["bad"], fe.podErr["bad"] = "failed", "start: no such file"
+	fe.publish()
+	m.settle()
+	tt = m.activeToast
+	if tt == nil || tt.Title != "2 plugins failed" || !strings.Contains(tt.Message, "bad: start: no such file") || !strings.Contains(tt.Message, "2 configuration problems") {
+		t.Fatalf("joined toast = %+v", tt)
+	}
+}

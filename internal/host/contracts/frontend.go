@@ -117,11 +117,11 @@ type Frontend interface {
 	// launch failure gets. Any goroutine.
 	Refusals() []PluginRefusal
 
-	// ConfigNotices lists the reloads the user did not start from the CLI
-	// (startup, profile, plugin) that finished with at least one error
-	// problem, in order. The list only grows; a frontend remembers how many it
-	// has shown and toasts the rest. Any goroutine.
-	ConfigNotices() []ConfigNotice
+	// LatestConfigNotice reports the newest reload the user did not start from
+	// the CLI (startup, profile, plugin) that finished with at least one error
+	// problem, and how many such reloads there have been. seq only grows; a
+	// frontend toasts when it is above the seq it last saw. Any goroutine.
+	LatestConfigNotice() (seq uint64, last ConfigNotice)
 
 	// OwnSlices registers the frontend's owner handles (husk.layout,
 	// husk.geometry, husk.focus). It may be called once, before the loop

@@ -3,6 +3,7 @@ package manifest
 import (
 	"encoding/json"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
+	"slices"
 )
 
 // ActionDecl is one manifest-owned catalog action.
@@ -212,7 +213,7 @@ func (s Spec) CatalogJSON() ([]byte, error) {
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return nil, err
 	}
-	for _, key := range []string{"protocol", "command", "work_dir", "binding_problems", "suggestions"} {
+	for _, key := range []string{"protocol", "command", "work_dir", "binding_problems", "subscription_problems", "suggestions"} {
 		delete(doc, key)
 	}
 	return json.Marshal(doc)
@@ -224,5 +225,6 @@ func (s Spec) KeymapJSON() ([]byte, error) {
 	if bind == nil {
 		bind = []FocusBinding{}
 	}
-	return json.Marshal(Keymap{Version: 1, Bind: bind, Problems: s.BindingProblems, Suggestions: s.Suggestions})
+	problems := append(slices.Clone(s.BindingProblems), s.SubscriptionProblems...)
+	return json.Marshal(Keymap{Version: 1, Bind: bind, Problems: problems, Suggestions: s.Suggestions})
 }

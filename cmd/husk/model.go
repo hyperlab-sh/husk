@@ -214,9 +214,11 @@ type WorkbenchModel struct {
 	toastPollOn    bool
 	toastSeq       int
 	refusalsShown  int      // host refusals already reported
-	noticesShown   int      // host config notices already toasted
+	noticesSeen    uint64   // newest host config notice already toasted
 	failures       []string // plugin failures noted, not yet toasted
 	shownFailures  []string // lines of the failure toast now up
+	pendingConfig  string   // config notice text raised this settle, not yet toasted
+	shownConfig    string   // config notice text folded into the failure toast now up
 	failureSeq     int      // toastSeq of that toast
 	totalIPCEvents uint64   // surface updates the host routed here
 
@@ -754,35 +756,47 @@ func (m *WorkbenchModel) noteConfigNotices() {
 	if m.fe == nil {
 		return
 	}
-	notices := m.fe.ConfigNotices()
-	fresh := notices[min(m.noticesShown, len(notices)):]
-	m.noticesShown = len(notices)
-	if len(fresh) == 0 {
+	seq, last := m.fe.LatestConfigNotice()
+	if seq <= m.noticesSeen {
 		return
 	}
-	last := fresh[len(fresh)-1]
+	m.noticesSeen = seq
 	m.logf("configuration: %d problems after %s reload", last.Errors, last.Reason)
-	m.cmds = append(m.cmds, m.showLocalToast("warn", "Configuration", fmt.Sprintf("%d configuration problems; run husk config reload", last.Errors)))
+	m.pendingConfig = fmt.Sprintf("%d configuration problems; run husk config reload", last.Errors)
 }
 
-// toastFailures shows the failures noted since the last call. A failure that
+// toastFailures shows the failures noted since the last call, and the config
+// notice raised in the same settle: with failures it is the last line of the
+// failure toast, so neither replaces the other; alone it is its own toast. A failure that
 // arrives while the failure toast is still up joins it instead of replacing
 // it (refusals land at boot, launch failures in later Updates), so the toast
 // lists every failure shown so far and is re-armed; once it expires the next
 // failure starts a fresh one. The log holds each failure in full.
 func (m *WorkbenchModel) toastFailures() {
+	cfg := m.pendingConfig
+	m.pendingConfig = ""
 	if len(m.failures) == 0 {
+		if cfg != "" {
+			m.cmds = append(m.cmds, m.showLocalToast("warn", "Configuration", cfg))
+		}
 		return
 	}
 	if m.failureSeq == m.toastSeq && m.activeToast != nil && !m.engineToast && len(m.shownFailures) > 0 {
 		m.shownFailures = append(m.shownFailures, m.failures...)
 	} else {
 		m.shownFailures = slices.Clone(m.failures)
+		m.shownConfig = ""
 	}
 	m.failures = nil
+	if cfg != "" {
+		m.shownConfig = cfg
+	}
 	title, msg := "Plugin failed", m.shownFailures[0]
 	if n := len(m.shownFailures); n > 1 {
 		title, msg = fmt.Sprintf("%d plugins failed", n), strings.Join(m.shownFailures, "; ")
+	}
+	if m.shownConfig != "" {
+		msg += "; " + m.shownConfig
 	}
 	m.cmds = append(m.cmds, m.showLocalToast("warn", title, msg))
 	m.failureSeq = m.toastSeq

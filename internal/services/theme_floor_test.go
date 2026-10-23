@@ -110,6 +110,22 @@ func TestLowContrastAttribution(t *testing.T) {
 			t.Fatalf("ink on canvas: %+v ok=%v", p, ok)
 		}
 	})
+	t.Run("Source.File comes from the layer document", func(t *testing.T) {
+		for layer, tc := range map[store.Layer]struct{ file, want string }{
+			store.LayerInstance:     {"/run/state/instances/t1/config.json", "instances/t1/config.json"},
+			store.LayerProfile:      {"/home/u/.config/husk/profiles/work/config.json", "profiles/work/config.json"},
+			store.LayerUser:         {"/home/u/.config/husk/config.json", "config.json"},
+			store.LayerDistribution: {"", ""},
+		} {
+			docs := store.LayerDoc{Layer: layer, File: tc.file, Doc: doc(`{}`)}
+			in := themeInput(t, `{"theme":{"palette":{"canvas":"#ffffff"}}}`, map[string]store.Layer{"theme.palette.canvas": layer}, docs)
+			_, rep, _ := stheme.New().Rebuild(context.Background(), in)
+			p, ok := find(rep, "ink on canvas")
+			if !ok || p.Source == nil || p.Source.Layer != string(layer) || p.Source.File != tc.want {
+				t.Errorf("%s: %+v source %+v, want file %q", layer, p, p.Source, tc.want)
+			}
+		}
+	})
 	t.Run("a default foreground is never the attributed layer", func(t *testing.T) {
 		in := themeInput(t, `{"theme":{"palette":{"surface":"#ffffff"}}}`, map[string]store.Layer{"theme.palette.surface": store.LayerInstance})
 		_, rep, _ := stheme.New().Rebuild(context.Background(), in)

@@ -149,24 +149,22 @@ func attribute(in c.ReloadInput, fg, bg string) (key, layer string) {
 }
 
 // configFile is the config-relative file of a layer's config document, from
-// the layer documents the reload was given; empty when the layer has no
-// file (distribution, instance) or was not supplied.
+// the layer documents the reload was given: the suffix from the last
+// "/profiles/" or "/instances/", else "config.json" for the user file. Empty
+// when the layer has no file (distribution, an instance folded from flags) or
+// was not supplied.
 func configFile(in c.ReloadInput, layer string) string {
 	for _, l := range in.ConfigLayers {
-		if string(l.Layer) != layer {
+		if string(l.Layer) != layer || l.File == "" {
 			continue
 		}
-		switch layer {
-		case "user":
+		path := strings.ReplaceAll(l.File, "\\", "/")
+		at := max(strings.LastIndex(path, "/profiles/"), strings.LastIndex(path, "/instances/"))
+		switch {
+		case at >= 0:
+			return path[at+1:]
+		case path == "config.json" || strings.HasSuffix(path, "/config.json"):
 			return "config.json"
-		case "profile":
-			path := strings.ReplaceAll(l.File, "\\", "/")
-			if at := strings.LastIndex(path, "/profiles/"); at >= 0 {
-				return path[at+1:]
-			}
-			if in.Profile != nil && *in.Profile != "" {
-				return "profiles/" + *in.Profile + "/config.json"
-			}
 		}
 	}
 	return ""
