@@ -138,11 +138,12 @@ The Server ([Pods](pods.md)) runs these steps at start and exit. The CLI runs th
 
 1. Take an exclusive advisory lock (`flock`, `LOCK_EX`) on a file descriptor opened read-only on the runtime directory itself. No lock file is created. `flock` has no timeout, so acquire with `LOCK_NB`, retrying every 50 ms until a 2.5 s deadline (the connect bound plus the probe bound; `flock.TryLockContext` in the existing `gofrs/flock`). Never leave a blocking `flock` running after the deadline: an abandoned blocking call can acquire the lock later and hold it until the process exits. On expiry nothing is removed; the Server fails start with `runtime dir <path> is locked`, and the CLI leaves the entry as `unresponsive` (not a fourth class) with a warning that names the lock, not the instance (failure table below). The lock is released when the descriptor closes, so a holder that dies releases it without any cleanup step.
 2. Probe the socket again under the lock. A reply ends recovery with nothing removed and the entry is live: the Server fails start as for a held name; the CLI reports exit 3 with `instance "<id>" started while this command ran; retry` and never retries the command itself against a socket it did not resolve; `Survey` lists the entry as `live`. A timeout ends recovery with nothing removed and the entry is unresponsive.
-3. If `<id>.json` exists and still holds the same `pid` and `started_at` as the entry that was probed, remove it. An entry passed with `pid` 0 and empty `started_at` (the Server's case: it has only the id) matches any file of that id, so the Server removes `<id>.json` if present.
-4. If `<id>.sock` exists and `lstat` says it is a socket, unlink it, unless the probe in step 2 found the path missing: a claimant that unlinked it earlier may have bound a new socket since, outside the lock, and only a path that existed and refused at the probe is certainly still the dead file (no bind can succeed over it while the lock is held). If the path exists and is not a socket, leave it and fail (Server: start fails naming the path; CLI: the entry is skipped and a warning names the path).
-5. Release the lock.
+3. If the probe in step 2 did not find `<id>.sock` missing and `lstat` says it exists and is not a socket, leave both it and `<id>.json` and fail (Server: start fails naming the path; CLI: the entry is skipped and a warning names the path). Nothing is removed for that entry, so every later survey warns again.
+4. If `<id>.json` exists and still holds the same `pid` and `started_at` as the entry that was probed, remove it. An entry passed with `pid` 0 and empty `started_at` (the Server's case: it has only the id) matches any file of that id, so the Server removes `<id>.json` if present.
+5. If `<id>.sock` exists and `lstat` says it is a socket, unlink it, unless the probe in step 2 found the path missing: a claimant that unlinked it earlier may have bound a new socket since, outside the lock, and only a path that existed and refused at the probe is certainly still the dead file (no bind can succeed over it while the lock is held). Step 4 has already removed the entry, so if this unlink fails (`EACCES`, `EBUSY`) the CLI warns once, naming the path, and the orphan socket surfaces again only when a start with that id fails; this residual is accepted.
+6. Release the lock.
 
-`Survey` takes the lock once and runs steps 2 to 4 for every stale entry under it, so a survey after several crashes costs one lock wait, not one per entry.
+`Survey` takes the lock once and runs steps 2 to 5 for every stale entry under it, so a survey after several crashes costs one lock wait, not one per entry.
 
 Removal is silent: the CLI prints no message for a stale entry it removed, except the `(stale entry removed)` suffix when that entry was the explicit target.
 
@@ -463,6 +464,7 @@ Imports go one way; no two of these packages import each other.
 | `--instance` or `HUSK_INSTANCE` not registered | CLI | | `husk: instance "notes" is not running` | 3 |
 | `--instance` or `HUSK_INSTANCE` entry stale | CLI | Stale recovery | `husk: instance "notes" is not running (stale entry removed)` | 3 |
 | `--instance` or `HUSK_INSTANCE` entry stale, re-probe under the lock answered | CLI | Nothing removed, command not retried | `husk: instance "notes" started while this command ran; retry` | 3 |
+| Stale recovery cannot remove a file (`EACCES`, `EBUSY`) | CLI | Entry skipped, survey continues | warning `husk: cannot remove <path>: <err>; instance "notes" skipped` | 0 for `husk instances`; discovery per the remaining entries |
 | Directory lock not acquired within 2.5 s, explicit target | CLI stale recovery step 1 | Nothing removed | `husk: instance "notes" is not answering and the runtime dir is locked; retry` | 5 |
 | Directory lock not acquired within 2.5 s, discovery | CLI stale recovery step 1 | Entry left as is, nothing removed | warning `husk: runtime dir <path> is locked; instance "notes" left as is`; then the discovery rule as if the entry were unresponsive (0 when another instance is live, 5 when none is) | 0 or 5 |
 | Directory lock not acquired within 2.5 s, `husk instances` | CLI stale recovery step 1 | Entry listed `unresponsive`, nothing removed | the same warning | 0 |
@@ -484,7 +486,7 @@ Imports go one way; no two of these packages import each other.
 1. One instance has exactly one socket and at most one entry; the id is the key of both.
 2. An entry on disk means its socket was listening when the entry was written.
 3. An instance removes its own files on a clean exit, recognising its socket by the `(dev, ino)` identity taken after `bind`; it never unlinks a socket path whose identity it did not match. Stale files are removed only by stale recovery, under the directory lock, after a probe under that lock confirmed nothing listens.
-4. Stale recovery never removes an entry whose `pid` or `started_at` differ from the entry that was probed, and never removes a path that is not a socket.
+4. Stale recovery never removes an entry whose `pid` or `started_at` differ from the entry that was probed, never removes a path that is not a socket, and never removes an entry whose socket path is not a socket.
 5. The Wrapper sets `HUSK_SOCKET_PATH`, `HUSK_INSTANCE` and `HUSK_BIN_PATH` in every plugin process. A plugin never sees another instance's value.
 6. The CLI never talks to an instance that a flag, a variable or a unique discovery did not select.
 7. The CLI checks the protocol major on every connection before sending the command's request.
