@@ -438,18 +438,18 @@ JSON output (the reply `result`):
   "entries": [
     {
       "keys": ["n"], "focus": "sidebar-list", "plugin": "files", "action": "files.new_dir",
-      "source": {"layer": "user", "file": "keymap.json", "line": 0, "order": 8},
+      "source": {"layer": "user", "file": "keymap.json", "order": 8},
       "state": "effective"
     },
     {
       "keys": ["n"], "focus": "sidebar-list", "plugin": "files", "action": "files.new",
       "source": {"layer": "focus-local", "plugin": "files", "order": 0},
       "state": "shadowed",
-      "shadowed_by": {"layer": "user", "file": "keymap.json", "line": 0, "order": 8}
+      "shadowed_by": {"layer": "user", "file": "keymap.json", "order": 8}
     },
     {
       "keys": ["["], "disable": true,
-      "source": {"layer": "user", "file": "keymap.json", "line": 0, "order": 14},
+      "source": {"layer": "user", "file": "keymap.json", "order": 14},
       "state": "disabled"
     }
   ],
