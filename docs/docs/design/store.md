@@ -161,6 +161,8 @@ type LayerDoc struct {
 	Layer       Layer
 	File        string              // config-relative, slash-separated; distribution relative to its root;
 	                                // "" for a layer with no single file (flag-folded instance)
+	InstanceFile string             // flag-folded instance only: the named-instance file's
+	                                // config-relative path, "" when none was loaded
 	Doc         Doc
 	MemberOrder map[string][]string // object keys in file order, keyed by JSON pointer;
 	                                // detached from Store's cache
