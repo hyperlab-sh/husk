@@ -227,6 +227,7 @@ The rule (`pkg/protocol/version.go`) is:
 2. A minor bump only adds: optional params or result fields, methods, error codes, enum values. Receivers ignore what they do not know.
 3. A major bump is any other change. Husk accepts any minor of its own major and rejects every other major.
 4. Version decisions use `protocol_version` only; `host_version` is informational.
+5. Minors are cumulative. `protocol.Version` advances to a minor only when every method of that minor and of every lower minor is served; until then that minor is "specified, not landed", whatever lands of it.
 
 What changes: this envelope is a breaking change, so the target major is **2** (`protocol.Major = 2`); `protocol.Version` is `"2.0"` for the envelope and `"2.1"` once [Hooks](hooks.md) lands. Husk speaks one major at a time; there is no dual stack.
 
@@ -371,7 +372,7 @@ Why the host emulates: the host owns the cell canvas and the key encoder, so a t
 {"id":3,"method":"theme.list","params":{}}
 {"id":3,"result":{"themes":[{"name":"CharmTone","source":"built-in","current":false},{"name":"evening","source":"user","current":true}]}}
 {"id":4,"method":"settings.set","params":{"key":"theme.name","value":"evening"}}
-{"id":4,"result":{"key":"theme.name","value":"evening","reports":[{"service":"profile","gen":5,"applied":true,"changed":false},{"service":"settings","gen":5,"applied":true,"changed":true},{"service":"theme","gen":4,"applied":true,"changed":true},{"service":"keybinding","gen":5,"applied":true,"changed":false},{"service":"secrets","gen":5,"applied":true,"changed":false}]}}
+{"id":4,"result":{"key":"theme.name","value":"evening","source":"user","reports":[{"service":"profile","gen":5,"applied":true,"changed":false},{"service":"settings","gen":5,"applied":true,"changed":true},{"service":"theme","gen":4,"applied":true,"changed":true},{"service":"keybinding","gen":5,"applied":true,"changed":false},{"service":"secrets","gen":5,"applied":true,"changed":false}]}}
 ```
 
 ### Mapping from today's message types
