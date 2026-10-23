@@ -23,7 +23,7 @@ func TestProfileServe(t *testing.T) {
 	}
 	port.Used = contracts.ProfileUseResult{Active: "work", Reports: []contracts.ReloadReport{{Service: "profile", Gen: 2, Applied: true}}}
 	reply = h.Serve(context.Background(), cliCaller, req(t, "profile.use", `{"name":"work"}`), nil)
-	if want := `{"active":"work","reports":[{"service":"profile","gen":2,"applied":true}]}`; reply.Error != nil || string(reply.Result) != want {
+	if want := `{"active":"work","reports":[{"service":"profile","gen":2,"applied":true,"changed":false}]}`; reply.Error != nil || string(reply.Result) != want {
 		t.Fatalf("use = %s / %+v, want %s", reply.Result, reply.Error, want)
 	}
 	// "" selects no profile: it is a value, not a missing parameter.
