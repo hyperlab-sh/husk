@@ -97,6 +97,10 @@ func (c canvas) put(x, y int, g cell) {
 	}
 	c.cells[y][x] = g
 	if g.width == 2 {
+		if c.cells[y][x+1].width == 2 {
+			old := c.cells[y][x+2]
+			c.cells[y][x+2] = cell{text: " ", width: 1, fg: old.fg, bg: old.bg}
+		}
 		c.cells[y][x+1] = cell{fg: g.fg, bg: g.bg}
 	}
 }
@@ -160,11 +164,11 @@ func (l layout) draw(k keyListing, p protocol.Palette) canvas {
 				if i == 1 {
 					separator = " "
 				}
-				c.text(x, r.Y, limit, separator, fg, "")
+				c.text(x, r.Y, limit, separator, p.Accent, "")
 				x += textWidth(separator)
 				limit -= textWidth(separator)
 			}
-			color := fg
+			color := p.Accent
 			if i == 3 && muted(f) {
 				color = p.InkMuted
 			}
