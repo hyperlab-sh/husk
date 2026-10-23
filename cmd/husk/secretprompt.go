@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"sync/atomic"
+	"time"
 	"unicode"
 
 	tea "charm.land/bubbletea/v2"
@@ -21,7 +22,14 @@ type secretPromptState struct {
 	id     uint64
 	prompt secrets.Prompt
 	reply  chan<- secrets.Answer
+	// armed is set a moment after the dialog appears. A plugin can open the
+	// dialog while the user types, so y and n do nothing until then.
+	armed bool
 }
+
+// secretPromptArmDelay is how long y and n stay inactive after the dialog
+// appears.
+const secretPromptArmDelay = time.Second
 
 // secretPromptOpenMsg asks the model to show a dialog; secretPromptCloseMsg
 // withdraws it when the service closed it first (a grant, a changed
@@ -33,6 +41,8 @@ type (
 		reply  chan<- secrets.Answer
 	}
 	secretPromptCloseMsg struct{ id uint64 }
+	// secretPromptArmMsg arms the answer keys of dialog id.
+	secretPromptArmMsg struct{ id uint64 }
 )
 
 // secretPromptFunc is host.WithPrompt's dialog: it runs on a service
@@ -71,14 +81,18 @@ func (m *WorkbenchModel) answerSecretPrompt(a secrets.Answer) {
 
 // secretPromptKey handles a key while the dialog is up. It swallows every key:
 // nothing reaches the palette, the keymap or a plugin, and only an explicit
-// y or n grants or declines. Enter does not answer, so a stray keystroke
+// y or n, once the dialog is armed, grants or declines; esc always dismisses. Enter does not answer, so a stray keystroke
 // cannot accept.
 func (m *WorkbenchModel) secretPromptKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "y":
-		m.answerSecretPrompt(secrets.Accepted)
+		if m.secretPrompt.armed {
+			m.answerSecretPrompt(secrets.Accepted)
+		}
 	case "n":
-		m.answerSecretPrompt(secrets.Declined)
+		if m.secretPrompt.armed {
+			m.answerSecretPrompt(secrets.Declined)
+		}
 	case "esc", "ctrl+c":
 		m.answerSecretPrompt(secrets.Dismissed)
 	}
@@ -126,8 +140,11 @@ func (m *WorkbenchModel) drawSecretPrompt(c *canvas) uv.Rectangle {
 	}
 	rule := lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.Border)).Render(strings.Repeat("─", iw))
 	key := lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.Accent)).Bold(true)
-	rows = append(rows, "", rule,
-		key.Render("y")+label.Render(" allow   ")+key.Render("n")+label.Render(" decline   ")+key.Render("esc")+label.Render(" ask again later"))
+	hint := key.Render("y") + label.Render(" allow   ") + key.Render("n") + label.Render(" decline   ") + key.Render("esc") + label.Render(" ask again later")
+	if !m.secretPrompt.armed {
+		hint = label.Render("y and n are not active yet   ") + key.Render("esc") + label.Render(" ask again later")
+	}
+	rows = append(rows, "", rule, hint)
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(m.palette.Warning)).

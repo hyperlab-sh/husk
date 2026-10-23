@@ -312,6 +312,7 @@ func (s *Service) readPlugin(ctx context.Context, plugin, name string) (value st
 		return "", c.Failure("not_found", "not_declared")
 	}
 	if s.ctx.Err() != nil {
+		dropped = true // shutdown drops the read like a closed connection
 		return "", c.Failure("cancelled", "shutdown")
 	}
 	req, ok := s.current.Load().declarations[plugin][name]
@@ -344,8 +345,16 @@ func (s *Service) await(ctx context.Context, plugin, name string, req c.SecretRe
 	if s.opts.Prompt == nil {
 		return "user_denied", deniedError()
 	}
+	// A read whose connection is already gone never opens a dialog.
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	digest := Digest(req)
 	s.mu.Lock()
+	if err := ctx.Err(); err != nil {
+		s.mu.Unlock()
+		return "", err
+	}
 	// A CLI grant lands before it takes the lock; re-check so a read that
 	// raced it does not open a dialog for a granted name.
 	if s.hasGrant(plugin, name, req) {

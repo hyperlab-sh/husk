@@ -2,11 +2,13 @@ package host
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/hyperlab-sh/husk/internal/services"
+	sc "github.com/hyperlab-sh/husk/internal/services/contracts"
 	"github.com/hyperlab-sh/husk/internal/services/secrets"
 	"github.com/hyperlab-sh/husk/internal/substrate/store"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
@@ -56,6 +58,17 @@ func (r *memRing) Delete(service, account string) error {
 	defer r.mu.Unlock()
 	delete(r.m, service+"/"+account)
 	return nil
+}
+
+// failureOf returns "code/reason" of a Services failure; it matches codes,
+// never messages.
+func failureOf(t *testing.T, err error) string {
+	t.Helper()
+	var f *sc.Error
+	if !errors.As(err, &f) {
+		t.Fatalf("not a services failure: %v", err)
+	}
+	return f.Code + "/" + f.Reason
 }
 
 const secretPurpose = "PURPOSE-must-stay-out-of-logs"
@@ -111,8 +124,8 @@ func TestDialogShownLogNamesNoPurpose(t *testing.T) {
 		return secrets.Declined
 	}))
 	_, err := h.root.rt.Secrets.Read(t.Context(), secrets.Caller{Kind: protocol.CallerPlugin, PluginID: "alpha"}, "tok.en")
-	if err == nil {
-		t.Fatal("a declined read returned a value")
+	if got := failureOf(t, err); got != "denied/user_denied" {
+		t.Fatalf("declined read = %q", got)
 	}
 	if p := <-seen; p.Plugin != "alpha" || p.PluginName != "Alpha" || p.Purpose != secretPurpose || !p.Required {
 		t.Fatalf("prompt = %+v", p)
@@ -128,7 +141,43 @@ func TestNoPromptWiredDeniesUngrantedRead(t *testing.T) {
 	logs := &logSink{}
 	h := bootWithSecret(t, logs)
 	_, err := h.root.rt.Secrets.Read(t.Context(), secrets.Caller{Kind: protocol.CallerPlugin, PluginID: "alpha"}, "tok.en")
-	if err == nil || !strings.Contains(err.Error(), "user_denied") {
-		t.Fatalf("err = %v", err)
+	if got := failureOf(t, err); got != "denied/user_denied" {
+		t.Fatalf("err = %q", got)
+	}
+}
+
+// The sentinel value travels set, a declined prompt, a CLI grant, a plugin
+// read and a reveal through the real host; it leaves only in the authorized
+// replies, never in the log or the grants slice.
+func TestValueStaysOutOfLogAndGrantsSlice(t *testing.T) {
+	const value = "SENTINEL-host-v4lue-do-not-leak"
+	logs := &logSink{}
+	answers := make(chan secrets.Answer, 1)
+	h := bootWithSecret(t, logs, WithPrompt(func(_ context.Context, _ secrets.Prompt) secrets.Answer { return <-answers }))
+	plugin := secrets.Caller{Kind: protocol.CallerPlugin, PluginID: "alpha"}
+	if code, _, stderr := cliRun(h, "rpc", "secrets.set", `{"name":"tok.en","value":"`+value+`"}`, "--format", "json"); code != 0 {
+		t.Fatalf("set: %d %s", code, stderr)
+	}
+	answers <- secrets.Declined
+	if _, err := h.root.rt.Secrets.Read(t.Context(), plugin, "tok.en"); failureOf(t, err) != "denied/user_denied" {
+		t.Fatalf("declined read = %v", err)
+	}
+	if code, _, stderr := cliRun(h, "rpc", "secrets.grant", `{"plugin":"alpha","name":"tok.en"}`, "--format", "json"); code != 0 {
+		t.Fatalf("grant: %d %s", code, stderr)
+	}
+	got, err := h.root.rt.Secrets.Read(t.Context(), plugin, "tok.en")
+	if err != nil || got != value {
+		t.Fatalf("granted read = %q, %v", got, err)
+	}
+	code, revealed, stderr := cliRun(h, "rpc", "secrets.reveal", `{"name":"tok.en"}`, "--format", "json")
+	if code != 0 || !strings.Contains(revealed, value) {
+		t.Fatalf("reveal: %d %q %s", code, revealed, stderr)
+	}
+	code, grants, stderr := cliRun(h, "state", "get", "husk.grants", "--format", "json")
+	if code != 0 || !strings.Contains(grants, "tok.en") {
+		t.Fatalf("state get: %d %q %s", code, grants, stderr)
+	}
+	if strings.Contains(grants, value) || strings.Contains(logs.all(), value) {
+		t.Fatalf("value leaked:\nlog:\n%s\ngrants: %s", logs.all(), grants)
 	}
 }

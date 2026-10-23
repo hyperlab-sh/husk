@@ -39,16 +39,18 @@ type event struct{ Name, PluginID, Outcome string }
 // rig is a Secrets service with a blocking prompt fake, a recording publisher
 // and audit hook, and the package's manual clock.
 type rig struct {
-	t      *testing.T
-	s      *secrets.Service
-	clk    *manualClock
-	crypto *memoryCrypto
-	shown  chan *promptCall
-	mu     sync.Mutex
-	events []event
-	audits []string
-	conc   atomic.Int32
-	maxc   atomic.Int32
+	t       *testing.T
+	s       *secrets.Service
+	clk     *manualClock
+	crypto  *memoryCrypto
+	shown   chan *promptCall
+	mu      sync.Mutex
+	events  []event
+	audits  []string
+	tree    *state.State
+	prompts atomic.Int32
+	conc    atomic.Int32
+	maxc    atomic.Int32
 }
 
 type rigOpts struct {
@@ -59,7 +61,7 @@ type rigOpts struct {
 
 func newRig(t *testing.T, o rigOpts) *rig {
 	t.Helper()
-	r := &rig{t: t, clk: clock(), shown: make(chan *promptCall, 16), crypto: o.crypto}
+	r := &rig{t: t, tree: state.New(state.Options{}), clk: clock(), shown: make(chan *promptCall, 16), crypto: o.crypto}
 	if r.crypto == nil {
 		r.crypto = &memoryCrypto{data: map[string][]byte{"git.token": []byte(sentinel)}}
 	}
@@ -68,7 +70,7 @@ func newRig(t *testing.T, o rigOpts) *rig {
 		post = func(f func()) bool { f(); return true }
 	}
 	opts := secrets.Options{
-		State: state.New(state.Options{}), Post: post, Clock: r.clk, Crypto: r.crypto,
+		State: r.tree, Post: post, Clock: r.clk, Crypto: r.crypto,
 		Publisher: c.PublishFunc(func(n string, d any) {
 			m := d.(map[string]string)
 			if n != "secrets.read" {
@@ -82,6 +84,7 @@ func newRig(t *testing.T, o rigOpts) *rig {
 	}
 	if !o.noPrompt {
 		opts.Prompt = func(ctx context.Context, p secrets.Prompt) secrets.Answer {
+			r.prompts.Add(1)
 			n := r.conc.Add(1)
 			defer r.conc.Add(-1)
 			for {
@@ -301,16 +304,16 @@ func TestDialogsQueueInOrderWithTimersStartingWhenShown(t *testing.T) {
 	if pb.p.Plugin != "b" {
 		t.Fatalf("second = %+v", pb.p)
 	}
-	// b was shown at +30s: +45s later its minute has not elapsed.
-	r.clk.advance(45e9)
-	select {
-	case res := <-rb:
-		t.Fatalf("b timed out early: %+v", res)
-	default:
+	// b's minute started when it was shown (+30s), not when it was requested.
+	ta, tb := <-r.clk.created, <-r.clk.created
+	if shownAt := r.clk.Now(); !tb.at.Equal(shownAt.Add(secrets.DialogTimeout)) || tb.at.Equal(ta.at) {
+		t.Fatalf("b's timer fires at %v, want show time %v + 60s", tb.at, shownAt)
 	}
-	r.clk.advance(15e9)
-	res := <-rb
-	if reason(t, res.err) != "denied/user_denied" {
+	// +45s later the minute has not elapsed: the accept still wins, which it
+	// could not if the timer had fired at request time (+60s).
+	r.clk.advance(45e9)
+	pb.reply <- secrets.Accepted
+	if res := <-rb; res.value != sentinel {
 		t.Fatalf("b = %+v", res)
 	}
 	if r.maxc.Load() != 1 {
@@ -416,14 +419,19 @@ func TestContextCancelDropsRead(t *testing.T) {
 	if res := <-again; res.value != sentinel {
 		t.Fatalf("read = %+v", res)
 	}
-	// A read whose ctx is already done never opens a dialog.
-	dead, stop := context.WithCancel(context.Background())
-	stop()
+	// A read whose ctx is already done never opens a dialog: no prompt call, no
+	// timer. Both counts are synchronous with the read's return.
 	if err := r.s.Revoke(context.Background(), cliCaller, "a", "git.token"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.s.Read(dead, pluginCaller("a"), "git.token"); !errors.Is(err, context.Canceled) || len(r.shown) != 0 {
+	dead, stop := context.WithCancel(context.Background())
+	stop()
+	promptsBefore, timersBefore := r.prompts.Load(), len(r.clk.created)
+	if _, err := r.s.Read(dead, pluginCaller("a"), "git.token"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("dead ctx read = %v", err)
+	}
+	if r.prompts.Load() != promptsBefore || len(r.clk.created) != timersBefore || len(r.shown) != 0 {
+		t.Fatalf("a dead-ctx read opened a dialog: prompts %d->%d timers %d->%d", promptsBefore, r.prompts.Load(), timersBefore, len(r.clk.created))
 	}
 }
 
@@ -763,17 +771,25 @@ func TestGrantRevokeReturnAfterPostedWrite(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			hold.Store(true)
-			done := make(chan error, 1)
-			go func() { done <- call() }()
-			f := <-posted
-			select {
-			case err := <-done:
-				t.Fatalf("%s returned before the posted write ran: %v", name, err)
-			default:
+			type outcome struct {
+				err error
+				ran bool // the posted write had executed when the call returned
 			}
+			var ran atomic.Bool
+			done := make(chan outcome, 1)
+			go func() {
+				err := call()
+				done <- outcome{err, ran.Load()}
+			}()
+			f := <-posted
+			ran.Store(true)
 			f()
-			if err := <-done; err != nil {
-				t.Fatal(err)
+			got := <-done
+			if got.err != nil {
+				t.Fatal(got.err)
+			}
+			if !got.ran {
+				t.Fatalf("%s returned before the posted write ran", name)
 			}
 			hold.Store(false)
 		})
@@ -841,6 +857,10 @@ func TestValueNeverLeavesAuthorizedReplies(t *testing.T) {
 	add("report", rep)
 	add("events", r.log())
 	add("audits", r.audits)
+	add("state", r.tree.Snapshot().Slices)
+	if g, ok := r.tree.Snapshot().Slices[state.GrantsNamespace]; !ok || !strings.Contains(string(g.Value), `"b"`) {
+		t.Fatalf("grants slice missing the grant the test wrote: %+v", g)
+	}
 	for _, o := range outbound {
 		if strings.Contains(o, sentinel) {
 			t.Fatalf("value leaked into %s", o)
@@ -857,5 +877,20 @@ func TestValueNeverLeavesAuthorizedReplies(t *testing.T) {
 	add("audits", r.audits)
 	if strings.Contains(outbound[len(outbound)-1], sentinel) || strings.Contains(outbound[len(outbound)-2], sentinel) {
 		t.Fatal("value leaked into an event or audit record")
+	}
+}
+
+// A read during shutdown is dropped like a closed connection: the error says
+// so and no secrets.read event is published for it.
+func TestShutdownDropsReadWithoutEvent(t *testing.T) {
+	r := newRig(t, rigOpts{})
+	r.declare("a")
+	r.s.Close()
+	_, err := r.s.Read(context.Background(), pluginCaller("a"), "git.token")
+	if got := reason(t, err); got != "cancelled/shutdown" {
+		t.Fatalf("read after close = %q", got)
+	}
+	if len(r.log()) != 0 {
+		t.Fatalf("a shutdown read published %+v", r.log())
 	}
 }

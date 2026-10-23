@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/hyperlab-sh/husk/internal/services/secrets"
@@ -27,6 +28,7 @@ func TestSecretPromptKeysAnswerOnce(t *testing.T) {
 			if m.secretPrompt == nil {
 				t.Fatal("dialog not shown")
 			}
+			m.Update(secretPromptArmMsg{id: 1})
 			press(m, key)
 			if m.secretPrompt != nil {
 				t.Fatal("dialog still up after an answer")
@@ -42,11 +44,67 @@ func TestSecretPromptKeysAnswerOnce(t *testing.T) {
 	}
 }
 
+// y and n do nothing until the dialog is armed, so a keystroke meant for a
+// plugin cannot answer it; esc dismisses at any time. A stale arm message for
+// another dialog arms nothing.
+func TestSecretPromptKeysAreInactiveUntilArmed(t *testing.T) {
+	m := goldenModel()
+	reply := openPrompt(m, 2, askPrompt)
+	press(m, "y")
+	press(m, "n")
+	m.Update(secretPromptArmMsg{id: 1})
+	press(m, "y")
+	if m.secretPrompt == nil || len(reply) != 0 {
+		t.Fatalf("answered before arming: prompt=%v answers=%d", m.secretPrompt != nil, len(reply))
+	}
+	if frame := ansi.Strip(m.View().Content); !strings.Contains(frame, "not active yet") {
+		t.Fatalf("footer does not say the keys are inactive:\n%s", frame)
+	}
+	m.Update(secretPromptArmMsg{id: 2})
+	if frame := ansi.Strip(m.View().Content); strings.Contains(frame, "not active yet") || !strings.Contains(frame, "allow") {
+		t.Fatalf("footer after arming:\n%s", frame)
+	}
+	press(m, "y")
+	if got := <-reply; got != secrets.Accepted {
+		t.Fatalf("answer = %v", got)
+	}
+	// esc works before arming.
+	m = goldenModel()
+	reply = openPrompt(m, 3, askPrompt)
+	press(m, "esc")
+	if got := <-reply; got != secrets.Dismissed {
+		t.Fatalf("esc before arming = %v", got)
+	}
+}
+
+// The open message schedules the arm message.
+func TestSecretPromptOpenSchedulesArm(t *testing.T) {
+	m := goldenModel()
+	reply := make(chan secrets.Answer, 1)
+	_, cmd := m.Update(secretPromptOpenMsg{id: 9, prompt: askPrompt, reply: reply})
+	if cmd == nil {
+		t.Fatal("open returned no arm command")
+	}
+}
+
+// The dialog is modal for paste too, even with the palette open.
+func TestSecretPromptSwallowsPaste(t *testing.T) {
+	m := goldenModel()
+	m.showPalette = true
+	openPrompt(m, 1, askPrompt)
+	before := m.paletteQuery
+	m.Update(tea.PasteMsg{Content: "hello"})
+	if m.paletteQuery != before {
+		t.Fatalf("paste reached the palette: %q", m.paletteQuery)
+	}
+}
+
 // Enter and every other key are swallowed: nothing accepts by accident and
 // nothing reaches the palette or the keymap.
 func TestSecretPromptSwallowsOtherKeys(t *testing.T) {
 	m := goldenModel()
 	reply := openPrompt(m, 1, askPrompt)
+	m.Update(secretPromptArmMsg{id: 1})
 	for _, key := range []string{"enter", "tab", "x", "Y", "ctrl+p", "f1", " "} {
 		press(m, key)
 	}
@@ -87,6 +145,7 @@ func TestSecretPromptContent(t *testing.T) {
 	p := askPrompt
 	p.Purpose = "Push\x1b[2J branches\nand\x07 more"
 	openPrompt(m, 1, p)
+	m.Update(secretPromptArmMsg{id: 1})
 	frame := ansi.Strip(m.View().Content)
 	order := []string{"git.tools", "Totally Trusted (the plugin's own claim)", "git.token", "Required yes", "Purpose, in the plugin's words", "Push[2J branchesand more"}
 	at := 0
