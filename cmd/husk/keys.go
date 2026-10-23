@@ -42,6 +42,7 @@ var defaultBindings = []defaultBinding{
 	{">", "husk.sidebar.wider", ""}, {".", "husk.sidebar.wider", ""},
 	{"tab", "husk.focus.next", ""}, {"shift+tab", "husk.focus.next", ""}, {"?", "husk.modifiers.toggle_alt_latch", ""},
 	{"esc", "husk.modal.close", string(protocol.SurfaceModal)},
+	{"ctrl+]", "husk.capture.release", ""},
 }
 
 // ordered lists the bindings strongest first, as the keybinding service ranks
@@ -63,6 +64,10 @@ func scopeOrder(b defaultBinding) int {
 }
 
 func (d defaultKeys) Resolve(ctx contracts.KeyContext, keys []string) contracts.KeyResolution {
+	if ctx.Frozen {
+		ctx.Capture = protocol.CaptureNone
+		ctx.ModalOpen = false
+	}
 	if len(keys) != 1 {
 		return contracts.KeyResolution{}
 	}
@@ -74,10 +79,14 @@ func (d defaultKeys) Resolve(ctx contracts.KeyContext, keys []string) contracts.
 			continue
 		}
 		modalClose := b.action == "husk.modal.close" || ctx.ModalAction != "" && b.action == ctx.ModalAction
-		if ctx.Capture == protocol.CaptureText && b.focus == "" && keyspelling.IsTextKey(b.key) && !(ctx.ModalOpen && modalClose) {
+		release := ctx.Capture != protocol.CaptureNone && b.action == "husk.capture.release"
+		if ctx.Capture == protocol.CaptureAll && (b.action == "husk.modal.close" || b.focus == "" && b.action != "husk.capture.release") {
 			continue
 		}
-		if ctx.ModalOpen && b.focus == "" && b.action != "husk.modal.close" && (ctx.ModalAction == "" || b.action != ctx.ModalAction) {
+		if ctx.Capture == protocol.CaptureText && !release && b.focus == "" && keyspelling.IsTextKey(b.key) && !(ctx.ModalOpen && modalClose) {
+			continue
+		}
+		if ctx.ModalOpen && !release && b.focus == "" && b.action != "husk.modal.close" && (ctx.ModalAction == "" || b.action != ctx.ModalAction) {
 			continue
 		}
 		return contracts.KeyResolution{Outcome: contracts.KeyMatch, Binding: &contracts.KeyEntry{Keys: []string{b.key}, Action: b.action, Focus: b.focus}}

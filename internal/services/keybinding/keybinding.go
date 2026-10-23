@@ -229,6 +229,10 @@ func shadows(a, b Binding) bool {
 
 // Resolve is pure and never locks or calls another module.
 func (s *Service) Resolve(ctx KeyContext, keys []string) Result {
+	if ctx.Frozen {
+		ctx.Capture = protocol.CaptureNone
+		ctx.ModalOpen = false
+	}
 	if len(keys) == 0 {
 		return Result{}
 	}
@@ -240,13 +244,17 @@ func (s *Service) Resolve(ctx KeyContext, keys []string) Result {
 		if b.Disable && len(b.Keys) != len(keys) {
 			continue
 		}
-		if ctx.ModalOpen && !b.Disable && b.Focus != "modal-surface" && !(b.Focus == "" && (b.Action == "husk.modal.close" || ctx.ModalAction != "" && b.Action == ctx.ModalAction)) {
+		release := ctx.Capture != protocol.CaptureNone && b.Action == "husk.capture.release"
+		if ctx.Capture == protocol.CaptureAll && !b.Disable && (b.Action == "husk.modal.close" || b.Focus == "" && b.Action != "husk.capture.release") {
+			continue
+		}
+		if ctx.ModalOpen && !release && !b.Disable && b.Focus != "modal-surface" && !(b.Focus == "" && (b.Action == "husk.modal.close" || ctx.ModalAction != "" && b.Action == ctx.ModalAction)) {
 			continue
 		}
 		// Capture keeps plain typing: a global text-key candidate is removed
 		// in every layer, except the modal's close keys while a modal is open.
 		// Tombstones stay, as under the other filters.
-		if ctx.Capture == protocol.CaptureText && !b.Disable && b.Focus == "" && keyspelling.IsTextKey(b.Keys[0]) &&
+		if ctx.Capture == protocol.CaptureText && !release && !b.Disable && b.Focus == "" && keyspelling.IsTextKey(b.Keys[0]) &&
 			!(ctx.ModalOpen && (b.Action == "husk.modal.close" || ctx.ModalAction != "" && b.Action == ctx.ModalAction)) {
 			continue
 		}
