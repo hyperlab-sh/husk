@@ -72,6 +72,7 @@ func payloads() map[string]payload {
 		protocol.MethodPluginList:        {obj, obj},
 		protocol.MethodPluginLog:         {obj, obj},
 		protocol.MethodPluginRemove:      {obj, obj},
+		protocol.MethodPluginAdd:         {obj, obj},
 		protocol.MethodConfigReload:      {obj, obj},
 	}
 }

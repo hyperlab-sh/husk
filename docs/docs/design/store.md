@@ -650,6 +650,7 @@ files or discards the internal diagnostic history.
 | `husk state clear <namespace>` | yes, through the instance | `ClearSlice` deletes shared user and this instance's copies only, then the handler calls `State.Clear` ([State](state.md)); other instances are untouched |
 | `husk config reload` | yes | `Invalidate`, through Services |
 | `husk plugin remove <id>` | yes, through the instance | `Undeclare` of the plugin's two declared documents, then a Services reload with reason `plugin` ([Pods](pods.md)); the plugin's slice is unregistered and its pending persistent writes flushed (invariant 5); no file is deleted and `RemovePlugin` is not called |
+| `husk plugin add <path>` | yes, through the instance | `Declare` of the plugin's two declared documents and `Register` of its slice (hydrated from the persisted copies a removal kept), then a Services reload with reason `plugin` ([Pods](pods.md), "Adding a plugin"); no layer file is written, so `husk.plugins.paths` and `husk.plugins.dirs` are unchanged and the plugin is not loaded by the next start unless a layer or a flag names it |
 
 Every `husk store` verb opens Store with `Options.Passive`: `Open` itself
 collects, quarantines and writes nothing (no startup or periodic GC, no preload

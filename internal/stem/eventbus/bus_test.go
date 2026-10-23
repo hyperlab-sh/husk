@@ -640,7 +640,7 @@ func TestAuthorize(t *testing.T) {
 }
 
 func TestCoreNames(t *testing.T) {
-	for _, n := range []string{"state.changed", "pods.plugin-exited", "services.reloaded", "secrets.read", "surface.resized", "input.key", "husk.anything", "user.x"} {
+	for _, n := range []string{"state.changed", "pods.plugin-exited", "pods.plugin-removed", "pods.plugin-added", "services.reloaded", "secrets.read", "surface.resized", "input.key", "husk.anything", "user.x"} {
 		if !eventbus.IsCoreName(n) {
 			t.Errorf("%s not core", n)
 		}

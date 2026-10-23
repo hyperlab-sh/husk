@@ -261,7 +261,7 @@ reload, so its problems are not Services problems and ride no
 `config.reload` report. Each refused id is logged at `warning` once per
 rebuild, that is once for each `DeclaredRevision` value, and so is
 re-logged at each later rebuild while the conflict lasts (bounded in v1:
-rebuilds happen only at launch and removal). The line names the declarer
+rebuilds happen only at launch, `plugin.add` and removal). The line names the declarer
 and the plugin it collides with. The refused id is simply absent from `hook.list`, which lists catalog
 entries and has no problems field. "A problem on the declarer" in the rules
 above and in the failure table means that log line.

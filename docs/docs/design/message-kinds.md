@@ -461,7 +461,8 @@ rejects others with a `denied` reply. A bare-shell CLI caller may emit only
 under the `user.` prefix. Core event names have no plugin-id prefix and are
 reserved: `state.changed`, `pods.plugin-exited`, `pods.plugin-removed`
 (`{"plugin_id","status"}`, published by the host after `plugin.remove`
-undeclares a plugin, [Pods](pods.md)), `services.reloaded` and
+undeclares a plugin, [Pods](pods.md)), `pods.plugin-added` (the same
+shape, published after a `plugin.add` batch's launch gate opens), `services.reloaded` and
 `secrets.read` now, and the `state.`, `surface.`, `input.`, `pods.`,
 `services.`, `secrets.`, `user.` and `husk.` prefixes. `secrets.read` and
 `services.reloaded` are delivered to CLI watchers only, never to a plugin
