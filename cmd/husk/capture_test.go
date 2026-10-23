@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -167,7 +168,7 @@ func TestDefaultKeysMirrorTheCaptureFilter(t *testing.T) {
 // Every host action the built-in keymap names has a palette row, and every
 // row names a registered host action.
 func TestBuiltinCommandsMatchTheKeymap(t *testing.T) {
-	raw, err := os.ReadFile("../../internal/services/keybinding/keymap.json")
+	raw, err := os.ReadFile(filepath.Join("..", "..", "internal", "services", "keybinding", "keymap.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
