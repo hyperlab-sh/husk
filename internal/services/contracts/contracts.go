@@ -57,6 +57,8 @@ type ReloadInput struct {
 	Settings     SettingsSnapshot
 	Profile      *string
 	ConfigLayers []store.LayerDoc
+	// Themes are unmerged theme documents, with source member order retained.
+	Themes []store.LayerDoc
 	// ProfileNames are the names Store.Profiles listed in this flight's step 2,
 	// the same set used for profile selection.
 	ProfileNames []string
