@@ -103,8 +103,8 @@ func Builtins() []Entry {
 func startConsumedEntries() []Entry {
 	return []Entry{
 		{Key: "husk.bundle", Type: TypeString, Default: "", Owner: "husk", Apply: "restart", Doc: "Bundle directory loaded once at start, from user and instance layers only."},
-		{Key: "husk.plugins.paths", Type: TypeStrings, Default: []string{}, Owner: "husk", Apply: "restart", Doc: "Plugin arguments loaded once at start, interpreted like --plugin; --plugin is the instance layer on top."},
-		{Key: "husk.plugins.dirs", Type: TypeStrings, Default: []string{}, Owner: "husk", Apply: "restart", Doc: "Plugin directories loaded once at start, interpreted like --plugin-dir; --plugin-dir is the instance layer on top."},
+		{Key: "husk.plugins.paths", Type: TypeStrings, Default: []string{}, Owner: "husk", Apply: "restart", Doc: "Plugin arguments loaded once at start, interpreted like --plugin; --plugin documents are the instance layer on top, and --add-plugin appends to the effective value (named-instance file included), deduplicated by cleaned absolute path."},
+		{Key: "husk.plugins.dirs", Type: TypeStrings, Default: []string{}, Owner: "husk", Apply: "restart", Doc: "Plugin directories loaded once at start, interpreted like --plugin-dir; --plugin-dir documents are the instance layer on top, and --add-plugin-dir appends to the effective value (named-instance file included), deduplicated by cleaned absolute path."},
 	}
 }
 
