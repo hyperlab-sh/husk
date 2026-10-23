@@ -6,10 +6,9 @@ description: "The nine themes Husk ships as a built-in layer, the rules that map
 # Built-in themes
 
 Status: the nine-theme built-in layer, `charm` default, ANSI index
-resolution and frontend index drawing are landed, including the `PaletteANSI`
-seam, index-aware popup shadows and terminal-background handling. Only the
-minor 2.4 `ansi` wire field remains specified, not landed. Scope:
-`pkg/theme` (the built-in `themes`
+resolution, frontend index drawing and minor 2.4 `ansi` wire field are landed,
+including the `PaletteANSI` seam, index-aware popup shadows and
+terminal-background handling. Scope: `pkg/theme` (the built-in `themes`
 layer, its tests), the Theme Service ([Services](services.md), "Named
 themes": the layer and the default), and the name the frontend shows
 ([Workbench chrome](chrome.md), "The bottom bar"). The rules for which role
@@ -780,7 +779,7 @@ blends a hex neighbour in the same shadow band.
 | `themes` document role values: `#RRGGBB` strings only | `#rrggbb` or an integer `0`–`15` in every layer; Theme resolves an integer to its xterm default and records it in the index map (Services, "Named themes", rule 2) |
 | `Overlay` validates `#RRGGBB` only, and re-derives `slot_background` from `canvas` on every call whose map lacks it | Still hex-only (it only sees resolved hex values and the hex-only overrides), but it **stops deriving `slot_background`**: today the override pass, whose map rarely names the slot, wipes a theme-set slot (`rose-pine` `#21202e` would serve `#201e2b`, `rose-pine-moon` `#2a283e` → `#2b283e`, `base16` `#000000` → a grey while `ansi` says `0`). The build derives the slot once, after the theme and the overrides, only when neither set it ([Services](services.md), build step 4) |
 | `CheckContrast`: an unparsable value is a violation | Unchanged for hex; it takes the index map and skips every pair with an index role on either side |
-| `protocol.Palette` comment: `#RRGGBB` strings | Unchanged: values stay `#rrggbb`. The `theme.get` result and `theme.changed` params gain an optional `ansi` object (role → `0`–`15`), minor 2.4; [Protocol](protocol.md) "ANSI palette roles (minor 2.4)" and the `theme_changed` row, and [Architecture](../architecture.md) "Theme", amended. The wire schema gains it in the change that serves it, generated from `pkg/protocol` |
+| `protocol.Palette` comment: `#RRGGBB` strings | Unchanged: values stay `#rrggbb`. The `theme.get` result and `theme.changed` params gain an optional `ansi` object (role → `0`–`15`), minor 2.4; [Protocol](protocol.md) "ANSI palette roles (minor 2.4)" and the `theme_changed` row, and [Architecture](../architecture.md) "Theme", amended. The generated wire schema carries it (`ThemeChangedParams.ansi`) |
 | Theme Service snapshot: `gen`, `palette`, `overrides` | Gains the index map (role → `0`–`15`), built with the palette; `Wire()` stays a plain conversion of the palette, and `WireANSI() (protocol.Palette, map[string]int)` returns the wire palette and a detached copy of the map from one snapshot read |
 | Theme Service `Prepare` (`internal/services/theme/theme.go`): `Changed` when `old.palette != p` | `Changed` when the palette or the index map differs (`maps.Equal`), so `"ink": 7` → `"#c0c0c0"`, same hex, publishes |
 | `contracts.Frontend` (`internal/host/contracts/frontend.go`): `Palette() protocol.Palette` | Unchanged, plus `PaletteANSI() (protocol.Palette, map[string]int)`, the palette and a detached copy of its index map from one snapshot read. Any goroutine |
