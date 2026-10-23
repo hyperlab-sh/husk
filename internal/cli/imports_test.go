@@ -29,6 +29,9 @@ func TestImportsStayWithinAllowList(t *testing.T) {
 		}
 		for _, imp := range src.Imports {
 			path, _ := strconv.Unquote(imp.Path.Value)
+			if path == "os/signal" {
+				t.Errorf("%s imports os/signal: the CLI installs no signal handler; a signal ends it by the signal", f)
+			}
 			if rel, ok := strings.CutPrefix(path, module); ok && !allowed[rel] {
 				t.Errorf("%s imports %s", f, path)
 			}
