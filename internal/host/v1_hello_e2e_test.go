@@ -71,11 +71,18 @@ type chanNotifier struct {
 
 func (n *chanNotifier) Notify(m protocol.Message) error { n.ch <- m; return nil }
 
-func bootV1(t *testing.T, plugins ...string) (*harness, *legacySpy, *chanNotifier) {
+func bootV1(t *testing.T, plugins ...string) (*harness, *legacySpy, *chanNotifier, <-chan string) {
 	t.Helper()
 	spy := &legacySpy{ids: make(chan string, 4)}
+	logs := make(chan string, 64)
+	logger := WithLogger(func(level, msg string) {
+		select {
+		case logs <- level + ": " + msg:
+		default:
+		}
+	})
 	hook, ready := readyHook("")
-	h, err := boot(t, func(c *contracts.Config) { c.Plugins = plugins }, withHook(hook), withLegacySpy(spy))
+	h, err := boot(t, func(c *contracts.Config) { c.Plugins = plugins }, withHook(hook), withLegacySpy(spy), logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +93,7 @@ func bootV1(t *testing.T, plugins ...string) (*harness, *legacySpy, *chanNotifie
 		}
 	})
 	runHost(t, ready, h)
-	return h, spy, exited
+	return h, spy, exited, logs
 }
 
 func receive[T any](t *testing.T, ch <-chan T) T {
@@ -106,7 +113,7 @@ func receive[T any](t *testing.T, ch <-chan T) T {
 func TestV1HelloOnTheSocketFailsThePlugin(t *testing.T) {
 	bin := buildV1Plugin(t)
 	out := filepath.Join(t.TempDir(), "answer")
-	h, spy, exited := bootV1(t, v1PluginDir(t, bin, "v1", out, "v1"))
+	h, spy, exited, _ := bootV1(t, v1PluginDir(t, bin, "v1", out, "v1"))
 
 	if id := receive(t, spy.ids); id != "v1" {
 		t.Fatalf("FailLegacy(%q), want v1", id)
@@ -159,16 +166,31 @@ func TestV1HelloNamingNoLivePodStopsNothing(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "answer")
 	alpha := v1PluginDir(t, bin, "alpha", "-", "-")
 	stranger := v1PluginDir(t, bin, "stranger", out, "someone-else")
-	h, spy, _ := bootV1(t, alpha, stranger)
+	h, spy, exited, logs := bootV1(t, alpha, stranger)
 
 	if id := receive(t, spy.ids); id != "someone-else" {
 		t.Fatalf("FailLegacy(%q), want someone-else", id)
 	}
-	h.loop(func() {}) // the LegacyHelloMsg posted by that call has been applied
+	// Only the no-op branch of the loop handler writes this line, so seeing it
+	// proves the hello was ignored rather than not yet applied.
+	for line := receive(t, logs); !strings.Contains(line, `names no live plugin ("someone-else")`); line = receive(t, logs) {
+	}
+	// Fence: a wrongly failed alpha would publish pods.plugin-exited; stopping
+	// the stranger is a deterministic event after it.
+	h.mustRemove("stranger")
+	for {
+		var event struct{ Data map[string]any }
+		if err := json.Unmarshal(receive(t, exited.ch).Params, &event); err != nil {
+			t.Fatal(err)
+		}
+		if event.Data["plugin_id"] == "alpha" {
+			t.Fatalf("alpha exited: %+v", event.Data)
+		}
+		if event.Data["plugin_id"] == "stranger" {
+			break
+		}
+	}
 	if got := h.podStatus("alpha"); got != "live" {
 		t.Fatalf("alpha = %q, want live", got)
-	}
-	if got := h.podStatus("stranger"); got != "live" {
-		t.Fatalf("stranger = %q, want live (it named another plugin)", got)
 	}
 }

@@ -46,6 +46,8 @@ type Host struct {
 	tokenMu  sync.RWMutex
 	tokens   map[string]string
 	byPlugin map[string]string
+	// worker, when set, replaces the worker start of goWorker (tests).
+	worker func(func())
 }
 
 // New constructs a Host without launching processes or writing State.
