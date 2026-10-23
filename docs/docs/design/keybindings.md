@@ -1,9 +1,9 @@
 ---
 type: Design Spec
 title: "Keybinding policy and config layers"
-description: "Who may bind keys in Husk, which layers a keymap comes from, how conflicts resolve, the keymap file shape, and what husk keys reports."
+description: "Who may bind keys in Husk, which layers a keymap comes from, which binding wins, the keymap file shape, and what husk keys reports."
 status: planned
-generated: { by: claude/sonnet-5-5, at: 2026-10-22T06:00:00Z }
+generated: { by: claude/fable-5-1, at: 2026-10-22T18:00:00Z }
 tags: [architecture-v2, services]
 ---
 
@@ -11,149 +11,219 @@ tags: [architecture-v2, services]
 
 ## Level 0: What and why
 
-This spec fixes the rules for key bindings: who may declare one, where the effective keymap comes from, which binding wins when two claim the same key, and what the user sees when they ask. The Keybinding service mechanics (the Go type that caches and answers lookups, reload, invalidation) belong to [Services](services.md). This spec is the policy that service implements.
+A key press reaches Husk and one of three things happens: a binding runs an action, the key is the first part of a longer sequence and Husk waits, or no binding claims the key and it goes to the plugin occupying the focused surface. This spec fixes the rules behind that decision: who may declare a binding, where the effective keymap comes from, which binding wins when several claim the same key, how a plugin that is taking text input keeps plain typing, and what the user sees when they ask `husk keys`.
 
-The policy in five lines:
+The policy in six lines:
 
 1. A plugin declares **actions**. It never declares a global binding.
-2. A plugin may declare **focus-local** bindings in its manifest. They are active only while one of its surfaces has focus, and they sit below the distribution, user and profile layers.
-3. **Global** bindings come only from config layers: `distribution`, `user`, `profile`.
-4. The host hard-codes no workbench key. Today's keys move to a built-in `husk` keymap file that sits below every other layer, so a real distribution replaces them.
-5. Husk resolves no plugin-versus-plugin conflict, because plugins cannot create one. Users are deliberate about bindings; the extra work of writing a binding is the point. A command that copies a plugin-suggested keymap into the user layer (`husk keys adopt`) is rejected on purpose.
+2. A plugin may declare **surface-scoped** bindings in its manifest. They apply only while one of its own surfaces has focus and that plugin occupies it. This is the `focus-local` layer.
+3. **Global** bindings come only from keymap files: the built-in `husk` layer, then `distribution`, `user` and `profile`.
+4. **The focused surface wins over the rest of the screen.** A binding scoped to the focused surface beats a global binding on the same key, whichever layer each comes from. Within one scope, the stronger layer wins. (Operator ruling D64.)
+5. **A surface taking text input keeps plain typing.** While the focused occupant has declared capture, unmodified text keys skip every global binding. Modified keys and `esc` always resolve.
+6. The host hard-codes no workbench key. Today's keys live in a built-in `husk` keymap that sits below every other layer, so a distribution can replace or drop them. Husk never writes a keymap file and never copies a plugin's suggestions into the user layer (`husk keys adopt` is rejected on purpose).
 
-What this is not:
+What this spec is not:
 
-- Not the Keybinding service implementation. Caching, reload wiring and the method set are in [Services](services.md).
-- Not config layer merging. [Store](store.md) merges `distribution < user < profile` generically; this spec says what a keymap layer contains and how its entries compete.
-- Not key decoding. Terminal escape handling stays in the Input module of the Stem; this spec starts at the normalized key spelling.
-- Not the action catalog. Which actions exist, and who owns them, comes from manifests via [Pods](pods.md) and is routed by the Dispatcher in [Message kinds](message-kinds.md).
+- Not the Keybinding service mechanics (rebuild, candidate, atomic swap, reload coordination). Those are in [Services](services.md). This spec is the policy that service implements.
+- Not config layer reading. [Store](store.md) reads the layer documents and the declared documents; it does not merge keymaps.
+- Not key decoding. Terminal escape handling stays in the frontend; this spec starts at the normalized key spelling.
+- Not the action catalog. Which actions exist, and who owns them, comes from manifests via [Pods](pods.md) and is routed by the Dispatcher ([Message kinds](message-kinds.md)).
 
 Dependencies:
 
-- Depends on [Store](store.md) for the resolved `distribution`, `user` and `profile` documents, on [Pods](pods.md) (manifest conversion) for the focus-local layer, and on [Services](services.md) for the service that hosts this policy.
-- Depended on by Input (resolves a key press to an action id), by the footer and rail (hint text), by the palette (shortcut column), and by the CLI through the Server (`husk keys`, see [Instances and the CLI](instances.md)).
+- Depends on [Store](store.md) for the unmerged `keymap` layer documents and the declared per-plugin `keymap` documents, on [Pods](pods.md) (manifest conversion) for the `focus-local` layer, on [Services](services.md) for the service that hosts this policy, and on [State](state.md) for the focus, overlay and capture facts the frontend reads into `KeyContext`.
+- Depended on by the frontend's Input (resolves a key press to an action id), by the footer, rail and palette (key labels), and by the CLI through the Server (`husk keys`, [Instances and the CLI](instances.md)).
 
 ## Level 1: Contract
 
-### Layers and precedence
+### Terms
 
-Five sources feed one resolved keymap. Rank 4 is strongest.
+| Term | Meaning |
+|---|---|
+| **Key** | One normalized key spelling, for example `n`, `ctrl+g`, `f4`, `esc`, `" "`. The spelling rules are under "Key spelling". |
+| **Sequence** | One to four keys pressed one after another. A binding with one key is a sequence of length one. |
+| **Binding** | One entry from any layer: a sequence, a scope, and either an action to run or `disable`. |
+| **Scope** | Where a binding applies: **global** (no `focus`) or **surface** (`focus` names a surface id). A surface-scoped binding may carry `plugin`, which is a match condition, not a scope of its own. |
+| **Layer** | One source of bindings, with a fixed rank. The five layers are listed below. |
+| **Context** | What Input knows when a key arrives: the focused surface, its occupant, whether a modal or the palette is open, whether the occupant captures text, whether the terminal is too small. |
+| **Candidate** | A binding whose sequence begins with the keys typed so far and whose scope and conditions match the context. |
+| **Effective** | The candidate that ranks highest for a key and scope. Every other candidate for the same keys is **shadowed** by it. |
+| **Tombstone** | A `disable` binding. When it is the effective candidate, the key is unbound: nothing runs and the key goes to the occupant. |
+| **Occupant** | The plugin occupying the focused surface, from `husk.surfaces` ([State](state.md)). |
+| **Text key** | An unmodified key that produces or edits text: a single printable rune including `" "`, or one of `enter`, `backspace`, `delete`, `tab`, `up`, `down`, `left`, `right`, `home`, `end`, `pgup`, `pgdown`, `insert`. `esc` is not a text key. A key with any modifier prefix is not a text key. |
 
-| Rank | Layer | Source | Scope of its bindings |
+### Layers
+
+| Rank | Layer | Source | Scopes it may bind |
 |---|---|---|---|
-| 0 | `husk` | Built-in keymap file embedded in the binary | global and focus |
-| 1 | `focus-local` | Plugin manifests, converted by the Pod | focus only, implicitly bound to the declaring plugin |
-| 2 | `distribution` | Keymap file shipped by an application or bundle built on Husk | global and focus |
-| 3 | `user` | User config directory | global and focus |
-| 4 | `profile` | Active profile directory | global and focus |
+| 0 (weakest) | `husk` | Keymap file embedded in the binary | global and surface |
+| 1 | `focus-local` | Plugin manifests (`keybindings`), converted by Pods into one declared `keymap` document per plugin | surface only; `plugin` is implicitly the declaring plugin |
+| 2 | `distribution` | The keymap file an application built on Husk registers with Store | global and surface |
+| 3 | `user` | `keymap.json` in the user config directory | global and surface |
+| 4 (strongest) | `profile` | `keymap.json` in the active profile's directory | global and surface |
 
-Rules:
+The Store `instance` layer (run flags) does not carry a keymap. Store has one distribution source (`Options.Distribution`, [Store](store.md)); an application that bundles plugins ships one merged distribution keymap. The rank order is fixed; no file changes it.
 
-- **Layer first.** When several bindings match a key press, the highest layer wins. Within one layer, the more specific scope wins (plugin-qualified focus, then focus, then global). Within one layer and one scope, the first entry in the file wins and the loader reports each later duplicate as a `duplicate` problem.
-- **Configuration always beats a plugin.** A distribution, user or profile binding beats a focus-local binding on the same key, whatever the scope. A plugin can never take a key a person or an application chose.
-- **The `husk` layer is the weakest default.** A plugin's focus-local binding beats a built-in host key while its surface has focus. A distribution replaces the host keymap by overriding or disabling entries, or by dropping the layer (see `builtin` below).
-- **Disable removal is exact; lookup still ranks.** A `disable` entry removes lower-layer entries with the same `(keys, focus, plugin)` triple. The tombstone itself remains a ranked candidate. Therefore a global user-layer disable of `[` outranks a plugin's focus-local `[` and yields `NoMatch` (the key falls through), even though the plugin declaration remains in the catalog/listing. This is the authoritative distinction between exact removal and the winning lookup result.
-- **A disabled or unbound key falls through.** If the winning candidate is a disable, or no candidate exists, the key goes to the focused surface's occupant as `slot_key`, exactly as an unbound key does today.
-- **No instance layer.** The Store `instance` layer (run flags) does not feed keymaps in v1.
-- **One distribution layer in v1.** Store takes a single distribution source (`Options.Distribution`, [Store](store.md)); an application that bundles plugins ships one merged distribution keymap. Several distribution layers ranked by registration order would be an additive change to Store and to this spec, not to the rank table.
+### Which binding wins
 
-### Key spelling and sequences
+Given the keys typed so far `K` and the context `C`, the effective candidate is found in these steps. Each step is a total order; the first step that separates two candidates decides.
 
-Keys use the existing `slot_key` spelling: `f4`, `ctrl+g`, `alt+2`, `n`, `esc`, `tab`. The loader normalizes `space` to the single wire space, and letters after modifiers to lowercase before applying Shift (`ctrl+X` → `ctrl+x`, `shift+x` → `X`). Shift+digit/symbol is rejected with an `invalid_key` problem naming the produced character to bind (`shift+1` → use `!`, `shift+/` → use `?`), rather than silently binding the unshifted key. Non-modified produced text retains its case.
+1. **Candidates.** A binding is a candidate when its sequence equals or begins with `K`, and:
+   - it is global, or its `focus` equals `C.FocusSurface` and (`plugin` is empty or equals `C.FocusOwner`); and
+   - the context filters below (frozen, modal, capture) keep it.
+2. **Scope first.** A surface-scoped candidate ranks above a global candidate.
+3. **Layer second.** Within one scope, the higher-ranked layer wins: `profile` > `user` > `distribution` > `focus-local` > `husk`.
+4. **Narrower condition third.** Within one scope and one layer, a candidate with `plugin` ranks above one without.
+5. **File order last.** Within one scope, layer and condition, the entry that appears first in its document wins. (Two such entries with the same sequence are a `duplicate`; see "Loader rules".)
 
-A binding names one key with `key` or a sequence of up to 4 keys with `keys: [...]` (`"keys": ["ctrl+k", "ctrl+s"]`); exactly one of the two is present. A sequence is never written as one space-separated string, because `" "` is itself a key. Input keeps the chord state and asks the service after each key. Rules:
+The outcome:
 
-- A sequence times out after 1500 ms without the next key. The partial input is dropped and the pending keys are not replayed to the occupant.
-- If a binding's sequence is a strict prefix of another binding's sequence in the same scope and both survive precedence, the longer one is unreachable. The loader drops it and reports `unreachable`.
-- `esc` while a sequence is pending cancels it and is consumed.
+| Top candidate | Result |
+|---|---|
+| none | `NoMatch`: the key is not bound here; Input hands it to the occupant. |
+| a tombstone | `NoMatch`, even when the tombstone's sequence is longer than `K`. A tombstone never produces `Prefix`. |
+| sequence longer than `K` | `Prefix`: Input waits for the next key. |
+| sequence equal to `K` | `Match`: Input runs the binding's action with its args. |
+
+Consequences, stated so they are tested rather than inferred:
+
+- A user global binding on `r` does not fire while a surface is focused whose occupant declared a surface-scoped `r`. The user takes that key back with a surface-scoped entry: `{"key":"r","focus":"sidebar-list","action":"..."}` or `{"key":"r","focus":"sidebar-list","disable":true}`.
+- A global tombstone unbinds global bindings only. It does not silence a plugin's surface-scoped binding on the same key.
+- A surface-scoped tombstone without `plugin` in the user layer unbinds every lower-layer binding on that surface, including every plugin's `focus-local` entry for it. With `plugin`, it unbinds them only while that plugin occupies the surface.
+- A `focus-local` entry beats a `husk`-layer global key while its surface has focus (so a plugin's `[` on its surface wins over the host's `[`), and loses to a `distribution`, `user` or `profile` entry scoped to the same surface.
+
+### Context filters
+
+`KeyContext` carries five facts. Each one removes candidates before ranking.
+
+| Fact | Source | Effect on candidates |
+|---|---|---|
+| `Frozen` (terminal below the minimum size) | frontend geometry | Only candidates whose action is `husk.quit` remain. Nothing is forwarded to any plugin. |
+| `ModalOpen`, `ModalAction` (a modal surface is open; the rail item id that opened it) | `husk.surfaces.overlays.modal` | Only candidates scoped to `modal-surface`, plus global candidates whose action is `husk.modal.close` or equals `ModalAction`, remain. Keys that then yield `NoMatch` go to the modal's plugin. `FocusSurface` is `modal-surface` and `FocusOwner` the modal's plugin while a modal is open. |
+| `Capture` (the focused occupant has declared text capture for the focused surface) | `husk.surfaces.capture[FocusSurface]`, see "Text capture" | Global candidates whose first key is a text key are removed, from every layer. Surface-scoped candidates, candidates on modified keys, on function keys and on `esc` remain. |
+| Palette open | frontend | `Resolve` is not called. The palette consumes every key (Invariant 9). |
+
+The filters compose: a frozen terminal with a modal open still resolves only `husk.quit`.
+
+### Text capture
+
+Problem: `q`, `h`, `v`, `?`, `tab` and the other unmodified host keys fire while a person types into a plugin's text field, because a binding on any key wins before the occupant sees it. Vim-style modes (normal/insert) are not the fix: Husk has no editor and the plugin, not the host, knows when it is editing. The fix is one bit of context, set by the occupant.
+
+- An occupant declares capture per surface with each `surface.update`: `"capture": true` means "this surface is taking text input now"; absent or `false` means it is not. The value from the latest accepted `surface.update` for that surface is current. ([Protocol](protocol.md) carries the field; the Surfaces engine records it as `capture` in `husk.surfaces`, [State](state.md).)
+- Input copies `husk.surfaces.capture[FocusSurface]` into `KeyContext.Capture` on every key press. An unoccupied surface never captures.
+- While `Capture` is true, a text key that no surface-scoped binding claims goes to the occupant unchanged, whatever any global layer binds. A person who wants a plain letter to stay a shortcut even while typing writes it as a surface-scoped entry.
+- `esc` and every modified key (`ctrl+`, `alt+`, `super+`, `meta+`, `hyper+`) resolve as usual, so quit, the palette and `husk.home` stay reachable through their modified spellings.
+- Capture is not focus: it changes which keys resolve, not which surface receives them.
+
+> Operator ruling pending (Q19/Q21). This section is the recommended answer; see the audit report. If capture is rejected, delete this section and the `Capture` row above, and the unmodified host keys fire while typing, as today.
+
+### Key spelling
+
+Keys use the frontend's wire spelling, the one plugins receive in `input.key`. The loader normalizes each spelling with the shared `keyspelling.Normalize` and rejects what cannot match a real key press.
+
+| Rule | Examples |
+|---|---|
+| Modifier prefixes, in any order, each at most once: `alt+`, `ctrl+`, `shift+`, `super+`, `meta+`, `hyper+`. The normalized form puts `alt+` first and uses lowercase names. | `ctrl+g`, `alt+2`, `alt+ctrl+x` |
+| Named keys: `enter`, `tab`, `backspace`, `esc`, `up`, `down`, `left`, `right`, `home`, `end`, `pgup`, `pgdown`, `insert`, `delete`, `space`, `f1` to `f63`. | `f4`, `pgdown` |
+| `space` normalizes to the single wire space `" "`. | `"key": "space"` and `"key": " "` are the same key |
+| Any other key is exactly one printable rune and keeps its case. | `n`, `N`, `?`, `ö`, `日` |
+| A letter after `ctrl+`, `super+`, `meta+` or `hyper+` is lowercased. | `ctrl+X` → `ctrl+x` |
+| `shift+` plus a letter means the uppercase letter. | `shift+x` → `X` |
+| `shift+` plus a digit or symbol is rejected (`invalid_key`); the message names the produced character to bind instead. | `shift+1` → "bind `!`" |
+| Anything else (empty, two runes without a modifier, unknown name, repeated modifier) is rejected (`invalid_key`). | `ctrl+ctrl+a`, `ab`, `f0` |
+
+Layout-specific characters pass through: on a German layout, Option+o arrives as `alt+ö` and is bound as `alt+ö`. Layout translation is a terminal problem, not Husk's.
+
+### Sequences
+
+A binding names one key with `key` or two to four keys with `keys`; exactly one of the two is present. A sequence is never written as one space-separated string, because `" "` is itself a key. Input, not the service, owns sequence state:
+
+| Event | Input does |
+|---|---|
+| `Prefix` returned | Remembers the keys typed so far and waits. |
+| 1500 ms pass without another key | Discards the pending keys. Nothing is replayed to the occupant; nothing is dispatched. |
+| `esc` arrives while keys are pending | Discards the pending keys and consumes the `esc`. |
+| `Match` returned | Clears the pending keys and dispatches the action. |
+| `NoMatch` returned with keys pending | Discards the pending keys and resolves the key that just arrived on its own, as if nothing had been pending. |
+| A reload swaps the keymap while keys are pending | Nothing special. The next key is resolved against the keymap current at that moment. |
+
+If, within one scope and layer, an effective binding's sequence is a strict prefix of another effective binding's sequence, the longer one can never be typed. The loader drops the longer one and reports `unreachable`. (The same prefix in two different scopes or layers is not a conflict: ranking decides at run time.)
 
 ### Keymap file shape
 
-Format: **HuJSON** (JSON with comments and trailing commas), one file per layer, named `keymap.json`. It is the Store document `keymap`, read with the same parser as every other layer document ([Store](store.md), decision 1), so a keymap can carry hand-written comments without a second config format in the binary. The plugin manifest uses the same syntax.
+Format: HuJSON (JSON with comments and trailing commas), one file per layer, named `keymap.json`. It is the Store document `keymap`, read with the same parser as every other layer document ([Store](store.md), decision 1).
 
 ```jsonc
 // keymap.json
 {
   "version": 1,            // required; the only accepted value is 1
-  // "builtin": false,     // distribution layers only: drop the husk layer entirely
+  // "builtin": false,     // distribution layer only: drop the husk layer entirely
   "bind": [
     {
-      "key": "ctrl+g",       // one key; or "keys": [...] for a sequence
+      "key": "ctrl+g",        // one key; or "keys": ["ctrl+k", "ctrl+s"] for a sequence
       "action": "notes.open", // required unless "disable": true
       "hint": "Notes",        // optional footer text, at most 40 runes
-      // "focus": "...",      // omitted: global
-      // "plugin": "...",     // optional, with focus: only while this plugin occupies the surface
+      // "focus": "...",      // omitted: global; a surface id: surface-scoped
+      // "plugin": "...",     // optional with focus: only while this plugin occupies the surface
       // "args": { ... },     // optional object passed to the action as params
-      // "disable": true,     // optional: remove the same (keys, focus, plugin) from lower layers
+      // "disable": true,     // optional tombstone; excludes action, args and hint
     },
   ],
 }
 ```
 
-Fields:
-
-| Field | Type | Required | Meaning |
+| Field | Type | Required | Rule |
 |---|---|---|---|
-| `version` | integer | yes | Schema version. Unknown values reject the file. |
-| `builtin` | bool | no | `false` in a distribution layer removes the `husk` layer. Ignored with a `problem` in any other layer. |
-| `bind` | array | yes | The entries, in order. |
-| `key` | string | one of `key`/`keys` | A single key. |
-| `keys` | array of string | one of `key`/`keys` | A sequence of 2 to 4 keys. |
-| `action` | string | unless `disable` | An action id, `<plugin_id>.<name>` or a `husk.*` host action. |
-| `focus` | string | no | A surface id. Omitted means global. |
-| `plugin` | string | no | Narrows `focus` to the surface while this plugin occupies it. Invalid without `focus`. |
-| `args` | object | no | Params for the action. Strings, numbers and booleans only. |
-| `hint` | string | no | Short label the footer shows. Without it the binding is not advertised. |
+| `version` | integer | yes | Must be `1`. Any other value rejects the file (`unsupported_version`). |
+| `builtin` | bool | no | `false` in the `distribution` layer removes the `husk` layer. In any other layer the field is reported (`invalid_entry`, key `builtin`) and ignored. |
+| `bind` | array | yes | The entries, in order. A missing or non-array `bind` rejects the file (`invalid_entry`, key `bind`). |
+| `key` | string | one of `key`/`keys` | One key. |
+| `keys` | array of 2 to 4 strings | one of `key`/`keys` | A sequence. |
+| `action` | string | unless `disable` | An action id containing at least one `.`: `<plugin_id>.<name>`, a `husk.*` host action, or a rail item id. Existence is not checked at load. |
+| `focus` | string | no | A surface id. Omitted means global. Existence is not checked at load. |
+| `plugin` | string | no | Only with `focus`. The entry applies only while this plugin occupies the surface. |
+| `args` | object | no | Params for the action. Values are strings, numbers and booleans only; at most 1 KiB serialized. |
+| `hint` | string | no | Footer label, at most 40 runes. Without it the binding is not advertised. |
 | `disable` | bool | no | Tombstone. `action`, `args` and `hint` must be absent. |
 
-Examples (the surrounding `{"version": 1, "bind": [...]}` omitted).
+Any field of the wrong JSON type, or any violation above, drops that entry with `invalid_entry` and keeps the rest of the file.
 
-A global binding in the user layer:
+Examples (the surrounding `{"version": 1, "bind": [...]}` omitted):
 
-```json
+```jsonc
+// A global binding in the user layer.
 {"key": "ctrl+g", "action": "notes.open", "hint": "Notes"}
-```
 
-A focus-local override. The plugin `files` declared `n` for `files.new` on its `sidebar-list` surface; the user rebinds that surface's `n` to a different action and gives `files.new` a new key:
+// The plugin `files` declared `n` for `files.new` on `sidebar-list`. The user gives
+// that surface's `n` another action and moves `files.new` to `ctrl+n`.
+{"key": "n",      "focus": "sidebar-list", "plugin": "files", "action": "files.new_dir"},
+{"key": "ctrl+n", "focus": "sidebar-list", "plugin": "files", "action": "files.new"},
 
-```json
-{"key": "n", "focus": "sidebar-list", "plugin": "files", "action": "files.new_dir"},
-{"key": "ctrl+n", "focus": "sidebar-list", "plugin": "files", "action": "files.new"}
-```
+// The distribution binds `[` globally; this user wants `[` to reach plugins.
+{"key": "[", "disable": true},
 
-A disable. The distribution binds `[` globally; this user wants `[` to reach plugins:
+// Unbind `r` on sidebar-list whichever plugin occupies it.
+{"key": "r", "focus": "sidebar-list", "disable": true},
 
-```json
-{"key": "[", "disable": true}
-```
-
-A focus-local disable, which removes only the plugin's own binding:
-
-```json
-{"key": "r", "focus": "sidebar-list", "plugin": "files", "disable": true}
-```
-
-A chord with parameters:
-
-```json
-{"keys": ["ctrl+k", "ctrl+o"], "action": "notes.open", "args": {"path": "todo.md"}}
+// A sequence with parameters.
+{"keys": ["ctrl+k", "ctrl+o"], "action": "notes.open", "args": {"path": "todo.md"}},
 ```
 
 ### Layer locations
 
-| Layer | Where | Registered by |
+| Layer | Where | Written by |
 |---|---|---|
-| `husk` | Embedded in the binary (`keymap.json` beside the Keybinding service source) | Husk |
-| `distribution` | Whatever file or embedded filesystem the embedding application registers with Store | The application |
+| `husk` | `keymap.json` embedded in the binary beside the Keybinding service source | Husk |
+| `distribution` | The file or embedded filesystem the embedding application registers with Store | The application |
 | `user` | `keymap.json` in the user config directory (`$XDG_CONFIG_HOME/husk`, default `~/.config/husk`) | The user |
-| `profile` | `keymap.json` in the active profile's directory (`profiles/<name>/`) under the user config directory | The user, selected by the Profile service |
-| `focus-local` | `keybindings` array in the plugin manifest | The plugin author |
+| `profile` | `profiles/<name>/keymap.json` under the user config directory | The user; selected by the Profile service |
+| `focus-local` | The `keybindings` array of each plugin manifest, declared by Pods as the per-plugin `keymap` document (`Store.Declared("keymap")`) | The plugin author |
 
-Store owns file reading; the Keybinding service asks it for the unmerged `keymap` documents (`Store.Layers("keymap", profile)`, [Store](store.md)) and receives each one tagged with its layer and file path.
+Store owns file reading. The Keybinding service receives the unmerged layer documents through `Store.Layers("keymap", profile)`, each tagged with its layer and file, and the declared documents through `Store.Declared("keymap")`, keyed by plugin id ([Store](store.md)). The service reads no file itself.
 
-### Plugin manifest: focus-local bindings
+### Plugin manifest: surface-scoped bindings
 
-The manifest gains a `keybindings` array, taking over from today's `hello.keybindings`. It means focus-local only.
+The manifest field is `keybindings`, an optional array. Every entry is surface-scoped; there is no way to write a global binding in a manifest.
 
 ```json
 {
@@ -164,15 +234,20 @@ The manifest gains a `keybindings` array, taking over from today's `hello.keybin
 }
 ```
 
-Rules:
+Manifest conversion ([Pods](pods.md)) owns these checks and is the only place they run. It keeps the entries that pass and records one problem per entry it drops, in the declared document's `problems` array (`{index, code, message}`, index being the manifest position):
 
-- `focus` is required and must name a surface the plugin declares in `slots` (or one it publishes). A binding with no `focus`, or for a surface the plugin does not own, is dropped and reported as a `global_not_allowed` or `foreign_surface` problem.
-- `action` must be one of the plugin's own actions or a `husk.*` host action. A focus-local binding to another plugin's action is dropped (`foreign_action`): a plugin does not wire users into someone else's code.
-- The `plugin` field is implicit (the declaring plugin) and not accepted.
-- At most 128 focus-local bindings per plugin. The rest are dropped with `too_many`.
-- The Pod converts the array into the `focus-local` layer document and hands it to Store as config, so a reload and a plugin install use the same path.
+| Check | Drops the entry with |
+|---|---|
+| `focus` is absent, or names a surface the plugin does not list in `surfaces` | `global_not_allowed`; the message says which |
+| `plugin` or `disable` is present | `global_not_allowed`; the message names the field |
+| `action` is neither one of the plugin's own actions nor `husk.*` | `foreign_action` |
+| More than 128 entries | the first 128 in document order are kept; one `too_many` problem for the rest |
 
-### Resolution
+Key spellings pass through conversion unparsed. The Keybinding service is the single key parser: a focus-local entry whose key does not normalize is dropped there with `unparsable_key`. Conversion sets `plugin` on every kept entry to the declaring plugin id; the service does not re-check ownership.
+
+A rail item's `shortcut` (and any `shortcut` on a command) is not a binding. Conversion records it under `suggestions` in the declared document and the service reports each one as `suggestion_ignored`, so the author learns that a key for it is bound in a keymap layer, not in the manifest.
+
+### Resolution API
 
 ```go
 // Package keybinding: the policy view. Services owns the concrete service type.
@@ -191,78 +266,78 @@ const (
 type Binding struct {
 	Keys    []string       // one to four normalized keys
 	Action  string         // empty when Disable
-	Args    map[string]any // optional
-	Hint    string         // optional
+	Args    map[string]any // nil when absent
+	Hint    string
 	Focus   string         // surface id; empty means global
-	Plugin  string         // empty unless narrowed; implicit for focus-local
+	Plugin  string         // match condition; set by conversion for focus-local
 	Disable bool
 	Source  Source
 }
 
+// Source locates the declaration for problems and `husk keys`.
 type Source struct {
 	Layer  Layer
-	File   string // repo-relative or config-relative path; empty for focus-local
-	Line   int    // 1-based; 0 when unknown
-	Plugin string // declaring plugin, focus-local only
-	Order  int    // position within the layer, for tie-breaking
+	File   string // config-relative path: "keymap.json", "profiles/<name>/keymap.json"; "builtin" for husk; empty for focus-local
+	Line   int    // 1-based when the parser reports one, else 0
+	Plugin string // declaring plugin; focus-local only
+	Order  int    // index in the layer's bind array
 }
 
-// KeyContext is what Input knows when a key arrives. All of it comes from State.
+// KeyContext is what Input knows when a key arrives. Every field comes from the
+// frontend's own view of State; the service reads no State.
 type KeyContext struct {
-	FocusSurface string // focused surface id; empty when none
+	FocusSurface string // focused surface id; "modal-surface" while a modal is open; empty when none
 	FocusOwner   string // plugin occupying it; empty when unoccupied
-	ModalOpen    bool   // a modal surface is open
-	ModalAction  string // open modal's rail action id; permits its global toggle to close it
-	Frozen       bool   // terminal too small; only husk.quit may resolve
+	ModalOpen    bool
+	ModalAction  string // rail item id that opened the modal; empty when none
+	Capture      bool   // the occupant declared text capture for FocusSurface
+	Frozen       bool   // terminal below the minimum size
 }
 
 type Outcome int
 
 const (
-	NoMatch Outcome = iota // key is not bound: hand it to the occupant
-	Prefix                 // a sequence is in progress: wait for the next key
+	NoMatch Outcome = iota // not bound here: hand the key to the occupant
+	Prefix                 // wait for the next key
 	Match                  // run Binding
 )
 
 type Result struct {
 	Outcome Outcome
-	Binding *Binding // set when Match
+	Binding *Binding // set only for Match; a detached copy
+}
+
+type Hint struct {
+	Keys   []string
+	Action string
+	Text   string
 }
 
 type Resolver interface {
-	// Resolve takes the keys pressed since the last Match or reset, in order.
+	// Resolve ranks the candidates for keys in ctx. Pure: no State, no I/O,
+	// no lock held across a call out of the service, under 1 ms.
 	Resolve(ctx KeyContext, keys []string) Result
-	// Hints returns the footer hints for the focused surface, at most four.
+	// Hints returns the effective bindings in ctx that carry a hint, at most
+	// four: surface-scoped before global, then stronger layer first, then file
+	// order. A shadowed or disabled binding is never a hint.
 	Hints(ctx KeyContext) []Hint
-	// KeysFor returns the effective keys for an action, strongest first, for
-	// palette and rail labels.
+	// KeysFor returns the display spellings of the effective bindings for
+	// action: global entries first, then surface-scoped; within each group
+	// stronger layer first, then file order. A sequence is joined with one
+	// space ("ctrl+k ctrl+s"). Empty when nothing binds the action.
 	KeysFor(action string) []string
-	// Listing returns every entry, effective and shadowed, plus load problems.
+	// Listing returns every entry with its static state, plus every load problem.
 	Listing() Listing
 }
 ```
 
-`Resolve` is a pure function of the loaded layers and the context. It reads no State and writes none.
+What happens on `Match`: Input dispatches `Binding.Action` with `Binding.Args` through the Dispatcher as the Stem caller ([Message kinds](message-kinds.md)). `husk.*` actions and rail item ids run in the host; any other id goes to its single owner. The Dispatcher does not know a key caused it.
 
-Candidate selection for a key sequence `K` in context `C`:
-
-1. A binding is a **candidate** if its keys equal or begin with `K` and its scope matches `C`: global, or `Focus == C.FocusSurface` and (`Plugin` empty or `Plugin == C.FocusOwner`).
-2. Tombstones apply: for each `Disable` entry, remove every lower-layer entry with the same `(Keys, Focus, Plugin)`. The disable entry itself stays as a candidate for ranking purposes only and yields `NoMatch` if it wins.
-3. Order the rest by layer rank, then scope specificity, then `Source.Order` ascending (first wins).
-4. If the top candidate is a disable, return `NoMatch` immediately, including a partial disabled chord: a tombstone never returns `Prefix`. Otherwise return `Match` for its exact keys, or `Prefix` while its sequence needs more keys.
-5. All other candidates are **shadowed** and listed as such by `Listing`.
-
-Special contexts:
-
-- **Frozen.** While the terminal is below the minimum size, only bindings whose action is `husk.quit` resolve. All other keys give `NoMatch` and are not forwarded.
-- **Modal open.** Only candidates scoped to `modal-surface`, plus global candidates whose action is `husk.modal.close` or equals the open modal's rail item id, are considered. Everything else gives `NoMatch` and goes to the modal's plugin. This preserves today's grab behavior and lets the rail item's own key close the modal.
-- **Palette open.** The palette consumes every key (see Invariant 9). `Resolve` is not called.
-
-What happens on `Match`: Input sends the binding's `Action` and `Args` to the Dispatcher ([Message kinds](message-kinds.md)). Host actions (`husk.*`) are owned by the host and run in the Stem. Rail item ids resolve to the rail item's activation. Any other id goes to its single owner.
+A host action may **decline** a key: its handler reports that it had nothing to do, and Input then treats the result as `NoMatch` and hands the key to the occupant. The only host action that declines today is `husk.home`, when the default layout is already shown and no rail item or stage mode is active; this is why `esc` reaches a plugin's main stage when there is nothing to go home from. A plugin action never declines; once dispatched, the key is consumed.
 
 ### Built-in `husk` keymap
 
-The host hard-codes no workbench key. The built-in file reproduces today's bindings so the first release changes no behavior except the rank change described in Level 2.
+The host hard-codes no workbench key. The embedded file reproduces today's keys. Every action it names has a catalog entry owned by the host, with a title, so each appears in the palette and in `husk action list`.
 
 ```json
 {
@@ -295,205 +370,213 @@ The host hard-codes no workbench key. The built-in file reproduces today's bindi
 }
 ```
 
-Host actions this file introduces that exist only as inline code in `cmd/husk/input.go` today: `husk.quit`, `husk.palette.open`, `husk.layout.reset`, `husk.sidebar.narrower`, `husk.sidebar.wider`, `husk.focus.next`, `husk.modifiers.toggle_alt_latch`, `husk.modal.close`. They join the existing `husk.home`, `husk.hotspots.toggle_stage`, `husk.hotspots.badges`, `husk.sidebar.toggle`, `husk.sidepanel.toggle` and `husk.docks.cycle`. Each has a catalog entry owned by the host, so it appears in the palette and in `husk action list`.
+Host actions: `husk.quit`, `husk.home`, `husk.palette.open`, `husk.hotspots.toggle_stage`, `husk.hotspots.badges`, `husk.sidebar.toggle`, `husk.sidepanel.toggle`, `husk.docks.cycle`, `husk.layout.reset`, `husk.sidebar.narrower`, `husk.sidebar.wider`, `husk.focus.next`, `husk.modifiers.toggle_alt_latch`, `husk.modal.close`. The set is closed by this file; adding a host key means adding an entry here and a catalog entry in the frontend.
 
-Widget-local keys are not keymap entries. The command palette and the slot inspector (hotspots stage) are host-owned surfaces. Like a plugin's surface, each receives the keys that reach it and handles them itself: the palette's `up`, `down`, `ctrl+j`, `ctrl+k`, `tab`, `enter`, `backspace`, `esc`, `ctrl+p`, `ctrl+c` and text entry; the inspector's `j`, `k`, `up`, `down`. The set is closed and listed in `docs/docs/architecture.md` under Input routing after this spec lands.
+The unmodified letters and symbols (`q`, `h`, `v`, `?`, `[`, `]`, `/`, `=`, `<`, `>`, `,`, `.`, `:`) stay for a behavior-neutral migration. Text capture keeps them out of a plugin's typing; a distribution that wants none of them overrides or drops the layer.
+
+Widget-local keys are not keymap entries. The command palette and the slot inspector (hotspots stage) are host-owned surfaces; each handles the keys that reach it itself, as a plugin surface does. The closed sets: the palette's `up`, `down`, `ctrl+j`, `ctrl+k`, `tab`, `enter`, `backspace`, `esc`, `ctrl+p`, `ctrl+c` and text entry; the inspector's `j`, `k`, `up`, `down`.
 
 ### Rail items, palette and footer
 
-- A rail item's `shortcut` field and a command's `shortcut` field stop being bindings. They remain only as the manifest's non-binding suggestion, are ignored for routing, and trigger a `suggestion_ignored` problem so the author sees it. The text a rail button, palette row or top bar shows is `KeysFor(action)[0]`: the effective key, or nothing.
-- Rail items are declared in the plugin manifest as `rail_items[]` (id, icon, badge, label, placement, description, optional frame; today's `RailItemSpec` without `shortcut`), validated by Pod manifest conversion and published in the `plugins` document ([Pods](pods.md)). The frontend lists them through `Frontend.RailItems` and registers the in-process handler of each rail id with `Frontend.RegisterHostAction`.
-- A rail item is addressable as an action by its id. Binding a key to a rail item id activates that item; pressing it while the item is active returns home (modal items close), as today.
-- The footer always shows the effective keys of `husk.home`, `husk.sidebar.toggle`/`husk.docks.cycle`, `husk.palette.open` and `husk.quit`, then `Hints(ctx)`: the winning bindings that have a `hint`, in scope for the focused surface (focus-local, or global with a hint), at most 4, first by layer rank descending then file order. A shadowed binding is never advertised.
+- A rail item is addressable as an action by its id ([Pods](pods.md)). Binding a key to a rail item id activates the item; pressing it while the item is active returns home, and closes the item if it is a modal.
+- Rail buttons, palette rows and the top bar show `KeysFor(action)[0]`, the effective key, or nothing. They never show a manifest `shortcut`.
+- The footer shows, in this order: the effective key of `husk.home`; `Hints(ctx)`, at most four; the layout-reset key; the effective keys of `husk.sidebar.toggle`, `husk.sidepanel.toggle` and `husk.docks.cycle`; the keys of `husk.palette.open` and `husk.quit`. Each group is left out when nothing binds it.
 
 ### Reload
 
-`husk config reload` invalidates the cached keymap. The service rebuilds from the latest layer documents and swaps the result atomically; an in-flight chord is cancelled. Adding a plugin at runtime changes the `focus-local` layer and takes the same path; the plugin's process starts only after that reload completes ([Pods](pods.md), launch gate), so its keys exist before its surface can take focus. Removing a plugin from the instance (Pod teardown) reloads likewise. A plugin whose process merely exits keeps its focus-local entries in the keymap, flagged `unavailable` in the listing, and they never match because no surface of that plugin has focus.
+`husk config reload`, a profile change, and a plugin added or removed at runtime each rebuild the keymap through the Services coordinator ([Services](services.md)); the result swaps atomically. A plugin's process starts only after the reload that read its declarations completes ([Pods](pods.md), launch gate), so its keys exist before its surface can take focus. A plugin whose process merely exits keeps its `focus-local` entries; they never match because no surface of that plugin has focus, and `husk keys` lists them as `unavailable`. Removing the plugin from the instance undeclares its document and reloads.
 
 ### `husk keys`
 
-`husk keys` is read-only. It maps to the `keys.list` method served by the Server ([Instances and the CLI](instances.md) owns the method and exit codes). The Server handler joins `Listing()` with State (is the owner live) and the action catalog (does the action exist). The Keybinding service itself stays free of State.
+`husk keys` is read-only and maps to `keys.list`, served by the Server ([Instances and the CLI](instances.md) owns flags, output format and exit codes). The Server handler joins `Listing()` with State (is the owner live) and the action catalog (does the action exist); the Keybinding service itself reads neither.
 
-Flags: `--action <id>` and `--focus <surface>` filter as in [Instances and the CLI](instances.md); this spec adds `--shadowed` (include shadowed entries) and `--problems` (print only load problems).
+Callers: the CLI (user identity) receives the whole listing. A plugin receives only the entries whose `plugin` is its id or whose `action` it owns, and only its own problems. Any other caller is denied.
+
+Flags: `--action <id>` and `--focus <surface>` filter entries; `--shadowed` includes shadowed entries (hidden by default); `--problems` prints only the problems.
 
 Each entry has a `state`:
 
 | State | Meaning |
 |---|---|
-| `effective` | Wins for its key and scope. |
-| `shadowed` | Beaten by a higher candidate; `shadowed_by` names the winner. |
-| `disabled` | A tombstone that is currently winning. |
-| `unavailable` | Effective, but the owning plugin is not live or its surface is not present. |
-| `unknown_action` | Effective, but the action is not in the catalog. |
+| `effective` | Not shadowed by any entry that would always outrank it. |
+| `shadowed` | Another entry outranks it in every context where it could match; `shadowed_by` names that entry's source. |
+| `disabled` | A tombstone that is not itself shadowed. |
+| `unavailable` | Effective, but the owning plugin is not live or declares no such surface. Computed by the handler. |
+| `unknown_action` | Effective, but the action is not in the catalog. Computed by the handler. |
 
-Table output (default on a TTY, with `--shadowed`):
+Static shadowing (the listing has no context): entry A shadows entry B when both have the same keys, A ranks above B by the rules under "Which binding wins", and every context that matches B also matches A, that is: both are global; or `A.focus == B.focus` and (`A.plugin` is empty or equals `B.plugin`). A global entry therefore never shadows a surface-scoped one, and a surface-scoped entry never shadows a global one, because each fires in contexts the other does not.
+
+Table output (default on a TTY, here with `--shadowed`). `SOURCE` is the config-relative file and the entry's index in `bind`:
 
 ```
-KEY      SCOPE                    ACTION               LAYER         SOURCE                     STATE
-ctrl+g   global                   notes.open           user          keymap.json:3              effective
-n        sidebar-list (files)     files.new_dir        user          keymap.json:8              effective
-n        sidebar-list (files)     files.new            focus-local   plugin files               shadowed by user keymap.json:8
-[        global                   (disabled)           user          keymap.json:14             disabled
-[        global                   husk.sidebar.toggle  distribution  app keymap.json:21         shadowed by user keymap.json:14
-q        global                   husk.quit            husk          builtin                    effective
+KEY      SCOPE                 ACTION               LAYER         SOURCE                        STATE
+ctrl+g   global                notes.open           user          keymap.json#3                 effective
+n        sidebar-list (files)  files.new_dir        user          keymap.json#8                 effective
+n        sidebar-list (files)  files.new            focus-local   plugin files #0               shadowed by user keymap.json#8
+[        global                (disabled)           user          keymap.json#14                disabled
+[        global                husk.sidebar.toggle  husk          builtin#12                    shadowed by user keymap.json#14
+q        global                husk.quit            husk          builtin#0                     effective
 ```
 
-JSON output (one document, the reply `result`):
+JSON output (the reply `result`):
 
 ```json
 {
   "entries": [
     {
-      "keys": ["n"],
-      "focus": "sidebar-list",
-      "plugin": "files",
-      "action": "files.new_dir",
-      "layer": "user",
-      "source": { "file": "keymap.json", "line": 8 },
+      "keys": ["n"], "focus": "sidebar-list", "plugin": "files", "action": "files.new_dir",
+      "source": {"layer": "user", "file": "keymap.json", "line": 0, "order": 8},
       "state": "effective"
     },
     {
-      "keys": ["n"],
-      "focus": "sidebar-list",
-      "plugin": "files",
-      "action": "files.new",
-      "layer": "focus-local",
-      "source": { "plugin": "files" },
+      "keys": ["n"], "focus": "sidebar-list", "plugin": "files", "action": "files.new",
+      "source": {"layer": "focus-local", "plugin": "files", "order": 0},
       "state": "shadowed",
-      "shadowed_by": { "layer": "user", "file": "keymap.json", "line": 8 }
+      "shadowed_by": {"layer": "user", "file": "keymap.json", "line": 0, "order": 8}
+    },
+    {
+      "keys": ["["], "disable": true,
+      "source": {"layer": "user", "file": "keymap.json", "line": 0, "order": 14},
+      "state": "disabled"
     }
   ],
   "problems": [
     {
-      "layer": "focus-local",
-      "plugin": "notes",
       "code": "global_not_allowed",
-      "message": "binding \"ctrl+n\" has no focus; plugins cannot declare global bindings"
+      "layer": "plugin:notes",
+      "key": "[\"ctrl+n\"]",
+      "message": "focus must be a surface owned by this plugin",
+      "source": {"layer": "focus-local", "plugin": "notes", "order": 2}
     }
   ]
 }
 ```
 
-`source.file` is relative to the config directory of its layer. `husk keys` never writes a keymap and never offers to copy bindings between layers.
+Entry fields are `keys`, `action`, `args`, `hint`, `focus`, `plugin`, `disable`, `source`, `state`, `shadowed_by`; absent or zero-valued optional fields are omitted. A problem's `layer` is the layer name, or `plugin:<id>` for a focus-local problem. `source.file` is relative to the config directory of its layer; `husk keys` never prints an absolute path.
+
+### Loader rules and problem codes
+
+The loader runs on every rebuild. It never stops at the first error: every layer that parses contributes, every bad entry is dropped on its own, and every drop is a problem. This is the complete list of codes.
+
+| Code | Raised by | Condition | Effect |
+|---|---|---|---|
+| `parse_error` | Store | The layer file is not valid HuJSON. | First load: the layer is absent. Reload: the last good document for that layer (and, for `profile`, that profile name) stays. |
+| `unsupported_version` | loader | `version` is not `1`. | Same as `parse_error`. |
+| `too_large` | loader | The document exceeds 256 KiB serialized. | Same as `parse_error`. |
+| `invalid_entry` | loader | A field has the wrong type; both or neither of `key`/`keys`; `keys` outside 2 to 4; `action` missing without `disable`, or present with it; `action` without a `.`; `plugin` without `focus`; `hint` over 40 runes; `args` not scalar-only or over 1 KiB; `builtin` outside the distribution layer (key `builtin`); `bind` missing or not an array (key `bind`, rejects the file). | The entry (or file) is dropped. |
+| `invalid_key` | loader | A key spelling in a layer file does not normalize. The message names the spelling and, for `shift+` symbols, the character to bind. | The entry is dropped. |
+| `unparsable_key` | loader | The same, for a `focus-local` entry. | The entry is dropped. |
+| `duplicate` | loader | Two entries in one layer have the same `(keys, focus, plugin)`. | The first stays effective; the later one is listed as shadowed by it. |
+| `unreachable` | loader | Within one scope and layer, an effective sequence is a strict prefix of another effective sequence. | The longer one is dropped. |
+| `too_many` | loader | More than 2048 entries in one layer file; more than 128 in one manifest (raised by conversion); or more than 4096 effective entries after ranking. | Extra entries are dropped. Past the 4096 cap the weakest-ranked go first, so a flood of low-layer entries cannot push out `profile` or `user` entries. |
+| `global_not_allowed` | conversion | A manifest entry without `focus`, with a `focus` the plugin does not own, or with `plugin` or `disable`. | The entry is dropped. |
+| `foreign_action` | conversion | A manifest entry whose `action` is neither the plugin's own nor `husk.*`. | The entry is dropped. |
+| `suggestion_ignored` | loader, from conversion's `suggestions` | A rail item or command carried `shortcut`. | Nothing is bound; the rail shows no key until a layer binds one. |
+| `no_exit_binding` | loader | After ranking, no effective entry has action `husk.quit` or none has `husk.palette.open`. | The keymap is used as written; a toast at startup. Recovery: `husk action invoke husk.quit`, or a signal. |
+
+### Failure modes at run time
+
+| Condition | Who detects | What happens | What the user sees |
+|---|---|---|---|
+| Bound action is not in the catalog | `keys.list` handler; Dispatcher on press | The binding stays. The Dispatcher answers `not_found`. | State `unknown_action`; a toast with the action id on press. |
+| Bound action's owner is not live | Dispatcher (State liveness) | No call is made. | State `unavailable`; a toast "owner not running" on press. |
+| A plugin's surface-scoped binding traps its own surface (for example `esc` on its main stage) | nobody | Honored: that is what surface scope means. | The user adds a surface-scoped override or tombstone. |
+| A user global binding seems dead on one surface | nobody | A surface-scoped binding outranks it there. | `husk keys --focus <surface>` shows the surface-scoped winner. |
+| The occupant declares capture and a global unmodified key stops working on that surface | nobody | Intended. | `husk keys` is unchanged; the modified spelling still works. |
 
 ### Invariants
 
-1. **Plugins create no global binding.** A manifest entry without a `focus` has no effect on any key press.
-2. **Configuration outranks plugins.** Any distribution, user or profile entry beats any focus-local entry on the same key, in every context.
-3. **Rank order is fixed.** `husk` < `focus-local` < `distribution` < `user` < `profile`. No file changes it.
-4. **Tombstone deletion follows the Disable rule above.** Exact removal does not bypass candidate precedence.
-5. **Resolve is pure.** The same layers and context give the same result. It reads no State, does no I/O and takes no lock held across a call out of the service.
-6. **The host binds no workbench key outside the `husk` layer.** Input contains no key literal other than the closed widget-local sets in the palette and the inspector.
-7. **A plugin's focus-local binding fires only while its surface has focus** and (for a plugin-qualified entry) while that plugin occupies it. A key never reaches a plugin that does not hold focus through a binding.
-8. **Every dropped or ignored entry is reported.** No entry disappears silently; each produces a problem visible in `husk keys --problems`.
-9. **The palette consumes every key while open**, as today. No binding fires and no `slot_key` is sent to plugins.
-10. **An unbound key reaches the occupant unchanged.** Dropping a binding or disabling it returns the key to the focused surface's plugin.
-11. **A reload swaps atomically.** A lookup sees the old keymap or the new one, never a mix.
-12. **Husk never writes a keymap file.** No command copies, adopts or generates bindings into the user layer.
+1. **Plugins create no global binding.** A manifest entry without `focus` has no effect on any key press.
+2. **The focused surface wins over the rest of the screen.** A surface-scoped candidate always outranks a global candidate for the same keys, in every context. (D64)
+3. **Within one scope, configuration outranks plugins.** `profile` > `user` > `distribution` > `focus-local` > `husk`, and no file changes the order.
+4. **A tombstone unbinds exactly its own scope.** It shadows lower-ranked entries that match in every context it matches, and nothing else.
+5. **Resolve is pure.** The same layers and context give the same result; it reads no State, does no I/O, and holds no lock across a call out of the service.
+6. **The host binds no workbench key outside the `husk` layer.** Input contains no key literal other than the closed widget-local sets of the palette and the inspector.
+7. **A surface-scoped binding fires only while its surface has focus** and, when `plugin` is set, only while that plugin occupies it.
+8. **Every dropped or ignored entry is reported.** Each produces exactly one problem, visible in `husk keys --problems`.
+9. **The palette consumes every key while open.** No binding fires and no `input.key` reaches a plugin.
+10. **An unbound, disabled or declined key reaches the occupant unchanged.**
+11. **A capturing surface keeps plain typing.** No global binding on a text key fires while the focused occupant captures; modified keys and `esc` still resolve.
+12. **A reload swaps atomically.** A lookup sees the old keymap or the new one, never a mix.
+13. **Husk never writes a keymap file.** No command copies, adopts or generates bindings into any layer.
 
 ### Limits
 
 | Limit | Value | Reason |
 |---|---|---|
-| Keymap file size | 256 KiB | A hand-edited keymap is a few KiB; the cap bounds parse time and memory. |
-| Bindings per file | 2048 | Same. Extra entries are dropped with `too_many`. |
-| Focus-local bindings per plugin | 128 | A plugin is a surface, not a keyboard. |
+| Keymap document size | 256 KiB | A hand-edited keymap is a few KiB; the cap bounds parse time and memory. |
+| Entries per layer file | 2048 | Same. |
+| Entries per manifest | 128 | A plugin is a surface, not a keyboard. |
+| Effective entries after ranking | 4096 | Bounds lookup memory and `husk keys` output. |
 | Keys per sequence | 4 | Longer sequences are unusable by hand. |
-| Sequence timeout | 1500 ms | Long enough for a deliberate chord, short enough that a stray prefix does not trap input. |
+| Sequence timeout | 1500 ms (Input's clock) | Long enough for a deliberate sequence, short enough that a stray prefix does not trap input. |
 | `hint` length | 40 runes | The footer has fixed room for four hints. |
-| Footer hints from plugins | 4 | Unchanged from today. |
-| `args` size | 1 KiB serialized | Params for an action, not a payload. |
+| Footer hints | 4 | Unchanged from today. |
+| `args` size | 1 KiB serialized, scalars only | Params for an action, not a payload. |
 | `Resolve` budget | 1 ms | It runs on the UI loop for every key. The index is a map keyed by first key. |
-
-### Failure modes
-
-| Condition | Who detects | What happens | What the user or plugin sees |
-|---|---|---|---|
-| Keymap file has a syntax error, first load | Store/Keybinding loader | The file's layer is dropped. Other layers load. | A toast at startup naming the file and line; `husk keys --problems` lists `parse_error`. |
-| Same error on reload | Loader | The previous good document for that layer and profile file stays active. A different profile never inherits the earlier profile's map. | `config.reload` returns the problem; the keymap does not change. |
-| Unknown `version` | Loader | File rejected as above. | `unsupported_version` problem. |
-| Entry has an invalid key | Loader | That entry is dropped. | `invalid_key` problem with file and line. |
-| Entry has both `key` and `keys`, neither, or a `keys` array outside 2 to 4 entries | Loader | That entry is dropped. | `invalid_entry` problem. |
-| Entry missing `action` without `disable`, or `disable` with an action | Loader | That entry is dropped. | `invalid_entry` problem. |
-| `plugin` given without `focus` | Loader | Entry dropped. | `invalid_entry` problem. |
-| Two entries with the same `(key, focus, plugin)` in one layer | Loader | The first entry wins. | `duplicate` problem naming both lines. |
-| Sequence is a strict prefix of another in the same scope | Loader | The longer binding is dropped. | `unreachable` problem. |
-| Bound action is not in the catalog | `keys.list` handler | The binding stays. Pressing it makes the Dispatcher return `not_found`. | State `unknown_action`; on press, a toast with the action id. |
-| Bound action's owner is not live | Dispatcher (State liveness) | No call is made. | State `unavailable`; on press, a toast "owner not running". |
-| Manifest binding without `focus` | Pod manifest conversion | Binding dropped; plugin still loads. | `global_not_allowed` problem naming the plugin. |
-| Manifest binding for a surface the plugin does not own | Pod manifest conversion | Binding dropped. | `foreign_surface` problem. |
-| Manifest binding to another plugin's action | Pod manifest conversion | Binding dropped. | `foreign_action` problem. |
-| Manifest rail item or command carries `shortcut` | Pod manifest conversion | Field ignored for routing. | `suggestion_ignored` problem; the rail shows no key until a layer binds one. |
-| Resolved keymap has no binding for `husk.quit` or `husk.palette.open` | Keybinding service after each load | The keymap is used as written. | A startup toast and a `no_exit_binding` problem. Recovery: `husk action invoke husk.quit`, or SIGTERM. |
-| A plugin binds a focus-local key that traps its surface (for example `esc`) | Nobody | Honored: that is focus-local semantics. | Fix with a user-layer disable or override. |
-| `args` exceeds 1 KiB or holds a non-scalar value | Loader | Entry dropped. | `invalid_entry` problem. |
-| Reload while a chord is pending | Input | The pending chord is cancelled. | The pending keys are discarded; nothing is sent to the occupant. |
 
 ### Dependency directions
 
-- Services read Store; Store never imports Services. The Keybinding service receives the unmerged layer documents through `Store.Layers("keymap", profile)` and the focus-local layer through `Store.Declared("focus-keymap")`.
-- The Keybinding service reads the `focus-local` layer from `Store.Declared("focus-keymap")` using Store's normalized schema. Pods drop foreign/unscoped bindings and attach `{index,code,message}` conversion problems; key spelling is passed through unchanged. Keybinding is the single parser and adds `unparsable_key` for malformed focus-local entries, with layer `plugin:<id>`.
-- Input reads the Keybinding service; the service never imports Input, the Dispatcher, State or the Server.
-- Input sends `Match` results to the Dispatcher as an action id plus params. The Dispatcher does not know a key caused it.
-- The Server's `keys.list` handler imports the Keybinding service, State and the action catalog and joins them. The CLI imports none of them and reaches the keymap only through the Server.
-- Hint text consumers (renderer, palette, rail) call `KeysFor` and `Hints`; none reads a layer document.
+- The Keybinding service reads Store (`Layers("keymap", profile)`, `Declared("keymap")`) and the declared `plugins` documents for action and surface ownership. Store never imports Services.
+- Manifest conversion (Pods) owns the surface-scoped rules and never parses key spellings. The service owns key parsing and never re-checks ownership.
+- Input reads the Keybinding service through the frontend contract; the service never imports Input, the Dispatcher, State or the Server.
+- Input sends `Match` results to the Dispatcher as an action id plus params.
+- The Server's `keys.list` handler imports the Keybinding service, State and the action catalog and joins them. The CLI reaches the keymap only through the Server.
+- The footer, palette and rail call `KeysFor` and `Hints`; none reads a layer document.
 
 ### What this exposes to the CLI
 
-- `keys.list` (backing `husk keys`): the entries, their layer, source and state, and the load problems.
-- `config.reload` rebuilds the keymap along with every other service cache.
+- `keys.list` (backing `husk keys`): entries, their layer, source and state, and the load problems.
+- `config.reload` rebuilds the keymap with every other service cache.
 - No write path. A keymap changes by editing a file and reloading.
 
 ## Level 2: Migration from today
 
-| Today | Change |
+| Today (`main`) | Change |
 |---|---|
-| `cmd/husk/input.go` (the `switch key` block around the `q`, `?`, `esc`, `ctrl+p`, `[`, `]`, `/`, `=`, `<`, `>`, `tab` cases) | Replaced by a `Resolve` call and a dispatch of the resulting action. Each case body moves into a host action (see the built-in keymap list). `layoutFrozen` handling becomes `KeyContext.Frozen`. The palette and slot-inspector key handling stays as widget-local code. |
-| `cmd/husk/input.go` (`railShortcutItem` use, rail shortcut activation) | Removed. Rail activation is an action bound by a layer. |
-| `cmd/husk/commands.go` `keyBinding`, `isChordKey`, `keyOwner` use for plugin bindings | Removed. `isChordKey` is dropped with the "plugin globals only on chords" rule, which no longer has a case to guard. `keyOwner` remains for `slot_key` routing. |
-| `cmd/husk/commands.go` `builtinCommands`, `executeCommand` | Kept as the host action catalog and handler. Gains the eight new `husk.*` actions. The `Shortcut` field on host commands is deleted; palette rows show `KeysFor`. |
-| `cmd/husk/commands.go` `footerHints`, `maxPluginFooterHints` | Reads `Hints` and `KeysFor` instead of `Info.Keybindings` and fixed host strings. |
-| `cmd/husk/keybinding_test.go` | Rewritten against `Resolve` with fixtures for each layer, disable, shadowing and sequences. Behavior tests for the built-in keymap assert today's key to action table. |
-| `pkg/huskipc/protocol.go` `KeybindSpec`, `Hello.Keybindings` | **Done (v2-cutover-retire):** removed with `hello` ([Protocol](protocol.md): there is no handshake in v2). The shape moves to the manifest as the focus-local entry above (`command_id` becomes `action`, `when_slot` becomes `focus`). `RailItemSpec.Shortcut` and `CommandSpec.Shortcut` become non-binding suggestions; the rest of `RailItemSpec` moves to the manifest's `rail_items[]`. |
-| `pkg/manifest/manifest.go` | **Done (v2-cutover-retire):** deleted; `internal/pods/manifest` carries a `Keybindings` field with the focus-local shape above. Validation of `focus`, `action` and the 128 cap lives in the conversion step. |
-| `docs/docs/architecture.md` Input routing | Steps 2 to 4 collapse into "resolve against the layered keymap". The statement that plugins cannot override host shortcuts is replaced by the rank rules above. Updated when the implementation lands. |
-| New | Keymap loader and `Resolve` under the Keybinding service ([Services](services.md)); embedded `keymap.json`; `keys.list` handler; `husk keys` subcommand. |
+| `internal/services/keybinding`: ranks layer first, then specificity (`stronger`, `dominates`) | Rank scope first, then layer, then `plugin` condition, then order, per "Which binding wins". Static shadowing per "`husk keys`". |
+| `KeyContext` has no capture bit | Add `Capture`; filter global text-key candidates when set. Frontend reads `husk.surfaces.capture`. |
+| `cmd/husk/input.go`: no sequence timeout; the key that breaks a sequence goes to the occupant without being resolved alone | Add the 1500 ms timer; resolve the breaking key on its own. |
+| `cmd/husk/input.go`: `husk.home` falls through by a special case | Keep the behavior, as the generic "host action declines" rule. |
+| `cmd/husk/commands.go`: `builtinCommands` lists six host actions | List every action the built-in keymap names, with titles. |
+| Loader reports a document over 256 KiB as `too_many` | Report `too_large`. |
+| Conversion accepts `focus_bindings` as an alias of `keybindings` | Accept `keybindings` only. |
+| Declared document name `focus-keymap` | `keymap` (D64; rename unit). |
+| `docs/docs/architecture.md`, "Input routing" | Says layer order decides; now scope decides first. |
 
-Behavior changes users can notice:
+Behavior changes users can notice, compared with the layer-first draft of this spec:
 
-1. A plugin's focus-local binding on a key the host also binds now wins while that surface has focus. Before, host shortcuts always won.
-2. Plugin bindings without a focus surface stop working. Distributions that relied on them add a `distribution` keymap.
-3. Rail and palette shortcut labels follow the effective keymap, so they change when a user rebinds.
+1. A plugin's surface-scoped binding wins over a user or distribution global binding on the same key while that surface has focus. The user takes a key back with a surface-scoped entry.
+2. Unmodified host keys stop firing inside a surface whose occupant declared text capture.
+3. A user global tombstone no longer silences a plugin's surface-scoped key; a surface-scoped tombstone does.
 
 ## Decisions made here
 
-1. **HuJSON for keymap files, like every other layer document.** Keymaps are hand-written and need comments; HuJSON gives comments and trailing commas without a second config parser in the binary ([Store](store.md), decision 1). An earlier draft chose TOML; one format for all documents wins.
-2. **Rank order `husk` < `focus-local` < `distribution` < `user` < `profile`.** The notes place focus-local below the user layer; this puts it above the built-in host keys and below every real config layer.
-3. **Layer first, specificity second.** A user global binding beats a plugin's focus-local binding on the same key. This is the strongest reading of "configuration beats plugins" and the easiest to explain; the user restores a plugin key with a focus-scoped entry.
-4. **Disable removal and lookup follow the single Disable rule above.** Tombstones stay in ranked lookup; their catalog removal scope and lookup outcome are distinct.
-5. **A disabled or unbound key falls through to the occupant.** It does not swallow the key.
-6. **The built-in `husk` keymap reproduces today's keys, including bare letters such as `q`, `h`, `v`.** The migration changes no default. Distributions are the lever for changing them.
-7. **A distribution may drop the built-in layer with `builtin = false`.** Overriding entry by entry is not enough for an application that wants none of the host keys.
-8. **One distribution layer in v1**, matching Store's single `Options.Distribution`. Several distribution layers ranked by registration order (a bundle nested in an application) are deferred until Store accepts more than one source.
-9. **No keymap in the `instance` layer in v1.** Run flags do not carry bindings.
-10. **Key sequences up to four keys, written as a `keys` array, 1500 ms timeout, no replay of a dropped prefix.** Input needs chord state anyway, and replay would send stray keys to a plugin. The array form exists because `" "` is a key and a space-joined string could not spell it.
-11. **Palette and slot-inspector keys stay widget-local.** They are the input handling of two host-owned surfaces, not workbench bindings. The set is closed.
-12. **Modal grab considers only `modal-surface` scope plus the modal's own close action.** Preserves today's behavior that a modal sees nearly every key.
-13. **Rail and command `shortcut` fields become suggestions that are ignored for routing and reported.** Otherwise a plugin could still declare a global key through the rail.
-14. **A foreign action in a focus-local binding is dropped.** A plugin may bind its own actions and `husk.*` actions only.
-15. **Eight new `husk.*` host actions** extract inline key handling in `input.go` so the built-in keymap has something to bind.
-16. **`keys.list` computes availability in the Server handler, not in the service.** Keeps `Resolve` pure and the service free of State.
-17. **Parse failure on reload keeps the last good document for that layer.** A typo cannot lock the user out mid-session. At first load the layer is dropped instead, because there is nothing to keep.
-18. **`husk keys` gains `--shadowed` and `--problems`.** Required to show where each binding came from and what it beat.
-19. **No key is protected from remapping, including quit.** Recovery is `husk action invoke husk.quit` or a signal; a warning fires when no exit binding remains.
+1. **HuJSON for keymap files**, like every other layer document ([Store](store.md), decision 1). One parser for all documents.
+2. **Scope first, layer second** (operator ruling D64). This is the Emacs and Vim model: a buffer-local map beats the global map whoever set it. The layer-first alternative (VS Code: user rules appended after defaults, last match wins) made every plugin key on a surface hostage to any global binding and forced users to repeat the plugin's keys per surface to get them back. The shadowed listing in `husk keys` shows what each entry hides.
+3. **`plugin` is a match condition, not a rank level.** Two scopes (global, surface) keep the ranking explainable; within one layer and scope a conditioned entry wins over an unconditioned one, so a user can write both without a duplicate.
+4. **A tombstone is a candidate that resolves to nothing**, with no separate removal rule. Under scope-first ranking, "removes lower-layer entries in its scope" and "shadows them" are the same statement, so the earlier two-part Disable rule is gone. A global tombstone does not reach a surface-scoped binding. This supersedes the earlier lead ruling D39, which assumed layer-first ranking.
+5. **Text capture is a context bit set by the occupant per `surface.update`**, not a manifest flag and not an input mode. A manifest flag cannot say "only while this text field is active"; a mode would make Husk an editor. The text-key set is closed and listed. Pending operator ruling (Q19/Q21).
+6. **The built-in keymap keeps today's keys, including unmodified letters.** Capture solves the typing problem; distributions solve the rest.
+7. **A distribution may drop the built-in layer with `builtin: false`.** Overriding entry by entry is not enough for an application that wants none of the host keys.
+8. **One distribution layer, no instance layer**, matching Store.
+9. **Sequences of up to four keys as a `keys` array, 1500 ms timeout owned by Input, no replay.** The array form exists because `" "` is a key. The key that breaks a sequence is resolved on its own so that `esc` cancels, a bound key fires and an unbound key reaches the occupant.
+10. **No chord cancel on reload.** The next key is resolved against the current keymap; a rule for it would add a wire between the coordinator and Input for no observable gain.
+11. **Palette and inspector keys stay widget-local.** They are the input handling of two host-owned surfaces.
+12. **Modal grab considers only `modal-surface` scope plus the modal's own close action.**
+13. **Manifest `shortcut` fields are suggestions, reported and ignored.** Otherwise a plugin could still declare a global key through the rail.
+14. **A foreign action in a manifest binding is dropped.** A plugin binds its own actions and `husk.*` only.
+15. **Conversion owns the manifest rules; the service owns key parsing.** One owner per rule; two codes (`global_not_allowed`, `foreign_action`) whose messages say what was wrong (D27).
+16. **`keys.list` computes availability in the Server handler**, keeping `Resolve` pure.
+17. **Parse failure on reload keeps the last good document for that layer and profile name** (D40). At first load the layer is absent instead.
+18. **No key is protected from remapping, including quit.** A warning fires when no exit binding remains; the CLI and signals recover.
+19. **Host actions may decline a key.** Needed so `esc` reaches a plugin's surface when there is nothing to go home from; stated as a rule instead of a special case.
 
 ## Open questions
 
-1. **Should the built-in keymap keep bare letters (`q`, `h`, `v`, `?`, `.`, `,`) that fire even when a plugin's text input has focus?** They do today, and `q` quits while typing in a plugin. Recommend: keep them in v1 for a behavior-neutral migration, and change the defaults to chords in the first release after, since a distribution can already override them.
-2. **Layer-first precedence versus specificity-first.** With layer-first, a user global `r` hides every plugin's focus-local `r` until the user adds focus-scoped entries. Recommend: keep layer-first; the shadowed listing in `husk keys` shows exactly what a binding hides, and the policy goal is that people, not plugins, own the keyboard.
-3. **Should a plugin be able to protect a key on its surface from distribution globals?** The notes say no (focus-local sits below config). This spec follows the notes. A text-editing plugin would then lose bare-letter keys to any distribution global on a bare letter. Recommend: leave it to distribution authors, and document that global bare-letter bindings steal typing.
-4. **Should the host protect one escape binding?** Decision 19 allows removing quit. An alternative is to refuse a keymap with no `husk.quit` and fall back to the built-in. Recommend: keep the warning only; the CLI and signals are enough, and a framework should not second-guess an explicit config.
-5. **Contexts for palette and widget-local keys.** A later spec could make the palette's navigation rebindable through a `context = "palette"` scope. Recommend: not in v1; the closed list is small and stable.
-6. **Key spelling of non-US layouts and Option combinations.** The terminal passes layout-specific characters through unchanged, so a binding for `alt+o` on a German layout needs `alt+ö`. Recommend: document it and keep exact matching; layout translation is a terminal problem.
-7. **Disagreement with the notes: none on policy.** One gap: the notes say the resolved keymap comes from "Store's generic layer resolution", but precedence here includes rank, scope specificity and tombstones, which a generic document merge does not express. Resolved: [Store](store.md) exposes `Layers(name, profile)`, which returns the unmerged documents tagged with their layer, and the Keybinding service resolves across them. Store stays generic.
-8. **Flags in the instances spec.** Resolved: [Instances and the CLI](instances.md) lists `husk keys [--action] [--focus] [--shadowed] [--problems]`.
+Each is written into the contract above with the recommended answer; the operator may flip it.
+
+1. **Scope-first ranking and the reach of a global tombstone** (D64 versus the earlier D39). Recommended and written: scope first; a global tombstone unbinds global entries only.
+2. **Text capture** (Q19, Q21). Recommended and written: one `capture` bit per surface, set by `surface.update`, filtering global text-key bindings. Not vim modes, not a manifest flag.
+3. **Keep unmodified host keys in the built-in keymap.** Recommended and written: keep, since capture removes them from typing.
+4. **Host actions may decline a key.** Recommended and written: yes, with `husk.home` the only one today.

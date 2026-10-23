@@ -175,7 +175,8 @@ func (s *Store) Patch(name DocName, layer Layer, profile string, patch Doc) erro
 // Safe for concurrent use: the loop declares while a reload reads.
 // Two names exist in v1:
 // "plugins" (per-plugin catalog: actions, surfaces, subscriptions, hooks,
-// secret requests, settings schema) and "focus-keymap" (focus-local bindings).
+// secret requests, settings schema) and "keymap" (focus-local bindings, D64;
+// the same DocName as the layer document, read through a different method).
 // source is the plugin id. Never persisted, never merged into layers.
 func (s *Store) Declare(name DocName, source string, d Doc)
 func (s *Store) Undeclare(source string)
@@ -185,7 +186,7 @@ func (s *Store) Declared(name DocName) map[string]Doc // source -> doc
 #### Declared-document schema (Services / Pods boundary)
 
 This is the normalized JSON contract, not a manifest file format. Pods publish
-one `plugins` document and one `focus-keymap` document per plugin, keyed by the
+one `plugins` document and one `keymap` document per plugin, keyed by the
 same plugin id passed as `source` to `Declare`. Fields mirror the declaration
 types in [Pods](pods.md)'s `Spec`, in snake_case. Services import no Pod types.
 Pods finish declaring both documents before requesting a `plugin` reload.
@@ -219,7 +220,7 @@ A plugin with no `settings_declared` entries has no schema (unknown keys in its
 own subtree are retained raw with a warning). A malformed declaration produces
 a problem naming its source, never an import of a Pod implementation.
 
-A `focus-keymap` document is `{"version":1,"bind":[...]}`. Entries use exactly
+A declared `keymap` document is `{"version":1,"bind":[...]}`. Entries use exactly
 one of `key` (string) or `keys` (2–4 strings), plus `action`, required `focus`,
 and optional `hint` and scalar-object `args`. The declaring plugin is implicit:
 `plugin` and `disable` are not accepted. Focus ownership is checked against
@@ -242,7 +243,7 @@ Example (source `files`):
 {"id":"files","name":"Files","actions":[{"id":"files.new","title":"New","public":true}],"surfaces":[{"id":"sidebar-list"}],"focus_bindings":[{"key":"n","action":"files.new","focus":"sidebar-list"}],"secret_requests":[{"name":"git.token","purpose":"Push over HTTPS","required":false}],"settings_declared":[{"key":"plugins.files.show_hidden","type":"bool","default":false,"apply":"live"}]}
 ```
 
-The matching `focus-keymap` document:
+The matching declared `keymap` document:
 
 ```json
 {"version":1,"bind":[{"key":"n","action":"files.new","focus":"sidebar-list"}]}

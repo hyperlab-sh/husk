@@ -49,7 +49,7 @@ type Reloadable interface {
 type ReloadInput struct {
     Doc      store.Resolved   // the merged "config" document, from Store.Resolve
     Layers   []store.LayerDoc // Store.Layers("keymap", profile): the unmerged keymap documents, for Keybinding ([Store](store.md))
-    Declared map[store.DocName]map[string]store.Doc // Store.Declared("plugins") and Store.Declared("focus-keymap"): normalized per-plugin documents, schema in Store
+    Declared map[store.DocName]map[string]store.Doc // Store.Declared("plugins") and Store.Declared("keymap"): normalized per-plugin documents, schema in Store
     Settings settings.Snapshot // set for Theme; zero for the others
     Profile  *string // coordinator-selected profile, before resolving its layer; nil for standalone preparation
     ConfigLayers []store.LayerDoc // unmerged config provenance, for distribution contrast opt-out validation
@@ -376,7 +376,7 @@ CLI: `husk secrets list` (names, who declares, who is granted, whether set), `hu
 5. Rebuild is all-or-nothing per Service.
 6. The Theme palette always passes `theme.CheckContrast`, unless `theme.allow_low_contrast` is set by a non-distribution layer.
 7. Plugins declare no global bindings. An unscoped declaration never enters the resolved keymap.
-8. Any config-layer entry (`distribution`, `user`, `profile`) beats any manifest-declared entry for the same keys. Rank is `husk` < `focus-local` < `distribution` < `user` < `profile` ([Keybindings](keybindings.md)).
+8. Ranking is scope first (a binding scoped to the focused surface beats a global one), then layer: `husk` < `focus-local` < `distribution` < `user` < `profile` within one scope ([Keybindings](keybindings.md), D64).
 9. A secret value never appears in State, settings, events, logs, toasts, `husk state` or an error message.
 10. A plugin can never grant, revoke, set or reveal a secret, and can never write settings.
 11. Reloads are serialized. A request that arrives before input capture shares the running flight; later requests share one queued follow-up flight. Capture starts before Store input gathering. The follow-up reads fresh config and declarations, so a plugin launch gate never accepts an older flight that could not have seen that plugin. Each flight belongs to the coordinator lifetime and its own 2 s bound; requester cancellation detaches only that waiter, including the caller that first queued a follow-up.
@@ -453,7 +453,7 @@ Behaviour change for existing plugins: unscoped manifest `keybindings` entries a
 4. `Profile.Use` writes State only; the coordinator reloads on the `profile` slice change. Profile never calls the coordinator.
 5. The active profile lives in the `husk.profile` slice, instance scope, persistent `keep-latest` as [State](state.md) fixes it, so a named instance reopens with its last profile. The default comes from `profile.default` in the user layer or the `--profile` flag. Writing the default back to the user layer is not part of this spec.
 6. Husk compiles in a `husk` keybinding layer for `husk.*` actions only. A blank Husk must be able to quit and open the palette; this is not a distribution layer.
-7. Precedence is `profile > user > distribution > focus-local > husk`, per [Keybindings](keybindings.md): configuration always beats a plugin. An earlier draft put focus-local above the distribution; the policy spec rules.
+7. Precedence is scope first, then `profile > user > distribution > focus-local > husk` within a scope, per [Keybindings](keybindings.md) (D64): the focused surface beats the rest of the screen, and within one scope configuration beats a plugin. The policy spec rules.
 8. `disable: true` is the tombstone that removes a lower layer's binding for the same keys, focus and plugin ([Keybindings](keybindings.md)); there is no reserved `none` action.
 9. `focus` is allowed in every config layer, so a user can rebind or disable a plugin's focus-local key for that surface only.
 10. Sequences are written as `keys: [...]`, single keys as `key`. A space-joined string is rejected because `" "` is itself a key.
@@ -473,7 +473,7 @@ Behaviour change for existing plugins: unscoped manifest `keybindings` entries a
 1. **Caller identity on the socket.** Resolved in [Pods](pods.md): a per-launch token in `HUSK_PLUGIN_TOKEN`, sent as each request's `token` member; no token is the user.
 2. **Rail `shortcut` and unscoped manifest `keybindings` stop binding.** This follows "plugins never declare globals" but breaks existing plugins' keys until a distribution or the user binds them. Recommended: accept the break and document it; the keys still appear in `husk keys --problems` as ignored declarations so the migration is a copy of lines, without an `adopt` command.
 3. **Should the notes' wording "Husk alone ships none" for distribution cover the `husk` layer?** I read it as covering distribution only, and kept `husk` for `husk.*`. If not, a blank Husk has no keys at all. Recommended: keep `husk`.
-4. **Focus-local above the distribution layer.** Resolved: [Keybindings](keybindings.md) ranks focus-local below the distribution ("configuration always beats a plugin"), and this spec follows it.
+4. **Focus-local above the distribution layer.** Resolved: [Keybindings](keybindings.md) ranks scope before layer (D64), and within the surface scope focus-local below the distribution; this spec follows it.
 5. **Persisting the profile choice.** `husk profile use` is instance-only here. Recommended: add `--save` once Store exposes a write API for the user layer, as a separate spec; Services must not write files.
 6. **Secrets namespace ownership.** Names are global to the user (`git.token`), shared by any plugin that declares them and is granted. A per-plugin namespace would be safer but blocks two plugins sharing a token. Recommended: global names plus per-plugin grants, as written.
 7. **`allow_low_contrast` as an escape hatch.** The acceptance rule is the contrast test, and a hatch weakens it. Recommended: keep it, because a low-vision or high-contrast preference can need ratios the table does not model, and it is refused in distributions.
