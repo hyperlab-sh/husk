@@ -7,7 +7,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/hyperlab-sh/husk/internal/host/contracts"
+	"github.com/hyperlab-sh/husk/pkg/host/contracts"
 )
 
 // paletteModel hosts a plugin with n actions ("Action 00".."Action nn") so the

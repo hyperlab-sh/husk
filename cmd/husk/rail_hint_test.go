@@ -6,8 +6,8 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/hyperlab-sh/husk/internal/host/contracts"
-	"github.com/hyperlab-sh/husk/internal/stem/surfaces"
+	"github.com/hyperlab-sh/husk/pkg/host/contracts"
+	"github.com/hyperlab-sh/husk/pkg/stem/surfaces"
 )
 
 func TestRailShortcutLabel(t *testing.T) {

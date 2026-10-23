@@ -1,12 +1,13 @@
 package main
 
 import (
-	tea "charm.land/bubbletea/v2"
-	"github.com/hyperlab-sh/husk/internal/host/contracts"
-	"github.com/hyperlab-sh/husk/internal/stem/terminals"
-	"github.com/hyperlab-sh/husk/pkg/protocol"
 	"strings"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
+	"github.com/hyperlab-sh/husk/pkg/host/contracts"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
+	"github.com/hyperlab-sh/husk/pkg/stem/terminals"
 )
 
 func TestTerminalUnfocusedWheelAndMouseRestore(t *testing.T) {

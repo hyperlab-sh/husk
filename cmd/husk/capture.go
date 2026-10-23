@@ -1,9 +1,10 @@
 package main
 
 import (
+	"time"
+
 	tea "charm.land/bubbletea/v2"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
-	"time"
 )
 
 type captureTimeoutMsg struct{ gen uint64 }

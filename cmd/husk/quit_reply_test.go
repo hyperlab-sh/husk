@@ -11,8 +11,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/hyperlab-sh/husk/internal/cli"
-	"github.com/hyperlab-sh/husk/internal/instance"
+	"github.com/hyperlab-sh/husk/pkg/cli"
+	"github.com/hyperlab-sh/husk/pkg/instance"
 )
 
 // `husk rpc action.invoke` and `husk action invoke` of husk.quit each get the

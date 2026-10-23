@@ -16,14 +16,14 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/hyperlab-sh/husk/internal/cli"
-	"github.com/hyperlab-sh/husk/internal/cli/createcmd"
-	"github.com/hyperlab-sh/husk/internal/cli/storecmd"
-	"github.com/hyperlab-sh/husk/internal/host"
-	"github.com/hyperlab-sh/husk/internal/host/contracts"
-	"github.com/hyperlab-sh/husk/internal/instance"
-	"github.com/hyperlab-sh/husk/internal/substrate/store"
+	"github.com/hyperlab-sh/husk/pkg/cli"
+	"github.com/hyperlab-sh/husk/pkg/cli/createcmd"
+	"github.com/hyperlab-sh/husk/pkg/cli/storecmd"
+	"github.com/hyperlab-sh/husk/pkg/host"
+	"github.com/hyperlab-sh/husk/pkg/host/contracts"
+	"github.com/hyperlab-sh/husk/pkg/instance"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
+	"github.com/hyperlab-sh/husk/pkg/substrate/store"
 )
 
 // version is the build version, set with -ldflags "-X main.version=...";

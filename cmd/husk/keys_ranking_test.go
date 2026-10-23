@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/hyperlab-sh/husk/internal/host/contracts"
+	"github.com/hyperlab-sh/husk/pkg/host/contracts"
 )
 
 // The no-host fallback ranks as the keybinding service does: scope first,

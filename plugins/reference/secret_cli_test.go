@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hyperlab-sh/husk/internal/cli"
-	"github.com/hyperlab-sh/husk/internal/cli/output"
+	"github.com/hyperlab-sh/husk/pkg/cli"
+	"github.com/hyperlab-sh/husk/pkg/cli/output"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 

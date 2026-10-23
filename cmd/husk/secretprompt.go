@@ -12,7 +12,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/hyperlab-sh/husk/internal/services/secrets"
+	"github.com/hyperlab-sh/husk/pkg/services/secrets"
 )
 
 // secretPromptState is the confirm dialog the Secrets service asked for. The

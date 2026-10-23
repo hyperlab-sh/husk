@@ -8,7 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/hyperlab-sh/husk/internal/services/secrets"
+	"github.com/hyperlab-sh/husk/pkg/services/secrets"
 )
 
 func openPrompt(m *WorkbenchModel, id uint64, p secrets.Prompt) chan secrets.Answer {
