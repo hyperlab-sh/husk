@@ -63,10 +63,10 @@ func TestNamedThemeReplacementSelectionAndOverrides(t *testing.T) {
 }
 
 func TestNamedThemeUnknownAttributedToSelection(t *testing.T) {
-	in := themeInput(t, `{"theme":{"name":"absent"}}`, map[string]store.Layer{"theme.name": store.LayerProfile}, store.LayerDoc{Layer: store.LayerProfile, File: "profiles/work/config.json"})
+	in := themeInput(t, `{"theme":{"name":"absent"}}`, map[string]store.Layer{"theme.name": store.LayerProfile}, store.LayerDoc{Layer: store.LayerProfile, File: "profiles/daily/config.json"})
 	th := stheme.New()
 	r := apply(t, th, in)
-	if len(r.Problems) != 1 || r.Problems[0].Code != "unknown_theme" || r.Problems[0].Layer != "profile" || r.Problems[0].Source.File != "profiles/work/config.json" || th.Palette().Name != palette.Default().Name {
+	if len(r.Problems) != 1 || r.Problems[0].Code != "unknown_theme" || r.Problems[0].Layer != "profile" || r.Problems[0].Source.File != "profiles/daily/config.json" || th.Palette().Name != palette.Default().Name {
 		t.Fatalf("%+v", r)
 	}
 }
@@ -107,7 +107,7 @@ func TestNamedThemeContrastAttributionAndNoPartialPublication(t *testing.T) {
 				raw = `{"theme":{"name":"bad","palette":{"ink":"#000000"}}}`
 				origins["theme.palette.ink"] = store.LayerProfile
 			}
-			in := themeInput(t, raw, origins, store.LayerDoc{Layer: store.LayerProfile, File: "profiles/work/config.json"})
+			in := themeInput(t, raw, origins, store.LayerDoc{Layer: store.LayerProfile, File: "profiles/daily/config.json"})
 			in.Themes = []store.LayerDoc{namedLayer(store.LayerUser, `{"themes":{"bad":{"palette":{"ink":"#000000","accent":"#f1effe"}}}}`)}
 			th := stheme.New()
 			cand, r, err := th.Rebuild(context.Background(), in)
@@ -116,7 +116,7 @@ func TestNamedThemeContrastAttributionAndNoPartialPublication(t *testing.T) {
 			}
 			wantKey, wantFile, wantLayer := "themes.bad.ink", "themes.json", "user"
 			if override {
-				wantKey, wantFile, wantLayer = "theme.palette.ink", "profiles/work/config.json", "profile"
+				wantKey, wantFile, wantLayer = "theme.palette.ink", "profiles/daily/config.json", "profile"
 			}
 			for _, p := range r.Problems {
 				if p.Code == "low_contrast" && strings.HasPrefix(p.Message, "ink on surface ") {

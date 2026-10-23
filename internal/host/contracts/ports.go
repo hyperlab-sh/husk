@@ -132,14 +132,17 @@ type SettingSetResult struct {
 	Reports []ReloadReport `json:"reports"`
 }
 
-// SettingsPort serves settings reads, validation and one-key user-layer writes.
-// Only Get is open to plugins, under the adapter's shared rate limiter. Its
-// visibility is exact declaration ownership plus explicitly public host keys;
-// a textual key prefix is never authorization. Set admits CLI and host only.
+// SettingsPort serves setting reads, validation and one-key user-layer writes.
+// Only get is open to plugins; list, schema, validate and set are
+// CLI methods and answer denied to a plugin caller (plugins read their own keys
+// with get).
+//
+// A plugin caller sees exactly the keys its own manifest declared (owner
+// "plugin:<id>") plus public husk.* keys, never an arbitrary prefix subtree
+// (decisions D34 and D34a). Any other key is not_found, whether it exists or
+// not. User callers see everything. Rate limiting (20/s per plugin) is the
+// adapter's job, via Limiter, before the port is called.
 type SettingsPort interface {
-	// Set writes a registered value in the user layer and awaits its reload.
-	// CLI and host callers are admitted; plugins and input are denied.
-	Set(ctx context.Context, c Caller, key string, value any) (SettingSetResult, error)
 	// Get returns the effective value and the layer it came from.
 	Get(ctx context.Context, c Caller, key string) (value any, source string, err error)
 	// List returns every known key and every retained unknown key, sorted by
@@ -150,6 +153,9 @@ type SettingsPort interface {
 	// Validate serves settings.validate: a dry rebuild of the current
 	// documents, reporting every problem.
 	Validate(ctx context.Context, c Caller) (ValidationResult, error)
+	// Set writes a registered value in the user layer and awaits its reload.
+	// CLI and host callers are admitted; plugins and input are denied.
+	Set(ctx context.Context, c Caller, key string, value any) (SettingSetResult, error)
 }
 
 // SecretInfo is one entry of secrets.names: metadata, never a value. Set is
