@@ -7,7 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,13 +21,19 @@ import (
 // clearContextObserver keeps the real mux and observes server cancellation so
 // the disconnect test releases the loop only after the request has ended.
 type clearContextObserver struct {
-	next  contracts.Handler
-	ended chan struct{}
+	next    contracts.Handler
+	ended   chan struct{}
+	onClear func()
 }
 
 func (o clearContextObserver) Serve(ctx context.Context, c contracts.Caller, req protocol.Message, n contracts.Notifier) protocol.Message {
 	if req.Method == protocol.MethodStateClear {
-		context.AfterFunc(ctx, func() { close(o.ended) })
+		if o.onClear != nil {
+			o.onClear()
+		}
+		if o.ended != nil {
+			context.AfterFunc(ctx, func() { close(o.ended) })
+		}
 	}
 	return o.next.Serve(ctx, c, req, n)
 }
@@ -36,16 +42,44 @@ func (o clearContextObserver) Serve(ctx context.Context, c contracts.Caller, req
 // ServerHandler and mux while observing the connection's context.
 type observingClearServer struct {
 	server.Server
-	ended chan struct{}
+	ended   chan struct{}
+	onClear func()
 }
 
 func (s observingClearServer) Handle(prefix string, next server.Handler) {
 	if prefix == "state" {
 		adapted := next.(handlers.ServerHandler)
-		adapted.Handler = clearContextObserver{next: adapted.Handler, ended: s.ended}
+		adapted.Handler = clearContextObserver{next: adapted.Handler, ended: s.ended, onClear: s.onClear}
 		next = adapted
 	}
 	s.Server.Handle(prefix, next)
+}
+
+// observeClearReset signals only after the forced Clear handler's fnMsg has
+// been accepted by the real post gate. Its only loop post is the reset in Do;
+// matching the handler goroutine excludes unrelated workers and server notices.
+// Production still supplies the State port, handler and Root.do implementation.
+func observeClearReset(queued chan<- struct{}, ended chan struct{}) (func(*contracts.Config), Option) {
+	var request atomic.Int64
+	mutate := func(cfg *contracts.Config) {
+		post := cfg.Post
+		cfg.Post = func(msg any) bool {
+			accepted := post(msg)
+			if _, ok := msg.(fnMsg); accepted && ok && request.Load() == goroutineID() {
+				queued <- struct{}{}
+			}
+			return accepted
+		}
+	}
+	option := func(o *options) {
+		o.newServer = func(cfg server.Config) server.Server {
+			return observingClearServer{
+				Server: server.New(cfg), ended: ended,
+				onClear: func() { request.Store(goroutineID()) },
+			}
+		}
+	}
+	return mutate, option
 }
 
 func TestStateClearApplySocketShutdown(t *testing.T) {
@@ -70,7 +104,9 @@ func TestStateClearApplySocketShutdown(t *testing.T) {
 	})
 	seed.shutdown()
 	hook, ready := readyHook("")
-	h, err := bootIn(t, dir, nil, withHook(hook))
+	resetQueued := make(chan struct{}, 16)
+	mutate, observe := observeClearReset(resetQueued, nil)
+	h, err := bootIn(t, dir, mutate, withHook(hook), observe)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,13 +140,20 @@ func TestStateClearApplySocketShutdown(t *testing.T) {
 	closed := make(chan error, 1)
 	h.post(fnMsg{fn: func() { close(entered); <-proceed; closed <- h.root.Close() }})
 	<-entered
-	queued := len(h.in)
+	// An unrelated closure is already queued: neither it nor a worker notice
+	// may stand in for the Clear reset in this test's synchronization.
+	h.root.cfg.Post(fnMsg{fn: func() {}})
+	select {
+	case <-resetQueued:
+		close(proceed)
+		<-closed
+		t.Fatal("an unrelated loop post was mistaken for the clear reset")
+	default:
+	}
 	if _, err := conn.c.Write([]byte(`{"id":1,"method":"state.clear","params":{"namespace":"atlas.state","force":true}}` + "\n")); err != nil {
 		t.Fatal(err)
 	}
-	for len(h.in) <= queued {
-		runtime.Gosched()
-	}
+	<-resetQueued
 	close(proceed)
 	select {
 	case err := <-closed:
@@ -136,11 +179,9 @@ func TestStateClearApplySocketShutdown(t *testing.T) {
 func TestStateClearApplySocketDisconnect(t *testing.T) {
 	hook, ready := readyHook("")
 	ended := make(chan struct{})
-	h, err := boot(t, nil, withHook(hook), func(o *options) {
-		o.newServer = func(cfg server.Config) server.Server {
-			return observingClearServer{Server: server.New(cfg), ended: ended}
-		}
-	})
+	resetQueued := make(chan struct{}, 16)
+	mutate, observe := observeClearReset(resetQueued, ended)
+	h, err := boot(t, mutate, withHook(hook), observe)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,13 +200,10 @@ func TestStateClearApplySocketDisconnect(t *testing.T) {
 	entered, proceed := make(chan struct{}), make(chan struct{})
 	h.post(fnMsg{fn: func() { close(entered); <-proceed }})
 	<-entered
-	queued := len(h.in)
 	if _, err := conn.c.Write([]byte(`{"id":1,"method":"state.clear","params":{"namespace":"atlas.state","force":true}}` + "\n")); err != nil {
 		t.Fatal(err)
 	}
-	for len(h.in) <= queued {
-		runtime.Gosched()
-	}
+	<-resetQueued
 	if err := conn.c.Close(); err != nil {
 		t.Fatal(err)
 	}
