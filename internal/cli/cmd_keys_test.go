@@ -109,6 +109,12 @@ func TestKeysProblems(t *testing.T) {
 					}
 					if empty {
 						assertJSONEqual(t, got["problems"], `[]`)
+					} else {
+						var original map[string]json.RawMessage
+						if err := json.Unmarshal([]byte(keysFixture), &original); err != nil {
+							t.Fatal(err)
+						}
+						assertJSONEqual(t, got["problems"], string(original["problems"]))
 					}
 				} else if empty {
 					if h.out.Len() != 0 {
