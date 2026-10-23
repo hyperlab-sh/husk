@@ -123,7 +123,7 @@ func hookHost(t *testing.T, f *fakes, dirs []string, want int) *harness {
 	t.Helper()
 	hook, ready := readyHook("")
 	h, err := boot(t, func(c *contracts.Config) {
-		c.Plugins = dirs
+		pluginSettings(c)["paths"] = dirs
 		c.Clock = frozenClock{time.Unix(1000, 0)}
 	}, withHook(hook), WithFactory(f.factory))
 	if err != nil {
@@ -286,7 +286,7 @@ func TestHookListShowsHostHookAndSubscriberLiveness(t *testing.T) {
 	hook, ready := readyHook("")
 	h, err := boot(t, func(c *contracts.Config) {
 		c.Clock = frozenClock{time.Unix(1000, 0)}
-		c.Plugins = []string{
+		pluginSettings(c)["paths"] = []string{
 			hookPlugin(t, "down", nil, []any{subHook("notes.gate", 20)}),
 			hookPlugin(t, "notes", []any{pubHook("notes.gate", "gate")}, nil),
 			hookPlugin(t, "up", nil, []any{subHook("notes.gate", 5)}),
@@ -334,7 +334,7 @@ func TestHookFailedPluginStillOwnsItsNamespace(t *testing.T) {
 	}
 	hook, ready := readyHook("")
 	h, err := boot(t, func(c *contracts.Config) {
-		c.Plugins = []string{
+		pluginSettings(c)["paths"] = []string{
 			hookPlugin(t, "go.reference", nil, nil),
 			hookPlugin(t, "go", []any{pubHook("go.reference.x", "gate"), pubHook("go.y", "gate")}, nil),
 		}

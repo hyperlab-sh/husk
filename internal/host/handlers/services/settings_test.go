@@ -235,7 +235,7 @@ func TestSharedBudgetCoversSettingsAndSecretsGet(t *testing.T) {
 	files := pluginCaller("files")
 
 	for i := 0; i < contracts.RateLimitPerSecond; i++ {
-		if reply := set.Serve(context.Background(), files, req(t, "settings.get", `{"key":"husk.layout.rail"}`), nil); reply.Error != nil {
+		if reply := set.Serve(context.Background(), files, req(t, "settings.get", `{"key":"theme.name"}`), nil); reply.Error != nil {
 			t.Fatalf("settings.get %d: %+v", i+1, reply.Error)
 		}
 	}

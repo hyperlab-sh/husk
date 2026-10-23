@@ -67,7 +67,7 @@ func TestSettingsGetOwnershipMatrix(t *testing.T) {
 		{name: "foreign owner", caller: filesCaller, key: "plugins.other.key", code: "not_found", reason: "unknown_setting"},
 		{name: "public dist default", caller: filesCaller, key: "dist.rail", value: ""},
 		{name: "non-public dist key", caller: filesCaller, key: "dist.hidden", code: "not_found", reason: "unknown_setting"},
-		{name: "non-public host key", caller: filesCaller, key: "husk.layout.rail", code: "not_found", reason: "unknown_setting"},
+		{name: "non-public host key", caller: filesCaller, key: "theme.name", code: "not_found", reason: "unknown_setting"},
 		{name: "absent husk key", caller: filesCaller, key: "husk.nope", code: "not_found", reason: "unknown_setting"},
 		{name: "cli reads any owner", caller: userCaller, key: "plugins.files.tree", value: true},
 		{name: "cli absent key", caller: userCaller, key: "nope", code: "not_found", reason: "unknown_setting"},

@@ -33,10 +33,10 @@ type Config struct {
 	RuntimeDir string
 	// Entry is the registration entry the Server writes once listening.
 	Entry instance.Entry
-	// Plugins are the --plugin arguments, in order.
-	Plugins []string
-	// PluginDirs are the --plugin-dir arguments, in order.
-	PluginDirs []string
+	// InstanceDocs carries flag-derived instance-layer documents. Under "config",
+	// cmd/husk builds {"husk":{"plugins":{"paths":[...],"dirs":[...]}}};
+	// each array is present only when its flag was given at least once.
+	InstanceDocs map[string]map[string]any
 	// ProfileFlag is the --profile start flag, nil when it was not given. It
 	// is a selection input of the startup reload only; the profile slice is
 	// what later reloads read.

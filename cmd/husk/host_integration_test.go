@@ -140,7 +140,7 @@ func TestWorkbenchOverTheRealHost(t *testing.T) {
 		tea.WithWindowSize(goldenW, goldenH),
 	)
 	prog.set(p)
-	h, err := newHost(prog, model, id, dir, []string{pluginDir}, nil, nil, host.WithFactory(factory))
+	h, err := newHost(prog, model, id, dir, pluginFlagDocs(t, "--plugin", pluginDir), nil, host.WithFactory(factory))
 	if err != nil {
 		t.Fatal(err)
 	}

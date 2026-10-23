@@ -27,7 +27,38 @@ var errLoopGone = errors.New("host: the loop no longer runs")
 type fnMsg struct{ fn func() }
 
 // post runs fn on the loop; false when the loop no longer accepts work.
-func (r *Root) post(fn func()) bool { return r.cfg.Post(fnMsg{fn: fn}) }
+func (r *Root) post(fn func()) bool {
+	r.postMu.Lock()
+	if !r.live.Load() {
+		r.buildPosts = append(r.buildPosts, fn)
+		r.postMu.Unlock()
+		return true
+	}
+	r.postMu.Unlock()
+	return r.cfg.Post(fnMsg{fn: fn})
+}
+
+// drainBuildPosts keeps construction-time State writes on the builder. The
+// transition to the caller's loop is atomic with accepting new callbacks.
+// Writes stay pending until the caller's first Update flushes them; construction
+// stages must never read their own posted writes back from a Snapshot.
+func (r *Root) drainBuildPosts(handoff bool) {
+	for {
+		r.postMu.Lock()
+		pending := r.buildPosts
+		r.buildPosts = nil
+		if len(pending) == 0 && handoff {
+			r.live.Store(true)
+		}
+		r.postMu.Unlock()
+		if len(pending) == 0 {
+			return
+		}
+		for _, fn := range pending {
+			fn()
+		}
+	}
+}
 
 // do runs fn on the loop and returns once it has run. When ctx ends first fn
 // is guaranteed not to run (claimed by exactly one side).

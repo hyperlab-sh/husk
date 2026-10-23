@@ -12,6 +12,7 @@ import (
 	portsservices "github.com/hyperlab-sh/husk/internal/host/ports/services"
 	"github.com/hyperlab-sh/husk/internal/pods"
 	"github.com/hyperlab-sh/husk/internal/pods/wrapper"
+	svccontracts "github.com/hyperlab-sh/husk/internal/services/contracts"
 	"github.com/hyperlab-sh/husk/internal/stem/dispatcher"
 	"github.com/hyperlab-sh/husk/internal/substrate/state"
 	"github.com/hyperlab-sh/husk/internal/substrate/store"
@@ -26,6 +27,11 @@ func (r *Root) Frontend() contracts.Frontend { return r }
 
 // Snapshot implements contracts.Frontend.
 func (r *Root) Snapshot() *state.Snapshot { return r.st.Snapshot() }
+
+// StartupReports implements contracts.Frontend.
+func (r *Root) StartupReports() []contracts.ReloadReport {
+	return portsservices.Reports(svccontracts.Clone(r.startupReports))
+}
 
 // Palette implements contracts.Frontend.
 func (r *Root) Palette() protocol.Palette { return r.rt.Theme.Wire() }

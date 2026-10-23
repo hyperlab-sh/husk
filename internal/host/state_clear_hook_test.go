@@ -122,7 +122,7 @@ func clearHost(t *testing.T, f *fakes, clock protocol.Clock, logger func(level, 
 	t.Helper()
 	hook, ready := readyHook("")
 	h, err := boot(t, func(c *contracts.Config) {
-		c.Plugins = dirs
+		pluginSettings(c)["paths"] = dirs
 		c.Clock = clock
 	}, withHook(hook), WithFactory(f.factory), WithLogger(logger))
 	if err != nil {

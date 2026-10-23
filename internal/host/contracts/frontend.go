@@ -24,6 +24,12 @@ type Frontend interface {
 	// Snapshot returns the latest read-only State view. Any goroutine.
 	Snapshot() *state.Snapshot
 
+	// StartupReports returns a detached copy of the five construction-time
+	// startup reports, available as soon as New returns. It does not change
+	// after later reloads. The frontend uses error reports for its startup
+	// toast; the startup flight predates event subscribers. Any goroutine.
+	StartupReports() []ReloadReport
+
 	// Palette returns the active theme palette. Any goroutine.
 	Palette() protocol.Palette
 

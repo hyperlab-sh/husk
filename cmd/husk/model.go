@@ -327,7 +327,7 @@ func (m *WorkbenchModel) startModifierTick() tea.Cmd {
 
 // handleBlur drops OS-derived modifier and held-key state (other apps' Alt
 // presses must not leak in) and lets the tick chain lapse. A latched Alt
-// (the "?" toggle or --hold-alt) is a host setting and survives.
+// (the "?" toggle or --hold-alt) is host-side state and survives.
 func (m *WorkbenchModel) handleBlur() {
 	m.blurred = true
 	m.termMods = 0

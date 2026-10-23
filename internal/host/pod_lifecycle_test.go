@@ -42,7 +42,7 @@ func TestFailedLaunchDoesNotHoldASurface(t *testing.T) {
 		return f.factory(spec, o)
 	}
 	hook, ready := readyHook("")
-	h, err := boot(t, func(c *contracts.Config) { c.Plugins = []string{broken, good} }, withHook(hook), WithFactory(factory))
+	h, err := boot(t, func(c *contracts.Config) { pluginSettings(c)["paths"] = []string{broken, good} }, withHook(hook), WithFactory(factory))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,8 +121,8 @@ func TestRefusedPluginsAreListedForTheFrontend(t *testing.T) {
 	f := newFakes()
 	hook, ready := readyHook("")
 	h, err := boot(t, func(c *contracts.Config) {
-		c.Plugins = []string{good}
-		c.PluginDirs = []string{root}
+		pluginSettings(c)["paths"] = []string{good}
+		pluginSettings(c)["dirs"] = []string{root}
 	}, withHook(hook), WithFactory(f.factory))
 	if err != nil {
 		t.Fatal(err)
@@ -174,7 +174,7 @@ func TestPluginExitedEventReachesAWatcher(t *testing.T) {
 		return f.factory(spec, o)
 	}
 	hook, ready := readyHook("")
-	h, err := boot(t, func(c *contracts.Config) { c.Plugins = []string{broken, good} }, withHook(hook), WithFactory(factory))
+	h, err := boot(t, func(c *contracts.Config) { pluginSettings(c)["paths"] = []string{broken, good} }, withHook(hook), WithFactory(factory))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +233,7 @@ func TestPluginExitedIsNotPostedFromTheLoop(t *testing.T) {
 	var onLoop atomic.Bool
 	hook, ready := readyHook("")
 	h, err := boot(t, func(c *contracts.Config) {
-		c.Plugins = []string{broken, good}
+		pluginSettings(c)["paths"] = []string{broken, good}
 		next := c.Post
 		c.Post = func(m any) bool {
 			if h.root.onLoop() {
@@ -264,7 +264,7 @@ func TestPluginExitedEventCarriesTheMergedEntry(t *testing.T) {
 	good := writeFrontendPlugin(t, "beta", []string{"sidebar-list"}, nil)
 	f := newFakes()
 	hook, ready := readyHook("")
-	h, err := boot(t, func(c *contracts.Config) { c.Plugins = []string{good} }, withHook(hook), WithFactory(f.factory))
+	h, err := boot(t, func(c *contracts.Config) { pluginSettings(c)["paths"] = []string{good} }, withHook(hook), WithFactory(f.factory))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -342,7 +342,7 @@ func TestRealProcessFailureTextsReachHuskPods(t *testing.T) {
 				t.Fatal(err)
 			}
 			hook, ready := readyHook("")
-			h, err := boot(t, func(c *contracts.Config) { c.Plugins = []string{dir} }, withHook(hook))
+			h, err := boot(t, func(c *contracts.Config) { pluginSettings(c)["paths"] = []string{dir} }, withHook(hook))
 			if err != nil {
 				t.Fatal(err)
 			}

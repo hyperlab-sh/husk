@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -84,6 +85,11 @@ type Root struct {
 	refusals   []contracts.PluginRefusal         // plugins refused before a Pod existed
 	declWarnMu sync.Mutex                        // guards declWarned
 	declWarned map[string]bool                   // plugins whose declared document failed to decode
+
+	// Before New returns, the builder owns State and drains posted callbacks.
+	postMu         sync.Mutex
+	buildPosts     []func()
+	startupReports []services.Report // immutable construction result for the frontend
 
 	// Lifecycle.
 	live      atomicBool   // New returned: the loop may be running
@@ -172,9 +178,6 @@ func build(cfg contracts.Config, optFns []Option) (_ *Root, err error) {
 		}
 	}()
 
-	if err = r.stage("manifests", r.loadSpecs); err != nil {
-		return nil, err
-	}
 	if err = r.stage("store", r.buildStore); err != nil {
 		return nil, err
 	}
@@ -182,6 +185,12 @@ func build(cfg contracts.Config, optFns []Option) (_ *Root, err error) {
 		return nil, err
 	}
 	if err = r.stage("services", r.buildServices); err != nil {
+		return nil, err
+	}
+	if err = r.stage("startup", r.startup); err != nil {
+		return nil, err
+	}
+	if err = r.stage("manifests", r.loadSpecs); err != nil {
 		return nil, err
 	}
 	if err = r.stage("stem", r.buildStem); err != nil {
@@ -193,7 +202,7 @@ func build(cfg contracts.Config, optFns []Option) (_ *Root, err error) {
 	if err = r.stage("server", r.buildServer); err != nil {
 		return nil, err
 	}
-	r.live.Store(true)
+	r.drainBuildPosts(true)
 	return r, nil
 }
 
@@ -211,11 +220,10 @@ func (r *Root) stage(name string, fn func() error) error {
 	return nil
 }
 
-// loadSpecs converts the --plugin and --plugin-dir arguments before anything
-// is built, so a bad argument fails with no files, socket or goroutine
-// behind it. An explicit --plugin that cannot load is fatal; a bad plugin
-// inside a --plugin-dir fails only itself (logged), like the converter's
-// LoadDir contract.
+// loadSpecs converts launch arguments from the startup Settings snapshot.
+// Bad explicit paths or unreadable directories are fatal after Store, State
+// and Services exist; New's failure defer closes them. A bad plugin inside a
+// directory fails only itself (logged), like the converter's LoadDir contract.
 func (r *Root) loadSpecs() error {
 	reg := manifest.NewRegistry()
 	seen := map[string]bool{}
@@ -233,21 +241,22 @@ func (r *Root) loadSpecs() error {
 		seen[spec.ID] = true
 		r.specs = append(r.specs, *spec)
 	}
-	for _, arg := range r.cfg.Plugins {
+	snap := r.rt.Settings.Snapshot()
+	for i, arg := range snap.Strings("husk.plugins.paths") {
 		spec, warns, err := reg.Load(arg)
 		if err != nil {
-			return fmt.Errorf("--plugin %q: %w", arg, err)
+			return fmt.Errorf("husk.plugins.paths[%d] %q (layer %s): %w", i, arg, snap.Source("husk.plugins.paths"), err)
 		}
 		add(spec, warns)
 	}
-	for _, dir := range r.cfg.PluginDirs {
+	for i, dir := range snap.Strings("husk.plugins.dirs") {
 		results, err := reg.LoadDir(dir)
 		if err != nil {
-			return fmt.Errorf("--plugin-dir %q: %w", dir, err)
+			return fmt.Errorf("husk.plugins.dirs[%d] %q (layer %s): not a readable directory: %w", i, dir, snap.Source("husk.plugins.dirs"), err)
 		}
 		for _, res := range results {
 			if res.Err != nil {
-				r.log(pods.LogMsg{Level: "warn", Message: fmt.Sprintf("--plugin-dir %q: %v", dir, res.Err)})
+				r.log(pods.LogMsg{Level: "warn", Message: fmt.Sprintf("husk.plugins.dirs %q: %v", dir, res.Err)})
 				r.refuse("", res.Err.Error())
 				continue
 			}
@@ -265,12 +274,17 @@ func specID(s *manifest.Spec) string {
 }
 
 func (r *Root) buildStore() error {
+	docs := make(map[store.DocName]store.Doc, len(r.cfg.InstanceDocs))
+	for name, doc := range r.cfg.InstanceDocs {
+		docs[store.DocName(name)] = doc
+	}
 	s, err := store.Open(store.Options{
-		Instance:   store.InstanceRef{ID: r.cfg.InstanceID},
-		RuntimeDir: r.cfg.RuntimeDir,
-		Clock:      storeClock{r.clock},
-		Post:       r.post,
-		Keyring:    r.opts.keyring,
+		InstanceDocs: docs,
+		Instance:     store.InstanceRef{ID: r.cfg.InstanceID},
+		RuntimeDir:   r.cfg.RuntimeDir,
+		Clock:        storeClock{r.clock},
+		Post:         r.post,
+		Keyring:      r.opts.keyring,
 	})
 	if err != nil {
 		return err
@@ -326,6 +340,48 @@ func (r *Root) buildServices() error {
 	return nil
 }
 
+// startup performs the one launch-time load, before any manifests are declared.
+// Service validation failures retain defaults; flight failures are fatal.
+func (r *Root) startup() error {
+	reports, err := r.rt.Coordinator.Reload(r.ctx, services.ReasonStartup)
+	r.startupReports = reports
+	r.drainBuildPosts(false)
+	problems := 0
+	fatal := len(reports) == 0 && err != nil
+	for _, report := range reports {
+		for _, p := range report.Problems {
+			if p.Severity == "error" {
+				problems++
+			}
+			switch p.Code {
+			case "store_error", "timed_out", "cancelled":
+				fatal = true
+			}
+		}
+	}
+	if fatal {
+		var details []string
+		seen := map[string]bool{}
+		for _, report := range reports {
+			for _, p := range report.Problems {
+				text := fmt.Sprintf("%s: %s", p.Code, p.Message)
+				if p.Source != nil {
+					text += fmt.Sprintf(" (layer %s, file %s)", p.Source.Layer, p.Source.File)
+				}
+				if !seen[text] {
+					seen[text] = true
+					details = append(details, text)
+				}
+			}
+		}
+		return fmt.Errorf("%w: %s", err, strings.Join(details, "; "))
+	}
+	if problems > 0 {
+		r.log(pods.LogMsg{Level: "warn", Message: fmt.Sprintf("services: startup reload: %d problems", problems)})
+	}
+	return nil
+}
+
 func (r *Root) buildStem() error {
 	r.catalog = newCatalogView(r.store)
 	r.catalog.logf = r.logf
@@ -374,7 +430,10 @@ func (r *Root) buildPods() error {
 	if err != nil {
 		return err
 	}
-	binPath, _ := os.Executable()
+	binPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("os.Executable: %w", err)
+	}
 	loop := hostLoop{
 		Loop: launch.Loop{
 			Context:  r.ctx,
@@ -461,20 +520,13 @@ func (r *Root) Run(ctx context.Context) error {
 	return nil
 }
 
-// launchPlugins runs the startup reload, then adds every configured plugin as
-// one batch and requests its launch sequence. The startup flight is the first
-// reload of the process and runs before any plugin launches, so the launch
-// gate's plugin flight is never the first. A failed startup flight leaves the
-// built-in snapshots serving and is reported like any reload; it does not stop
-// the host.
+// launchPlugins adds every configured plugin as one batch and requests its
+// launch sequence. The startup flight already ran during construction.
 func (r *Root) launchPlugins(ctx context.Context) error {
 	if r.opts.afterStage != nil {
 		if err := r.opts.afterStage("run"); err != nil {
 			return fmt.Errorf("host: run: %w", err)
 		}
-	}
-	if _, err := r.rt.Coordinator.Reload(ctx, services.ReasonStartup); err != nil && ctx.Err() != nil {
-		return fmt.Errorf("host: startup reload: %w", ctx.Err())
 	}
 	var cmd tea.Cmd
 	if err := r.do(ctx, func() {
@@ -489,7 +541,7 @@ func (r *Root) launchPlugins(ctx context.Context) error {
 		cmd = r.pods.Prepare()
 	}); err != nil {
 		if r.ctx.Err() != nil {
-			// Close ran during the startup flight: nothing is left to launch.
+			// Close ran before the launch batch was added: nothing is left to launch.
 			return nil
 		}
 		return fmt.Errorf("host: launch plugins: %w", err)
