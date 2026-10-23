@@ -292,15 +292,16 @@ Notes fixed by the implementation (`internal/stem/dispatcher`):
   true for host actions. The `--owner` filter of `husk action list` is applied
   by the CLI, since the method has no parameters.
 - A caller entering through `Frontend.InvokeAction` (`Root` calls
-  `Dispatcher.Invoke` directly, not through the `CallsPort`) carries the kind the frontend passed: `input` for a key binding Input
-  resolved, `host` for an action the host started itself (a palette entry, a
-  rail item). An `input` caller also carries the `FocusContext` Input read on
-  that key press, and the Dispatcher uses it; a `host` caller gets State's
-  focus like every other caller. The two mismatches are rejected before
-  anything is dispatched: `input` with no focus, and `host` with a focus, each
-  get an `invalid_params` reply through the caller's `Reply`, synchronously,
-  plus a log line, both from `Root.InvokeAction` before the Dispatcher; the frontend seam defines the same rule ([Pods](pods.md),
-  Frontend seams).
+  `Dispatcher.Invoke` directly, not through the `CallsPort`) carries the kind
+  the frontend passed: `input` for a key binding Input resolved, `host` for an
+  action the host started itself (a palette entry, a rail item). An `input`
+  caller also carries the `FocusContext` Input read on that key press, and the
+  Dispatcher uses it; a `host` caller gets State's focus like every other
+  caller. The two mismatches are rejected before anything is dispatched:
+  `input` with no focus, and `host` with a focus, each get an `invalid_params`
+  reply through the caller's `Reply`, synchronously, plus a log line, both
+  from `Root.InvokeAction` before the Dispatcher sees the request; the
+  frontend seam defines the same rule ([Pods](pods.md), Frontend seams).
 - A host handler that panics yields one `internal` reply and a log line.
 
 Default is deny. A plugin marks an action public in its manifest
