@@ -105,28 +105,31 @@ func (p *Calls) ActionInvoke(ctx context.Context, c contracts.Caller, action str
 	}) {
 		return nil, coded(protocol.CodeUnavailable, "host is shutting down")
 	}
-	select {
-	case r := <-done:
-		if r.Err != nil {
-			return nil, contracts.NewError(protocol.Code(r.Err.Code), r.Err.Message, r.Err.Data)
-		}
-		res := r.Result
-		if res == nil {
-			res = map[string]any{}
-		}
-		out, err := json.Marshal(res)
-		if err != nil {
-			return nil, coded(protocol.CodeInternal, "cannot encode result")
-		}
-		return out, nil
-	case <-ctx.Done():
+	r, ok := await(ctx, done)
+	if !ok {
 		return nil, ctxError(ctx)
 	}
+	if r.Err != nil {
+		return nil, contracts.NewError(protocol.Code(r.Err.Code), r.Err.Message, r.Err.Data)
+	}
+	res := r.Result
+	if res == nil {
+		res = map[string]any{}
+	}
+	out, err := json.Marshal(res)
+	if err != nil {
+		return nil, coded(protocol.CodeInternal, "cannot encode result")
+	}
+	return out, nil
 }
 
-// ctxError maps an ended context: a passed deadline is timeout, anything else
-// cancelled.
+// ctxError maps an ended context: a passed deadline is timeout, a host
+// shutdown is cancelled with {"reason":"shutdown"} (protocol.md), anything
+// else cancelled because the caller went away.
 func ctxError(ctx context.Context) error {
+	if errors.Is(context.Cause(ctx), contracts.ErrShutdown) {
+		return contracts.NewError(protocol.CodeCancelled, "instance is shutting down", map[string]any{"reason": "shutdown"})
+	}
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return coded(protocol.CodeTimeout, "caller deadline passed")
 	}
@@ -151,10 +154,9 @@ func (p *Calls) ActionList(ctx context.Context, c contracts.Caller) ([]contracts
 	}) {
 		return nil, coded(protocol.CodeUnavailable, "host is shutting down")
 	}
-	select {
-	case out := <-done:
-		return out, nil
-	case <-ctx.Done():
+	out, ok := await(ctx, done)
+	if !ok {
 		return nil, ctxError(ctx)
 	}
+	return out, nil
 }

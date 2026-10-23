@@ -26,10 +26,10 @@ type ServerHandler struct {
 // Serve implements server.Handler.
 func (a ServerHandler) Serve(ctx context.Context, c server.Caller, req protocol.Message, n server.Notifier) protocol.Message {
 	if a.Closing != nil {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithCancel(ctx)
-		defer cancel()
-		defer context.AfterFunc(a.Closing, cancel)()
+		var cancel context.CancelCauseFunc
+		ctx, cancel = context.WithCancelCause(ctx)
+		defer cancel(nil)
+		defer context.AfterFunc(a.Closing, func() { cancel(contracts.ErrShutdown) })()
 	}
 	return a.Handler.Serve(ctx, FromServerCaller(c), req, n)
 }

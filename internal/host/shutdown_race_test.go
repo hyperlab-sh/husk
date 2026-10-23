@@ -60,7 +60,7 @@ func TestCloseFromLoopFailsQueuedSocketRequestsAtOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	var m protocol.Message
-	if err := m.UnmarshalJSON(line); err != nil || m.Error == nil || m.Error.Code != protocol.CodeCancelled {
-		t.Fatalf("reply = %s (%v), want a cancelled error", line, err)
+	if err := m.UnmarshalJSON(line); err != nil || m.Error == nil || m.Error.Code != protocol.CodeCancelled || string(m.Error.Data) != `{"reason":"shutdown"}` {
+		t.Fatalf("reply = %s (%v), want cancelled with reason shutdown", line, err)
 	}
 }

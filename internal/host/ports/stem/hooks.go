@@ -84,14 +84,22 @@ func (p *Hooks) HookCall(ctx context.Context, c contracts.Caller, hook string, d
 	}) {
 		return contracts.HookOutcome{}, coded(protocol.CodeUnavailable, "host is shutting down")
 	}
+	var o hooks.Outcome
 	select {
-	case o := <-done:
-		return hookOutcomeOf(o), nil
+	case o = <-done:
 	case err := <-failed:
 		return contracts.HookOutcome{}, hookErrorOf(err)
 	case <-ctx.Done():
-		return contracts.HookOutcome{}, ctxError(ctx)
+		// A result that is already there wins over an ended ctx.
+		select {
+		case o = <-done:
+		case err := <-failed:
+			return contracts.HookOutcome{}, hookErrorOf(err)
+		default:
+			return contracts.HookOutcome{}, ctxError(ctx)
+		}
 	}
+	return hookOutcomeOf(o), nil
 }
 
 // HookList serves hook.list: the runner's declared hooks with their
@@ -101,24 +109,23 @@ func (p *Hooks) HookList(ctx context.Context, _ contracts.Caller) ([]contracts.H
 	if !p.post(func() { done <- p.runner.List() }) {
 		return nil, coded(protocol.CodeUnavailable, "host is shutting down")
 	}
-	select {
-	case listed := <-done:
-		out := make([]contracts.HookInfo, len(listed))
-		for i, l := range listed {
-			info := contracts.HookInfo{
-				ID: l.ID, Owner: l.Owner, Kind: string(l.Kind), TimeoutMS: l.Timeout.Milliseconds(),
-				Title: l.Title, Description: l.Description,
-				Subscribers: make([]contracts.HookSubscriber, len(l.Subscribers)),
-			}
-			for j, s := range l.Subscribers {
-				info.Subscribers[j] = contracts.HookSubscriber{Plugin: s.Plugin, Priority: s.Priority, Live: s.Live}
-			}
-			out[i] = info
-		}
-		return out, nil
-	case <-ctx.Done():
+	listed, ok := await(ctx, done)
+	if !ok {
 		return nil, ctxError(ctx)
 	}
+	out := make([]contracts.HookInfo, len(listed))
+	for i, l := range listed {
+		info := contracts.HookInfo{
+			ID: l.ID, Owner: l.Owner, Kind: string(l.Kind), TimeoutMS: l.Timeout.Milliseconds(),
+			Title: l.Title, Description: l.Description,
+			Subscribers: make([]contracts.HookSubscriber, len(l.Subscribers)),
+		}
+		for j, s := range l.Subscribers {
+			info.Subscribers[j] = contracts.HookSubscriber{Plugin: s.Plugin, Priority: s.Priority, Live: s.Live}
+		}
+		out[i] = info
+	}
+	return out, nil
 }
 
 // compactLen is the byte length of raw's compact JSON encoding; raw that is
