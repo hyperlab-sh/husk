@@ -165,11 +165,10 @@ params}`. This spec fixes the `method` names and `params` shapes.
 // and the hook runner; no module defines its own copy.
 type Caller = protocol.Caller // Kind: CallerInput | CallerPlugin | CallerCLI | CallerHost; PluginID set only for CallerPlugin; ConnID set by the Server
 
-// FocusContext is the focus slice of State at dispatch time.
-type FocusContext struct {
-    Surface string // surface id, "" when nothing has focus
-    Owner   string // plugin id occupying Surface, "" when unoccupied or host
-}
+// FocusContext is protocol.FocusContext ([Protocol](protocol.md), "Caller"):
+// the focus slice of State at dispatch time, or Input's own snapshot for an
+// `input` caller. One type, wire-visible as params.focus; no module copies it.
+type FocusContext = protocol.FocusContext // Surface: surface id, "" when nothing has focus; Owner: plugin id occupying it, "" when unoccupied or host
 
 // Sink delivers a notification to one subscriber and never blocks.
 // Implemented by each Pod over its Wrapper's Channel (plugin stdin, see
@@ -293,7 +292,11 @@ Notes fixed by the implementation (`internal/stem/dispatcher`):
   resolved, `host` for an action the host started itself (a palette entry, a
   rail item). An `input` caller also carries the `FocusContext` Input read on
   that key press, and the Dispatcher uses it; a `host` caller gets State's
-  focus like every other caller.
+  focus like every other caller. The two mismatches are rejected before
+  anything is dispatched: `input` with no focus, and `host` with a focus, each
+  get an `invalid_params` reply through the caller's `Reply`, synchronously,
+  plus a log line; the frontend seam defines the same rule ([Pods](pods.md),
+  Frontend seams).
 - A host handler that panics yields one `internal` reply and a log line.
 
 Default is deny. A plugin marks an action public in its manifest

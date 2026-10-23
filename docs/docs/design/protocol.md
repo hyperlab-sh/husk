@@ -128,6 +128,17 @@ const (
 
 Only `cli` and `plugin` are ever produced from a socket request. A zero value is not a valid caller; each receiving module says what it answers to one.
 
+`FocusContext` lives here for the same reason: it is the `params.focus` member of the `action.invoke` request Husk sends an owner ([Message kinds](message-kinds.md)), and it is the one focus type the Dispatcher, the frontend seam (`Frontend.InvokeAction`, [Pods](pods.md)) and the Server share; no module defines its own copy.
+
+```go
+// FocusContext is the focus at dispatch time: State's focus slice, or, for an
+// `input` caller, the snapshot Input read on the key press.
+type FocusContext struct {
+    Surface string `json:"surface"` // surface id, "" when nothing has focus
+    Owner   string `json:"owner"`   // plugin id occupying Surface, "" when unoccupied or host
+}
+```
+
 ### Error codes
 
 A closed enum per protocol minor version. A receiver built for an older minor treats an unknown code as `internal`.
