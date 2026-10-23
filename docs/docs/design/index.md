@@ -26,6 +26,9 @@ Level 2 migration from today's code. Read [Protocol](protocol.md) and
 - [Message kinds](message-kinds.md): contracts for the Dispatcher, Event bus
   and Hook runner: how actions, events and hooks move between Husk, plugins
   and the CLI.
+- [Hooks](hooks.md): a hook as an extension point inside its owner's
+  operation: owner-only firing, the `transform`, `collect` and `gate` kinds,
+  priority order, timeouts, reentrancy, host-fired hooks and `husk hook list`.
 - [Calls](calls.md): the Stem module that owns every outstanding
   Husk-to-plugin request: ids, the pending table, timeouts, caps, exit cleanup
   and reply delivery on the Bubble Tea loop.

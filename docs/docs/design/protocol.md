@@ -19,7 +19,7 @@ It is **not**:
 
 - a transport. Process launch, queues and write deadlines belong to the Wrapper and Server ([Pods](pods.md)); socket placement and discovery to [Instances](instances.md).
 - correlation or timeouts. [Calls](calls.md) owns pending tables, deadlines and caps; the protocol only defines the `id` field they key on.
-- semantics. Which kind a method is (action, event, hook) and who may send it is [Message kinds](message-kinds.md); what a surface or slice is belongs to Surfaces and [State](state.md).
+- semantics. Which kind a method is (action, event, hook) and who may send it is [Message kinds](message-kinds.md); who may fire a hook, its modes and its outcome shape are [Hooks](hooks.md); what a surface or slice is belongs to Surfaces and [State](state.md).
 - JSON-RPC 2.0. It borrows the split, not the spec: no `jsonrpc` member, string error codes, no batches.
 
 Who depends on it: Calls, Dispatcher, Event bus, Hook runner, Server, Wrapper, the CLI, and every plugin in any language. It depends on nothing in Husk: the Go package imports the standard library only.
@@ -167,7 +167,9 @@ The rule (`pkg/protocol/version.go`) is:
 3. A major bump is any other change. Husk accepts any minor of its own major and rejects every other major.
 4. Version decisions use `protocol_version` only; `host_version` is informational.
 
-What changes: this envelope is a breaking change, so the target protocol is **`2.0`** (`protocol.Version = "2.0"`, `protocol.Major = 2`). Husk speaks one major at a time; there is no dual stack.
+What changes: this envelope is a breaking change, so the target major is **2** (`protocol.Major = 2`); `protocol.Version` is `"2.0"` for the envelope and `"2.1"` once [Hooks](hooks.md) lands. Husk speaks one major at a time; there is no dual stack.
+
+Minor 2.1 ([Hooks](hooks.md)): `hook.list`; `hook.call` outcome fields `kind`, `data`, `allowed`, `vetoes` and the per-entry `items`, `veto`, `reason`; subscriber params `kind`. Owner-only firing (the CLI included) tightens 2.0 without a major bump because no shipped plugin fires a hook it does not own and no CLI exists yet.
 
 Where the version is checked, since there is no handshake:
 
@@ -207,7 +209,8 @@ A requester that stops waiting ([Calls](calls.md) times a request out, or a sock
 | `event` | `event.emit` | request, result `{}` | plugin or CLI to Husk (socket); the reply says the event was accepted onto the bus, not delivered |
 | | `event.deliver` | notification | Husk to a subscriber (stdin, or a watching socket connection) |
 | | `event.watch` | request, then `event.deliver` notifications on the same connection | socket caller to Husk |
-| `hook` | `hook.call` | request | caller to Husk (socket); Husk to each subscriber (stdin) |
+| `hook` | `hook.call` | request | the hook's owner to Husk (socket, plugin only; the CLI is denied); Husk to each subscriber (stdin). Firing rule and shapes: [Hooks](hooks.md) |
+| | `hook.list` | request (minor 2.1) | socket caller to Husk |
 | `state` | `state.get`, `state.set`, `state.patch`, `state.snapshot`, `state.watch`, `state.clear` | request | plugin or CLI to Husk |
 | | `state.changed` | notification | Husk to a watching socket connection |
 | `surface` | `surface.update`, `surface.close` | notification | plugin to Husk (socket) |
@@ -230,7 +233,7 @@ A requester that stops waiting ([Calls](calls.md) times a request out, or a sock
 
 Declarations (actions, surfaces, focus-local keys, published slots, hooks, events, slice) are manifest only; there are no `declare` or `subscribe` methods ([Pods](pods.md), [Message kinds](message-kinds.md)).
 
-Direction rule: stdin carries Husk's requests and notifications; stdout carries the plugin's replies and nothing else. Everything a plugin sends on its own initiative, a render above all, goes to the socket, over a connection the plugin keeps open for as long as it likes, with its token on each request. Each method's params schema is owned by the spec named in [Message kinds](message-kinds.md); this spec owns only the name and the form.
+Direction rule: stdin carries Husk's requests and notifications; stdout carries the plugin's replies and nothing else. Everything a plugin sends on its own initiative, a render above all, goes to the socket, over a connection the plugin keeps open for as long as it likes, with its token on each request. Each method's params schema is owned by the spec named in [Message kinds](message-kinds.md) (`hook.*` by [Hooks](hooks.md)); this spec owns only the name and the form.
 
 ### Surface resize snapshot
 
@@ -262,20 +265,20 @@ Each entry names the surface and its inner content dimensions in cells, focus an
 | `slot_contribute` | `slot.contribute` | request | gains a reply; refusals become `denied` or `invalid_params` |
 | `slot_contributions` | `slot.contributions` | notification | |
 | `hook_declare`, `hook_subscribe` | manifest `hooks` | | |
-| `hook_call` (caller to Husk) | `hook.call` with `{"hook":"a.before-refresh","data":{}}` | request | `request_id` replaced by the envelope `id` |
+| `hook_call` (owner to Husk) | `hook.call` with `{"hook":"a.before-refresh","data":{}}` | request | `request_id` replaced by the envelope `id`; only the hook's owner may send it ([Hooks](hooks.md)) |
 | `hook_call` (Husk to subscriber) | `hook.call`, same params, on the subscriber's stdin | request | |
-| `hook_result` | reply to the subscriber's `hook.call`; the caller gets one reply to its `hook.call` | reply | see below |
+| `hook_result` | reply to the subscriber's `hook.call`; the owner gets one reply to its `hook.call` | reply | see below |
 | `event_declare`, `event_subscribe` | manifest `events` | | |
 | `event_emit` (envelope key `event`) | `event.emit` with `{"name":"a.selection-changed","data":{}}`; delivered as `event.deliver` with `{"name","source","data"}` | request, then notification | |
 | `protocol_error` | error reply when the rejected line had a readable request `id`; `protocol.error` otherwise | reply or notification | |
 
-`hook.call` replies once, after every subscriber answered, timed out or disconnected:
+`hook.call` replies once to the owner, after every subscriber asked has answered, timed out or disconnected:
 
 ```json
-{"id":12,"result":{"results":[{"plugin_id":"b","data":{"ready":true}},{"plugin_id":"c","error":{"code":"timeout","message":"no reply in 10s"}}]}}
+{"id":12,"result":{"kind":"gate","allowed":true,"vetoes":[],"results":[{"plugin_id":"b"},{"plugin_id":"c","error":{"code":"timeout","message":"no reply in 10s"}}]}}
 ```
 
-Chain order and veto are out of scope here; the Hook runner ([Message kinds](message-kinds.md)) may add fields to this result in a minor version.
+The outcome's fields (`kind`, `data`, `allowed`, `vetoes`, `results`), the subscriber reply shapes per kind and who may send `hook.call` are owned by [Hooks](hooks.md).
 
 ### Limits and timeouts owned here
 
@@ -303,7 +306,7 @@ The CLI is a socket client speaking this protocol and nothing else. It connects,
 Done in the cutover and retirement: `pkg/huskipc` and `pkg/manifest` are deleted, `pkg/protocol` carries the wire types, reader, writer, queue and version rule, `internal/pods/manifest` replaces `pkg/manifest`, `plugins/reference` speaks 2.0, and `docs/docs/wire-schema.json` (with its guard test) is gone. The rows below stay as the record of where each piece went.
 
 - `pkg/huskipc/protocol.go`: `Envelope` and its per-type pointer fields are replaced by `protocol.Message`. Wire value types and params (`Palette`, `FrameSpec`, `SlotSize`, `ModifierState`, `KeyStatePayload`, `SlotKeyPayload`, `SlotMousePayload`, `SlotUpdatePayload`, `ToastPayload`) move to `pkg/protocol` using v2 surface vocabulary: `SlotSize` becomes `SurfaceSize`, key/mouse/update payloads become `SurfaceKeyParams`, `SurfaceMouseParams` and `SurfaceUpdateParams`, and every host-surface identifier field is renamed from `slot` to `surface`. `KeyStatePayload` becomes `KeyStateParams`, `ToastPayload` becomes `ToastShowParams`; shared value types retain their names. Resize batches become `SurfaceResizedParams` with a `surfaces` array of `SurfaceSize` entries, as defined in Level 1, replacing the old `slot_sizes` map and separate `focused_slot`. Other JSON fields retain their spelling. `HelloPayload`, `CommandSpec`, `RailItemSpec`, `KeybindSpec` leave the wire for the manifest ([Pods](pods.md), [Keybindings](keybindings.md)). `WorkspaceContextPayload` and `RailActivatedPayload` leave the wire. `ConnWriter` becomes `protocol.Writer`.
-- `pkg/huskipc/version.go`: parsing and the compatibility rule move unchanged; constants become `"2.0"` and `2`. The check runs at manifest conversion and in the CLI, not on the wire.
+- `pkg/huskipc/version.go`: parsing and the compatibility rule move unchanged; constants become `"2.0"` and `2` (`Version` becomes `"2.1"` with Hooks, see Versioning). The check runs at manifest conversion and in the CLI, not on the wire.
 - `pkg/huskipc/read.go`: the buffering and oversized-line skip move unchanged; `deliver` decodes `Message` and classifies its form; `LineError` gains `Code`, `ID` and `Method`; `Payload()` becomes a builder for `protocol.error` or an error reply.
 - `pkg/huskipc/wirevalid.go`: moves unchanged; `Validate()` errors map to `invalid_params`.
 - `pkg/huskipc/published.go`: params structs move; `HookCallPayload.RequestID` and `HookResultPayload.RequestID` are removed; `ProtocolErrorPayload` is replaced by `Error` and `protocol.error`.
@@ -326,8 +329,8 @@ Done in the cutover and retirement: `pkg/huskipc` and `pkg/manifest` are deleted
 8. No handshake on either channel. The pipe is the plugin's identity, the manifest its declaration, the environment its configuration; the socket identifies a caller by the `token` member per request.
 9. The plugin's stdout carries replies only. Everything plugin-originated, renders included, goes to the socket over a connection the plugin may keep open.
 10. Method names have exactly two segments. Resource ids travel in params: `action.invoke` carries the action, `event.deliver` the event name, `hook.call` the hook.
-11. `hook.call` returns one aggregated reply instead of today's streamed `hook_result` per subscriber.
-12. No cancel and no end notification in 2.0; EOF on stdin ends a plugin's session. `event.emit` is a request so a CLI caller gets an exit status and a namespace refusal is a `denied` reply.
+11. `hook.call` returns one aggregated reply to the owner instead of today's streamed `hook_result` per subscriber; its shape, per hook kind, is owned by [Hooks](hooks.md).
+12. No cancel and no end notification in 2.x; EOF on stdin ends a plugin's session. `event.emit` is a request so a CLI caller gets an exit status and a namespace refusal is a `denied` reply.
 13. Input, surface and theme deliveries are targeted notifications in their own namespaces, not `event.deliver` deliveries.
 14. The Go package is a new `pkg/protocol`; `pkg/huskipc` is deleted after migration rather than kept as a frozen v1.
 15. The CLI exposes `husk rpc <method> [params-json]`.
@@ -337,6 +340,6 @@ Done in the cutover and retirement: `pkg/huskipc` and `pkg/manifest` are deleted
 
 1. Resolved in the consistency pass: stdout carries replies only (decision 9). An earlier draft let stdout carry plugin requests so a render needs no CLI spawn; the per-request token in [Pods](pods.md) gives a long-lived socket connection the identity that argument said was missing, so a plugin that renders every frame keeps one socket connection open and pays one connect.
 2. Are input, surface and theme deliveries a fourth message kind, or events with one implicit subscriber? This spec gives them their own namespaces (decision 13) and leaves the classification to [Message kinds](message-kinds.md). Recommended: events with an implicit subscriber, so the Event bus carries them and coalescing applies to `input.key_state` and `surface.resized`.
-3. Aggregating `hook.call` into one reply (decision 11) delays the caller to the slowest subscriber, up to the 10 s hook timeout. Recommended: accept; no plugin uses hooks yet, and streaming can come back as a minor addition (`hook.result` notifications) if one needs it.
+3. Aggregating `hook.call` into one reply (decision 11) delays the caller to the slowest subscriber, up to the hook's timeout. Settled in [Hooks](hooks.md): accepted; a publisher bounds the wait with `timeout_ms`, and streaming can come back as a minor addition if a plugin needs it.
 4. Resolved (no shim): should Husk keep a major-1 compatibility shim for the external plugin crate that exists today? Recommended: no; update it in step with the change and rely on the one-line major-1 rejection to tell stale builds what happened.
 5. Resolved: `pkg/huskipc` was deleted; the only known importers were in this repository.

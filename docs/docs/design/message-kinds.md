@@ -18,8 +18,17 @@ differences so the contracts can be written one per kind.
 Three Stem modules carry the three kinds. The **Dispatcher** routes an action
 to its single owner and returns the owner's reply to whoever asked. The **Event
 bus** fans a named event out to every subscriber and never waits. The **Hook
-runner** calls the subscribers of a hook and collects their replies; it is a
-cut-out, with chain and veto semantics deferred.
+runner** serves an extension point inside an operation: the operation's owner
+stops at the point, the runner asks the subscribers, and the owner continues
+according to their answers; its contract is [Hooks](hooks.md).
+
+The line between an event and a hook is whether the answers matter. An event
+reports something that already happened; the publisher does not wait and
+nothing a listener does changes what the publisher does. A hook is fired by
+the code running an operation, before the operation continues, and that code
+uses the answers (a transformed value, contributed items, or a veto) to decide
+what it does next. A point whose answers would not change anything is an
+event, and should be published as one.
 
 None of them is a transport. Waiting on a plugin (correlation ids, timeouts,
 reply matching) belongs to [Calls](calls.md). Writing bytes to a plugin
@@ -39,7 +48,9 @@ Dependencies:
 - Event bus depends on State (liveness of subscribers) and on the subscription
   table derived from manifests. It is also published to by State, which makes
   State a publisher, not a dependency.
-- Hook runner depends on Calls and the hook subscription table.
+- Hook runner depends on Calls, the hook catalog (declarations and
+  registrations from manifests, plus the host's own hooks) and State
+  (liveness). See [Hooks](hooks.md).
 - Input ([Keybindings](keybindings.md)) and the Server ([Pods](pods.md)) depend
   on the Dispatcher. The Wrapper depends on none of the three.
 
@@ -47,11 +58,13 @@ Dependencies:
 
 | | Action | Event | Hook |
 |---|---|---|---|
-| Who starts | user, plugin, CLI | Husk or plugin | Husk |
-| Receivers | one owner, looked up in the store | every subscriber | registered plugins, in order |
-| Reply | result or error, with timeout | none | required, can veto or modify |
-| Failure mode | owner gone, no such action, slow owner | subscriber slow, bursts | one hung plugin freezes the UI |
-| Kind-specific policy | permission (may X invoke Y's action), focus context | coalescing and throttling | per-hook timeout, priority order, reentrancy guard |
+| Who starts | user, plugin, CLI | Husk or plugin, after the fact | only the hook's owner (the plugin for its namespace, Husk for `husk.*`), from inside its own operation |
+| Does the starter wait | yes, for the one reply | no | yes, for every subscriber asked |
+| Receivers | one owner, looked up in the store | every subscriber, no reply | every live subscriber, in priority order: one at a time (`transform`) or at once (`collect`, `gate`) |
+| Reply | result or error, with timeout | none | one per subscriber, with timeout, in the shape of the hook's kind: a replaced value, items, or allow/veto |
+| Can the receivers change what the starter does | yes, it is the reply | no, by definition | yes, that is the point: the owner continues according to the answers |
+| Failure mode | owner gone, no such action, slow owner | subscriber slow, bursts | a slow subscriber delays the owner up to the hook's timeout; a failed subscriber is recorded and skipped, never a veto |
+| Kind-specific policy | permission (may X invoke Y's action), focus context | coalescing and throttling | owner-only firing, kind, per-hook timeout, priority order, in-flight cap ([Hooks](hooks.md)) |
 
 What they share: one JSON object per line, a correlation id for replies,
 ordering per plugin, timeouts, and cleanup when a plugin exits.
@@ -87,11 +100,10 @@ launched by it, such as a test harness, uses the CLI path only.
   routing. One owner per action.
 - **Event bus** (Stem): subscriptions, fan-out, coalescing. Any part may
   publish: Input, State, Surfaces, Services, plugins.
-- **Hook runner** (Stem): chain order, veto or modify, per-hook timeout,
-  reentrancy guard. Today only the hook call path exists, in the registry
-  (timeout, pending-call caps); no plugin uses hooks yet. The boundary is cut
-  now so that path moves behind it, and chain and veto semantics are added
-  later without touching Calls or Dispatcher.
+- **Hook runner** (Stem): owner-only firing, the three hook kinds
+  (`transform` chains, `collect` and `gate` fan-outs), per-hook timeout,
+  in-flight cap. Specified in [Hooks](hooks.md); it reaches plugins only
+  through Calls.
 - **Wrapper** (Pod, one per plugin): launches and supervises the process,
   injects the instance socket path into its environment, and carries the
   Husk-to-plugin direction over its stdio.
@@ -290,7 +302,7 @@ Reply from the owner (the id is the integer Calls assigned; error codes come
 from the [Protocol](protocol.md) registry, `failed` for an application failure):
 
 ```json
-{"id":41,"result":{"path":"/notes/todo.md"}}
+{"id":41,"result":{"path":"/lists/todo.md"}}
 {"id":41,"error":{"code":"failed","message":"disk full"}}
 ```
 
@@ -413,7 +425,7 @@ subscriber's stdin (or on a watching socket connection):
 
 ```json
 {"method":"event.deliver","params":{"name":"state.changed","source":"husk","data":{"slice":"husk.focus","owner":"husk","revision":42}}}
-{"method":"event.deliver","params":{"name":"notes.saved","source":"notes","data":{"path":"/notes/todo.md"}}}
+{"method":"event.deliver","params":{"name":"notes.saved","source":"notes","data":{"path":"/lists/todo.md"}}}
 ```
 
 Publishing. Core modules call `Publish` directly. A plugin publishes with an
@@ -422,7 +434,7 @@ token and replies `{}` once the event is on the bus (so a CLI caller gets an
 exit status); delivery to subscribers stays fire-and-forget:
 
 ```json
-{"id":3,"method":"event.emit","token":"9f2c...e1","params":{"name":"notes.saved","data":{"path":"/notes/todo.md"}}}
+{"id":3,"method":"event.emit","token":"9f2c...e1","params":{"name":"notes.saved","data":{"path":"/lists/todo.md"}}}
 {"id":3,"result":{}}
 ```
 
@@ -500,62 +512,18 @@ Failure modes:
 
 ### Hook runner
 
-Cut-out. The runner exists so the hook call path that the registry holds today
-moves behind a boundary and keeps working. Chain order, veto, modify,
-priorities and the reentrancy guard are deferred to a later spec; this
-section fixes only the request and reply shapes and today's behaviour.
-
-```go
-type HookResult struct {
-    Hook     string
-    Plugin   string         // the responding subscriber, set by Husk
-    Data     map[string]any
-    Err      *ActionError   // Protocol codes: "timeout", "cancelled", or the subscriber's own ("failed")
-}
-
-type HookRunner interface {
-    // Call sends hook.call to every live subscriber of hook and invokes
-    // onDone exactly once, when every subscriber has replied, timed out or
-    // exited, with one HookResult per subscriber in completion order. With
-    // no live subscribers onDone is called at once with an empty slice.
-    // Never blocks.
-    Call(caller Caller, hook string, data map[string]any, onDone func([]HookResult)) error
-}
-```
-
-Request to each subscriber, and its reply:
-
-```json
-{"id":52,"method":"hook.call","params":{"hook":"notes.before-refresh","data":{"reason":"manual"}}}
-{"id":52,"result":{"data":{"ready":true}}}
-{"id":52,"error":{"code":"failed","message":"not ready"}}
-```
-
-Each subscriber gets its own Calls id; the runner maps the ids back to the
-single `Call`. Subscribers are determined by the manifest table
-(`"hooks": {"subscribe": ["notes.before-refresh"]}`). The caller gets one
-aggregated reply to its own `hook.call` once every subscriber is accounted for
-([Protocol](protocol.md)); today's streamed `hook_result` per subscriber goes.
-A subscriber that is silent for 10 s is answered for with `timeout`. A
-subscriber that exits is answered for with `cancelled`. Pending caps are the
-shared Calls caps. A hook has no veto and no result merging in this version.
-
-Chain and veto semantics are deferred.
-
-CLI surface: `husk hook call <id> [--data json]` prints the aggregated result
-as one JSON document. It exists for tests and diagnostics.
-
-Hook runner invariants:
-
-1. `onDone` is called exactly once per `Call` and never after the caller
-   disconnects (the continuation is dropped, the subscribers' replies are
-   still consumed).
-2. A hung subscriber never blocks the loop; it costs one pending entry until
-   the timeout.
-3. The runner reads the hook subscription table and State liveness; it writes
-   neither.
-4. The runner depends on Calls only; it does not import the Dispatcher or the
-   Event bus.
+The Hook runner has its own spec: [Hooks](hooks.md). In one paragraph: a hook
+is an extension point inside its owner's operation; only the owner (a plugin
+for `<plugin>.*`, the host for `husk.*`) fires it, and the CLI cannot; the
+owner declares the hook's kind, `transform` (subscribers one at a time in
+priority order, each may replace the value), `collect` (every subscriber at
+once, each contributes items) or `gate` (every subscriber at once, each may
+veto with a reason); the owner gets one outcome once every leg resolved and
+continues according to it; a slow, failed or exited subscriber is recorded
+and skipped, never a veto. Legs are Calls entries with the hook's declared
+per-leg timeout under the shared caps. The wire method is `hook.call` (owner
+to Husk on the socket, Husk to each subscriber on stdin) plus `hook.list` for
+introspection; the shapes are in [Hooks](hooks.md).
 
 ### Dependency directions
 
@@ -642,11 +610,12 @@ Hook runner invariants:
     per tick, excess dropped with one log line per subscriber per tick.
 16. Events are not replayed to a subscriber that was not live when they were
     published.
-17. Hook results are aggregated into one reply to the caller, one entry per
-    subscriber in completion order, `timeout` for silence, `cancelled` for
-    exit. Streaming can return as a minor addition if a plugin needs it.
-18. `husk action invoke|list`, `husk event emit|watch` and `husk hook call` are
-    the CLI surface of these modules.
+17. Hook results are aggregated into one outcome to the owner, one entry per
+    subscriber asked, in priority order, `timeout` for silence, `cancelled`
+    for exit. Everything else about hooks is decided in [Hooks](hooks.md).
+18. `husk action invoke|list`, `husk event emit|watch` and `husk hook list` are
+    the CLI surface of these modules. There is no `husk hook call`: a hook is
+    fired only by its owner, from inside the operation it belongs to.
 
 ## Open questions
 
@@ -669,36 +638,11 @@ Hook runner invariants:
    distributions ship host-side extensions, `husk.*` handlers may need a
    registry outside `cmd/husk`. Recommended: defer; `RegisterHost` already
    covers it.
-6. Today's hook path checks the global and per-subscriber caps before any
-   envelope is delivered, and the cut-out keeps that: a cap refusal refuses
-   the whole call and nothing is sent. Delivery itself is per-subscriber, as
-   today's publisher (`deliverPublications` ignores one plugin's failed send
-   and delivers the rest): a send that fails mid fan-out becomes that
-   subscriber's entry — `unavailable`, reason `disconnected` — and the
-   remaining subscribers still get theirs. The spec names the caps but not
-   the per-subscriber failure entry. Recommended: keep; parity.
-7. The runner can refuse before any subscriber is asked: `not_found` for an
-   undeclared hook id (today's `unknown hook`), `busy` for the caps, and
-   `unavailable` when the call table is closed. The spec's HookResult codes
-   name only timeout, cancelled and the subscriber's own codes; these
-   refusals answer the caller's `hook.call` directly with no result list.
-   Recommended: confirm the codes in the protocol table suffice; they do
-   today.
-8. A subscriber that is not live when the hook is called is skipped without
-   an entry in the aggregate, as today. The spec says "every live subscriber"
-   but does not name that a non-live subscriber produces no entry (unlike a
-   subscriber that exits mid-call, which gets `cancelled`). Recommended:
-   keep; liveness at call time defines the fan-out.
-9. Today's registry keys pending hook calls on the caller's `request_id`,
-   refusing duplicates in flight and freeing the id on reply or timeout. The
-   cut-out drops that seam: the wire envelope `id` correlates the caller's
-   request and Calls ids correlate the legs, so there is no caller-supplied
-   request id to deduplicate. Recommended: nothing needs it; record that the
-   migration drops it.
-10. When a plugin with pending hook legs disconnects, today's registry
-   answers the waiting callers at once with `"plugin disconnected"`
-   (`cmd/husk/registry.go` `removePlugin`). The runner leaves the legs pending
-   until their own deadline instead: `DropPlugin` is the loop's call
-   (host-root wiring), so until that wiring exists nothing shortens the
-   wait. Recommended: behaviour stays for the cut-out; record that host-root
-   must feed `DropPlugin` on disconnect to recover v1's immediate answer.
+6. Items 6 to 10 of earlier drafts recorded what the hook cut-out did that
+   its section did not name (all-or-nothing caps preflight, refusal codes,
+   non-live subscribers producing no entry, the dropped `request_id` dedup,
+   and the disconnect answer through `DropPlugin`). They are settled in
+   [Hooks](hooks.md): the preflight, `not_found`/`busy`/`unavailable`
+   refusals and the no-entry rule are kept; `DropPlugin` is fed on
+   `pods.ClosedMsg` by the host root, so an exited subscriber is answered at
+   once.
