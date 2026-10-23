@@ -55,6 +55,9 @@ func TestServicesCommands(t *testing.T) {
 		{"theme show", []string{"theme", "show"}, protocol.MethodThemeGet, `{}`, `{"palette":{"name":"Fake","ink":"#ffffff","accent":"#123456"}}`, "", "ROLE COLOR\naccent #123456\nink #ffffff"},
 		{"theme roles", []string{"theme", "roles"}, protocol.MethodThemeGet, `{}`, `{"palette":{"name":"Fake","ink":"#ffffff","accent":"#123456"}}`, `["accent","ink"]`, "accent\nink"},
 		{"theme check", []string{"theme", "check"}, protocol.MethodThemeCheck, `{}`, serviceProblems, "", "ok false\nSEVERITY CODE LAYER KEY MESSAGE\nerror low_contrast user theme.palette.ink too low"},
+		{"theme list", []string{"theme", "list"}, protocol.MethodThemeList, `{}`, `{"themes":[{"name":"default","source":"built-in","current":true},{"name":"evening","source":"user","current":false}]}`, "", "NAME SOURCE CURRENT\ndefault built-in *\nevening user"},
+		{"theme set", []string{"theme", "set", "evening"}, protocol.MethodSettingsSet, `{"key":"theme.name","value":"evening"}`, serviceReports, "", "SERVICE GEN APPLIED CHANGED\ntheme 2 false false\nSEVERITY CODE LAYER KEY MESSAGE\nerror low_contrast user theme.palette.ink too low"},
+		{"settings set", []string{"settings", "set", "theme.name", "evening"}, protocol.MethodSettingsSet, `{"key":"theme.name","value":"evening"}`, serviceReports, "", "SERVICE GEN APPLIED CHANGED\ntheme 2 false false\nSEVERITY CODE LAYER KEY MESSAGE\nerror low_contrast user theme.palette.ink too low"},
 		{"profile list", []string{"profile", "list"}, protocol.MethodProfileList, `{}`, `{"profiles":[]}`, "", "profiles []"},
 		{"profile current", []string{"profile", "current"}, protocol.MethodProfileList, `{}`, `{"profiles":[{"name":"work","source":"user","active":true}]}`, `{"name":"work","source":"user","active":true}`, "active true\nname work\nsource user"},
 		{"profile absent", []string{"profile", "current"}, protocol.MethodProfileList, `{}`, `{"profiles":[{"name":"work","active":false}]}`, `null`, ""},
@@ -127,8 +130,8 @@ func TestServicesCommands(t *testing.T) {
 func TestServicesUsageBeforeConnect(t *testing.T) {
 	cases := [][]string{
 		{"keys", "adopt"}, {"keys", "set"}, {"keys", "--problems", "--action", "a"}, {"keys", "--problems", "--focus", "main-stage"},
-		{"settings", "get"}, {"settings", "get", "a", "b"}, {"settings", "list", "extra"}, {"settings", "schema", "extra"}, {"settings", "validate", "extra"}, {"settings", "set", "a", "b"},
-		{"theme", "list"}, {"theme", "set", "a"}, {"theme", "show", "extra"}, {"theme", "roles", "extra"}, {"theme", "check", "extra"},
+		{"settings", "get"}, {"settings", "get", "a", "b"}, {"settings", "list", "extra"}, {"settings", "schema", "extra"}, {"settings", "validate", "extra"}, {"settings", "set"}, {"settings", "set", "a"}, {"settings", "set", "a", "b", "c"},
+		{"theme", "list", "extra"}, {"theme", "set"}, {"theme", "set", "a", "b"}, {"theme", "show", "extra"}, {"theme", "roles", "extra"}, {"theme", "check", "extra"},
 		{"profile", "use"}, {"profile", "use", "a", "b"}, {"profile", "list", "extra"}, {"profile", "current", "extra"},
 		{"secrets", "set"}, {"secrets", "set", "a", "b"}, {"secrets", "grant", "a"}, {"secrets", "revoke", "a"}, {"secrets", "reveal"}, {"secrets", "list", "extra"}, {"config", "reload", "extra"},
 	}
@@ -146,7 +149,7 @@ func TestServicesUsageBeforeConnect(t *testing.T) {
 			}
 		})
 	}
-	for _, args := range [][]string{{"keys", "--source"}, {"settings", "get", "a", "--source"}, {"settings", "list", "--owner", "husk"}, {"settings", "schema", "--action", "a"}, {"theme", "show", "--shadowed"}, {"profile", "list", "--problems"}, {"secrets", "list", "--focus", "a"}, {"config", "reload", "--source"}} {
+	for _, args := range [][]string{{"keys", "--source"}, {"settings", "get", "a", "--source"}, {"settings", "list", "--owner", "husk"}, {"settings", "schema", "--action", "a"}, {"theme", "show", "--shadowed"}, {"profile", "list", "--problems"}, {"secrets", "list", "--focus", "a"}, {"config", "reload", "--source"}, {"settings", "set", "a", "b", "--source"}, {"theme", "list", "--owner", "husk"}, {"theme", "set", "a", "--owner", "husk"}} {
 		h := newHarness(t, shortDir(t), nil)
 		if got := h.run(args...); got != output.ExitUsage {
 			t.Fatalf("flag acceptance: exit %d", got)
