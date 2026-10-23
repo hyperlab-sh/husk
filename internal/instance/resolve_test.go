@@ -306,6 +306,14 @@ func TestResolveAbsentDirectory(t *testing.T) {
 			}
 		})
 	}
+	t.Run("DirAbsent wins over a populated Dir: the registry is empty", func(t *testing.T) {
+		dir, net := fixture(t, func(dir string) []Entry { return []Entry{namedEntry(dir, "notes", 5120)} })
+		_, err := Resolve(ResolveOptions{Dir: dir, DirAbsent: true, Deps: net.deps()})
+		var e *Error
+		if !errors.As(err, &e) || e.Kind != KindNoInstance {
+			t.Fatalf("error = %v, want KindNoInstance", err)
+		}
+	})
 	t.Run("a socket path needs no directory", func(t *testing.T) {
 		got, err := Resolve(ResolveOptions{DirAbsent: true, Socket: "/s.sock"})
 		if err != nil || got.Socket != "/s.sock" {
