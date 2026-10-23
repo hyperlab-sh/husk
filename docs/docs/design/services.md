@@ -205,7 +205,7 @@ State slice, registered by Profile at construction, exactly as [State](state.md)
 Selection runs in the coordinator's step 2, before the one `Store.Resolve`, so the merged document it produces is already the selected profile's. It reads only the unmerged `user` layer of `config` (`Store.Layers("config", "")`) for `profile.default`, never a merged document: the merge needs the profile, and the profile must not come from the merge. First match wins:
 
 1. `--profile <name>` was given: that name, on the `startup` flight only. On every later flight the flag is already in the slice (next step).
-2. The `husk.profile` slice holds a name (hydrated for a named instance, or written by `profile.use` or an earlier flight): that name.
+2. The `husk.profile` slice is present (hydrated for a named instance, or written by `--profile`, `profile.use` or an earlier flight): its value, `""` included. `{"active":""}` is an explicit no profile and selection stops here; `profile.default` is not consulted.
 3. `profile.default` is set in the `user` layer: that name. The `distribution`, `profile` and `instance` layers cannot set it (a profile choosing a profile is circular; a distribution ships a default profile by shipping one profile directory, not by setting this key). A `profile.default` present in any other layer is a `warning` problem `profile_default_ignored` (message `profile.default is honoured from the user layer only`) and is ignored.
 4. Otherwise `""`.
 
