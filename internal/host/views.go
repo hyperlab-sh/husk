@@ -94,7 +94,7 @@ func (p publisher) Publish(name string, data any) {
 	// Pods publish pods.plugin-exited from inside Update, where a blocking
 	// Post would wait on the loop it runs on; publish inline there.
 	if p.r.onLoop() {
-		if name == pods.PluginAddedEvent {
+		if name == pods.PluginAddedEvent || name == pods.PluginRemovedEvent {
 			p.r.afterState = append(p.r.afterState, publish)
 			return
 		}
