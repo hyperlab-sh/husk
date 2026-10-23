@@ -70,11 +70,11 @@ A plugin directory contains a `husk-plugin.json`:
 | :--- | :--- |
 | Frame (`border`, `label`, `close`) | `surfaces[].frame` for `main-stage` in `husk-plugin.json` |
 | Published inline slot `go.reference.row-actions` | `published_slots` in the manifest; rows carry the `ESC ] husk;slot=…;key=… ESC \` anchor |
-| Hook `go.reference.before-refresh` | declared under `hooks.publish` in the manifest; `r` calls it with `hook.call` and the replies are shown |
+| Hook `go.reference.before-refresh` | a `gate` declared under `hooks.publish` in the manifest; `r` and the `go.reference.refresh` action (`husk action invoke go.reference.refresh`) fire it with `hook.call` and the outcome (allowed by N, or vetoed by whom) is shown |
 | Event `go.reference.selection-changed` | declared under `events.publish` in the manifest; `j`/`k` emit it with `event.emit` |
 | Width and height | read from `surface.resized`, never hard-coded; it re-renders only when the size or its content changes, not on `input.key_state` |
 
-A plugin cannot contribute to its own slot, so the same binary also runs as `plugins/reference-actions` (`--contributor`): it fills the slot with an `[inspect]` action (`slot.contribute`), subscribes to the hook and the event, answers the hook and toasts on a click. It may start before the publisher has declared anything, so it retries its setup when the host answers with an error. Build the binary first (`go build -o plugins/reference/reference ./plugins/reference`), then `husk --dump-frame --plugin-dir ./plugins` renders the framed surface with `[inspect]` beside each row. `go test ./plugins/reference` drives both roles over pipes.
+A plugin cannot contribute to its own slot, so the same binary also runs as `plugins/reference-actions` (`--contributor`): it fills the slot with an `[inspect]` action (`slot.contribute`), subscribes to the hook and the event, allows the gate with an empty reply and toasts on a click. It may start before the publisher has declared anything, so it retries its setup when the host answers with an error. Build the binary first (`go build -o plugins/reference/reference ./plugins/reference`), then `husk --dump-frame --plugin-dir ./plugins` renders the framed surface with `[inspect]` beside each row. `go test ./plugins/reference` drives both roles over pipes.
 
 ## Activity rail
 

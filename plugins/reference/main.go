@@ -3,7 +3,8 @@
 //
 //   - a frame (border, label and close declared on the surface in the manifest),
 //   - a published inline slot (row actions anchored in surface content),
-//   - a hook the plugin calls and an event it emits,
+//   - a gate hook the plugin fires before it refreshes (from the r key or the
+//     go.reference.refresh action) and an event it emits,
 //   - surface.resized for geometry, so nothing is hard-coded.
 //
 // It runs in one of two roles from the same binary, because a plugin cannot
@@ -49,6 +50,8 @@ const (
 	refreshHook    = publisherID + ".before-refresh"
 	selectionEvent = publisherID + ".selection-changed"
 
+	refreshAction  = publisherID + ".refresh"
+	gateKind       = "gate"
 	inspectAction  = contributorID + ".inspect"
 	inspectContrib = contributorID + ".inspect-button"
 )
@@ -122,9 +125,8 @@ type plugin struct {
 
 	sizes    map[protocol.SurfaceID]protocol.SurfaceSize
 	selected int
-	answered bool // a hook.call reply arrived
-	results  int  // subscriber results received
-	last     string
+	answered bool   // a hook.call reply arrived
+	status   string // what the last refresh gate decided, shown in the status line
 
 	arm     func()
 	retries int
@@ -298,6 +300,12 @@ func (p *plugin) request(m protocol.Message) error {
 		if err := json.Unmarshal(m.Params, &a); err != nil {
 			return p.replyError(m, protocol.CodeInvalidParams, "action.invoke params: "+err.Error())
 		}
+		if !p.cfg.contributor && a.Action == refreshAction {
+			if err := p.refresh(); err != nil {
+				return err
+			}
+			return p.reply(m, struct{}{})
+		}
 		if !p.cfg.contributor || a.Action != inspectAction {
 			return p.replyError(m, protocol.CodeNotFound, fmt.Sprintf("no action %q", a.Action))
 		}
@@ -313,6 +321,7 @@ func (p *plugin) request(m protocol.Message) error {
 	case protocol.MethodHookCall:
 		var h struct {
 			Hook string `json:"hook"`
+			Kind string `json:"kind"`
 		}
 		if err := json.Unmarshal(m.Params, &h); err != nil {
 			return p.replyError(m, protocol.CodeInvalidParams, "hook.call params: "+err.Error())
@@ -320,7 +329,13 @@ func (p *plugin) request(m protocol.Message) error {
 		if !p.cfg.contributor || h.Hook != refreshHook {
 			return p.replyError(m, protocol.CodeNotFound, fmt.Sprintf("not subscribed to %q", h.Hook))
 		}
-		return p.reply(m, map[string]any{"data": map[string]any{"ready": true}})
+		// The leg names the kind the owner reads. This hook is a gate, and an
+		// empty result allows; any other kind is answered the same way (no
+		// data, no items, no veto) so the owner is never blocked.
+		if h.Kind != gateKind {
+			fmt.Fprintf(p.log, "reference: %s asked as %q, expected a gate\n", refreshHook, h.Kind)
+		}
+		return p.reply(m, struct{}{})
 	}
 	return p.replyError(m, protocol.CodeUnknownMethod, fmt.Sprintf("unknown method %q", m.Method))
 }
@@ -411,31 +426,47 @@ func (p *plugin) complete(m protocol.Message) error {
 		}
 	case pendingHook:
 		p.answered = true
-		if m.Error != nil {
-			p.results++
-			p.last = string(m.Error.Code)
-			return p.renderAll()
-		}
-		var res struct {
-			Results []struct {
-				PluginID string          `json:"plugin_id"`
-				Error    *protocol.Error `json:"error"`
-			} `json:"results"`
-		}
-		if err := json.Unmarshal(m.Result, &res); err != nil {
-			fmt.Fprintf(p.log, "reference: bad hook.call result: %v\n", err)
-		}
-		p.last = "no subscribers"
-		for _, r := range res.Results {
-			p.results++
-			p.last = r.PluginID
-			if r.Error != nil {
-				p.last = string(r.Error.Code)
-			}
-		}
+		p.status = p.gateStatus(m)
 		return p.renderAll()
 	}
 	return nil
+}
+
+// gateStatus turns the reply to a refresh hook.call into the status line text.
+// Only the members this plugin reads are decoded; unknown ones are ignored.
+func (p *plugin) gateStatus(m protocol.Message) string {
+	if m.Error != nil {
+		return "refresh not asked: " + string(m.Error.Code)
+	}
+	var out struct {
+		Kind    string `json:"kind"`
+		Allowed bool   `json:"allowed"`
+		Vetoes  []struct {
+			PluginID string `json:"plugin_id"`
+			Reason   string `json:"reason"`
+		} `json:"vetoes"`
+		Results []struct {
+			Error *protocol.Error `json:"error"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(m.Result, &out); err != nil {
+		fmt.Fprintf(p.log, "reference: bad hook.call result: %v\n", err)
+		return "refresh outcome unreadable"
+	}
+	if !out.Allowed {
+		if len(out.Vetoes) == 0 {
+			return "refresh vetoed"
+		}
+		v := out.Vetoes[0]
+		return fmt.Sprintf("refresh vetoed by %s: %s", v.PluginID, v.Reason)
+	}
+	asked := 0
+	for _, r := range out.Results {
+		if r.Error == nil {
+			asked++
+		}
+	}
+	return fmt.Sprintf("refresh allowed by %d", asked)
 }
 
 // retry arms one setup retry unless the budget is spent.
@@ -490,6 +521,14 @@ func (p *plugin) resized(r protocol.SurfaceResizedParams) error {
 	return nil
 }
 
+// refresh fires the gate hook that precedes a refresh; the r key and the
+// refresh action share it.
+func (p *plugin) refresh() error {
+	return p.call(pendingHook, protocol.MethodHookCall, map[string]any{
+		"hook": refreshHook, "data": map[string]any{"reason": "manual"},
+	})
+}
+
 func (p *plugin) key(key string) error {
 	switch key {
 	case "j", "down":
@@ -497,9 +536,7 @@ func (p *plugin) key(key string) error {
 	case "k", "up":
 		p.selected = (p.selected + len(rows) - 1) % len(rows)
 	case "r":
-		return p.call(pendingHook, protocol.MethodHookCall, map[string]any{
-			"hook": refreshHook, "data": map[string]any{"reason": "manual"},
-		})
+		return p.refresh()
 	default:
 		return nil
 	}
@@ -528,7 +565,7 @@ func (p *plugin) lines(size protocol.SurfaceSize) []string {
 	}
 	result := "none"
 	if p.answered {
-		result = fmt.Sprintf("%d, last %s", p.results, p.last)
+		result = p.status
 	}
 	return append(out,
 		"",

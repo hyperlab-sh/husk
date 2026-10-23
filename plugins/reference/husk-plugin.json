@@ -12,6 +12,9 @@
   "published_slots": [
     {"id": "go.reference.row-actions", "title": "Row actions", "description": "Actions beside each row", "kind": "inline"}
   ],
+  "actions": [
+    {"id": "go.reference.refresh", "title": "Refresh", "description": "Refreshes the reference plugin, asking the before-refresh gate first"}
+  ],
   "hooks": {
     "publish": [{"id": "go.reference.before-refresh", "kind": "gate", "title": "Before refresh", "description": "Called when the reference plugin refreshes"}]
   },

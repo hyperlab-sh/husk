@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -292,26 +293,64 @@ func TestKeysEmitEventAndCallHook(t *testing.T) {
 		t.Fatalf("hook.call ids must be distinct: %v %v", c1.ID, c2.ID)
 	}
 
-	h.toSocket(`{"id":` + c1.ID.String() + `,"result":{"results":[{"plugin_id":"` + contributorID + `","data":{"ready":true}}]}}`)
-	if got := strings.Join(h.update().Lines, "\n"); !strings.Contains(got, "replies: 1, last "+contributorID) {
-		t.Errorf("hook result not shown: %q", got)
+	h.toSocket(`{"id":` + c1.ID.String() + `,"result":{"kind":"gate","allowed":true,"vetoes":[],"results":[{"plugin_id":"` + contributorID + `"}],"future":1}}`)
+	if got := strings.Join(h.update().Lines, "\n"); !strings.Contains(got, "replies: refresh allowed by 1") {
+		t.Errorf("allowed outcome not shown: %q", got)
 	}
-	h.toSocket(`{"id":` + c2.ID.String() + `,"result":{"results":[{"plugin_id":"` + contributorID + `","error":{"code":"timeout","message":"no reply in 10s"}}]}}`)
-	if got := strings.Join(h.update().Lines, "\n"); !strings.Contains(got, "replies: 2, last timeout") {
-		t.Errorf("subscriber timeout not shown: %q", got)
+	h.toSocket(`{"id":` + c2.ID.String() + `,"result":{"kind":"gate","allowed":false,"vetoes":[{"plugin_id":"index","reason":"busy"}],"results":[{"plugin_id":"index","veto":true,"reason":"busy"}]}}`)
+	if got := strings.Join(h.update().Lines, "\n"); !strings.Contains(got, "replies: refresh vetoed by index: busy") {
+		t.Errorf("veto not shown: %q", got)
 	}
 
 	h.key("main-stage", "r")
 	c3 := h.sockNext(protocol.MethodHookCall)
-	h.toSocket(`{"id":` + c3.ID.String() + `,"result":{"results":[]}}`)
-	if got := strings.Join(h.update().Lines, "\n"); !strings.Contains(got, "replies: 2, last no subscribers") {
-		t.Errorf("empty result not shown: %q", got)
+	h.toSocket(`{"id":` + c3.ID.String() + `,"result":{"kind":"gate","allowed":true,"vetoes":[],"results":[{"plugin_id":"` + contributorID + `","error":{"code":"timeout","message":"no reply in 10s"}}]}}`)
+	if got := strings.Join(h.update().Lines, "\n"); !strings.Contains(got, "replies: refresh allowed by 0") {
+		t.Errorf("subscriber timeout must not count as an answer: %q", got)
 	}
 	h.key("main-stage", "r")
 	c4 := h.sockNext(protocol.MethodHookCall)
-	h.toSocket(`{"id":` + c4.ID.String() + `,"error":{"code":"denied","message":"no"}}`)
-	if got := strings.Join(h.update().Lines, "\n"); !strings.Contains(got, "replies: 3, last denied") {
+	h.toSocket(`{"id":` + c4.ID.String() + `,"result":{"kind":"gate","allowed":true,"vetoes":[],"results":[]}}`)
+	if got := strings.Join(h.update().Lines, "\n"); !strings.Contains(got, "replies: refresh allowed by 0") {
+		t.Errorf("empty outcome not shown: %q", got)
+	}
+	h.key("main-stage", "r")
+	c5 := h.sockNext(protocol.MethodHookCall)
+	h.toSocket(`{"id":` + c5.ID.String() + `,"error":{"code":"denied","message":"no"}}`)
+	if got := strings.Join(h.update().Lines, "\n"); !strings.Contains(got, "replies: refresh not asked: denied") {
 		t.Errorf("error reply not shown: %q", got)
+	}
+}
+
+func TestRefreshActionFiresTheGateLikeTheRKey(t *testing.T) {
+	h := start(t, false)
+	h.send(resized("main-stage", 60, 20, true, true))
+	h.update()
+
+	h.send(`{"id":21,"method":"action.invoke","params":{"action":"` + refreshAction + `","args":{},"caller":{"kind":"cli"}}}`)
+	call := h.sockNext(protocol.MethodHookCall)
+	hp := decode[struct {
+		Hook string
+		Data map[string]any
+	}](t, call.Params)
+	if hp.Hook != refreshHook || hp.Data["reason"] != "manual" {
+		t.Errorf("hook.call params = %+v", hp)
+	}
+	if m := h.outNext(); m.ID.String() != "21" || m.Error != nil {
+		t.Errorf("action reply = %+v", m)
+	}
+	h.toSocket(`{"id":` + call.ID.String() + `,"result":{"kind":"gate","allowed":true,"vetoes":[],"results":[{"plugin_id":"` + contributorID + `"}]}}`)
+	if got := strings.Join(h.update().Lines, "\n"); !strings.Contains(got, "replies: refresh allowed by 1") {
+		t.Errorf("outcome not shown: %q", got)
+	}
+}
+
+func TestRefreshActionBelongsToThePublisherOnly(t *testing.T) {
+	h := start(t, true)
+	h.sockNext(protocol.MethodSlotContribute)
+	h.send(`{"id":22,"method":"action.invoke","params":{"action":"` + refreshAction + `","args":{}}}`)
+	if m := h.outNext(); m.ID.String() != "22" || m.Error == nil || m.Error.Code != protocol.CodeNotFound {
+		t.Errorf("contributor refresh reply = %+v", m)
 	}
 }
 
@@ -393,13 +432,13 @@ func TestContributorFillsSlotAndAnswersHook(t *testing.T) {
 	}
 	h.toSocket(`{"id":` + c.ID.String() + `,"result":{}}`)
 
-	h.send(`{"id":7,"method":"hook.call","params":{"hook":"` + refreshHook + `","data":{"reason":"manual"}}}`)
+	h.send(`{"id":7,"method":"hook.call","params":{"hook":"` + refreshHook + `","kind":"gate","data":{"reason":"manual"}}}`)
 	r := h.outNext()
 	if r.ID.String() != "7" || r.Error != nil || r.Token != "" {
 		t.Fatalf("hook reply = %+v", r)
 	}
-	if got := decode[struct{ Data map[string]any }](t, r.Result); got.Data["ready"] != true {
-		t.Errorf("hook reply data = %v", got.Data)
+	if got := string(r.Result); got != "{}" {
+		t.Errorf("gate reply = %s, want exactly {}", got)
 	}
 	h.send(`{"id":"h","method":"hook.call","params":{"hook":"someone.else","data":{}}}`)
 	if m := h.outNext(); m.ID.String() != `"h"` || m.Error == nil || m.Error.Code != protocol.CodeNotFound {
@@ -530,6 +569,24 @@ func TestLaunchRequiresTheHostEnvironment(t *testing.T) {
 	}
 }
 
+func TestPublisherHookNeedsItsKind(t *testing.T) {
+	raw, err := os.ReadFile("husk-plugin.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	noKind := strings.Replace(string(raw), `"kind": "gate", `, "", 1)
+	if noKind == string(raw) {
+		t.Fatal("the manifest no longer declares the hook kind this test strips")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "husk-plugin.json"), []byte(noKind), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := manifest.NewRegistry().Load(dir); err == nil {
+		t.Error("a hook without a kind must fail conversion")
+	}
+}
+
 func TestManifestsAreValidV2AndMatchThePlugin(t *testing.T) {
 	reg := manifest.NewRegistry()
 	pub, warns, err := reg.Load(".")
@@ -558,15 +615,18 @@ func TestManifestsAreValidV2AndMatchThePlugin(t *testing.T) {
 	if len(pub.PublishedSlots) != 1 || pub.PublishedSlots[0].ID != rowActionsSlot || pub.PublishedSlots[0].Kind != "inline" {
 		t.Errorf("published slots = %+v", pub.PublishedSlots)
 	}
-	if len(pub.HooksDeclared) != 1 || pub.HooksDeclared[0].ID != refreshHook || pub.HooksDeclared[0].Title == "" {
+	if len(pub.HooksDeclared) != 1 || pub.HooksDeclared[0].ID != refreshHook || pub.HooksDeclared[0].Title == "" || pub.HooksDeclared[0].Kind != manifest.HookGate {
 		t.Errorf("hooks = %+v", pub.HooksDeclared)
+	}
+	if len(pub.Actions) != 1 || pub.Actions[0].ID != refreshAction || pub.Actions[0].Title != "Refresh" {
+		t.Errorf("publisher actions = %+v", pub.Actions)
 	}
 	if len(pub.EventsDeclared) != 1 || pub.EventsDeclared[0].Name != selectionEvent || pub.EventsDeclared[0].Title == "" {
 		t.Errorf("events = %+v", pub.EventsDeclared)
 	}
 	// The contributor's subscriptions and on_click action are what the code
 	// answers and contributes.
-	if len(act.HookRegistrations) != 1 || act.HookRegistrations[0].ID != refreshHook {
+	if len(act.HookRegistrations) != 1 || act.HookRegistrations[0].ID != refreshHook || act.HookRegistrations[0].Priority != 10 {
 		t.Errorf("hook registrations = %+v", act.HookRegistrations)
 	}
 	if len(act.Subscriptions) != 1 || act.Subscriptions[0] != selectionEvent {
