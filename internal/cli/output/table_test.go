@@ -21,12 +21,19 @@ func TestDisplayWidth(t *testing.T) {
 		{"emoji, transport block 1F680", "🚀", 2},
 		{"emoji, extended-A block 1FA70", "🩰", 2},
 		{"emoji, watch 231A", "⌚", 2},
-		{"emoji, hot beverage 2614", "☕", 2},
+		{"emoji, hot beverage 2615", "☕", 2},
+		{"emoji, umbrella with rain 2614", "☔", 2},
 		{"emoji, 1F300 block", "🌍", 2},
 		{"emoji, 1F900 block", "🤖", 2},
 		{"combining mark takes none", "é", 1},
 		{"zero-width joiner takes none", "a‍b", 2},
 		{"zero-width joiner sequence is one glyph", "👨‍👩‍👧", 2},
+		{"word joiner takes none", "a\u2060b", 2},
+		{"tag character takes none", "a\U000E0041b", 2},
+		{"soft hyphen takes none", "a\u00adb", 2},
+		{"ambiguous arrow is narrow", "→", 1},
+		{"ambiguous degree is narrow", "°", 1},
+		{"ambiguous box drawing is narrow", "─", 1},
 		{"empty", "", 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -37,21 +44,25 @@ func TestDisplayWidth(t *testing.T) {
 	}
 }
 
-// A wide cell pads by display columns, not runes: the next column starts at
-// the same display column on every row.
+// A wide cell pads by display columns, not runes: the literal text is what
+// the terminal shows aligned.
 func TestTableAlignsWideCells(t *testing.T) {
-	for _, first := range []string{"🚀", "🩰", "⌚", "☕", "漢字", "한글", "éé"} {
+	for _, tc := range []struct{ first, want string }{
+		{"🚀", "A     B\n🚀    x\nabcd  y\n"},
+		{"🩰", "A     B\n🩰    x\nabcd  y\n"},
+		{"⌚", "A     B\n⌚    x\nabcd  y\n"},
+		{"☕", "A     B\n☕    x\nabcd  y\n"},
+		{"漢字", "A     B\n漢字  x\nabcd  y\n"},
+		{"한글", "A     B\n한글  x\nabcd  y\n"},
+		{"e\u0301e\u0301", "A     B\ne\u0301e\u0301    x\nabcd  y\n"},
+		{"a\u2060b", "A     B\na\u2060b   x\nabcd  y\n"},
+	} {
 		var b bytes.Buffer
-		if err := WriteTable(&b, []string{"A", "B"}, [][]string{{first, "x"}, {"abcd", "y"}}); err != nil {
+		if err := WriteTable(&b, []string{"A", "B"}, [][]string{{tc.first, "x"}, {"abcd", "y"}}); err != nil {
 			t.Fatal(err)
 		}
-		lines := strings.Split(strings.TrimSuffix(b.String(), "\n"), "\n")
-		w := max(displayWidth(first), displayWidth("abcd"), 1) + 2
-		for _, l := range lines {
-			i := strings.LastIndexAny(l, "Bxy")
-			if got := displayWidth(l[:i]); got != w {
-				t.Fatalf("%q: second column of %q starts at column %d, want %d", first, l, got, w)
-			}
+		if b.String() != tc.want {
+			t.Fatalf("%q: got %q, want %q", tc.first, b.String(), tc.want)
 		}
 	}
 }
