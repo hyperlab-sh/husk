@@ -330,9 +330,20 @@ func (r *Root) occupiedSizes(pluginID string) []protocol.SurfaceSize {
 func (r *Root) markSizesDirty(changes []state.Change, _ *state.Snapshot) {
 	for i := range changes {
 		switch changes[i].Namespace {
-		case state.GeometryNamespace, state.FocusNamespace, state.SurfacesNamespace:
+		case state.GeometryNamespace, state.FocusNamespace:
 			r.sizesDirty = true
-			return
+		case state.SurfacesNamespace:
+			r.sizesDirty = true
+			// Observe the release before the engine resolves standing claims.
+			// A yielder with no alternative can regain the same surface in
+			// this tick; it must hear surface.resized even at unchanged size.
+			if res, ok := decodeSurfaces(r.st.Snapshot()); ok {
+				for id := range r.lastSizes {
+					if res.Occupants[id].Plugin == "" {
+						delete(r.lastSizes, id)
+					}
+				}
+			}
 		}
 	}
 }

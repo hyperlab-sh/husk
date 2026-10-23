@@ -127,9 +127,12 @@ type SurfaceUpdateParams struct {
 	Capture *CaptureValue `json:"capture,omitempty"`
 }
 
-// SurfaceCloseParams closes the named dynamic surface.
+// SurfaceCloseParams releases the named surface.
 type SurfaceCloseParams struct {
 	Surface SurfaceID `json:"surface"`
+	// Yield keeps an occupied layout claim as a fallback behind ordinary
+	// live claims. False retracts the claim, as does an absent field.
+	Yield bool `json:"yield,omitempty"`
 }
 
 // ModifierState is the authoritative modifier snapshot.
