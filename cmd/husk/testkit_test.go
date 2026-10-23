@@ -4,17 +4,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	uv "github.com/charmbracelet/ultraviolet"
 	"maps"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 
-	"github.com/hyperlab-sh/husk/internal/host/contracts"
-	"github.com/hyperlab-sh/husk/internal/stem/surfaces"
-	"github.com/hyperlab-sh/husk/internal/substrate/state"
+	uv "github.com/charmbracelet/ultraviolet"
+
+	"github.com/hyperlab-sh/husk/pkg/host/contracts"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
+	"github.com/hyperlab-sh/husk/pkg/stem/surfaces"
+	"github.com/hyperlab-sh/husk/pkg/substrate/state"
 	"github.com/hyperlab-sh/husk/pkg/theme"
 )
 

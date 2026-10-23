@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hyperlab-sh/husk/internal/pods/manifest"
+	"github.com/hyperlab-sh/husk/pkg/pods/manifest"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 

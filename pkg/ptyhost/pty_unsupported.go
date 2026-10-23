@@ -4,6 +4,7 @@ package ptyhost
 
 import (
 	"errors"
+
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 

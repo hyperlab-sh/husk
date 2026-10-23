@@ -16,8 +16,8 @@ import (
 
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/creack/pty"
-	"github.com/hyperlab-sh/husk/internal/stem/terminals"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
+	"github.com/hyperlab-sh/husk/pkg/stem/terminals"
 )
 
 // TestTerminalResizeChild acknowledges readiness only after installing WINCH.

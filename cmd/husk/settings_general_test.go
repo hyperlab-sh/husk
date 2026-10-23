@@ -11,7 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/hyperlab-sh/husk/internal/host/contracts"
+	"github.com/hyperlab-sh/husk/pkg/host/contracts"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 	"github.com/hyperlab-sh/husk/pkg/theme"
 )

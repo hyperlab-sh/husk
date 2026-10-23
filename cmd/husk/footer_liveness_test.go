@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/hyperlab-sh/husk/internal/host/contracts"
+	"github.com/hyperlab-sh/husk/pkg/host/contracts"
 )
 
 func TestFooterHintFollowsLiveness(t *testing.T) {

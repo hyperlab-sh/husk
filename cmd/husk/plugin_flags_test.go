@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hyperlab-sh/husk/internal/host"
+	"github.com/hyperlab-sh/husk/pkg/host"
 )
 
 func pluginFlags(t *testing.T, args ...string) *flag.FlagSet {

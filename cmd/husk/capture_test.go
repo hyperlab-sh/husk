@@ -10,9 +10,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/hyperlab-sh/husk/internal/host/contracts"
-	"github.com/hyperlab-sh/husk/internal/stem/surfaces"
+	"github.com/hyperlab-sh/husk/pkg/host/contracts"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
+	"github.com/hyperlab-sh/husk/pkg/stem/surfaces"
 )
 
 // keyContext carries husk.surfaces.capture for the focused surface, and for
@@ -168,7 +168,7 @@ func TestDefaultKeysMirrorTheCaptureFilter(t *testing.T) {
 // Every host action the built-in keymap names has a palette row, and every
 // row names a registered host action.
 func TestBuiltinCommandsMatchTheKeymap(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "internal", "services", "keybinding", "keymap.json"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "pkg", "services", "keybinding", "keymap.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

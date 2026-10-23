@@ -16,12 +16,12 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/hyperlab-sh/husk/internal/host"
-	"github.com/hyperlab-sh/husk/internal/host/contracts"
-	"github.com/hyperlab-sh/husk/internal/services/secrets"
-	"github.com/hyperlab-sh/husk/internal/substrate/state"
-	"github.com/hyperlab-sh/husk/internal/substrate/state/surfaces"
+	"github.com/hyperlab-sh/husk/pkg/host"
+	"github.com/hyperlab-sh/husk/pkg/host/contracts"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
+	"github.com/hyperlab-sh/husk/pkg/services/secrets"
+	"github.com/hyperlab-sh/husk/pkg/substrate/state"
+	"github.com/hyperlab-sh/husk/pkg/substrate/state/surfaces"
 	"github.com/hyperlab-sh/husk/pkg/theme"
 )
 

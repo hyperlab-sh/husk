@@ -1,10 +1,11 @@
 package main
 
 import (
-	"github.com/hyperlab-sh/husk/internal/host/contracts"
-	"github.com/hyperlab-sh/husk/pkg/protocol"
 	"strings"
 	"testing"
+
+	"github.com/hyperlab-sh/husk/pkg/host/contracts"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
 func TestTerminalNonRegionSurfacesDraw(t *testing.T) {

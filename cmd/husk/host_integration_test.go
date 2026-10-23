@@ -14,13 +14,13 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/hyperlab-sh/husk/internal/host"
-	"github.com/hyperlab-sh/husk/internal/instance"
-	"github.com/hyperlab-sh/husk/internal/pods"
-	"github.com/hyperlab-sh/husk/internal/pods/manifest"
-	"github.com/hyperlab-sh/husk/internal/pods/wrapper"
-	"github.com/hyperlab-sh/husk/internal/substrate/state"
+	"github.com/hyperlab-sh/husk/pkg/host"
+	"github.com/hyperlab-sh/husk/pkg/instance"
+	"github.com/hyperlab-sh/husk/pkg/pods"
+	"github.com/hyperlab-sh/husk/pkg/pods/manifest"
+	"github.com/hyperlab-sh/husk/pkg/pods/wrapper"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
+	"github.com/hyperlab-sh/husk/pkg/substrate/state"
 )
 
 // probeModel runs a function on the program loop, the one goroutine allowed to
