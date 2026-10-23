@@ -26,7 +26,7 @@ glyphs.
 This spec fixes four things:
 
 1. **Every surface the layout has a place for is laid out, occupied or not.**
-   An unoccupied surface is drawn with its humanised surface name so the layout
+   An unoccupied region slot is drawn with its humanised surface name so the layout
    is visible. The footer's dock keys never point at a dock that pressing them
    cannot bring on screen: a dock key is shown only when pressing it changes
    the frame.
@@ -55,8 +55,10 @@ puts in its rail are consumer concerns and do not belong in the frontend.
   `main-header`, `main-stage`, `side-panel`. The **placement surfaces** are
   `modal-surface`, `full-canvas` and `workspace-stage`, which exist while a
   rail item with that placement is active (`modal-surface` while a modal is
-  open). `thread-row-status` and
-  `app-overlay` have no rect (see Decisions 7 and 8).
+  open). `thread-row-status` has no rect (see Decision 7). `app-overlay` is
+  not a region slot: it is the overlay layer, with a whole-frame rect
+  ([Cell-buffer compositor](cell-buffer-compositor.md), "Overlay layer"; see
+  Decision 8).
 - A surface is **drawn** when the frontend gives it a rect in `husk.geometry`
   and lists it in `husk.surfaces.visible`. It is **occupied** when
   `husk.surfaces.occupants` has an entry for it ([State](state.md), "Surfaces
@@ -412,8 +414,11 @@ size", "Input routing"), [Services](services.md) ("Settings", `theme.name`),
    plugin claiming it today gets no size, and giving it one changes the
    sidebar list's width for every plugin there. That is a layout decision
    outside the four rulings; it is listed under Open questions.
-8. **`app-overlay` is not laid out.** It is the layer the palette, toasts and
-   modals draw on, not a region; it has no rect to show a name in.
+8. **`app-overlay` is not a region slot.** It is the overlay layer, with a
+   whole-frame rect, specified in the
+   [Cell-buffer compositor](cell-buffer-compositor.md) spec ("Overlay
+   layer"). The empty-surface name rule applies to region slots only, so an
+   unoccupied `app-overlay` draws nothing.
 9. **Placement surfaces are never "empty".** A rail item's plugin occupies the
    surface it opens or, when it did not claim it, receives its keys, so the
    name is not drawn there; before content arrives
