@@ -200,7 +200,7 @@ unknown fields are retained by Store and ignored by Services for forward growth.
 | `id`, `name`, `version`, `description` | Plugin identity/display strings; `id` equals the Store source id. |
 | `actions` | Array of ActionDecl objects: `id`, `title`, `description`, `args_schema` (object), `public` (bool). IDs are fully qualified. |
 | `surfaces` | Array of SurfaceDecl objects: `id` (surface id), optional `frame` (object). Additional surface declaration fields remain opaque to Services. |
-| `focus_bindings` | Array of FocusBinding objects, identical to `focus-keymap.bind` below. |
+| `focus_bindings` | Array of FocusBinding objects, identical to the declared `keymap` document's `bind` below. |
 | `subscriptions` | Array of event-pattern strings. |
 | `events_declared`, `hooks_declared`, `hook_registrations`, `published_slots` | Arrays of the corresponding Pod declaration objects, with snake_case field names; opaque to Services. |
 | `slice` | Optional SliceDecl object; opaque to Services. |
@@ -212,7 +212,7 @@ local key with `plugins.<exact-source>.` once. The plugin-id segment is opaque,
 case-sensitive and follows the Pod id regex (uppercase and dots are allowed).
 The local key is a single lowercase `[a-z0-9_-]+` segment: conversion rejects
 local dots. Settings exposure uses the exact source's declared keys, never a
-textual subtree prefix; the public `husk.*` exception remains read-only. An already-qualified key must match
+textual subtree prefix; host keys reach a plugin only when their schema entry is marked `public` ([Services](services.md)). An already-qualified key must match
 that same source; a foreign prefix is rejected. Services derive the owner as
 `plugin:<source>` rather than trusting an owner supplied by a plugin. `apply`
 defaults to `live`; duration values and min/max are integer milliseconds.

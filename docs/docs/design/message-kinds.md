@@ -449,7 +449,9 @@ rejects others with a `denied` reply. A bare-shell CLI caller may emit only
 under the `user.` prefix. Core event names have no plugin-id prefix and are
 reserved: `state.changed`, `pods.plugin-exited`, `services.reloaded` and
 `secrets.read` now, and the `state.`, `surface.`, `input.`, `pods.`,
-`services.`, `secrets.`, `user.` and `husk.` prefixes. A plugin may declare
+`services.`, `secrets.`, `user.` and `husk.` prefixes. `secrets.read` is
+delivered to CLI watchers only, never to a plugin subscriber
+([Services](services.md)). A plugin may declare
 events in its manifest for introspection
 (`"events": {"publish": [{"name": "notes.saved", "title": "...", "coalesce": false}]}`).
 
