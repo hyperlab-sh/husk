@@ -67,9 +67,7 @@ Rules:
 4. Bundle config files are HuJSON with the file names and shapes of the user layer ([Store](store.md), "Directory tree": `<doc>.json`, `profiles/<profile>/<doc>.json`). The document names in v1 are `config`, `keymap`, `themes` ([Services](services.md), "Named themes") and `catalog` ([Settings center](settings-center.md), "The catalog document"). A `keymap.json` in a bundle is a distribution-layer keymap, so it may say `"builtin": false` ([Keybindings](keybindings.md)).
 5. Everything else in the directory is ignored. The manifest, `plugins/` and `README.md` are hidden from Store so they can never be mistaken for a document.
 
-The layered `catalog` reader and its off-loop host cache are landed; a bundle's
-`catalog.json` uses the ordinary distribution-layer document mechanism. Catalog
-validation never installs anything or changes a reload report.
+The layered `catalog` reader and its off-loop host cache are landed; a bundle's `catalog.json` uses the ordinary distribution-layer document mechanism. Catalog validation never installs anything or changes a reload report.
 
 ### Manifest
 
