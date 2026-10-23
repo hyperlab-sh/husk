@@ -406,9 +406,46 @@ type PluginRemoval struct {
 	Reports []ReloadReport `json:"reports"`
 }
 
-// PluginPort serves plugin.list, plugin.log and plugin.remove. All three are
-// CLI methods: a plugin caller gets denied.
+// PluginSource selects exactly one absolute plugin path or directory.
+type PluginSource struct {
+	Path string `json:"path,omitempty"`
+	Dir  string `json:"dir,omitempty"`
+}
+
+// PluginWarning is a conversion diagnostic returned by plugin.add.
+type PluginWarning struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// PluginAdded is the final launch outcome; removed is a reply-only status.
+type PluginAdded struct {
+	Plugin   string          `json:"plugin"`
+	Status   string          `json:"status"`
+	Log      string          `json:"log"`
+	Warnings []PluginWarning `json:"warnings"`
+}
+
+// PluginAddRefusal describes a directory entry that received no Pod.
+type PluginAddRefusal struct {
+	Path    string `json:"path"`
+	Plugin  string `json:"plugin"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// PluginAddition is one batch's final outcomes and shared reload reports.
+type PluginAddition struct {
+	Added   []PluginAdded      `json:"added"`
+	Refused []PluginAddRefusal `json:"refused"`
+	Reports []ReloadReport     `json:"reports"`
+}
+
+// PluginPort serves the CLI-only plugin lifecycle methods.
 type PluginPort interface {
+	// Add loads a batch without persisting configuration. ctx only detaches
+	// the caller; an admitted batch completes under the Host's context.
+	Add(ctx context.Context, c Caller, source PluginSource) (PluginAddition, error)
 	// List serves plugin.list.
 	List(ctx context.Context, c Caller) ([]PluginInfo, error)
 	// Log serves plugin.log: the log file path for a plugin id, or not_found.

@@ -70,7 +70,7 @@ type CatalogDeclarer interface {
 type Reloader interface {
 	// Reload blocks until the reload requested now has completed. applied is
 	// false when any service kept its old snapshot.
-	Reload(ctx context.Context) (applied bool, problems []protocol.Problem)
+	Reload(ctx context.Context) (applied bool, problems []protocol.Problem, reports []ReloadReport)
 }
 
 // SliceHandle is the write capability a Pod holds on its plugin's slice.

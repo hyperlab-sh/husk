@@ -24,6 +24,7 @@ type fakeLoop struct {
 	gates        []uint64
 	prepared     []manifest.Spec
 	result       Preparation
+	prepareFn    func(context.Context, uint64, []manifest.Spec) Preparation
 }
 
 func (l *fakeLoop) Post(m tea.Msg) {
@@ -36,6 +37,9 @@ func (l *fakeLoop) Opening(string) []protocol.Message {
 	return []protocol.Message{{Method: protocol.MethodThemeChanged}, {Method: protocol.MethodSurfaceResized}, {Method: protocol.MethodInputKeyState}}
 }
 func (l *fakeLoop) Prepare(ctx context.Context, gate uint64, specs []manifest.Spec) Preparation {
+	if l.prepareFn != nil {
+		return l.prepareFn(ctx, gate, specs)
+	}
 	l.prepareCalls++
 	l.gates = append(l.gates, gate)
 	l.prepared = specs
@@ -176,15 +180,23 @@ func hostFixture(t *testing.T) (*Host, *fakeLoop, *testclock.Clock, map[string]*
 }
 func addPod(t *testing.T, h *Host, id string) *Pod {
 	t.Helper()
-	p, err := h.Add(manifest.Spec{ID: id, Protocol: protocol.Major, Command: []string{"plugin"}})
+	p, err := h.AddPod(manifest.Spec{ID: id, Protocol: protocol.Major, Command: []string{"plugin"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return p
 }
+func prepareAll(h *Host) tea.Cmd {
+	ids := make([]string, 0, len(h.pods))
+	for id := range h.pods {
+		ids = append(ids, id)
+	}
+	return h.Prepare(ids...)
+}
+
 func prepareHost(t *testing.T, h *Host) {
 	t.Helper()
-	cmd := h.Prepare()
+	cmd := prepareAll(h)
 	if cmd == nil {
 		t.Fatal("missing preparation command")
 	}
@@ -197,14 +209,14 @@ func TestHostBatchGateOpeningOutboxAndSinks(t *testing.T) {
 	h, loop, _, procs := hostFixture(t)
 	b := addPod(t, h, "b")
 	a := addPod(t, h, "a")
-	if _, err := h.Add(a.Spec()); err == nil {
+	if _, err := h.AddPod(a.Spec()); err == nil {
 		t.Fatal("duplicate id replaced first pod")
 	}
 	if len(procs) != 0 || a.Info().Status != wrapper.Starting || h.Send("a", protocol.Message{}) != wrapper.ErrNotLive {
 		t.Fatal("launched before gate")
 	}
-	cmd := h.Prepare()
-	if cmd == nil || h.Prepare() != nil {
+	cmd := prepareAll(h)
+	if cmd == nil || prepareAll(h) != nil {
 		t.Fatal("duplicate preparation")
 	}
 	msg := cmd()
@@ -322,14 +334,14 @@ func TestSharedShutdownDeadlineKillsAllSurvivors(t *testing.T) {
 func TestShutdownPreventsLatePreparationFromLaunching(t *testing.T) {
 	h, _, _, procs := hostFixture(t)
 	addPod(t, h, "p")
-	cmd := h.Prepare()
+	cmd := prepareAll(h)
 	stop := h.Stop()
 	h.Handle(cmd())
 	stop()
-	if len(procs) != 0 || h.Prepare() != nil {
+	if len(procs) != 0 || prepareAll(h) != nil {
 		t.Fatal("launched after shutdown")
 	}
-	if _, err := h.Add(manifest.Spec{}); err == nil {
+	if _, err := h.AddPod(manifest.Spec{}); err == nil {
 		t.Fatal("Add accepted after shutdown")
 	}
 }

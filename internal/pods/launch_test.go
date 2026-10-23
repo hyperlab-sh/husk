@@ -22,11 +22,11 @@ func TestLaunchFailureReturnsToLoopBeforeUnbufferedPostDrains(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(h.cancel)
-	pod, err := h.Add(manifest.Spec{ID: "missing", Protocol: protocol.Major, Command: []string{filepath.Join(dir, "missing")}})
+	pod, err := h.AddPod(manifest.Spec{ID: "missing", Protocol: protocol.Major, Command: []string{filepath.Join(dir, "missing")}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	prepared := h.Prepare()()
+	prepared := prepareAll(h)()
 	returned := make(chan bool, 1)
 	go func() { returned <- h.Handle(prepared) }()
 	// No receiver for Loop.Post exists until Handle has returned. Program.Send

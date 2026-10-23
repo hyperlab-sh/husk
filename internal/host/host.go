@@ -70,6 +70,7 @@ type Root struct {
 	catalog        *catalogView
 	decl           *declarations
 	specs          []manifest.Spec
+	converter      *manifest.Loader
 	loopSeam       loopSeam
 	instStart      time.Time
 
@@ -88,6 +89,7 @@ type Root struct {
 	lastSizes  map[protocol.SurfaceID]pushedSize // what each surface's occupant was last told
 	refusalsMu sync.Mutex                        // guards refusals
 	refusals   []contracts.PluginRefusal         // plugins refused before a Pod existed
+	afterState []func()                          // lifecycle announcements published after State change events
 	reloadSeq  atomic.Uint64                     // keys services.reloaded events apart
 	noticesMu  sync.Mutex                        // guards noticeSeq and lastNotice
 	noticeSeq  uint64                            // reloads that ended with errors
@@ -248,7 +250,8 @@ func (r *Root) loadSpecs() error {
 	for _, w := range r.bundleWarnings {
 		r.log(pods.LogMsg{Level: "warn", Message: w.Message})
 	}
-	reg := manifest.NewRegistry()
+	r.converter = manifest.NewRegistry()
+	reg := r.converter
 	seen := map[string]bool{}
 	add := func(spec *manifest.Spec, warns []manifest.Warning) {
 		for _, w := range warns {
@@ -534,6 +537,7 @@ func (r *Root) buildStem() error {
 		return fmt.Errorf("surfaces: %w", err)
 	}
 	r.catalog.onSlotsChanged = r.engine.CatalogChanged
+	r.st.OnFlush(r.publishStateChanges)
 	r.st.OnFlush(r.markSizesDirty)
 	r.st.OnFlush(r.markLivenessChanged)
 	return nil
@@ -568,6 +572,7 @@ func (r *Root) buildPods() error {
 		Registry:  registry,
 		Publisher: publisher{r},
 		Workers:   lifecycle{r},
+		Converter: r.converter,
 		Factory:   r.opts.factory,
 		Wrapper: wrapper.Options{
 			Context:    r.ctx,
@@ -649,15 +654,17 @@ func (r *Root) launchPlugins(ctx context.Context) error {
 	}
 	var cmd tea.Cmd
 	if err := r.do(ctx, func() {
+		var ids []string
 		for _, spec := range r.specs {
-			if _, err := r.pods.Add(spec); err != nil {
+			if _, err := r.pods.AddPod(spec); err != nil {
 				r.log(pods.LogMsg{PluginID: spec.ID, Level: "warn", Message: "plugin not added: " + err.Error()})
 				r.refuse(spec.ID, err.Error())
 				continue
 			}
 			r.watchPod(spec.ID)
+			ids = append(ids, spec.ID)
 		}
-		cmd = r.pods.Prepare()
+		cmd = r.pods.Prepare(ids...)
 	}); err != nil {
 		if r.ctx.Err() != nil {
 			// Close ran before the launch batch was added: nothing is left to launch.

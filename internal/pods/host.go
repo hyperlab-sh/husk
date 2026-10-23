@@ -8,6 +8,7 @@ import (
 	"maps"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -19,8 +20,9 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
-// Host is the loop-owned set of Pods. Only token resolution/revocation and the
-// ReplySink posting methods are worker-safe; all other methods run on the loop.
+// Host is the loop-owned set of Pods. The PluginPort methods marshal their
+// loop work through Do; token resolution/revocation and ReplySink posting are
+// worker-safe. All other methods run on the loop.
 // Stop returns a command that performs bounded waits away from the loop.
 type Host struct {
 	loop   Loop
@@ -41,6 +43,8 @@ type Host struct {
 	preparing map[string]bool
 	nextGate  uint64
 	closing   bool
+	stopped   atomic.Bool // handler-safe shutdown mark, checked before conversion
+	adding    map[uint64]*addition
 	// removing holds one entry per plugin.remove in progress (removal.go).
 	removing map[string]*removal
 	tokenMu  sync.RWMutex
@@ -76,13 +80,13 @@ func New(loop Loop, opts Options) (*Host, error) {
 	if opts.Factory == nil {
 		opts.Factory = func(s manifest.Spec, o wrapper.Options) (wrapper.Process, error) { return wrapper.New(s, o) }
 	}
-	return &Host{loop: loop, opts: opts, ctx: ctx, cancel: cancel, pods: make(map[string]*Pod), handles: make(map[string]contracts.SliceHandle), gates: make(map[uint64][]string), removing: make(map[string]*removal), preparing: make(map[string]bool), tokens: make(map[string]string), byPlugin: make(map[string]string)}, nil
+	return &Host{loop: loop, opts: opts, ctx: ctx, cancel: cancel, pods: make(map[string]*Pod), handles: make(map[string]contracts.SliceHandle), gates: make(map[uint64][]string), removing: make(map[string]*removal), adding: make(map[uint64]*addition), preparing: make(map[string]bool), tokens: make(map[string]string), byPlugin: make(map[string]string)}, nil
 }
 
-// Add registers a starting Pod but never starts it. Duplicate ids fail without
+// AddPod registers a starting Pod but never starts it. Duplicate ids fail without
 // replacing the first Pod; with a PodRegistry the Reserve conflict is that
 // answer. Call Prepare once after adding a startup batch.
-func (h *Host) Add(spec manifest.Spec) (*Pod, error) {
+func (h *Host) AddPod(spec manifest.Spec) (*Pod, error) {
 	if h.closing {
 		return nil, errors.New("pods: host is stopping")
 	}
@@ -106,16 +110,17 @@ func (h *Host) Add(spec manifest.Spec) (*Pod, error) {
 	return p, nil
 }
 
-// Prepare snapshots all unprepared starting Pods into one reload gate. The
+// Prepare snapshots only the supplied unprepared starting Pods into one reload gate. The
 // returned worker may block, but only Handle(PreparedMsg) starts wrappers on the
 // loop. Repeated calls while a gate is in flight do not duplicate preparation.
-func (h *Host) Prepare() tea.Cmd {
+func (h *Host) Prepare(batch ...string) tea.Cmd {
 	if h.closing {
 		return nil
 	}
 	var ids []string
-	for id, p := range h.pods {
-		if p.info.Status == wrapper.Starting && !h.preparing[id] {
+	for _, id := range batch {
+		p := h.pods[id]
+		if p != nil && p.info.Status == wrapper.Starting && !h.preparing[id] && !slices.Contains(ids, id) {
 			ids = append(ids, id)
 		}
 	}
@@ -229,6 +234,7 @@ func (h *Host) Handle(msg tea.Msg) bool {
 				h.Handle(LaunchFailedMsg{PluginID: id, Err: err})
 			}
 		}
+		h.finishAddition(m.Gate, m.Preparation.Reports)
 		return true
 	case RegisterSlicesMsg:
 		// Step 4 on the loop, before the worker requests the reload: each
@@ -490,7 +496,9 @@ func (h *Host) Stop() tea.Cmd {
 		return nil
 	}
 	h.closing = true
+	h.stopped.Store(true)
 	h.cancelRemovals()
+	h.cancelAdditions()
 	var processes []wrapper.Process
 	for _, p := range h.pods {
 		if p.process != nil {

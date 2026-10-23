@@ -273,7 +273,7 @@ func TestPluginRemovedEventsOfOneTickAreNotCoalesced(t *testing.T) {
 	// Both Pods exist, `starting`, with no launch gate yet.
 	h.loop(func() {
 		for _, spec := range h.root.specs {
-			if _, err := h.root.pods.Add(spec); err != nil {
+			if _, err := h.root.pods.AddPod(spec); err != nil {
 				t.Error(err)
 			}
 		}
@@ -295,7 +295,7 @@ func TestPluginRemovedEventsOfOneTickAreNotCoalesced(t *testing.T) {
 	}
 	// Completing the gate tears both down in one PreparedMsg.
 	var cmd tea.Cmd
-	h.loop(func() { cmd = h.root.pods.Prepare() })
+	h.loop(func() { cmd = h.root.pods.Prepare("alpha", "beta") })
 	h.root.spawn(cmd)
 	for range 2 {
 		if err := <-replies; err != nil {

@@ -163,13 +163,13 @@ func TestLaunchSequenceOrder(t *testing.T) {
 	opening := []protocol.Message{{Method: protocol.MethodThemeChanged}, {Method: protocol.MethodSurfaceResized}}
 	_, h := newRecordedLoop(t, t.Context(), registry, launch.Preparer{Catalog: catalog, Slices: slices, Reload: reload}, starter, opening)
 
-	if _, err := h.Add(specWithSlice("files")); err != nil {
+	if _, err := h.AddPod(specWithSlice("files")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.Add(spec("notes")); err != nil {
+	if _, err := h.AddPod(spec("notes")); err != nil {
 		t.Fatal(err)
 	}
-	cmd := h.Prepare()
+	cmd := h.Prepare("files", "notes")
 	if cmd == nil {
 		t.Fatal("missing preparation command")
 	}
@@ -220,11 +220,11 @@ func TestFailedReloadStillOpensGate(t *testing.T) {
 	starter := fakes.NewWrapper(rec)
 
 	loop, h := newRecordedLoop(t, t.Context(), fakes.NewPods(rec), launch.Preparer{Reload: reload}, starter, nil)
-	added, err := h.Add(spec("files"))
+	added, err := h.AddPod(spec("files"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := h.Prepare()
+	cmd := h.Prepare("files")
 	prepared := cmd().(pods.PreparedMsg)
 	if prepared.Preparation.ReloadError == nil || !strings.Contains(prepared.Preparation.ReloadError.Error(), "contrast below floor") {
 		t.Fatal("reload problems lost", prepared.Preparation.ReloadError)
@@ -265,14 +265,14 @@ func TestRegisterFailureFailsOnlyThatPlugin(t *testing.T) {
 	starter := fakes.NewWrapper(rec)
 
 	loop, h := newRecordedLoop(t, t.Context(), fakes.NewPods(rec), launch.Preparer{Slices: slices, Reload: reload}, starter, nil)
-	declared, err := h.Add(specWithSlice("files"))
+	declared, err := h.AddPod(specWithSlice("files"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.Add(spec("notes")); err != nil {
+	if _, err := h.AddPod(spec("notes")); err != nil {
 		t.Fatal(err)
 	}
-	if !h.Handle(h.Prepare()()) {
+	if !h.Handle(h.Prepare("files", "notes")()) {
 		t.Fatal("unhandled preparation")
 	}
 	if declared.Info().Status != wrapper.Failed {
@@ -325,15 +325,15 @@ func TestDeclareFailureFailsOnlyThatPlugin(t *testing.T) {
 	starter := fakes.NewWrapper(rec)
 
 	_, h := newRecordedLoop(t, t.Context(), fakes.NewPods(rec), launch.Preparer{Catalog: catalog, Reload: reload}, starter, nil)
-	broken, err := h.Add(spec("broken"))
+	broken, err := h.AddPod(spec("broken"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	fine, err := h.Add(spec("fine"))
+	fine, err := h.AddPod(spec("fine"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := h.Prepare()
+	cmd := h.Prepare("broken", "fine")
 	prepared := cmd().(pods.PreparedMsg)
 	if err := prepared.Preparation.Failed["broken"]; err == nil {
 		t.Fatal("declare failure not recorded")
@@ -525,13 +525,13 @@ func TestLaunchIntegrationRealSeams(t *testing.T) {
 	settingsBefore := svc.runtime.Settings.Generation()
 	secretsBefore := svc.runtime.Secrets.Generation()
 
-	if _, err := h.Add(specWithSlice("files")); err != nil {
+	if _, err := h.AddPod(specWithSlice("files")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.Add(spec("notes")); err != nil {
+	if _, err := h.AddPod(spec("notes")); err != nil {
 		t.Fatal(err)
 	}
-	cmd := h.Prepare()
+	cmd := h.Prepare("files", "notes")
 	prepared := cmd().(pods.PreparedMsg)
 	if len(prepared.Preparation.Failed) != 0 || prepared.Preparation.ReloadError != nil {
 		t.Fatalf("preparation problems: %+v / %v", prepared.Preparation.Failed, prepared.Preparation.ReloadError)
@@ -644,10 +644,10 @@ func TestRelaunchRedeclaresAndReregisters(t *testing.T) {
 		Slices:  launch.SliceRegistrar{State: first},
 		Reload:  launch.Reloader{Coordinator: svc1.runtime.Coordinator},
 	}, fakes.NewWrapper(rec), nil)
-	if _, err := h1.Add(specWithSlice("files")); err != nil {
+	if _, err := h1.AddPod(specWithSlice("files")); err != nil {
 		t.Fatal(err)
 	}
-	if !h1.Handle(h1.Prepare()()) {
+	if !h1.Handle(h1.Prepare("files")()) {
 		t.Fatal("first launch failed")
 	}
 	if len(st.Declared(store.DeclaredPlugins)) != 1 {
@@ -671,10 +671,10 @@ func TestRelaunchRedeclaresAndReregisters(t *testing.T) {
 	redeclared := specWithSlice("files")
 	redeclared.SettingsDeclared = append(redeclared.SettingsDeclared,
 		manifest.SettingDecl{Key: "plugins.files.verbose", Type: "bool", Default: json.RawMessage(`true`)})
-	if _, err := h2.Add(redeclared); err != nil {
+	if _, err := h2.AddPod(redeclared); err != nil {
 		t.Fatal(err)
 	}
-	if !h2.Handle(h2.Prepare()()) {
+	if !h2.Handle(h2.Prepare("files")()) {
 		t.Fatal("relaunch failed")
 	}
 	svc2.drainPosts()
@@ -746,10 +746,10 @@ func TestTeardownUnregistersSliceAndReleasesId(t *testing.T) {
 		Slices:  launch.SliceRegistrar{State: tree},
 		Reload:  launch.Reloader{Coordinator: svc.runtime.Coordinator},
 	}, fakes.NewWrapper(rec), nil)
-	if _, err := h.Add(specWithSlice("files")); err != nil {
+	if _, err := h.AddPod(specWithSlice("files")); err != nil {
 		t.Fatal(err)
 	}
-	if !h.Handle(h.Prepare()()) {
+	if !h.Handle(h.Prepare("files")()) {
 		t.Fatal("launch failed")
 	}
 	if _, ok := pods.NewPodSlices(h).Handle("files", "files.state"); !ok {
@@ -781,10 +781,10 @@ func TestTeardownUnregistersSliceAndReleasesId(t *testing.T) {
 	}
 
 	// The id is launchable again on the same tree.
-	if _, err := h.Add(specWithSlice("files")); err != nil {
+	if _, err := h.AddPod(specWithSlice("files")); err != nil {
 		t.Fatal("re-add after teardown", err)
 	}
-	if !h.Handle(h.Prepare()()) {
+	if !h.Handle(h.Prepare("files")()) {
 		t.Fatal("relaunch after teardown failed")
 	}
 	if _, ok := tree.Snapshot().Slices["files.state"]; !ok {
@@ -839,7 +839,8 @@ func TestImportsStayWithinAllowList(t *testing.T) {
 			"github.com/hyperlab-sh/husk/internal/host/contracts",
 			"github.com/hyperlab-sh/husk/internal/host/contracts/fakes",
 			"github.com/hyperlab-sh/husk/internal/host/ports/launch",
-			"github.com/hyperlab-sh/husk/internal/host/ports/stem", // integration test only: the State port writing through the Pod-held handle
+			"github.com/hyperlab-sh/husk/internal/host/ports/services", // the shared wire report builder
+			"github.com/hyperlab-sh/husk/internal/host/ports/stem",     // integration test only: the State port writing through the Pod-held handle
 			"github.com/hyperlab-sh/husk/internal/pods",
 			"github.com/hyperlab-sh/husk/internal/pods/manifest",
 			"github.com/hyperlab-sh/husk/internal/pods/wrapper",

@@ -561,15 +561,16 @@ type Reloader struct {
 	callLog
 	Applied  bool
 	Problems []protocol.Problem
+	Reports  []contracts.ReloadReport
 }
 
 // NewReloader returns a Reloader logging to rec.
 func NewReloader(rec *Recorder) *Reloader { return &Reloader{callLog: callLog{r: orNew(rec)}} }
 
 // Reload implements contracts.Reloader.
-func (f *Reloader) Reload(context.Context) (bool, []protocol.Problem) {
+func (f *Reloader) Reload(context.Context) (bool, []protocol.Problem, []contracts.ReloadReport) {
 	f.Record("Reloader.Reload")
-	return f.Applied, f.Problems
+	return f.Applied, f.Problems, f.Reports
 }
 
 // Slice fakes contracts.SliceHandle.
@@ -791,12 +792,19 @@ type Plugins struct {
 	Infos []contracts.PluginInfo
 	Path  string
 	// Removal is what Remove answers.
-	Removal contracts.PluginRemoval
-	Err     error
+	Removal  contracts.PluginRemoval
+	Addition contracts.PluginAddition
+	Err      error
 }
 
 // NewPlugins returns a Plugins logging to rec.
 func NewPlugins(rec *Recorder) *Plugins { return &Plugins{callLog: callLog{r: orNew(rec)}} }
+
+// Add implements contracts.PluginPort.
+func (f *Plugins) Add(_ context.Context, c contracts.Caller, source contracts.PluginSource) (contracts.PluginAddition, error) {
+	f.RecordCaller("Plugins.Add", c, source)
+	return f.Addition, f.Err
+}
 
 // List implements contracts.PluginPort.
 func (f *Plugins) List(_ context.Context, c contracts.Caller) ([]contracts.PluginInfo, error) {

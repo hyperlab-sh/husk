@@ -179,7 +179,7 @@ func (f *removalFixture) add(id string, launch bool) {
 		return
 	}
 	var cmd tea.Cmd
-	f.onLoop(func() { cmd = f.h.Prepare() })
+	f.onLoop(func() { cmd = prepareAll(f.h) })
 	msg := cmd()
 	f.onLoop(func() { f.h.Handle(msg) })
 }
@@ -409,7 +409,7 @@ func TestRemoveOfStartingPodWaitsForGateAndNeverStartsIt(t *testing.T) {
 			f.add("b", false)
 			var cmd tea.Cmd
 			if tc.gateRequired {
-				f.onLoop(func() { cmd = f.h.Prepare() })
+				f.onLoop(func() { cmd = prepareAll(f.h) })
 			}
 			reply := f.remove(t.Context(), "a")
 			// The removal is registered and waiting; the Pod is untouched.
@@ -429,7 +429,7 @@ func TestRemoveOfStartingPodWaitsForGateAndNeverStartsIt(t *testing.T) {
 			default:
 			}
 			if !tc.gateRequired {
-				f.onLoop(func() { cmd = f.h.Prepare() })
+				f.onLoop(func() { cmd = prepareAll(f.h) })
 			}
 			var writes int
 			f.onLoop(func() { writes = len(f.loop.statuses) })
@@ -521,7 +521,7 @@ func TestTeardownTickOrderAndContent(t *testing.T) {
 	f.add("a", false)
 	handle := &fakeHandle{namespace: "a.state"}
 	var gate uint64
-	f.onLoop(func() { gate = f.h.nextGate + 1; f.h.Prepare() })
+	f.onLoop(func() { gate = f.h.nextGate + 1; prepareAll(f.h) })
 	var done chan Registered = make(chan Registered, 1)
 	f.onLoop(func() {
 		f.h.Handle(RegisterSlicesMsg{Gate: gate, Register: map[string]func() (contracts.SliceHandle, error){"a": func() (contracts.SliceHandle, error) { return handle, nil }}, Done: done})
