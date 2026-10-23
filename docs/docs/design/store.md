@@ -331,7 +331,11 @@ settings keys under the host's `husk.*` namespace in document `config`
 ```
 
 Store does not know these paths mean anything; `cmd/husk` owns the flag table
-and Services own the schema.
+and Services own the schema. `--add-plugin` / `--add-plugin-dir` are not flag
+documents: Store never sees them. Settings computes the instance value of
+`husk.plugins.paths` / `husk.plugins.dirs` from the layers below instance plus
+the additions, ignoring the whole instance layer for that key
+([Services](services.md), "Additive plugin launch flags").
 
 Distribution layer: two parts merged in order with the same rules, the
 embedding application's `Options.Distribution` files, then the bundle's
@@ -778,7 +782,11 @@ startup snapshot. Configured arrays survive when their flag is absent.
 - `cmd/husk/main.go`: `--plugin` and `--plugin-dir` become instance-layer
   paths (`husk.plugins.paths`, `husk.plugins.dirs`) in `Options.InstanceDocs`,
   set only when given. The composition root reads them from the startup
-  flight's Settings snapshot. `--dump-frame`, `--demo-frame`, `--demo`,
+  flight's Settings snapshot. `--add-plugin` / `--add-plugin-dir` are not
+  `Options.InstanceDocs`: Store never sees them. Settings computes those
+  instance arrays from the layers below instance plus the additions, ignoring
+  the whole instance layer for each affected key ([Services](services.md),
+  "Additive plugin launch flags"). `--dump-frame`, `--demo-frame`, `--demo`,
   `--rail` and `--hold-alt` stay process flags, not config. New flags:
   `--instance <name>`, `--bundle <dir>` (folded into `husk.bundle`; the
   directory form of the distribution layer is a bundle, [Bundles](bundles.md),
