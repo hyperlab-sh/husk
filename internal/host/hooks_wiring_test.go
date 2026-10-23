@@ -209,17 +209,17 @@ func TestHookTransformRunsStagesInPriorityOrder(t *testing.T) {
 			return map[string]any{"data": map[string]any{"trail": trail + id + ","}}
 		}
 	}
-	responders{"ten": stage("ten"), "five": stage("five")}.install(f)
+	responders{"alpha": stage("alpha"), "zeta": stage("zeta")}.install(f)
 	h := hookHost(t, f, []string{
 		hookPlugin(t, "notes", []any{pubHook("notes.tr", "transform")}, nil),
-		hookPlugin(t, "ten", nil, []any{subHook("notes.tr", 10)}),
-		hookPlugin(t, "five", nil, []any{subHook("notes.tr", 5)}),
+		hookPlugin(t, "alpha", nil, []any{subHook("notes.tr", 10)}),
+		hookPlugin(t, "zeta", nil, []any{subHook("notes.tr", 5)}),
 	}, 3)
 	o := decodeOutcome(t, rpc(t, h, "tok-notes", protocol.MethodHookCall, map[string]any{"hook": "notes.tr", "data": map[string]any{"trail": ""}}))
-	if o.Kind != "transform" || o.Data["trail"] != "five,ten," {
+	if o.Kind != "transform" || o.Data["trail"] != "zeta,alpha," {
 		t.Fatalf("outcome = %+v", o)
 	}
-	if !slices.Equal(o.plugins(), []string{"five", "ten"}) {
+	if !slices.Equal(o.plugins(), []string{"zeta", "alpha"}) {
 		t.Fatalf("result order = %v", o.plugins())
 	}
 }
@@ -229,17 +229,17 @@ func TestHookCollectListsItemsInPriorityOrder(t *testing.T) {
 	items := func(id string) func(legParams) any {
 		return func(legParams) any { return map[string]any{"items": []any{map[string]any{"from": id}}} }
 	}
-	responders{"ten": items("ten"), "five": items("five")}.install(f)
+	responders{"alpha": items("alpha"), "zeta": items("zeta")}.install(f)
 	h := hookHost(t, f, []string{
 		hookPlugin(t, "notes", []any{pubHook("notes.col", "collect")}, nil),
-		hookPlugin(t, "ten", nil, []any{subHook("notes.col", 10)}),
-		hookPlugin(t, "five", nil, []any{subHook("notes.col", 5)}),
+		hookPlugin(t, "alpha", nil, []any{subHook("notes.col", 10)}),
+		hookPlugin(t, "zeta", nil, []any{subHook("notes.col", 5)}),
 	}, 3)
 	o := decodeOutcome(t, rpc(t, h, "tok-notes", protocol.MethodHookCall, map[string]any{"hook": "notes.col"}))
-	if o.Kind != "collect" || !slices.Equal(o.plugins(), []string{"five", "ten"}) {
+	if o.Kind != "collect" || !slices.Equal(o.plugins(), []string{"zeta", "alpha"}) {
 		t.Fatalf("outcome = %+v", o)
 	}
-	for i, from := range []string{"five", "ten"} {
+	for i, from := range []string{"zeta", "alpha"} {
 		got := o.Results[i].Items
 		if len(got) != 1 || got[0].(map[string]any)["from"] != from {
 			t.Fatalf("results[%d].items = %v", i, got)
