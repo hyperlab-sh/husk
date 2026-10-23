@@ -148,15 +148,19 @@ func RegisterContributions(s *state.State, pluginID string) (*ContributionsSlice
 }
 
 // RegisterSurfaces registers the husk.surfaces resolution slice: owner husk,
-// instance scope, not persistent, initial {}. Only the Surfaces engine
-// (stem-surfaces) holds the returned slice and writes it; this registration
-// is part of the engine's setup, and no plugin or Pod ever receives it.
+// instance scope, not persistent, with empty capture and terminal maps. Only
+// the Surfaces engine (stem-surfaces) holds the returned slice and writes it;
+// this registration is part of the engine's setup, and no plugin or Pod ever
+// receives it.
 func RegisterSurfaces(s *state.State) (*state.Slice[Surfaces], error) {
 	return state.Register(s, state.Spec{
 		Namespace: SurfacesNamespace,
 		Owner:     state.OwnerHusk,
 		Scope:     state.ScopeInstance,
-	}, Surfaces{})
+	}, Surfaces{
+		Capture:   map[protocol.SurfaceID]protocol.CaptureMode{},
+		Terminals: map[protocol.SurfaceID]contracts.TerminalMetadata{},
+	})
 }
 
 // OccupantsSlice is the Pod's write handle to its occupants declaration

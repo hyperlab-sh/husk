@@ -110,7 +110,7 @@ func (r *Root) buildServer() error {
 				return contracts.NewError(protocol.CodeUnavailable, "plugin is not live", nil)
 			}
 		},
-	}, Logf: r.logf})
+	}})
 	mux.Register("plugin", pluginh.Plugin{Port: r.pods})
 	r.mux = mux
 

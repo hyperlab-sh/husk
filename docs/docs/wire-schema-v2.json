@@ -1141,7 +1141,7 @@
       "$ref": "#/$defs/TerminalDetachParams"
     },
     "terminal.detach.result": {
-      "description": "Result owned by design/protocol.md; no additional field constraints specified here."
+      "$ref": "#/$defs/EmptyResult"
     },
     "terminal.input.params": {
       "$ref": "#/$defs/TerminalInputParams"
@@ -1153,7 +1153,7 @@
       "$ref": "#/$defs/TerminalWriteParams"
     },
     "terminal.write.result": {
-      "description": "Result owned by design/protocol.md; no additional field constraints specified here."
+      "$ref": "#/$defs/EmptyResult"
     },
     "theme.changed.params": {
       "$ref": "#/$defs/ThemeChangedParams"
@@ -1592,7 +1592,7 @@
       }
     },
     "terminal.detach": {
-      "form": "notification",
+      "form": "request or notification",
       "params": {
         "$ref": "#/$defs/terminal.detach.params"
       },
@@ -1610,7 +1610,7 @@
       }
     },
     "terminal.write": {
-      "form": "notification",
+      "form": "request or notification",
       "params": {
         "$ref": "#/$defs/terminal.write.params"
       },
