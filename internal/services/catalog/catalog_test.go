@@ -136,7 +136,7 @@ func TestCatalogWholeEntryReplacementAndIsolatedLayers(t *testing.T) {
 			higher := layer(map[string]any{"alpha": entry(), "bad": false})
 			bad := layer(map[string]any{"other": entry()})
 			bad.Layer = store.LayerProfile
-			bad.File = "profiles/work/catalog.json"
+			bad.File = "profiles/dev/catalog.json"
 			bad.Doc["version"] = version
 			got := Read(&reader{layers: []store.LayerDoc{lower, higher, bad}}, "")
 			if len(got.Entries) != 2 || got.Entries[0].Name != "alpha" || len(got.Entries[0].Tags) != 0 || got.Entries[0].SourceLayer != "user" || got.Entries[1].SourceLayer != "distribution" {
@@ -183,13 +183,13 @@ func TestCatalogLoadProblemsAndEmptyBuiltin(t *testing.T) {
 	if len(empty.Entries) != 0 || len(empty.Problems) != 0 {
 		t.Fatal(empty)
 	}
-	r := &reader{problems: []store.Problem{{Code: "invalid_document", Layer: store.LayerProfile, File: "/config/profiles/work/catalog.json", Message: "parse failure", Line: 4}, {Code: "type_clash"}}, layers: []store.LayerDoc{layer(map[string]any{"alpha": entry()})}}
+	r := &reader{problems: []store.Problem{{Code: "invalid_document", Layer: store.LayerProfile, File: "/config/profiles/dev/catalog.json", Message: "parse failure", Line: 4}, {Code: "type_clash"}}, layers: []store.LayerDoc{layer(map[string]any{"alpha": entry()})}}
 	got := Read(r, "")
 	if len(got.Entries) != 1 || len(got.Problems) != 1 {
 		t.Fatal(got)
 	}
 	p := got.Problems[0]
-	if p.Code != "store_error" || p.Severity != "warning" || p.Source.File != "profiles/work/catalog.json" || p.Source.Line != 4 || !strings.Contains(p.Message, "parse failure") {
+	if p.Code != "store_error" || p.Severity != "warning" || p.Source.File != "profiles/dev/catalog.json" || p.Source.Line != 4 || !strings.Contains(p.Message, "parse failure") {
 		t.Fatal(p)
 	}
 }

@@ -8,12 +8,12 @@ import (
 
 func TestLayerMemberOrderRetainsFileOrderAndIsDetached(t *testing.T) {
 	s := fixture(t).open(t, "unit", func(o *Options) {
-		o.Distribution = fstest.MapFS{"catalog.json": {Data: []byte(`{"version":1,"entries":{"z":{},"a":{}}}`)}, "profiles/work/catalog.json": {Data: []byte(`{"entries":{"b":{},"a":{"name":"override"}}}`)}}
+		o.Distribution = fstest.MapFS{"catalog.json": {Data: []byte(`{"version":1,"entries":{"z":{},"a":{}}}`)}, "profiles/dev/catalog.json": {Data: []byte(`{"entries":{"b":{},"a":{"name":"override"}}}`)}}
 		o.InstanceDocs = map[DocName]Doc{"catalog": {"entries": Doc{"flag": Doc{}}}}
 	})
 	writeConfig(t, s, []string{"catalog.json"}, `{/* comment */ "version":1,"entries":{"y":{},"x":{},},}`)
 	writeConfig(t, s, []string{"instances", "unit", "catalog.json"}, `{"entries":{"z":{}}}`)
-	layers, err := s.Layers("catalog", "work")
+	layers, err := s.Layers("catalog", "dev")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -23,7 +23,7 @@ func TestLayerMemberOrderRetainsFileOrderAndIsDetached(t *testing.T) {
 		}
 	}
 	layers[1].MemberOrder["/entries"][0] = "changed"
-	again, err := s.Layers("catalog", "work")
+	again, err := s.Layers("catalog", "dev")
 	if err != nil {
 		t.Fatal(err)
 	}
