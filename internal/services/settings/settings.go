@@ -95,7 +95,8 @@ func Builtins() []Entry {
 }
 
 // startConsumedEntries is the single catalog of keys whose values startup
-// consumes before any successful Settings load is guaranteed.
+// consumes before any successful Settings load is guaranteed. Future start-time
+// keys, including husk.plugins.converters when it lands, must join this catalog.
 func startConsumedEntries() []Entry {
 	return []Entry{
 		{Key: "husk.bundle", Type: TypeString, Default: "", Owner: "husk", Apply: "restart", Doc: "Bundle directory loaded once at start, from user and instance layers only."},
@@ -106,14 +107,16 @@ func startConsumedEntries() []Entry {
 
 // IsStartConsumed reports whether startup consumes a key independently of the
 // first successful Settings load. The host also uses it for fatal validation.
-func IsStartConsumed(key string) bool {
+func IsStartConsumed(key string) bool { return startConsumed[key] }
+
+// startConsumed is an immutable lookup derived once from the schema catalog.
+var startConsumed = func() map[string]bool {
+	keys := make(map[string]bool)
 	for _, e := range startConsumedEntries() {
-		if e.Key == key {
-			return true
-		}
+		keys[e.Key] = true
 	}
-	return false
-}
+	return keys
+}()
 
 // New initializes the built-in snapshot before the first reload. It performs
 // no I/O. A duplicate, foreign, invalid-default or invalid built-in or
