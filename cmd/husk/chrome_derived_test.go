@@ -66,6 +66,7 @@ func TestFooterHintsFollowHostHints(t *testing.T) {
 	m.width, m.height = 200, 40
 	addPublicationTestPlugin(m, hello{PluginID: "side", Slots: []protocol.SurfaceID{protocol.SurfaceSidebarList}})
 	fe := withFE(m)
+	fe.Acts = []contracts.PluginAction{{Plugin: "side", ID: "side.new"}, {Plugin: "side", ID: "side.refresh"}}
 	fe.HintsFn = func(ctx contracts.KeyContext) []contracts.KeyHint {
 		if ctx.FocusSurface != string(protocol.SurfaceSidebarList) || ctx.FocusOwner != "side" {
 			return nil
@@ -95,6 +96,10 @@ func TestFooterHintsFollowHostHints(t *testing.T) {
 func TestFooterHintsCapPluginBindings(t *testing.T) {
 	m := newWorkbenchModel()
 	fe := withFE(m)
+	m.plugins["p"] = true
+	for _, k := range []string{"a", "b", "c", "d", "e", "f"} {
+		fe.Acts = append(fe.Acts, contracts.PluginAction{Plugin: "p", ID: "p." + k})
+	}
 	fe.HintsFn = func(contracts.KeyContext) []contracts.KeyHint {
 		var hs []contracts.KeyHint
 		for _, k := range []string{"a", "b", "c", "d", "e", "f"} {

@@ -173,6 +173,10 @@ func (m *WorkbenchModel) placeSlots() {
 	bodyH := max(20, m.height-2)
 
 	m.slotRects = make(map[protocol.SurfaceID]SlotRect)
+	// The overlay is a layer, not a region: it includes both bars and has no chrome.
+	m.slotRects[protocol.SurfaceAppOverlay] = SlotRect{
+		Width: m.width, Height: m.height, InnerW: m.width, InnerH: m.height,
+	}
 
 	modalW := min(92, m.width-10)
 	modalH := min(24, m.height-6)
@@ -251,6 +255,9 @@ func (m *WorkbenchModel) frameRect(slotID protocol.SurfaceID, x, y, w, h int) Sl
 // the modal surface, the active canvas/stage item otherwise). Absent means a
 // blank canvas.
 func (m *WorkbenchModel) frameFor(slotID protocol.SurfaceID) frame.Spec {
+	if slotID == protocol.SurfaceAppOverlay {
+		return frame.Spec{}
+	}
 	if m.demoFrame {
 		if s, ok := demoFrameSpecs[slotID]; ok {
 			return frame.Spec(s)
@@ -313,6 +320,9 @@ func slotZ(id protocol.SurfaceID) int {
 func (m *WorkbenchModel) hitOrder() []slotHit {
 	hits := make([]slotHit, 0, len(m.slotRects))
 	for id, r := range m.slotRects {
+		if id == protocol.SurfaceAppOverlay {
+			continue
+		}
 		hits = append(hits, slotHit{ID: id, Rect: r})
 	}
 	slices.SortFunc(hits, func(a, b slotHit) int {

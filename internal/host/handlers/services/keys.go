@@ -9,8 +9,8 @@ import (
 )
 
 // Keys adapts contracts.KeybindingPort for keys.list. The listing is caller-
-// scoped by the port: users see the merged keymap, a plugin sees only its own
-// bindings, and nothing here widens that.
+// scoped by the port: users see the merged keymap; plugins see their own
+// entries and problems plus effective husk.* and declared rail-item bindings.
 type Keys struct {
 	Port    contracts.KeybindingPort
 	Limiter contracts.Limiter

@@ -57,6 +57,9 @@ func (m *WorkbenchModel) View() tea.View {
 		r := m.modalRect
 		c.castShadow(uv.Rect(r.X, r.Y, r.Width, r.Height), ink, canvasBg)
 	}
+	if m.surfaceOwner(protocol.SurfaceAppOverlay) != "" {
+		c.blitOverlay(m.publishedContent(protocol.SurfaceAppOverlay, m.width, m.height))
+	}
 	if m.activeToast != nil {
 		m.drawToast(c) // a toast is not a popup: no shadow
 	}

@@ -288,9 +288,11 @@ func Issue(ps *[]Problem, severity, code, layer, key, message string) {
 
 // Catalog is the normalized per-plugin document published by Pod conversion.
 type Catalog struct {
-	ID               string          `json:"id"`
-	Name             string          `json:"name"`
-	Actions          []ActionDecl    `json:"actions"`
+	ID      string       `json:"id"`
+	Name    string       `json:"name"`
+	Actions []ActionDecl `json:"actions"`
+	// RailItems holds ids projected from the declared rail_items objects.
+	RailItems        []string        `json:"-"`
 	Surfaces         []SurfaceDecl   `json:"surfaces"`
 	SecretRequests   []SecretRequest `json:"secret_requests"`
 	SettingsDeclared []SettingDecl   `json:"settings_declared"`
@@ -338,6 +340,16 @@ func Catalogs(in ReloadInput) (map[string]Catalog, []Problem) {
 		if err := Decode(doc, &c); err != nil || c.ID != id {
 			ps = append(ps, Problem{Severity: "warning", Code: "invalid_plugin_catalog", Layer: "plugin:" + id, Message: "invalid plugin catalog", Source: &Source{Layer: "plugin:" + id, Plugin: id}})
 			continue
+		}
+		var rails struct {
+			Items []ActionDecl `json:"rail_items"`
+		}
+		if err := Decode(doc, &rails); err != nil {
+			ps = append(ps, Problem{Severity: "warning", Code: "invalid_plugin_catalog", Layer: "plugin:" + id, Message: "invalid rail item catalog", Source: &Source{Layer: "plugin:" + id, Plugin: id}})
+			continue
+		}
+		for _, item := range rails.Items {
+			c.RailItems = append(c.RailItems, item.ID)
 		}
 		out[id] = c
 	}

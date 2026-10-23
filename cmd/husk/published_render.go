@@ -126,7 +126,7 @@ func (r *surfaceCatalog) layoutPublished(surface protocol.SurfaceID, owner strin
 		var rowHits []contributionHit
 		l.Rows[y], rowHits = r.replaceAnchors(owner, line, width, y)
 		// Clip with the "…" tail; the canvas blanks the rest of the row.
-		if ansi.StringWidth(l.Rows[y]) > width {
+		if surface != protocol.SurfaceAppOverlay && ansi.StringWidth(l.Rows[y]) > width {
 			l.Rows[y] = ansi.Truncate(l.Rows[y], width, "…")
 		}
 		hits = append(hits, rowHits...)
