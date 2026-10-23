@@ -74,16 +74,53 @@ type EventDecl struct {
 	Coalesce    *bool  `json:"coalesce,omitempty"`
 }
 
-// HookDecl declares a plugin-owned hook point.
-type HookDecl struct {
-	ID          string `json:"id"`
-	Title       string `json:"title,omitempty"`
-	Description string `json:"description,omitempty"`
+// HookKind is the contract a hook's owner declares: what subscribers may do.
+type HookKind string
+
+const (
+	// HookTransform lets subscribers replace a value, in turn.
+	HookTransform HookKind = "transform"
+	// HookCollect lets subscribers contribute items.
+	HookCollect HookKind = "collect"
+	// HookGate lets subscribers allow or veto.
+	HookGate HookKind = "gate"
+)
+
+// Valid reports whether k is one of the three kinds.
+func (k HookKind) Valid() bool {
+	return k == HookTransform || k == HookCollect || k == HookGate
 }
 
-// HookRegistration subscribes this plugin to a hook point.
+// Hook timeout bounds in milliseconds: the Calls MinTimeout and DefaultTimeout.
+const (
+	MinHookTimeoutMs     = 1000
+	DefaultHookTimeoutMs = 10000
+	// MaxHookTimeoutMs equals the default: the Calls default is also the cap.
+	MaxHookTimeoutMs = DefaultHookTimeoutMs
+)
+
+// Hook subscription priority bounds; lower runs first.
+const (
+	MinHookPriority     = 0
+	MaxHookPriority     = 100
+	DefaultHookPriority = 10
+)
+
+// HookDecl declares a plugin-owned hook point. Conversion writes the resolved
+// TimeoutMs; Kind has no default.
+type HookDecl struct {
+	ID          string   `json:"id"`
+	Kind        HookKind `json:"kind"`
+	Title       string   `json:"title,omitempty"`
+	Description string   `json:"description,omitempty"`
+	TimeoutMs   int      `json:"timeout_ms"`
+}
+
+// HookRegistration subscribes this plugin to a hook point. Conversion writes
+// the resolved Priority.
 type HookRegistration struct {
-	ID string `json:"id"`
+	ID       string `json:"id"`
+	Priority int    `json:"priority"`
 }
 
 // PublishedRect places an extension region inside a claimed host surface.
