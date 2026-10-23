@@ -186,7 +186,17 @@ func TestStateClear(t *testing.T) {
 		if reply.Error != nil {
 			t.Fatalf("error = %+v", reply.Error)
 		}
-		if calls := rec.Calls(); calls[0].Args[0] != "atlas.state" {
+		if calls := rec.Calls(); calls[0].Args[0] != "atlas.state" || calls[0].Args[1] != false {
+			t.Fatalf("args = %v", calls[0].Args)
+		}
+	})
+	t.Run("force reaches the port", func(t *testing.T) {
+		rec := fakes.NewRecorder()
+		reply := State{Port: fakes.NewState(rec)}.Serve(ctx, cli, req(protocol.MethodStateClear, `{"namespace":"atlas.state","force":true}`), nil)
+		if reply.Error != nil {
+			t.Fatalf("error = %+v", reply.Error)
+		}
+		if calls := rec.Calls(); calls[0].Args[1] != true {
 			t.Fatalf("args = %v", calls[0].Args)
 		}
 	})

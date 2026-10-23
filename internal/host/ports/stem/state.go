@@ -182,7 +182,11 @@ func (w *State) Watch(ctx context.Context, _ contracts.Caller, slices []string, 
 // reachable only from the user's CLI; a Stem caller over the port is not
 // the user here). Persisted copies are deleted through the Store seam
 // first; the in-memory clear runs on the loop.
-func (w *State) Clear(ctx context.Context, c contracts.Caller, namespace string) error {
+//
+// force is accepted and ignored for now: it only matters once Clear fires
+// husk.before-state-clear (a later change), where it skips the
+// gate's vetoes.
+func (w *State) Clear(ctx context.Context, c contracts.Caller, namespace string, _ bool) error {
 	if c.Kind != contracts.CallerCLI {
 		return contracts.NewError(protocol.CodeDenied, "state.clear clears the user's own data; only the user's CLI may do it", nil)
 	}

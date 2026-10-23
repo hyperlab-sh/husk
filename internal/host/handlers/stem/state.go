@@ -44,6 +44,7 @@ type stateWatchParams struct {
 
 type clearParams struct {
 	Namespace string `json:"namespace"`
+	Force     bool   `json:"force"`
 }
 
 type revisionResult struct {
@@ -137,7 +138,7 @@ func (h State) Serve(ctx context.Context, c contracts.Caller, req protocol.Messa
 		if bad := handlers.RequireString(req, "params.namespace", p.Namespace); bad != nil {
 			return *bad
 		}
-		if err := h.Port.Clear(ctx, c, p.Namespace); err != nil {
+		if err := h.Port.Clear(ctx, c, p.Namespace, p.Force); err != nil {
 			return handlers.ErrorReply(req, err)
 		}
 		return handlers.Reply(req, nil)

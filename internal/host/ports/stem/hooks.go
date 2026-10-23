@@ -1,9 +1,11 @@
 package stem
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
 	"github.com/hyperlab-sh/husk/internal/stem/dispatcher"
@@ -33,13 +35,15 @@ func NewHooks(runner *hooks.Runner, post Post) *Hooks {
 	return &Hooks{runner: runner, post: post}
 }
 
-// HookCall serves hook.call: one result per live subscriber once all are
-// accounted for, in priority order (empty when none). The result shape is
-// the pre-outcome one; the outcome's kind-specific fields are not mapped yet.
-func (p *Hooks) HookCall(ctx context.Context, c contracts.Caller, hook string, data json.RawMessage) ([]contracts.HookResult, error) {
+// HookCall serves hook.call from the hook's owner: the outcome once all
+// legs are accounted for. The caller is passed to the runner, which decides
+// ownership; the adapter has already admitted plugin callers only. params.data
+// over 1 MiB (compact JSON, measured on the raw bytes) is invalid_params and
+// nothing is posted.
+func (p *Hooks) HookCall(ctx context.Context, c contracts.Caller, hook string, data json.RawMessage) (contracts.HookOutcome, error) {
 	d, ok := callerOf(c)
 	if !ok {
-		return nil, coded(protocol.CodeDenied, "unknown caller")
+		return contracts.HookOutcome{}, coded(protocol.CodeDenied, "unknown caller")
 	}
 	// The mapping rules stay callerOf's (Stem is a Host caller); the kind
 	// itself is translated explicitly so nothing assumes the two enums'
@@ -53,12 +57,16 @@ func (p *Hooks) HookCall(ctx context.Context, c contracts.Caller, hook string, d
 	case dispatcher.CallerPlugin:
 		caller.Kind = hooks.CallerPlugin
 	default:
-		return nil, coded(protocol.CodeDenied, "unknown caller")
+		return contracts.HookOutcome{}, coded(protocol.CodeDenied, "unknown caller")
 	}
 	caller.PluginID = d.PluginID
+	if n := compactLen(data); n > hooks.MaxPayload {
+		return contracts.HookOutcome{}, coded(protocol.CodeInvalidParams,
+			fmt.Sprintf("hook data is %d bytes, over the %d byte limit", n, hooks.MaxPayload))
+	}
 	payload, err := parseObject(data, "hook data")
 	if err != nil {
-		return nil, err
+		return contracts.HookOutcome{}, err
 	}
 	done := make(chan hooks.Outcome, 1)
 	failed := make(chan error, 1)
@@ -74,35 +82,99 @@ func (p *Hooks) HookCall(ctx context.Context, c contracts.Caller, hook string, d
 			failed <- err
 		}
 	}) {
-		return nil, coded(protocol.CodeUnavailable, "host is shutting down")
+		return contracts.HookOutcome{}, coded(protocol.CodeUnavailable, "host is shutting down")
 	}
 	select {
 	case o := <-done:
-		out := make([]contracts.HookResult, len(o.Results))
-		for i, r := range o.Results {
-			out[i] = hookResultOf(r)
+		return hookOutcomeOf(o), nil
+	case err := <-failed:
+		return contracts.HookOutcome{}, hookErrorOf(err)
+	case <-ctx.Done():
+		return contracts.HookOutcome{}, ctxError(ctx)
+	}
+}
+
+// HookList serves hook.list: the runner's declared hooks with their
+// subscribers and liveness, read on the loop.
+func (p *Hooks) HookList(ctx context.Context, _ contracts.Caller) ([]contracts.HookInfo, error) {
+	done := make(chan []hooks.Listed, 1)
+	if !p.post(func() { done <- p.runner.List() }) {
+		return nil, coded(protocol.CodeUnavailable, "host is shutting down")
+	}
+	select {
+	case listed := <-done:
+		out := make([]contracts.HookInfo, len(listed))
+		for i, l := range listed {
+			info := contracts.HookInfo{
+				ID: l.ID, Owner: l.Owner, Kind: string(l.Kind), TimeoutMS: l.Timeout.Milliseconds(),
+				Title: l.Title, Description: l.Description,
+				Subscribers: make([]contracts.HookSubscriber, len(l.Subscribers)),
+			}
+			for j, s := range l.Subscribers {
+				info.Subscribers[j] = contracts.HookSubscriber{Plugin: s.Plugin, Priority: s.Priority, Live: s.Live}
+			}
+			out[i] = info
 		}
 		return out, nil
-	case err := <-failed:
-		return nil, hookErrorOf(err)
 	case <-ctx.Done():
 		return nil, ctxError(ctx)
 	}
 }
 
-// hookResultOf converts one aggregate entry, marshalling the payload back to
-// wire form.
+// compactLen is the byte length of raw's compact JSON encoding; raw that is
+// not valid JSON measures as 0 and is rejected later by parseObject.
+func compactLen(raw json.RawMessage) int {
+	var buf bytes.Buffer
+	if err := json.Compact(&buf, raw); err != nil {
+		return 0
+	}
+	return buf.Len()
+}
+
+// hookOutcomeOf converts the runner's outcome, carrying kind, the transform
+// value, the gate verdict and every entry's fields.
+func hookOutcomeOf(o hooks.Outcome) contracts.HookOutcome {
+	out := contracts.HookOutcome{
+		Kind:    string(o.Kind),
+		Data:    marshalPresent(o.Data, o.Data != nil),
+		Allowed: o.Allowed,
+		Results: make([]contracts.HookResult, len(o.Results)),
+	}
+	for _, v := range o.Vetoes {
+		out.Vetoes = append(out.Vetoes, contracts.HookVeto{Plugin: v.Plugin, Reason: v.Reason})
+	}
+	for i, r := range o.Results {
+		out.Results[i] = hookResultOf(r)
+	}
+	return out
+}
+
+// hookResultOf converts one entry. A nil Data map is a pass-through (no
+// data); an empty one is a replacement, "{}".
 func hookResultOf(r hooks.HookResult) contracts.HookResult {
-	out := contracts.HookResult{Plugin: r.Plugin}
-	if r.Data != nil {
-		if b, err := json.Marshal(r.Data); err == nil {
-			out.Data = b
-		}
+	out := contracts.HookResult{
+		Plugin: r.Plugin,
+		Data:   marshalPresent(r.Data, r.Data != nil),
+		Items:  marshalPresent(r.Items, r.Items != nil),
+		Veto:   r.Veto,
+		Reason: r.Reason,
 	}
 	if r.Err != nil {
 		out.Err = contracts.NewError(r.Err.Code, r.Err.Message, r.Err.Data)
 	}
 	return out
+}
+
+// marshalPresent encodes v when present is true, else returns nil.
+func marshalPresent(v any, present bool) json.RawMessage {
+	if !present {
+		return nil
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	return b
 }
 
 // hookErrorOf carries the runner's coded refusals across the port boundary;

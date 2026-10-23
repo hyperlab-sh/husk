@@ -67,8 +67,10 @@ type StatePort interface {
 	// state.changed notifications on n. The registration is removed when ctx
 	// ends (the connection closed).
 	Watch(ctx context.Context, c Caller, slices []string, n Notifier) (StateSnapshotResult, error)
-	// Clear serves state.clear, user only (plugin callers get denied).
-	Clear(ctx context.Context, c Caller, namespace string) error
+	// Clear serves state.clear, user only (plugin callers get denied). force
+	// is the request's "force" flag: skip the husk.before-state-clear gate's
+	// vetoes; false when absent.
+	Clear(ctx context.Context, c Caller, namespace string, force bool) error
 }
 
 // ActionInfo is one catalog entry as action.list reports it.
@@ -281,21 +283,74 @@ type EventPort interface {
 	Watch(ctx context.Context, c Caller, pattern string, n Notifier) error
 }
 
-// HookResult is one subscriber's answer to a hook call.
+// HookResult is one subscriber's entry in a hook outcome.
 type HookResult struct {
-	Plugin string          `json:"plugin_id"`
-	Data   json.RawMessage `json:"data"`
-	// Err is nil on success; otherwise its code is timeout, cancelled or
-	// the subscriber's own (failed).
-	Err CodedError `json:"-"`
+	Plugin string
+	// Data is a transform stage's replacement as a JSON object; nil on
+	// pass-through, "{}" for an empty replacement.
+	Data json.RawMessage
+	// Items is a collect subscriber's items as a JSON array; nil when none.
+	Items json.RawMessage
+	// Veto is true when a gate subscriber vetoed; Reason is its reason.
+	Veto   bool
+	Reason string
+	// Err is nil on success; otherwise the protocol Error the leg produced
+	// (timeout, cancelled, busy, unavailable, invalid_params or the
+	// subscriber's own). A DataError carries the error's data member.
+	Err CodedError
 }
 
-// HookPort serves hook.call. Hook subscription and publication are manifest
-// declarations (no wire method), so there is no registration seam here.
+// HookVeto is one gate objection.
+type HookVeto struct {
+	Plugin string
+	Reason string
+}
+
+// HookOutcome is the aggregate an owner's hook.call receives.
+type HookOutcome struct {
+	// Kind is "transform", "collect" or "gate".
+	Kind string
+	// Data is a transform's value after the last stage as a JSON object;
+	// nil for the other kinds.
+	Data json.RawMessage
+	// Allowed is false only for a gate with at least one veto.
+	Allowed bool
+	// Vetoes lists every gate veto in priority order.
+	Vetoes []HookVeto
+	// Results has one entry per subscriber asked, in priority order.
+	Results []HookResult
+}
+
+// HookSubscriber is one registration in a hook.list entry.
+type HookSubscriber struct {
+	Plugin   string
+	Priority int
+	Live     bool
+}
+
+// HookInfo is one declared hook as hook.list reports it.
+type HookInfo struct {
+	ID          string
+	Owner       string
+	Kind        string
+	TimeoutMS   int64
+	Title       string
+	Description string
+	Subscribers []HookSubscriber
+}
+
+// HookPort serves hook.call and hook.list. Hook subscription and publication
+// are manifest declarations (no wire method), so there is no registration
+// seam here.
 type HookPort interface {
-	// HookCall serves hook.call from a socket caller and returns one result
-	// per live subscriber once all are accounted for (empty when none).
-	HookCall(ctx context.Context, c Caller, hook string, data json.RawMessage) ([]HookResult, error)
+	// HookCall serves hook.call from the hook's owner (the adapter admits
+	// plugin callers only) and returns the outcome once every subscriber
+	// asked is accounted for. A refusal before any subscriber is asked is a
+	// CodedError (denied, invalid_params, not_found, busy).
+	HookCall(ctx context.Context, c Caller, hook string, data json.RawMessage) (HookOutcome, error)
+	// HookList serves hook.list: every declared hook with its subscribers
+	// and their liveness. No permission filter.
+	HookList(ctx context.Context, c Caller) ([]HookInfo, error)
 }
 
 // PluginInfo is a plugin's spec summary plus liveness (plugin.list).
