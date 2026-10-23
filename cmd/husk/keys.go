@@ -21,8 +21,9 @@ type keySource interface {
 // resolves single keys only and advertises no hints; TestDefaultKeysMatchTheDistributionKeymap
 // keeps it in step with the embedded keymap.
 type defaultKeys struct {
-	// Extra adds bindings after the distribution ones; tests use it to stand in
-	// for plugin-declared keymap documents.
+	// Extra stands in for a layer above the built-in one (tests use it for
+	// plugin-declared or distribution bindings); within a scope it outranks
+	// defaultBindings.
 	Extra []defaultBinding
 }
 

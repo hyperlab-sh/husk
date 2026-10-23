@@ -93,6 +93,14 @@ func TestRankingFileOrderBreaksTies(t *testing.T) {
 	}
 }
 
+// abc is A (profile, [x y]) shadowing B (user, [x]) by being longer, and B
+// shadowing C (distribution, [x z]) by being shorter; A and C are unrelated.
+var abc = map[store.Layer]string{
+	store.LayerProfile:      bind(`{"keys":["x","y"],"action":"p.a"}`),
+	store.LayerUser:         bind(`{"key":"x","action":"u.b"}`),
+	store.LayerDistribution: bind(`{"keys":["x","z"],"action":"d.c"}`),
+}
+
 // Static shadowing pairs and non-pairs.
 func TestStaticShadowing(t *testing.T) {
 	type want struct{ state, by string }
@@ -119,6 +127,8 @@ func TestStaticShadowing(t *testing.T) {
 		{"longer tombstone does not shadow the shorter sequence", map[store.Layer]string{store.LayerDistribution: bind(`{"key":"g","action":"d.short"}`), store.LayerUser: bind(`{"keys":["g","x"],"disable":true}`)}, "", "distribution#0", want{"effective", ""}},
 		{"tombstone that nothing outranks is disabled", map[store.Layer]string{store.LayerUser: bind(`{"key":"q","disable":true}`)}, "", "user#0", want{"disabled", ""}},
 		{"global tombstone does not shadow a surface-scoped entry", map[store.Layer]string{store.LayerUser: bind(`{"key":"r","disable":true}`)}, bind(`{"key":"r","focus":"stage","action":"a.run"}`), "focus-local#0", want{"effective", ""}},
+		{"a shadowed entry shadows nothing: B is shadowed by A", abc, "", "user#0", want{"shadowed", "profile#0"}},
+		{"a shadowed entry shadows nothing: C stays effective", abc, "", "distribution#0", want{"effective", ""}},
 		{"builtin entry shadowed by a user tombstone", map[store.Layer]string{store.LayerUser: bind(`{"key":"[","disable":true}`)}, "", "husk#" + fmt.Sprint(builtinIndex(t, "[")), want{"shadowed", "user#0"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -292,5 +302,84 @@ func TestHintsOrder(t *testing.T) {
 	}
 	if want := "[S shadows d globally on stage B A]"; fmt.Sprint(got) != want {
 		t.Fatalf("Hints = %v, want %s", got, want)
+	}
+}
+
+// Shadowing is decided strongest first, so a shadowed entry shadows nothing:
+// after x, the only candidate for x z is C.
+func TestShadowedEntryDoesNotShadowOthers(t *testing.T) {
+	kb := rankKeys(t, abc, "")
+	ctx := keybinding.KeyContext{}
+	for _, tc := range []struct {
+		keys []string
+		want string
+	}{{[]string{"x"}, "<prefix>"}, {[]string{"x", "y"}, "p.a"}, {[]string{"x", "z"}, "d.c"}} {
+		if got := resolved(kb, ctx, tc.keys...); got != tc.want {
+			t.Errorf("Resolve(%v) = %s, want %s", tc.keys, got, tc.want)
+		}
+	}
+}
+
+// The Frozen and modal filters run before ranking, so an entry that is only
+// statically shadowed still resolves where the shadower is filtered out.
+func TestFiltersSeeStaticallyShadowedEntries(t *testing.T) {
+	kb := rankKeys(t, map[store.Layer]string{store.LayerUser: bind(`{"keys":["q","w"],"action":"u.long"}`, `{"keys":["alt+n","x"],"action":"u.alt"}`, `{"key":"y","action":"u.y"}`)}, "")
+	if got := resolved(kb, keybinding.KeyContext{Frozen: true}, "q"); got != "husk.quit" {
+		t.Errorf("frozen q = %s, want husk.quit", got)
+	}
+	if got := resolved(kb, keybinding.KeyContext{}, "q"); got != "<prefix>" {
+		t.Errorf("unfiltered q = %s, want <prefix>", got)
+	}
+	// A distribution key opens a modal; a longer user sequence on it is filtered out in the modal.
+	kb = rankKeys(t, map[store.Layer]string{
+		store.LayerDistribution: bind(`{"key":"alt+n","action":"d.open"}`),
+		store.LayerUser:         bind(`{"keys":["alt+n","x"],"action":"u.alt"}`),
+	}, "")
+	modal := keybinding.KeyContext{FocusSurface: "modal-surface", ModalOpen: true, ModalAction: "d.open"}
+	if got := resolved(kb, modal, "alt+n"); got != "d.open" {
+		t.Errorf("modal alt+n = %s, want d.open", got)
+	}
+	if got := resolved(kb, keybinding.KeyContext{}, "alt+n"); got != "<prefix>" {
+		t.Errorf("unfiltered alt+n = %s, want <prefix>", got)
+	}
+}
+
+// Tombstones survive the Frozen and modal filters.
+func TestTombstonesSurviveFrozenAndModalFilters(t *testing.T) {
+	kb := rankKeys(t, map[store.Layer]string{store.LayerUser: bind(`{"key":"q","disable":true}`, `{"key":"alt+n","focus":"modal-surface","disable":true}`, `{"key":"alt+m","disable":true}`), store.LayerDistribution: bind(`{"key":"alt+n","focus":"modal-surface","action":"d.close"}`, `{"key":"alt+m","action":"d.open"}`)}, "")
+	if got := resolved(kb, keybinding.KeyContext{Frozen: true}, "q"); got != "<none>" {
+		t.Errorf("frozen q = %s, want none", got)
+	}
+	modal := keybinding.KeyContext{FocusSurface: "modal-surface", ModalOpen: true, ModalAction: "d.open"}
+	if got := resolved(kb, modal, "alt+n"); got != "<none>" {
+		t.Errorf("modal-scoped tombstone = %s, want none", got)
+	}
+	if got := resolved(kb, modal, "alt+m"); got != "<none>" {
+		t.Errorf("global tombstone on the ModalAction key = %s, want none", got)
+	}
+}
+
+// A tombstone is not a prefix for unreachable; a plugin condition separates groups.
+func TestUnreachableIgnoresTombstonesAndConditions(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		entry string
+	}{
+		{"tombstone prefix", bind(`{"key":"g","disable":true}`, `{"keys":["g","x"],"action":"u.long"}`)},
+		{"prefix without condition, longer with plugin", bind(`{"key":"g","focus":"stage","action":"u.short"}`, `{"keys":["g","x"],"focus":"stage","plugin":"a","action":"u.long"}`)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			kb := rankKeys(t, map[store.Layer]string{store.LayerUser: tc.entry}, "")
+			for _, p := range kb.Listing().Problems {
+				if p.Code == "unreachable" {
+					t.Fatalf("unexpected unreachable: %+v", p)
+				}
+			}
+			for _, e := range kb.Listing().Entries {
+				if e.Source.Layer == keybinding.LayerUser && e.State == "shadowed" {
+					t.Fatalf("entry %d shadowed", e.Source.Order)
+				}
+			}
+		})
 	}
 }
