@@ -209,7 +209,7 @@ unknown fields are retained by Store and ignored by Services for forward growth.
 | `id`, `name`, `version`, `description` | Plugin identity/display strings; `id` equals the Store source id. |
 | `actions` | Array of ActionDecl objects: `id`, `title`, `description`, `args_schema` (object), `public` (bool). IDs are fully qualified. |
 | `surfaces` | Array of SurfaceDecl objects: `id` (surface id), optional `frame` (object). Additional surface declaration fields remain opaque to Services. |
-| `focus_bindings` | Array of FocusBinding objects, identical to the declared `keymap` document's `bind` below. |
+| `keybindings` | Array of FocusBinding objects, identical to the declared `keymap` document's `bind` below. |
 | `subscriptions` | Array of event-pattern strings. |
 | `events_declared`, `hooks_declared`, `hook_registrations`, `published_slots` | Arrays of the corresponding Pod declaration objects, with snake_case field names; opaque to Services. |
 | `slice` | Optional SliceDecl object; opaque to Services. |
@@ -249,7 +249,7 @@ never enter the key index.
 Example (source `files`):
 
 ```json
-{"id":"files","name":"Files","actions":[{"id":"files.new","title":"New","public":true}],"surfaces":[{"id":"sidebar-list"}],"focus_bindings":[{"key":"n","action":"files.new","focus":"sidebar-list"}],"secret_requests":[{"name":"git.token","purpose":"Push over HTTPS","required":false}],"settings_declared":[{"key":"plugins.files.show_hidden","type":"bool","default":false,"apply":"live"}]}
+{"id":"files","name":"Files","actions":[{"id":"files.new","title":"New","public":true}],"surfaces":[{"id":"sidebar-list"}],"keybindings":[{"key":"n","action":"files.new","focus":"sidebar-list"}],"secret_requests":[{"name":"git.token","purpose":"Push over HTTPS","required":false}],"settings_declared":[{"key":"plugins.files.show_hidden","type":"bool","default":false,"apply":"live"}]}
 ```
 
 The matching declared `keymap` document:
