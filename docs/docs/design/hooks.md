@@ -961,8 +961,8 @@ or priority. It is the starting point; the changes below extend it.
     deletes nothing and answers `unavailable` for shutdown, `cancelled`
     otherwise. From deletion on, the clear completes with its real outcome;
     a reset skipped because the host is closing still succeeds because the
-    persisted copies are gone. A nil firer means no hooks wired and the gate
-    passes. Rejected:
+    persisted copies are gone. A nil firer means no hooks are wired and the
+    gate passes. Rejected:
     counting only the slice owner's veto (a second rule for one hook, when
     `force` already bounds the cost of a wrong veto).
 12. **`hook.list` is added** (protocol minor 2.1) for introspection; hooks
