@@ -467,8 +467,8 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 			src Source
 		}{built, Source{Layer: LayerHusk, File: "builtin"}})
 	}
-	ids := make([]string, 0, len(in.Declared[store.DeclaredFocusKeymap]))
-	for id := range in.Declared[store.DeclaredFocusKeymap] {
+	ids := make([]string, 0, len(in.Declared[store.DeclaredKeymap]))
+	for id := range in.Declared[store.DeclaredKeymap] {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
@@ -476,7 +476,7 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 		layers = append(layers, struct {
 			doc store.Doc
 			src Source
-		}{in.Declared[store.DeclaredFocusKeymap][id], Source{Layer: LayerFocusLocal, Plugin: id}})
+		}{in.Declared[store.DeclaredKeymap][id], Source{Layer: LayerFocusLocal, Plugin: id}})
 	}
 	for _, l := range in.Layers {
 		if l.Layer == store.LayerInstance {

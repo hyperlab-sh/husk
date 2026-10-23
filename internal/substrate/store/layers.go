@@ -386,9 +386,9 @@ func (s *Store) Profiles() []string {
 }
 
 // Declare atomically replaces a plugin's non-layered document. Invalid declared
-// names are ignored; supported names are plugins and focus-keymap only.
+// names are ignored; supported names are plugins and keymap only.
 func (s *Store) Declare(name DocName, source string, d Doc) {
-	if name != DeclaredPlugins && name != DeclaredFocusKeymap {
+	if name != DeclaredPlugins && name != DeclaredKeymap {
 		return
 	}
 	if !validID(source) {

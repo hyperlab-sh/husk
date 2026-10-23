@@ -348,7 +348,7 @@ func (co *Coordinator) loadInput() inputResult {
 	if err != nil {
 		return inputResult{err: err}
 	}
-	return inputResult{in: ReloadInput{Doc: resolved, Layers: layers, ConfigLayers: configLayers, Declared: map[store.DocName]map[string]store.Doc{store.DeclaredPlugins: co.opts.Store.Declared(store.DeclaredPlugins), store.DeclaredFocusKeymap: co.opts.Store.Declared(store.DeclaredFocusKeymap)}, Profile: &selected}}
+	return inputResult{in: ReloadInput{Doc: resolved, Layers: layers, ConfigLayers: configLayers, Declared: map[store.DocName]map[string]store.Doc{store.DeclaredPlugins: co.opts.Store.Declared(store.DeclaredPlugins), store.DeclaredKeymap: co.opts.Store.Declared(store.DeclaredKeymap)}, Profile: &selected}}
 }
 
 // Inputs collects fresh user-authorized disk input for dry validation/checks.

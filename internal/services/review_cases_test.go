@@ -64,7 +64,7 @@ func TestReviewKeyListingExactCatalogOwnershipAndNativeRejections(t *testing.T) 
 	kb := keybinding.New()
 	in := catalog("a")
 	in.Declared[store.DeclaredPlugins]["a.b"] = catalog("a.b").Declared[store.DeclaredPlugins]["a.b"]
-	in.Declared[store.DeclaredFocusKeymap] = map[string]store.Doc{"a": doc(`{"version":1,"bind":[{"key":"x","focus":"stage","action":"a.run"},{"key":"y","focus":"foreign","action":"a.run"},{"key":"z","focus":"stage","action":"a.b.run"}]}`), "a.b": doc(`{"version":1,"bind":[{"key":"b","focus":"stage","action":"a.b.run"}]}`)}
+	in.Declared[store.DeclaredKeymap] = map[string]store.Doc{"a": doc(`{"version":1,"bind":[{"key":"x","focus":"stage","action":"a.run"},{"key":"y","focus":"foreign","action":"a.run"},{"key":"z","focus":"stage","action":"a.b.run"}]}`), "a.b": doc(`{"version":1,"bind":[{"key":"b","focus":"stage","action":"a.b.run"}]}`)}
 	in.Layers = []store.LayerDoc{{Layer: store.LayerUser, Doc: doc(`{"version":1,"bind":[{"key":"1","action":"a.run"},{"key":"2","action":"a.b.run"}]}`)}}
 	apply(t, kb, in)
 	codes := map[string]bool{}
@@ -148,7 +148,7 @@ func TestReviewProfileKeymapCacheDoesNotCrossProfiles(t *testing.T) {
 func TestReviewDisabledChordFallsThroughAndUserDisableWins(t *testing.T) {
 	kb := keybinding.New()
 	in := catalog("a")
-	in.Declared[store.DeclaredFocusKeymap] = map[string]store.Doc{"a": doc(`{"version":1,"bind":[{"key":"r","focus":"stage","action":"a.run"}]}`)}
+	in.Declared[store.DeclaredKeymap] = map[string]store.Doc{"a": doc(`{"version":1,"bind":[{"key":"r","focus":"stage","action":"a.run"}]}`)}
 	in.Layers = []store.LayerDoc{{Layer: store.LayerUser, Doc: doc(`{"version":1,"bind":[{"keys":["a","b"],"disable":true},{"key":"r","disable":true}]}`)}}
 	apply(t, kb, in)
 	for _, keys := range [][]string{{"a"}, {"a", "b"}} {

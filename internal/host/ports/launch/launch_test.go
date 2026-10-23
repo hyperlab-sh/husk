@@ -426,7 +426,7 @@ func TestPodRegistryRegistersOnce(t *testing.T) {
 }
 
 // The real CatalogDeclarer over Store: the manifest Spec's catalog and
-// focus-keymap documents become the plugin's declared documents, atomically
+// keymap documents become the plugin's declared documents, atomically
 // replacing earlier ones, and Undeclare removes both.
 func TestCatalogDeclarerOverStore(t *testing.T) {
 	s := openStore(t)
@@ -437,7 +437,7 @@ func TestCatalogDeclarerOverStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	focus, err := spec.FocusKeymapJSON()
+	focus, err := spec.KeymapJSON()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -445,7 +445,7 @@ func TestCatalogDeclarerOverStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertDocEqual(t, "catalog", catalog, s.Declared(store.DeclaredPlugins)["files"])
-	assertDocEqual(t, "focus-keymap", focus, s.Declared(store.DeclaredFocusKeymap)["files"])
+	assertDocEqual(t, "keymap", focus, s.Declared(store.DeclaredKeymap)["files"])
 
 	// Replacing a declaration leaves no residue from the earlier one.
 	replaced := specWithSlice("files")
@@ -460,8 +460,8 @@ func TestCatalogDeclarerOverStore(t *testing.T) {
 	if docs := s.Declared(store.DeclaredPlugins); len(docs) != 0 {
 		t.Fatal("undeclare left plugins", docs)
 	}
-	if docs := s.Declared(store.DeclaredFocusKeymap); len(docs) != 0 {
-		t.Fatal("undeclare left focus-keymap", docs)
+	if docs := s.Declared(store.DeclaredKeymap); len(docs) != 0 {
+		t.Fatal("undeclare left keymap", docs)
 	}
 
 	if err := declarer.Declare("files", json.RawMessage("not json"), focus); err == nil {
@@ -534,9 +534,9 @@ func TestLaunchIntegrationRealSeams(t *testing.T) {
 	// Declared documents serve the manifest catalogs.
 	files := specWithSlice("files")
 	catalog, _ := files.CatalogJSON()
-	focus, _ := files.FocusKeymapJSON()
+	focus, _ := files.KeymapJSON()
 	assertDocEqual(t, "catalog", catalog, st.Declared(store.DeclaredPlugins)["files"])
-	assertDocEqual(t, "focus-keymap", focus, st.Declared(store.DeclaredFocusKeymap)["files"])
+	assertDocEqual(t, "keymap", focus, st.Declared(store.DeclaredKeymap)["files"])
 
 	// The plugin slice is registered with the plugin as owner, value {}.
 	entry, ok := tree.Snapshot().Slices["files.state"]

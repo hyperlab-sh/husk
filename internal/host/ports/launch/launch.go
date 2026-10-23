@@ -157,18 +157,18 @@ type CatalogDeclarer struct {
 
 var _ contracts.CatalogDeclarer = CatalogDeclarer{}
 
-// Declare stores the plugin's catalog and focus-keymap documents.
-func (c CatalogDeclarer) Declare(pluginID string, catalog, focusKeymap json.RawMessage) error {
+// Declare stores the plugin's catalog and keymap documents.
+func (c CatalogDeclarer) Declare(pluginID string, catalog, keymap json.RawMessage) error {
 	catalogDoc, err := decodeDoc(catalog)
 	if err != nil {
 		return fmt.Errorf("launch: plugin %s catalog: %w", pluginID, err)
 	}
-	focusDoc, err := decodeDoc(focusKeymap)
+	focusDoc, err := decodeDoc(keymap)
 	if err != nil {
-		return fmt.Errorf("launch: plugin %s focus-keymap: %w", pluginID, err)
+		return fmt.Errorf("launch: plugin %s keymap: %w", pluginID, err)
 	}
 	c.Store.Declare(store.DeclaredPlugins, pluginID, catalogDoc)
-	c.Store.Declare(store.DeclaredFocusKeymap, pluginID, focusDoc)
+	c.Store.Declare(store.DeclaredKeymap, pluginID, focusDoc)
 	return nil
 }
 
@@ -240,7 +240,7 @@ func (s SliceRegistrar) RegisterSlice(spec state.Spec) (contracts.SliceHandle, e
 }
 
 // Preparer composes launch steps 3 to 5 for one batch against the seams: for
-// each spec the catalog and focus-keymap documents are declared atomically,
+// each spec the catalog and keymap documents are declared atomically,
 // then the plugin slices are registered — on the loop, before the reload is
 // requested — and one shared Services reload is awaited. The reload's
 // completion — applied or not — is the launch gate, so a failed or timed-out
@@ -279,9 +279,9 @@ func (p Preparer) Prepare(ctx context.Context, gate uint64, specs []manifest.Spe
 			failed[spec.ID] = fmt.Errorf("catalog: %w", err)
 			continue
 		}
-		focus, err := spec.FocusKeymapJSON()
+		focus, err := spec.KeymapJSON()
 		if err != nil {
-			failed[spec.ID] = fmt.Errorf("focus-keymap: %w", err)
+			failed[spec.ID] = fmt.Errorf("keymap: %w", err)
 			continue
 		}
 		if p.Catalog != nil {

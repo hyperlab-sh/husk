@@ -36,8 +36,8 @@ const (
 	LayerInstance Layer = "instance"
 	// DeclaredPlugins holds per-plugin catalogs, separate from config layers.
 	DeclaredPlugins DocName = "plugins"
-	// DeclaredFocusKeymap holds manifest focus-local bindings, never user keymaps.
-	DeclaredFocusKeymap DocName = "focus-keymap"
+	// DeclaredKeymap holds manifest focus-local bindings, never user keymaps.
+	DeclaredKeymap DocName = "keymap"
 	// ConflictLastWriterWins is the reserved multi-source reconciliation policy.
 	ConflictLastWriterWins = "last-writer-wins"
 	// MaxDocBytes bounds a config document's input bytes.

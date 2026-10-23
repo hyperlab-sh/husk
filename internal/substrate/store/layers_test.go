@@ -150,7 +150,7 @@ func TestParseDocLimitsAndDeclaredIsolation(t *testing.T) {
 	e := fixture(t)
 	s := e.open(t, "notes", true, nil)
 	input := Doc{"nested": Doc{"n": 1}}
-	s.Declare(DeclaredFocusKeymap, "example.notes", input)
+	s.Declare(DeclaredKeymap, "example.notes", input)
 	input["nested"].(Doc)["n"] = 2
 	var wg sync.WaitGroup
 	for range 4 {
@@ -162,20 +162,23 @@ func TestParseDocLimitsAndDeclaredIsolation(t *testing.T) {
 		})
 	}
 	wg.Wait()
-	declared := s.Declared(DeclaredFocusKeymap)
+	declared := s.Declared(DeclaredKeymap)
 	if declared["example.notes"]["nested"].(Doc)["n"] != 1 {
 		t.Fatal("declared input aliased")
 	}
 	declared["example.notes"]["nested"].(Doc)["n"] = 99
-	if s.Declared(DeclaredFocusKeymap)["example.notes"]["nested"].(Doc)["n"] != 1 {
+	if s.Declared(DeclaredKeymap)["example.notes"]["nested"].(Doc)["n"] != 1 {
 		t.Fatal("declared output aliased")
 	}
-	r, _ := s.Resolve("focus-keymap", "")
+	if len(s.Declared("keymap")) != 1 {
+		t.Fatal("declared keymap document is not stored under the name keymap")
+	}
+	r, _ := s.Resolve("keymap", "")
 	if len(r.Doc) != 0 {
 		t.Fatal("declared documents leaked into layers")
 	}
 	s.Undeclare("example.notes")
-	if len(s.Declared(DeclaredFocusKeymap)) != 0 || len(s.Declared(DeclaredPlugins)) != 0 {
+	if len(s.Declared(DeclaredKeymap)) != 0 || len(s.Declared(DeclaredPlugins)) != 0 {
 		t.Fatal("Undeclare incomplete")
 	}
 	if _, err = json.Marshal(r.Doc); err != nil {
