@@ -65,6 +65,9 @@ func (m *WorkbenchModel) View() tea.View {
 	if m.activeToast != nil {
 		m.drawToast(c) // a toast is not a popup: no shadow
 	}
+	if m.settings != nil {
+		c.castShadow(m.drawSettings(c), ink, canvasBg)
+	}
 	if m.showPalette {
 		c.castShadow(m.drawCommandPalette(c), ink, canvasBg)
 	}
@@ -205,7 +208,7 @@ func (m *WorkbenchModel) layoutLabel() string {
 	_, left := m.slotRects[protocol.SurfaceSidebarList]
 	_, right := m.slotRects[protocol.SurfaceSidePanel]
 	switch {
-	case m.modalOwner().Open():
+	case m.modalOwner().Open() || m.settings != nil:
 		return "Modal"
 	case m.activePlacement == contracts.PlacementFullCanvas:
 		return "Full canvas"

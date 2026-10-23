@@ -455,7 +455,7 @@ func TestSurfacesResolutionSlice(t *testing.T) {
 		`"capture":{"main-stage":true},` +
 		`"visible":["activity-rail","sidebar-list","main-header","main-stage"],` +
 		`"placement":{"rail_item":"","kind":""},` +
-		`"overlays":{"modal":{"plugin":"","rail_item":""},"palette":false,"slot_explorer":false}}`
+		`"overlays":{"modal":{"plugin":"","rail_item":""},"palette":false,"slot_explorer":false,"settings_center":""}}`
 	if string(raw) != want {
 		t.Fatalf("resolution value =\n%s\nwant\n%s", raw, want)
 	}

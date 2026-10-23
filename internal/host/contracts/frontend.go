@@ -302,6 +302,8 @@ type Overlays struct {
 	Modal        ModalOverlay `json:"modal"`
 	Palette      bool         `json:"palette"`
 	SlotExplorer bool         `json:"slot_explorer"`
+	// SettingsCenter is the active tab, or empty when the center is closed.
+	SettingsCenter string `json:"settings_center"`
 }
 
 // ModalOverlay is the modal overlay: which plugin's rail item is open.

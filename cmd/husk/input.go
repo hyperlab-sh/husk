@@ -258,6 +258,10 @@ func (m *WorkbenchModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if m.settings != nil && m.secretPrompt == nil {
+		return m.settingsKey(msg)
+	}
+
 	// The secret confirm dialog is modal and private: no plugin sees its keys.
 	if m.secretPrompt != nil {
 		return m.secretPromptKey(key)
@@ -564,6 +568,13 @@ func (m *WorkbenchModel) handleMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	msg := event.Mouse()
+	if click, ok := event.(tea.MouseClickMsg); ok && click.Button == tea.MouseLeft && image.Pt(msg.X, msg.Y).In(themePillRect(m.width, m.height, m.palette.Name)) {
+		m.run("husk.settings.open", map[string]any{"tab": "theme"})
+		return m, nil
+	}
+	if m.settings != nil {
+		return m.settingsMouse(event)
+	}
 
 	if _, release := event.(tea.MouseReleaseMsg); release {
 		if m.activeDrag != "" {
@@ -592,10 +603,6 @@ func (m *WorkbenchModel) handleMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 	isLeftClick := click && msg.Button == tea.MouseLeft
 
 	if !isWheelDown && !isWheelUp && !isLeftClick {
-		return m, nil
-	}
-
-	if isLeftClick && image.Pt(msg.X, msg.Y).In(themePillRect(m.width, m.height, m.palette.Name)) {
 		return m, nil
 	}
 

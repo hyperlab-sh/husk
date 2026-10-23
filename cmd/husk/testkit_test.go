@@ -29,6 +29,8 @@ type fakeFE struct {
 	Invoked   []invoked
 	Registers []string
 	// Writer calls retain their callbacks until a test explicitly delivers a reply.
+	ThemeRows      []contracts.ThemeEntry
+	ProfileRows    []contracts.ProfileInfo
 	SettingWrites  []settingWrite
 	ProfileUses    []profileUse
 	PluginRemovals []pluginRemoval
@@ -167,11 +169,11 @@ type invoked struct {
 func (f *fakeFE) Snapshot() *state.Snapshot                { return f.Snap }
 func (f *fakeFE) StartupReports() []contracts.ReloadReport { return nil }
 func (f *fakeFE) Catalog() contracts.CatalogResult         { return contracts.CatalogResult{} }
-func (f *fakeFE) Themes() []contracts.ThemeEntry           { return nil }
+func (f *fakeFE) Themes() []contracts.ThemeEntry           { return slices.Clone(f.ThemeRows) }
 func (f *fakeFE) SettingsSchema() []contracts.SettingEntry { return nil }
 func (f *fakeFE) Setting(string) (any, string, error)      { return nil, "", nil }
 func (f *fakeFE) KeyListing() contracts.KeyListing         { return contracts.KeyListing{} }
-func (f *fakeFE) Profiles() []contracts.ProfileInfo        { return nil }
+func (f *fakeFE) Profiles() []contracts.ProfileInfo        { return slices.Clone(f.ProfileRows) }
 func (f *fakeFE) ConfigDir() string                        { return "" }
 
 type settingWrite struct {

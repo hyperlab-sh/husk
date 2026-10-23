@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/exp/golden"
 	"github.com/charmbracelet/x/exp/teatest/v2"
 
+	"github.com/hyperlab-sh/husk/internal/host/contracts"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
@@ -94,6 +95,23 @@ var goldenFrames = map[string]func(t *testing.T) string{
 		return runGolden(t, m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	},
 	"TestGoldenFrameFullSlots": func(t *testing.T) string { return runGolden(t, fullSlotsModel()) },
+	"TestGoldenFrameSettingsTheme": func(t *testing.T) string {
+		m, _ := settingsFixture(t, "theme")
+		return runGolden(t, m)
+	},
+	"TestGoldenFrameSettingsThemeError": func(t *testing.T) string {
+		m, fe := settingsFixture(t, "theme")
+		m.settings.cursor = 2
+		m.selectSettingsTheme()
+		fe.replySetting(0, contracts.SettingSetResult{Reports: []contracts.ReloadReport{{Service: "theme", Problems: []protocol.Problem{{Severity: "error", Code: "low_contrast", Message: "ink on surface is 2.10:1, need 4.5:1"}}}}}, nil)
+		return runGolden(t, m)
+	},
+	"TestGoldenFrameSettingsProfileSelect": func(t *testing.T) string {
+		m, _ := settingsFixture(t, "theme")
+		m.settings.focus = settingsProfileFocus
+		m.openSettingsProfiles()
+		return runGolden(t, m)
+	},
 }
 
 func fullSlotsModel() *WorkbenchModel {
@@ -107,6 +125,24 @@ func fullSlotsModel() *WorkbenchModel {
 		protocol.SurfaceSidePanel:         {"SIDEPANEL"},
 	})
 	return m
+}
+
+func TestGoldenFrameSettingsTheme(t *testing.T) {
+	frame := goldenFrames[t.Name()](t)
+	requireFrameGeometry(t, frame)
+	golden.RequireEqual(t, frame)
+}
+
+func TestGoldenFrameSettingsThemeError(t *testing.T) {
+	frame := goldenFrames[t.Name()](t)
+	requireFrameGeometry(t, frame)
+	golden.RequireEqual(t, frame)
+}
+
+func TestGoldenFrameSettingsProfileSelect(t *testing.T) {
+	frame := goldenFrames[t.Name()](t)
+	requireFrameGeometry(t, frame)
+	golden.RequireEqual(t, frame)
 }
 
 func TestGoldenFrameEmptyWorkbench(t *testing.T) {

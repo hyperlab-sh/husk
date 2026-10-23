@@ -203,25 +203,27 @@ type WorkbenchModel struct {
 	activePlacement contracts.RailPlacement
 	modal           modalState // the one source of truth for the open modal; use modalOwner/openModal/closeModal
 
-	showHotspots  bool
-	stageMode     string // "plugin" or "hotspots"
-	hotspotCursor int
-	showPalette   bool
-	secretPrompt  *secretPromptState // the Secrets confirm dialog, when one is up
-	paletteQuery  string
-	paletteCursor int
-	paletteTop    int // first result row drawn; follows the cursor (movePaletteCursor)
-	activeToast   *contracts.Toast
-	engineToast   bool // activeToast came from the engine queue
-	toastPollOn   bool
-	toastSeq      int
-	refusalsShown int      // host refusals already reported
-	noticesSeen   uint64   // newest host config notice already toasted
-	failures      []string // plugin failures noted, not yet toasted
-	shownFailures []string // lines of the failure toast now up
-	pendingConfig string   // config notice text raised this settle, not yet toasted
-	shownConfig   string   // config notice text folded into the failure toast now up
-	failureSeq    int      // toastSeq of that toast
+	showHotspots    bool
+	stageMode       string // "plugin" or "hotspots"
+	hotspotCursor   int
+	showPalette     bool
+	settings        *settingsCenter
+	lastSettingsTab string
+	secretPrompt    *secretPromptState // the Secrets confirm dialog, when one is up
+	paletteQuery    string
+	paletteCursor   int
+	paletteTop      int // first result row drawn; follows the cursor (movePaletteCursor)
+	activeToast     *contracts.Toast
+	engineToast     bool // activeToast came from the engine queue
+	toastPollOn     bool
+	toastSeq        int
+	refusalsShown   int      // host refusals already reported
+	noticesSeen     uint64   // newest host config notice already toasted
+	failures        []string // plugin failures noted, not yet toasted
+	shownFailures   []string // lines of the failure toast now up
+	pendingConfig   string   // config notice text raised this settle, not yet toasted
+	shownConfig     string   // config notice text folded into the failure toast now up
+	failureSeq      int      // toastSeq of that toast
 
 	logOut io.Writer // host log lines, such as launch failures
 }
@@ -449,6 +451,7 @@ func (m *WorkbenchModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = max(0, msg.Width)
 		m.height = max(0, msg.Height)
 		if m.tooSmall() {
+			m.closeSettings()
 			// Keep the last valid layout (and plugin surface sizes); View
 			// renders the too-small screen until the terminal grows back.
 			return m, nil
@@ -565,7 +568,7 @@ func (m *WorkbenchModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return next, cmd
 
 	case tea.PasteMsg:
-		if m.secretPrompt != nil {
+		if m.secretPrompt != nil || m.settings != nil {
 			return m, nil // the dialog is modal: pasted text reaches nothing
 		}
 		if m.showPalette && !m.layoutFrozen() {
@@ -600,6 +603,11 @@ func (m *WorkbenchModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// sweeps, Pod notices.
 	if m.host != nil && !m.closed {
 		m.host.Update(msg)
+	}
+	if s := m.settings; s != nil && s.profileForm != nil {
+		_, cmd := s.profileForm.Update(msg)
+		s.profileView = s.profileForm.View()
+		return m, cmd
 	}
 	return m, nil
 }
@@ -935,6 +943,7 @@ func (m *WorkbenchModel) settle() {
 	defer m.toastFailures()
 	for range 4 {
 		changed := m.refresh()
+		m.refreshSettings()
 		wrote := m.flushState()
 		if wrote && m.host != nil {
 			m.host.Tick()
@@ -1036,9 +1045,10 @@ func (m *WorkbenchModel) surfaceView() contracts.SurfaceView {
 	slices.Sort(v.Visible)
 	v.Placement = contracts.Placement{RailItem: m.activeRailID, Kind: string(m.activePlacement)}
 	v.Overlays = contracts.Overlays{
-		Modal:        contracts.ModalOverlay{Plugin: m.modal.PluginID, RailItem: m.modal.RailID},
-		Palette:      m.showPalette,
-		SlotExplorer: m.stageMode == "hotspots",
+		Modal:          contracts.ModalOverlay{Plugin: m.modal.PluginID, RailItem: m.modal.RailID},
+		Palette:        m.showPalette,
+		SlotExplorer:   m.stageMode == "hotspots",
+		SettingsCenter: m.settingsTab(),
 	}
 	return v
 }
@@ -1167,6 +1177,10 @@ func (m *WorkbenchModel) hostActionTable() map[string]contracts.HostActionHandle
 			m.activateHomeWorkbench()
 			return nil, nil
 		},
+		"husk.settings.open": m.openSettings,
+		"husk.theme.select": func(map[string]any) (map[string]any, error) {
+			return m.openSettings(map[string]any{"tab": "theme"})
+		},
 		"husk.palette.open": do(m.openPalette),
 		"husk.hotspots.toggle_stage": do(func() {
 			m.activeRailID = ""
@@ -1232,6 +1246,9 @@ func (m *WorkbenchModel) hostActionTable() map[string]contracts.HostActionHandle
 }
 
 func (m *WorkbenchModel) openPalette() {
+	if m.settings != nil {
+		return
+	}
 	m.clearPending()
 	m.showPalette = true
 	m.paletteQuery = ""
