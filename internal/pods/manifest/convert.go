@@ -161,6 +161,17 @@ func convert(src Source, modern bool) (*Spec, []Warning, error) {
 			s.Subscriptions = append(s.Subscriptions, events.Subscribe...)
 			s.EventsDeclared = append(s.EventsDeclared, events.Publish...)
 		}
+		// secrets.* and services.* events reach cli watchers only (services.md,
+		// Events): only the offending pattern is dropped, the rest stand.
+		kept := s.Subscriptions[:0:0]
+		for i, pattern := range s.Subscriptions {
+			if cliOnlyPattern(pattern) {
+				warnings = append(warnings, Warning{Code: "subscription_ignored", Field: "subscriptions", Index: i, Message: "event " + pattern + " is delivered to cli watchers only; subscription dropped"})
+				continue
+			}
+			kept = append(kept, pattern)
+		}
+		s.Subscriptions = kept
 		if b := fields["hooks"]; b != nil {
 			decls, regs, err := parseHooks(b)
 			if err != nil {
@@ -262,6 +273,14 @@ func ownedID(owner, id string) bool {
 	at := strings.LastIndexByte(id, '.')
 	return at > 0 && id[:at] == owner && at < len(id)-1 && !strings.ContainsAny(id, " \t\r\n\x1b;=\\")
 }
+
+// cliOnlyPattern reports whether pattern could match a secrets. or services.
+// event name, which only cli watchers receive. The event bus port applies the
+// same rule to event.watch from a plugin (eventbus.CLIOnlyPattern).
+func cliOnlyPattern(pattern string) bool {
+	return strings.HasPrefix(pattern, "secrets.") || strings.HasPrefix(pattern, "services.")
+}
+
 func eventPattern(pattern string) bool {
 	pattern = strings.TrimSuffix(pattern, ".*")
 	if pattern == "" || strings.Contains(pattern, "*") {

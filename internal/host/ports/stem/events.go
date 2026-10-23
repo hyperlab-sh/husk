@@ -51,10 +51,15 @@ func (e *Events) Emit(ctx context.Context, c contracts.Caller, name string, data
 	return nil
 }
 
-// Watch serves event.watch: it registers n for pattern, returns nil at once
+// Watch serves event.watch: a plugin asking for a secrets. or services.
+// pattern is denied (only cli watchers receive those events); otherwise it
+// registers n for pattern, returns nil at once
 // (the adapter replies {}), and removes the registration when ctx ends. A
 // refused pattern is invalid_params and registers nothing.
-func (e *Events) Watch(ctx context.Context, _ contracts.Caller, pattern string, n contracts.Notifier) error {
+func (e *Events) Watch(ctx context.Context, c contracts.Caller, pattern string, n contracts.Notifier) error {
+	if c.Kind == contracts.CallerPlugin && eventbus.CLIOnlyPattern(pattern) {
+		return contracts.NewError(protocol.CodeDenied, "events matching "+pattern+" are delivered to cli watchers only", nil)
+	}
 	cancel, err := e.bus.Subscribe(n, pattern)
 	if err != nil {
 		return err
