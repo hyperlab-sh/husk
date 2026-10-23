@@ -240,7 +240,7 @@ Where the version is checked, since there is no handshake:
 A major-1 plugin that slipped through (a manifest without a version, read by the v1 converter) is recognized by its first stdout line (`{"type":"hello",...}`) or by the first line of a socket connection it opens. Husk answers it once, on stdin or on that connection, in the major-1 shape so the plugin can log a useful reason, then stops it. On the socket the plugin is the live pod named by `hello.plugin_id`; a hello naming no live pod gets the line and the close and nothing else is stopped:
 
 ```json
-{"type":"protocol_error","protocol_error":{"message_type":"hello","message":"unsupported protocol major 1: host speaks 2.0"}}
+{"type":"protocol_error","protocol_error":{"message_type":"hello","message":"unsupported protocol major 1: host speaks 2.1"}}
 ```
 
 ### Session start and end
