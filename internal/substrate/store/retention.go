@@ -131,6 +131,11 @@ func (s *Store) preload() error {
 		}
 		env, parseErr := parseEnvelope(data, entry.Key)
 		if parseErr != nil {
+			if s.opts.Passive {
+				s.blocked[id] = true
+				s.diagnostic(Problem{Code: "unavailable", Path: ns, Message: fmt.Sprintf("%v: %v; left in place, persistence disabled this run", ErrUnavailable, parseErr)}, "")
+				continue
+			}
 			if err = s.quarantine(entry, ns, parseErr); err != nil {
 				s.blocked[id] = true
 			}
@@ -361,7 +366,7 @@ func (s *Store) run() {
 	defer close(s.done)
 	var gcTimer Timer
 	var gcC <-chan time.Time // nil blocks forever: no periodic GC
-	if !s.opts.NoBackgroundGC {
+	if !s.opts.Passive {     // passive: no startup or periodic GC
 		gcTimer = s.clock.NewTimer(gcInterval)
 		gcC = gcTimer.C()
 		_, _ = s.GC(context.Background())
@@ -380,7 +385,7 @@ func (s *Store) run() {
 			ctx := s.closeCtx
 			s.mu.Unlock()
 			err := s.flushDue(ctx, true)
-			if s.opts.Instance.Named() && ctx.Err() == nil {
+			if s.opts.Instance.Named() && !s.opts.Passive && ctx.Err() == nil {
 				err = errors.Join(err, s.writeMeta(true))
 			}
 			s.mu.Lock()

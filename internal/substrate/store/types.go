@@ -161,8 +161,11 @@ type Options struct {
 	Post func(func()) bool
 	// Keyring overrides the OS keyring, normally only in tests.
 	Keyring Keyring
-	// NoBackgroundGC skips the worker's startup and periodic GC; an explicit GC still works.
-	NoBackgroundGC bool
+	// Passive makes Open write nothing on its own: no startup or periodic GC,
+	// no preload quarantine (an unparsable record stays and blocks its slice's
+	// persistence) and no metadata reset or write. Explicit GC and ResetSecrets
+	// still act.
+	Passive bool
 	// InstanceDeps injects log-GC liveness probes; nil uses instance defaults.
 	InstanceDeps *instance.Deps
 }

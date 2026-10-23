@@ -182,8 +182,10 @@ func Open(opts Options) (*Store, error) {
 		if err = s.loadMeta(); err != nil {
 			return nil, err
 		}
-		if err = s.writeMeta(false); err != nil {
-			return nil, err
+		if !opts.Passive {
+			if err = s.writeMeta(false); err != nil {
+				return nil, err
+			}
 		}
 	}
 	// No worker starts until preloading succeeds; startup failure leaks no goroutine.
@@ -264,6 +266,9 @@ func (s *Store) loadMeta() error {
 		err = fmt.Errorf("metadata must be a JSON object")
 	}
 	if err != nil {
+		if s.opts.Passive {
+			return nil // left in place: a passive Open resets nothing
+		}
 		return s.quarantineFile(entry, "instance metadata", "metadata_reset", err)
 	}
 	s.lastClean = previous.LastClean
