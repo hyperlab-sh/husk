@@ -164,10 +164,16 @@ type HookError struct {
 	// becomes its own internal/invalid_reply error), so this carries the
 	// member whole.
 	Data map[string]any
+	// Cause is the error this one wraps, such as the context error behind a
+	// cancelled wait; nil when none.
+	Cause error
 }
 
 // Error implements error.
 func (e *HookError) Error() string { return string(e.Code) + ": " + e.Message }
+
+// Unwrap returns Cause.
+func (e *HookError) Unwrap() error { return e.Cause }
 
 // HookResult is one subscriber's entry in the outcome.
 type HookResult struct {

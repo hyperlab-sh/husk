@@ -73,6 +73,8 @@ func (r *Root) buildServer() error {
 			Loop:    r.loopSeam,
 			Handles: pods.NewPodSlices(r.pods),
 			Cleaner: storeCleaner{r},
+			Hooks:   hookFirer{r},
+			Logf:    r.logf,
 		}),
 	})
 	co := r.rt.Coordinator

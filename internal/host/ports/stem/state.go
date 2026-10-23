@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/hyperlab-sh/husk/internal/host/contracts"
+	"github.com/hyperlab-sh/husk/internal/stem/hooks"
 	"github.com/hyperlab-sh/husk/internal/substrate/state"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
@@ -27,14 +28,36 @@ type SliceCleaner interface {
 	DeleteSlice(ctx context.Context, namespace string) error
 }
 
+// BeforeStateClearHook is the id of the gate hook Clear fires before it
+// deletes anything.
+const BeforeStateClearHook = "husk.before-state-clear"
+
+// HookFirer is how a host module fires a husk.* hook from inside its own
+// operation; the composition root implements it over the runner. Fire is
+// called off the loop (handler goroutines): it posts runner.Call onto the
+// loop and waits for the outcome or ctx. It is never called on the loop,
+// where the wait would deadlock.
+//
+// It returns the runner's refusal as a *hooks.HookError (denied, not_found,
+// invalid_params, busy) when Call refused; a *hooks.HookError with code
+// unavailable when the loop no longer runs; a *hooks.HookError with code
+// cancelled wrapping ctx.Err() when ctx ends before the outcome; otherwise
+// the Outcome and nil.
+type HookFirer interface {
+	Fire(ctx context.Context, hook string, data map[string]any) (hooks.Outcome, error)
+}
+
 // StatePortOptions configures NewStatePort. State and Loop are required;
 // Handles is required for plugin writes (its absence fails those calls with
-// internal), Cleaner is optional.
+// internal), Cleaner, Hooks and Logf are optional. Without Hooks, Clear
+// fires nothing; a nil Logf discards.
 type StatePortOptions struct {
 	State   *state.State
 	Loop    Loop
 	Handles SliceHandles
 	Cleaner SliceCleaner
+	Hooks   HookFirer
+	Logf    func(format string, args ...any)
 }
 
 // State serves contracts.StatePort over the real substrate State: reads and
@@ -47,6 +70,8 @@ type State struct {
 	loop    Loop
 	handles SliceHandles
 	cleaner SliceCleaner
+	hooks   HookFirer
+	logf    func(format string, args ...any)
 
 	mu       sync.Mutex
 	watchers map[*stateWatch]struct{}
@@ -76,6 +101,8 @@ func NewStatePort(opts StatePortOptions) *State {
 		loop:     opts.Loop,
 		handles:  opts.Handles,
 		cleaner:  opts.Cleaner,
+		hooks:    opts.Hooks,
+		logf:     opts.Logf,
 		watchers: map[*stateWatch]struct{}{},
 	}
 	opts.State.OnFlush(w.fanOut)
@@ -181,14 +208,18 @@ func (w *State) Watch(ctx context.Context, _ contracts.Caller, slices []string, 
 // namespace to its initial value (D51: clear is the user's own action,
 // reachable only from the user's CLI; a Stem caller over the port is not
 // the user here). Persisted copies are deleted through the Store seam
-// first; the in-memory clear runs on the loop.
-//
-// force is accepted and ignored until unit 6 (hooks-host-fired,
-// husk-m8z.19.6) fires husk.before-state-clear here; force then skips the
-// hook entirely.
-func (w *State) Clear(ctx context.Context, c contracts.Caller, namespace string, _ bool) error {
+// first; the in-memory clear runs on the loop. Unless force is set,
+// husk.before-state-clear is fired first and a veto, a shutdown or an ended
+// ctx stops the clear before anything is deleted (hooks.md, Host-fired
+// hooks).
+func (w *State) Clear(ctx context.Context, c contracts.Caller, namespace string, force bool) error {
 	if c.Kind != contracts.CallerCLI {
 		return contracts.NewError(protocol.CodeDenied, "state.clear clears the user's own data; only the user's CLI may do it", nil)
+	}
+	if !force {
+		if err := w.beforeClear(ctx, namespace); err != nil {
+			return err
+		}
 	}
 	if w.cleaner != nil {
 		// Persisted copies go first, mirroring store.md's documented clear
@@ -205,6 +236,70 @@ func (w *State) Clear(ctx context.Context, c contracts.Caller, namespace string,
 		return err
 	}
 	return nil
+}
+
+// beforeClear fires husk.before-state-clear for a registered slice and maps
+// what Fire returns to nil (proceed) or the error Clear answers with. A slice
+// that is not registered has no owner to name, so nothing is asked and the
+// clear falls through to its own not_found. The hook data carries the slice
+// name and owner, never the value.
+func (w *State) beforeClear(ctx context.Context, namespace string) error {
+	if w.hooks == nil {
+		return nil
+	}
+	entry, ok := w.st.Snapshot().Slices[namespace]
+	if !ok {
+		return nil
+	}
+	out, err := w.hooks.Fire(ctx, BeforeStateClearHook, map[string]any{"slice": namespace, "owner": entry.Owner})
+	if err != nil {
+		var he *hooks.HookError
+		if !errors.As(err, &he) {
+			w.log("state.clear: firing %s failed: %v", BeforeStateClearHook, err)
+			return coded(protocol.CodeInternal, "firing "+BeforeStateClearHook+" failed")
+		}
+		switch he.Code {
+		case protocol.CodeBusy:
+			w.log("state.clear: %s skipped, clearing %s anyway: %s", BeforeStateClearHook, namespace, he.Message)
+			return nil
+		case protocol.CodeUnavailable:
+			return coded(protocol.CodeUnavailable, "the host is shutting down")
+		case protocol.CodeCancelled:
+			if errors.Is(context.Cause(ctx), contracts.ErrShutdown) {
+				return ctxError(ctx)
+			}
+			return coded(protocol.CodeCancelled, "request ended before the hook answered; nothing was cleared")
+		default:
+			w.log("state.clear: BUG: %s refused with %s: %s", BeforeStateClearHook, he.Code, he.Message)
+			return coded(protocol.CodeInternal, "firing "+BeforeStateClearHook+" failed")
+		}
+	}
+	for _, r := range out.Results {
+		if r.Err != nil && r.Err.Code == protocol.CodeCancelled && r.Err.Data["reason"] == "shutdown" {
+			return coded(protocol.CodeUnavailable, "the host is shutting down")
+		}
+	}
+	for _, r := range out.Results {
+		if r.Err != nil {
+			w.log("state.clear: %s: subscriber %s counted as allow: %s", BeforeStateClearHook, r.Plugin, r.Err.Error())
+		}
+	}
+	if !out.Allowed {
+		vetoes := make([]map[string]any, len(out.Vetoes))
+		for i, v := range out.Vetoes {
+			vetoes[i] = map[string]any{"plugin_id": v.Plugin, "reason": v.Reason}
+		}
+		return contracts.NewError(protocol.CodeDenied, "clearing "+namespace+" was vetoed",
+			map[string]any{"reason": "vetoed", "vetoes": vetoes})
+	}
+	return nil
+}
+
+// log reports through the injected logger; nil discards.
+func (w *State) log(format string, args ...any) {
+	if w.logf != nil {
+		w.logf(format, args...)
+	}
 }
 
 // writeHandle authorizes a plugin write and resolves the Pod-held handle.
