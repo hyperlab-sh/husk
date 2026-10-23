@@ -25,7 +25,7 @@ func stateCommand() command {
 			"watch": {usage: "husk state watch [<slice>...]", timeout: openingBound, stream: true, run: runStateWatch},
 			"set":   {usage: "husk state set <json>", timeout: t, run: runStateSet},
 			"patch": {usage: "husk state patch <json> [--if-revision <n>]", timeout: t, accepts: []string{"if-revision"}, run: runStatePatch},
-			"clear": {usage: "husk state clear <namespace>", timeout: t, run: runStateClear},
+			"clear": {usage: "husk state clear <namespace> [--force]", timeout: t, accepts: []string{"force"}, run: runStateClear},
 		},
 	}
 }
@@ -172,15 +172,46 @@ func runStatePatch(ctx context.Context, inv *Invocation, args []string) error {
 }
 
 // runStateClear is husk state clear: reset one namespace to its initial value.
+// --force skips the husk.before-state-clear gate; without it a vetoed clear
+// is the instance's denied reply, and the table mode lists each veto.
 func runStateClear(ctx context.Context, inv *Invocation, args []string) error {
 	if len(args) != 1 {
 		return output.Usage("state clear takes <namespace>")
 	}
-	raw, err := inv.call(ctx, protocol.MethodStateClear, map[string]any{"namespace": args[0]})
+	params := map[string]any{"namespace": args[0]}
+	if inv.force {
+		params["force"] = true
+	}
+	raw, err := inv.call(ctx, protocol.MethodStateClear, params)
 	if err != nil {
-		return err
+		return listVetoes(inv, err)
 	}
 	return inv.out.Result(raw)
+}
+
+// listVetoes appends each veto of a vetoed clear to the table-mode message as
+// a "plugin_id: reason" line. The error's code, data and exit stay, and the
+// JSON message is untouched: its data.vetoes already carries them.
+func listVetoes(inv *Invocation, err error) error {
+	var oe *output.Error
+	if inv.out.Format != output.Table || !errors.As(err, &oe) || oe.Exit != output.ExitRemote || oe.Code != string(protocol.CodeDenied) {
+		return err
+	}
+	var data struct {
+		Reason string `json:"reason"`
+		Vetoes []struct {
+			Plugin string `json:"plugin_id"`
+			Reason string `json:"reason"`
+		} `json:"vetoes"`
+	}
+	if json.Unmarshal(oe.Data, &data) != nil || data.Reason != "vetoed" || len(data.Vetoes) == 0 {
+		return err
+	}
+	listed := *oe
+	for _, v := range data.Vetoes {
+		listed.Message += "\n  " + v.Plugin + ": " + v.Reason
+	}
+	return &listed
 }
 
 // dumpHint points a dump the instance refused as too large at state get

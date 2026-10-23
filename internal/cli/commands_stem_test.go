@@ -253,7 +253,12 @@ func TestStemCommandsUsageErrorsSendNothing(t *testing.T) {
 		{"state patch non-numeric revision", []string{"state", "patch", `{}`, "--if-revision", "x"}, ""},
 		{"state patch fractional revision", []string{"state", "patch", `{}`, "--if-revision", "1.5"}, ""},
 		{"state clear without namespace", []string{"state", "clear"}, ""},
-		{"state clear --force is not accepted yet", []string{"state", "clear", "p.state", "--force"}, ""},
+		{"state clear --force=maybe", []string{"state", "clear", "p.state", "--force=maybe"}, ""},
+		{"state get takes no --force", []string{"state", "get", "s", "--force"}, ""},
+		{"hook list takes no --force", []string{"hook", "list", "--force"}, ""},
+		{"hook list with an argument", []string{"hook", "list", "x"}, ""},
+		{"hook call does not exist", []string{"hook", "call", "x.y"}, ""},
+		{"hook without a verb", []string{"hook"}, ""},
 		{"state get takes no --if-revision", []string{"state", "get", "s", "--if-revision", "1"}, ""},
 		{"state patch takes no --owner", []string{"state", "patch", `{}`, "--owner", "x"}, ""},
 		{"action list with an argument", []string{"action", "list", "x"}, ""},
@@ -409,13 +414,10 @@ func TestWatchHelpListsEveryVerb(t *testing.T) {
 	if got := h.run("state", "--help"); got != 0 {
 		t.Fatalf("exit %d", got)
 	}
-	for _, s := range []string{"husk state get <slice>", "husk state watch [<slice>...]", "husk state patch <json> [--if-revision <n>]", "husk state clear <namespace>"} {
+	for _, s := range []string{"husk state get <slice>", "husk state watch [<slice>...]", "husk state patch <json> [--if-revision <n>]", "husk state clear <namespace> [--force]"} {
 		if !strings.Contains(h.out.String(), s) {
 			t.Fatalf("help lacks %q:\n%s", s, h.out.String())
 		}
-	}
-	if strings.Contains(h.out.String(), "--force") {
-		t.Fatalf("help mentions --force:\n%s", h.out.String())
 	}
 }
 
