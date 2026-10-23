@@ -318,6 +318,7 @@ func (r *Root) buildServices() error {
 
 func (r *Root) buildStem() error {
 	r.catalog = newCatalogView(r.store)
+	r.catalog.logf = r.logf
 	r.decl = newDeclarations(r.st)
 	live := dispatcher.StateLiveness(r.st)
 

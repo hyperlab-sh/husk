@@ -1,9 +1,11 @@
 package host
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -173,15 +175,26 @@ func (n podNotifier) Notify(m protocol.Message) error {
 // documents: who publishes which slot, which hooks exist and who subscribes.
 // It implements surfaces.Publications and hooks.Catalog.
 type catalogView struct {
-	store          *store.Store
+	declared       func() map[string]store.Doc
+	logf           func(format string, args ...any)
 	slotOwner      map[string]string
-	hookOwner      map[string]string
-	hookSubs       map[string][]string
+	hooks          map[string]hooks.HookDef
+	hookSubs       map[string][]hooks.Subscription
+	problems       map[string][]string // plugin id -> hook catalog problems
+	badTimeout     map[string]bool     // hook ids already logged for a zero timeout
 	onSlotsChanged func()
 }
 
 func newCatalogView(s *store.Store) *catalogView {
-	return &catalogView{store: s, slotOwner: map[string]string{}, hookOwner: map[string]string{}, hookSubs: map[string][]string{}}
+	return &catalogView{
+		declared:   func() map[string]store.Doc { return s.Declared(store.DeclaredPlugins) },
+		logf:       func(string, ...any) {},
+		slotOwner:  map[string]string{},
+		hooks:      hostHookDefs(),
+		hookSubs:   map[string][]hooks.Subscription{},
+		problems:   map[string][]string{},
+		badTimeout: map[string]bool{},
+	}
 }
 
 var _ surfaces.Publications = (*catalogView)(nil)
@@ -194,49 +207,67 @@ func (c *catalogView) Owner(slot string) (string, bool) {
 
 var _ hooks.Catalog = (*catalogView)(nil)
 
-// Lookup implements hooks.Catalog. Until the declared documents carry kind,
-// timeout and priority, every declared hook is a gate with the Calls default
-// timeout, owned by the first plugin (in id order) that declares it.
+// hostHooks is the host's own hook list, declared under the husk owner.
+var hostHooks = []hooks.HookDef{
+	{ID: "husk.before-state-clear", Owner: hooks.HostOwner, Kind: hooks.Gate, Timeout: 2 * time.Second, Title: "Before state clear"},
+}
+
+// hostHookDefs returns the host hooks keyed by id.
+func hostHookDefs() map[string]hooks.HookDef {
+	defs := make(map[string]hooks.HookDef, len(hostHooks))
+	for _, def := range hostHooks {
+		defs[def.ID] = def
+	}
+	return defs
+}
+
+// Lookup implements hooks.Catalog.
 func (c *catalogView) Lookup(hook string) (hooks.HookDef, bool) {
-	owner, ok := c.hookOwner[hook]
-	if !ok {
-		return hooks.HookDef{}, false
-	}
-	return hooks.HookDef{ID: hook, Owner: owner, Kind: hooks.Gate, Timeout: calls.DefaultTimeout}, true
+	def, ok := c.hooks[hook]
+	return def, ok
 }
 
-// Subscribers implements hooks.Catalog: every registration at the default
-// priority, so the order is the plugin id.
+// Subscribers implements hooks.Catalog: sorted by priority, then plugin id.
 func (c *catalogView) Subscribers(hook string) []hooks.Subscription {
-	ids := slices.Clone(c.hookSubs[hook])
-	slices.Sort(ids)
-	out := make([]hooks.Subscription, len(ids))
-	for i, id := range ids {
-		out[i] = hooks.Subscription{Plugin: id, Priority: 10}
-	}
-	return out
+	return slices.Clone(c.hookSubs[hook])
 }
 
-// List implements hooks.Catalog.
+// List implements hooks.Catalog: every hook, ordered by id.
 func (c *catalogView) List() []hooks.HookDef {
-	out := make([]hooks.HookDef, 0, len(c.hookOwner))
-	for id := range c.hookOwner {
-		def, _ := c.Lookup(id)
+	out := make([]hooks.HookDef, 0, len(c.hooks))
+	for _, def := range c.hooks {
 		out = append(out, def)
 	}
 	slices.SortFunc(out, func(a, b hooks.HookDef) int { return strings.Compare(a.ID, b.ID) })
 	return out
 }
 
+// Problems returns the hook catalog problems of each plugin from the last
+// rebuild: refused declarations, by plugin id.
+func (c *catalogView) Problems() map[string][]string { return maps.Clone(c.problems) }
+
 type idDecl struct {
 	ID string `json:"id"`
 }
 
+type hookDecl struct {
+	ID          string `json:"id"`
+	Kind        string `json:"kind"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	TimeoutMs   int    `json:"timeout_ms"`
+}
+
+type hookReg struct {
+	ID       string `json:"id"`
+	Priority int    `json:"priority"`
+}
+
 type catalogDoc struct {
-	PublishedSlots    []idDecl `json:"published_slots"`
-	HooksDeclared     []idDecl `json:"hooks_declared"`
-	HookRegistrations []idDecl `json:"hook_registrations"`
-	Subscriptions     []string `json:"subscriptions"`
+	PublishedSlots    []idDecl   `json:"published_slots"`
+	HooksDeclared     []hookDecl `json:"hooks_declared"`
+	HookRegistrations []hookReg  `json:"hook_registrations"`
+	Subscriptions     []string   `json:"subscriptions"`
 	EventsDeclared    []struct {
 		Name     string `json:"name"`
 		Coalesce *bool  `json:"coalesce"`
@@ -246,15 +277,15 @@ type catalogDoc struct {
 // refresh re-reads the declared documents and returns the Event bus table.
 // When the slot-to-publisher answer changed it calls onSlotsChanged (D58).
 func (c *catalogView) refresh() eventbus.Table {
-	docs := c.store.Declared(store.DeclaredPlugins)
+	docs := c.declared()
 	ids := make([]string, 0, len(docs))
 	for id := range docs {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
 	owners := map[string]string{}
-	hookOwners := map[string]string{}
-	subs := map[string][]string{}
+	parsed := map[string]catalogDoc{}
+	subs := map[string][]hooks.Subscription{}
 	table := eventbus.Table{Subscribe: map[string][]string{}}
 	for _, id := range ids {
 		raw, err := json.Marshal(docs[id])
@@ -265,18 +296,14 @@ func (c *catalogView) refresh() eventbus.Table {
 		if json.Unmarshal(raw, &d) != nil {
 			continue
 		}
+		parsed[id] = d
 		for _, s := range d.PublishedSlots {
 			if _, taken := owners[s.ID]; !taken {
 				owners[s.ID] = id
 			}
 		}
-		for _, h := range d.HooksDeclared {
-			if _, taken := hookOwners[h.ID]; !taken {
-				hookOwners[h.ID] = id
-			}
-		}
 		for _, h := range d.HookRegistrations {
-			subs[h.ID] = append(subs[h.ID], id)
+			subs[h.ID] = append(subs[h.ID], hooks.Subscription{Plugin: id, Priority: h.Priority})
 		}
 		if len(d.Subscriptions) > 0 {
 			table.Subscribe[id] = d.Subscriptions
@@ -287,17 +314,102 @@ func (c *catalogView) refresh() eventbus.Table {
 			}
 		}
 	}
+	for _, list := range subs {
+		slices.SortFunc(list, func(a, b hooks.Subscription) int {
+			return cmp.Or(cmp.Compare(a.Priority, b.Priority), strings.Compare(a.Plugin, b.Plugin))
+		})
+	}
+	defs, problems := c.buildHooks(ids, parsed)
 	changed := len(owners) != len(c.slotOwner)
 	for k, v := range owners {
 		if c.slotOwner[k] != v {
 			changed = true
 		}
 	}
-	c.slotOwner, c.hookOwner, c.hookSubs = owners, hookOwners, subs
+	c.slotOwner, c.hooks, c.hookSubs = owners, defs, subs
+	c.reportProblems(problems)
 	if changed && c.onSlotsChanged != nil {
 		c.onSlotsChanged()
 	}
 	return table
+}
+
+// buildHooks applies the two catalog rules of hooks.md in order over the
+// loaded plugins (those with declared documents, whatever their liveness) and
+// adds the host hooks. It returns the catalog and the problems by plugin id.
+func (c *catalogView) buildHooks(ids []string, parsed map[string]catalogDoc) (map[string]hooks.HookDef, map[string][]string) {
+	problems := map[string][]string{}
+	problem := func(plugin, format string, args ...any) {
+		problems[plugin] = append(problems[plugin], fmt.Sprintf(format, args...))
+	}
+	// Rule 1, namespace: a hook id belongs to the loaded plugin with the
+	// longest id followed by a dot that prefixes it.
+	nsOwner := func(hook string) string {
+		best := ""
+		for _, id := range ids {
+			if len(id) > len(best) && strings.HasPrefix(hook, id+".") {
+				best = id
+			}
+		}
+		return best
+	}
+	type claim struct {
+		plugin string
+		decl   hookDecl
+	}
+	claims := map[string][]claim{}
+	for _, id := range ids {
+		for _, h := range parsed[id].HooksDeclared {
+			if owner := nsOwner(h.ID); owner != id {
+				if owner == "" {
+					problem(id, "hook %q is outside its namespace", h.ID)
+				} else {
+					problem(id, "hook %q is inside the namespace of loaded plugin %q", h.ID, owner)
+				}
+				continue
+			}
+			claims[h.ID] = append(claims[h.ID], claim{id, h})
+		}
+	}
+	// Rule 2, duplicate: still contested ids are refused for every declarer.
+	defs := hostHookDefs()
+	zero := map[string]bool{}
+	for hook, list := range claims {
+		if len(list) > 1 {
+			for _, cl := range list {
+				problem(cl.plugin, "hook %q is declared by more than one plugin", hook)
+			}
+			continue
+		}
+		cl := list[0]
+		def := hooks.HookDef{
+			ID: hook, Owner: cl.plugin, Kind: hooks.Kind(cl.decl.Kind),
+			Timeout: time.Duration(cl.decl.TimeoutMs) * time.Millisecond,
+			Title:   cl.decl.Title, Description: cl.decl.Description,
+		}
+		if def.Timeout <= 0 {
+			zero[hook] = true
+			if !c.badTimeout[hook] {
+				c.logf("hooks: %s declares %q without a timeout; left out of the catalog", cl.plugin, hook)
+			}
+			continue
+		}
+		defs[hook] = def
+	}
+	c.badTimeout = zero
+	return defs, problems
+}
+
+// reportProblems logs each problem that was not in the previous rebuild.
+func (c *catalogView) reportProblems(now map[string][]string) {
+	for plugin, list := range now {
+		for _, p := range list {
+			if !slices.Contains(c.problems[plugin], p) {
+				c.logf("hooks: plugin %s: %s", plugin, p)
+			}
+		}
+	}
+	c.problems = now
 }
 
 // ---- declarations ----

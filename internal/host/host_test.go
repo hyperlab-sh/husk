@@ -171,6 +171,7 @@ type fakes struct {
 	mu      sync.Mutex
 	procs   map[string]*fakeProc
 	started chan string
+	onSend  func(p *fakeProc, m protocol.Message) // set before the host runs
 }
 
 func newFakes() *fakes { return &fakes{procs: map[string]*fakeProc{}, started: make(chan string, 16)} }
@@ -216,6 +217,9 @@ func (p *fakeProc) Send(m protocol.Message) error {
 	p.mu.Lock()
 	p.sent = append(p.sent, m)
 	p.mu.Unlock()
+	if p.f.onSend != nil {
+		p.f.onSend(p, m)
+	}
 	return nil
 }
 func (p *fakeProc) MarkShutdown()         {}
