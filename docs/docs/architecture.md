@@ -314,7 +314,7 @@ catalog the rest of the host reads:
   "id": "a", "name": "A", "version": "1", "command": ["./a"],
   "surfaces": [{"id": "main-stage"}],
   "published_slots": [{"id":"a.agent-line-action","title":"Row actions","kind":"inline"}],
-  "hooks": {"publish": [{"id":"a.before-refresh","title":"Before refresh"}]},
+  "hooks": {"publish": [{"id":"a.before-refresh","kind":"gate","title":"Before refresh"}]},
   "events": {"publish": [{"name":"a.selection-changed"}]}
 }
 ```
