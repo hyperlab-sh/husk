@@ -33,8 +33,8 @@ This spec fixes four things:
 2. **Rail buttons are tiles, closer to square**, drawn from whole cells.
 3. **The top bar is the brand and the transient status pills**, nothing else.
 4. **The bottom bar shows the layout label at the left and the theme name at
-   the right**, around the key hints. The theme name is clickable; it opens the
-   theme selector once one exists.
+   the right**, around the key hints. The theme name is clickable; it runs
+   `husk.theme.select`, which opens the theme selector once that lands.
 
 Husk has no normal/insert modes and this spec introduces none. Where this
 spec's requirements say "mode", they mean the layout label defined under "The
@@ -273,11 +273,15 @@ value `theme.changed` carries). Theme copies the `theme.name` setting into it,
 and that setting's default is the built-in palette's name
 ([Services](services.md), "Theme"), so with `theme.name` unset the slot shows
 `CharmTone`. Should the name be empty (`theme.name` set to `""`) the slot
-shows `theme`, so the click target below keeps a visible extent. The
+shows `theme`, so the click target below keeps a visible extent. With named
+themes ([Services](services.md), "Named themes"; not landed) the name is
+always the selected theme's name and `""` selects the built-in palette, so the
+empty case then cannot arise; the `theme` fallback stays as a guard. The
 frontend reads the name from `Frontend.Palette()`, never from Settings.
 
 **Clicking the theme name** (a left click on any cell of the pill) opens the
-theme selector once the theme selector spec lands, which names the host action the click runs. Until then the click is consumed
+theme selector: it runs the host action `husk.theme.select` ([Services](services.md),
+"The theme selector"; not landed). Until that lands the click is consumed
 (it reaches no surface and starts no drag) and does nothing; hover does not
 change the pill. No other cell of the bottom bar is a click target.
 
@@ -373,9 +377,9 @@ All in `package main` under `cmd/husk`. `pkg/` is untouched.
 | `mode_label_test.go` | Rewritten for the table above and the inverted layout rule; other `cmd/husk` tests that assume zero plugins lay out no side rects, or read the top-bar label (`focus_fallback_test.go`, `surface_owner_test.go`), are updated the same way |
 
 A click on the theme pill is routed in `input.go` before surface hit-testing,
-as the rail and the dividers are. The action it runs is left for the theme
-selector spec; until then the handler is a no-op that still consumes the
-click.
+as the rail and the dividers are. The action it runs is `husk.theme.select`
+([Services](services.md), "The theme selector"); until that lands the handler
+is a no-op that still consumes the click.
 
 [Architecture](../architecture.md) ("Slots", "Surfaces and frames", "Minimum
 size", "Input routing"), [Services](services.md) ("Settings", `theme.name`),
@@ -438,4 +442,5 @@ size", "Input routing"), [Services](services.md) ("Settings", `theme.name`),
 1. `thread-row-status`: does it get a rect (a narrow column to the right of
    `sidebar-list`, inside the sidebar width), or is it retired from the
    surface list? Either is a later spec; this one leaves it undrawn.
-2. The host action the theme pill runs is the theme selector spec's to name.
+2. Resolved: the theme pill runs `husk.theme.select` ([Services](services.md),
+   "The theme selector").
