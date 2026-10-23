@@ -41,8 +41,8 @@ func TestManifestDeclarationValidation(t *testing.T) {
 		{"unknown surface in slots is refused before regions are checked", `["nowhere"]`, `,"published_slots":[` + region("nowhere", 0, 1, 2, 2) + `]`, `invalid or duplicate surface "nowhere"`},
 		{"unknown surface beside a valid claim", `["main-stage","nowhere"]`, `,"published_slots":[` + region("nowhere", 0, 1, 2, 2) + `]`, `invalid or duplicate surface "nowhere"`},
 		{"duplicate slot", claim, `,"published_slots":[{"id":"acme.p.rows","kind":"inline"},{"id":"acme.p.rows","kind":"inline"}]`, `invalid or duplicate slot id "acme.p.rows"`},
-		{"foreign hook", claim, `,"hooks":[{"id":"other.before"}]`, `invalid or duplicate hook id "other.before"`},
-		{"duplicate hook", claim, `,"hooks":[{"id":"acme.p.before"},{"id":"acme.p.before"}]`, `invalid or duplicate hook id "acme.p.before"`},
+		{"foreign hook", claim, `,"hooks":[{"id":"other.before"}]`, `hooks.publish[0].id: "other.before" must be "acme.p."`},
+		{"duplicate hook", claim, `,"hooks":[{"id":"acme.p.before"},{"id":"acme.p.before"}]`, `hooks.publish[1].id: duplicate hook id "acme.p.before"`},
 		{"event with space", claim, `,"events":[{"id":"acme.p.a b"}]`, `invalid or duplicate event id "acme.p.a b"`},
 		{"empty event id", claim, `,"events":[{"id":""}]`, `invalid or duplicate event id ""`},
 	} {
@@ -62,8 +62,8 @@ func TestManifestDeclarationValidation(t *testing.T) {
 // hook published under hooks.publish the same way.
 func TestV2ManifestRefusesForeignHook(t *testing.T) {
 	spec, _, err := convertBytes(t, `{"manifest_version":2,"protocol":2,"id":"acme.p","name":"P","version":"1","command":["./plugin"],`+
-		`"hooks":{"publish":[{"id":"other.before"}]}}`, true)
-	if err == nil || !strings.Contains(err.Error(), `invalid or duplicate hook id "other.before"`) || spec != nil {
+		`"hooks":{"publish":[{"id":"other.before","kind":"gate"}]}}`, true)
+	if err == nil || !strings.Contains(err.Error(), `hooks.publish[0].id: "other.before" must be`) || spec != nil {
 		t.Fatalf("spec = %+v, err = %v", spec, err)
 	}
 }
@@ -93,7 +93,7 @@ func TestHookAndEventTitleAndDescriptionReachTheCatalog(t *testing.T) {
 			`"hooks":[{"id":"acme.p.before","title":"Before","description":"Runs first"}],` +
 			`"events":[{"id":"acme.p.changed","title":"Changed","description":"State moved"}]}`, false},
 		{"v2", `{"manifest_version":2,"protocol":2,"id":"acme.p","name":"P","version":"1","command":["./plugin"],` +
-			`"hooks":{"publish":[{"id":"acme.p.before","title":"Before","description":"Runs first"}]},` +
+			`"hooks":{"publish":[{"id":"acme.p.before","kind":"gate","title":"Before","description":"Runs first"}]},` +
 			`"events":{"publish":[{"name":"acme.p.changed","title":"Changed","description":"State moved"}]}}`, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -112,7 +112,7 @@ func TestHookAndEventTitleAndDescriptionReachTheCatalog(t *testing.T) {
 			if err := json.Unmarshal(data, &catalog); err != nil {
 				t.Fatal(err)
 			}
-			wantHook := HookDecl{ID: "acme.p.before", Title: "Before", Description: "Runs first"}
+			wantHook := HookDecl{ID: "acme.p.before", Kind: HookGate, Title: "Before", Description: "Runs first", TimeoutMs: 10000}
 			if len(catalog.Hooks) != 1 || catalog.Hooks[0] != wantHook {
 				t.Fatalf("hooks = %+v, want %+v", catalog.Hooks, wantHook)
 			}

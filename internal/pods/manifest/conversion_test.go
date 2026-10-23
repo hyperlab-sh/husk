@@ -65,7 +65,7 @@ func TestNormalizedCatalogFocusProblemsAndExactCaseSettings(t *testing.T) {
  {"key":"x","action":"other.new","focus":"sidebar-list"},
  {"key":"q","action":"Case.Owner.new"}],
  "events":{"subscribe":["state.changed","Case.Owner.*"],"publish":[{"name":"Case.Owner.changed","coalesce":false}]},
- "hooks":{"publish":[{"id":"Case.Owner.before"}],"subscribe":["other.before"]},
+ "hooks":{"publish":[{"id":"Case.Owner.before","kind":"collect"}],"subscribe":["other.before"]},
  "published_slots":[{"id":"Case.Owner.toolbar","kind":"region","rect":{"surface":"sidebar-list","x":0,"y":0,"width":2,"height":1}}],
  "state":{"scope":"user","persistent":true,"retention":{"policy":"keep-last-n","n":5},"max_bytes":1024},
  "secrets":[{"name":"git.token","purpose":"Push","required":true}],

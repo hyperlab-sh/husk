@@ -123,6 +123,11 @@ func convert(src Source, modern bool) (*Spec, []Warning, error) {
 				return nil, nil, err
 			}
 		}
+		for i := range s.HooksDeclared {
+			if s.HooksDeclared[i].TimeoutMs == 0 {
+				s.HooksDeclared[i].TimeoutMs = DefaultHookTimeoutMs
+			}
+		}
 		if err := alias(fields, "slice", "state", &s.Slice); err != nil {
 			return nil, nil, err
 		}
@@ -144,17 +149,12 @@ func convert(src Source, modern bool) (*Spec, []Warning, error) {
 			s.EventsDeclared = append(s.EventsDeclared, events.Publish...)
 		}
 		if b := fields["hooks"]; b != nil {
-			var hooks struct {
-				Subscribe []string   `json:"subscribe"`
-				Publish   []HookDecl `json:"publish"`
-			}
-			if err := json.Unmarshal(b, &hooks); err != nil {
+			decls, regs, err := parseHooks(b)
+			if err != nil {
 				return nil, nil, err
 			}
-			s.HooksDeclared = append(s.HooksDeclared, hooks.Publish...)
-			for _, id := range hooks.Subscribe {
-				s.HookRegistrations = append(s.HookRegistrations, HookRegistration{ID: id})
-			}
+			s.HooksDeclared = append(s.HooksDeclared, decls...)
+			s.HookRegistrations = append(s.HookRegistrations, regs...)
 		}
 		var rails []struct {
 			RailItemDecl
@@ -217,6 +217,11 @@ func convert(src Source, modern bool) (*Spec, []Warning, error) {
 		}
 		if err := decodeField(fields, "hooks", &s.HooksDeclared); err != nil {
 			return nil, warnings, err
+		}
+		// The v1 wait-for-everyone behaviour is the gate kind.
+		for i := range s.HooksDeclared {
+			s.HooksDeclared[i].Kind = HookGate
+			s.HooksDeclared[i].TimeoutMs = DefaultHookTimeoutMs
 		}
 		var events []struct{ ID, Title, Description string }
 		if err := decodeField(fields, "events", &events); err != nil {
@@ -301,15 +306,8 @@ func validateDeclarations(s *Spec) error {
 			return err
 		}
 	}
-	for _, h := range s.HooksDeclared {
-		if err := check("hook", h.ID); err != nil {
-			return err
-		}
-	}
-	for _, h := range s.HookRegistrations {
-		if !eventPattern(h.ID) || strings.Contains(h.ID, "*") || !strings.Contains(h.ID, ".") {
-			return errors.New("invalid hook registration")
-		}
+	if err := validateHooks(s); err != nil {
+		return err
 	}
 	for _, pattern := range s.Subscriptions {
 		if !eventPattern(pattern) {
