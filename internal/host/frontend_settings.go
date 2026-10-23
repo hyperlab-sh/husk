@@ -12,13 +12,19 @@ import (
 
 // Themes implements contracts.Frontend. Any goroutine; snapshot only.
 func (r *Root) Themes() []contracts.ThemeEntry {
-	themes, _ := (ports.Theme{Svc: r.rt.Theme}).List(context.Background(), contracts.Caller{Kind: protocol.CallerHost})
+	themes, err := (ports.Theme{Svc: r.rt.Theme}).List(context.Background(), contracts.Caller{Kind: protocol.CallerHost})
+	if err != nil {
+		r.logf("frontend: Themes: %v", err)
+	}
 	return themes
 }
 
 // SettingsSchema implements contracts.Frontend. Any goroutine; snapshot only.
 func (r *Root) SettingsSchema() []contracts.SettingEntry {
-	entries, _ := (ports.Settings{Svc: r.rt.Settings}).Schema(context.Background(), contracts.Caller{Kind: protocol.CallerHost}, "")
+	entries, err := (ports.Settings{Svc: r.rt.Settings}).Schema(context.Background(), contracts.Caller{Kind: protocol.CallerHost}, "")
+	if err != nil {
+		r.logf("frontend: SettingsSchema: %v", err)
+	}
 	return entries
 }
 
@@ -30,13 +36,19 @@ func (r *Root) Setting(key string) (any, string, error) {
 // KeyListing implements contracts.Frontend. Any goroutine; the same port and
 // CLI view used by the socket adapter, not a separate listing join.
 func (r *Root) KeyListing() contracts.KeyListing {
-	listing, _ := r.keys().List(context.Background(), contracts.Caller{Kind: protocol.CallerCLI})
+	listing, err := r.keys().List(context.Background(), contracts.Caller{Kind: protocol.CallerCLI})
+	if err != nil {
+		r.logf("frontend: KeyListing: %v", err)
+	}
 	return listing
 }
 
 // Profiles implements contracts.Frontend. Any goroutine; snapshot only.
 func (r *Root) Profiles() []contracts.ProfileInfo {
-	profiles, _ := (ports.Profile{Svc: r.rt.Profile}).List(context.Background(), contracts.Caller{Kind: protocol.CallerHost})
+	profiles, err := (ports.Profile{Svc: r.rt.Profile}).List(context.Background(), contracts.Caller{Kind: protocol.CallerHost})
+	if err != nil {
+		r.logf("frontend: Profiles: %v", err)
+	}
 	return profiles
 }
 
@@ -49,7 +61,8 @@ func frontendWrite[T any](r *Root, call func(context.Context) (T, error), reply 
 	r.spawn(func() tea.Msg {
 		result, err := call(r.closingCtx)
 		if r.closingCtx.Err() != nil {
-			err = contracts.NewError(protocol.CodeCancelled, "husk is shutting down", map[string]any{"reason": "shutdown"})
+			var zero T
+			result, err = zero, contracts.NewError(protocol.CodeCancelled, "husk is shutting down", map[string]any{"reason": "shutdown"})
 		}
 		if reply != nil {
 			r.post(func() { reply(result, err) })
