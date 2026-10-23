@@ -220,7 +220,7 @@ func (s Spec) CatalogJSON() ([]byte, error) {
 
 // KeymapJSON returns version 1, an always-present bind array and diagnostics.
 func (s Spec) KeymapJSON() ([]byte, error) {
-	bind := s.FocusBindings
+	bind := s.Keybindings
 	if bind == nil {
 		bind = []FocusBinding{}
 	}

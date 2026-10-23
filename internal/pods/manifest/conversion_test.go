@@ -75,10 +75,10 @@ func TestNormalizedCatalogFocusProblemsAndExactCaseSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(s.FocusBindings) != 2 || len(w) != 2 || len(s.BindingProblems) != 2 {
+	if len(s.Keybindings) != 2 || len(w) != 2 || len(s.BindingProblems) != 2 {
 		t.Fatal("conversion ownership/scope policy", s, w)
 	}
-	if s.FocusBindings[0].Key != "not-a-parsed-key" {
+	if s.Keybindings[0].Key != "not-a-parsed-key" {
 		t.Fatal("Pods parsed a key owned by Services")
 	}
 	if s.BindingProblems[0].Index != 2 || s.BindingProblems[0].Code != "foreign_action" || s.BindingProblems[1].Code != "global_not_allowed" {
@@ -92,12 +92,12 @@ func TestNormalizedCatalogFocusProblemsAndExactCaseSettings(t *testing.T) {
 	if err := json.Unmarshal(data, &catalog); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"id", "name", "version", "description", "actions", "surfaces", "focus_bindings", "subscriptions", "events_declared", "hooks_declared", "hook_registrations", "published_slots", "slice", "secret_requests", "settings_declared"} {
+	for _, key := range []string{"id", "name", "version", "description", "actions", "surfaces", "keybindings", "subscriptions", "events_declared", "hooks_declared", "hook_registrations", "published_slots", "slice", "secret_requests", "settings_declared"} {
 		if catalog[key] == nil {
 			t.Fatal("catalog missing", key)
 		}
 	}
-	for _, key := range []string{"protocol", "command", "work_dir", "binding_problems"} {
+	for _, key := range []string{"protocol", "command", "work_dir", "binding_problems", "focus_bindings"} {
 		if catalog[key] != nil {
 			t.Fatal("process metadata leaked", key)
 		}
@@ -120,12 +120,12 @@ func TestNormalizedCatalogFocusProblemsAndExactCaseSettings(t *testing.T) {
 	clone.Command[0] = "mutated"
 	clone.Actions[0].ArgsSchema[0] = 'X'
 	clone.Surfaces[0].Frame.Label = "mutated"
-	clone.FocusBindings[1].Keys[0] = "mutated"
+	clone.Keybindings[1].Keys[0] = "mutated"
 	*clone.EventsDeclared[0].Coalesce = true
 	clone.PublishedSlots[0].Rect.Width = 99
 	clone.Slice.Retention.N = 19
 	clone.SettingsDeclared[0].Default[0] = 'X'
-	if s.Command[0] == "mutated" || s.Actions[0].ArgsSchema[0] == 'X' || s.Surfaces[0].Frame.Label == "mutated" || s.FocusBindings[1].Keys[0] == "mutated" || *s.EventsDeclared[0].Coalesce || s.PublishedSlots[0].Rect.Width == 99 || s.Slice.Retention.N == 19 || s.SettingsDeclared[0].Default[0] == 'X' {
+	if s.Command[0] == "mutated" || s.Actions[0].ArgsSchema[0] == 'X' || s.Surfaces[0].Frame.Label == "mutated" || s.Keybindings[1].Keys[0] == "mutated" || *s.EventsDeclared[0].Coalesce || s.PublishedSlots[0].Rect.Width == 99 || s.Slice.Retention.N == 19 || s.SettingsDeclared[0].Default[0] == 'X' {
 		t.Fatal("declaration clone aliased mutable data")
 	}
 }
