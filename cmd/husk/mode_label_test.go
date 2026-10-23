@@ -178,19 +178,36 @@ func TestFocusReturnsWhenSideColumnReturns(t *testing.T) {
 }
 
 func TestVanishingSideCancelsDragMovesFocusAndDisablesResizeKeys(t *testing.T) {
-	for _, narrow := range []bool{false, true} {
-		m := goldenModel()
-		m.activeDrag, m.hoverDivider = "sidepanel-width", "sidepanel-width"
-		m.focusedSlot = protocol.SurfaceSidePanel
-		if narrow {
-			m.width = narrowPanelWidth(m)
-			m.recomputeLayout()
-		} else {
-			press(m, "]")
-		}
-		if m.activeDrag != "" || m.hoverDivider != "" || m.focusedSlot != protocol.SurfaceMainStage {
-			t.Fatalf("vanished panel: drag %q hover %q focus %q", m.activeDrag, m.hoverDivider, m.focusedSlot)
-		}
+	for _, tc := range []struct {
+		name      string
+		drag      string
+		focus     protocol.SurfaceID
+		placement contracts.RailPlacement
+		narrow    bool
+	}{
+		{"dock hidden", "sidepanel-width", protocol.SurfaceSidePanel, "", false},
+		{"panel collapsed", "sidepanel-width", protocol.SurfaceSidePanel, "", true},
+		{"stage hides panel", "sidepanel-width", protocol.SurfaceSidePanel, contracts.PlacementStage, false},
+		{"canvas hides panel", "sidepanel-width", protocol.SurfaceSidePanel, contracts.PlacementFullCanvas, false},
+		{"canvas hides sidebar", "sidebar-width", protocol.SurfaceSidebarList, contracts.PlacementFullCanvas, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := goldenModel()
+			m.activeDrag, m.hoverDivider = tc.drag, tc.drag
+			m.focusedSlot = tc.focus
+			if tc.placement != "" {
+				m.activePlacement = tc.placement
+				m.recomputeLayout()
+			} else if tc.narrow {
+				m.width = narrowPanelWidth(m)
+				m.recomputeLayout()
+			} else {
+				press(m, "]")
+			}
+			if m.activeDrag != "" || m.hoverDivider != "" || m.focusedSlot != m.centreSlot() {
+				t.Fatalf("vanished side: drag %q hover %q focus %q", m.activeDrag, m.hoverDivider, m.focusedSlot)
+			}
+		})
 	}
 	m := goldenModel()
 	w := m.sidebarWidth

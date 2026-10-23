@@ -84,21 +84,32 @@ func (m *WorkbenchModel) rightSideShown() bool {
 	return m.showSidePane
 }
 
-// panelFits uses the same sidebar cap as placeSlots, including when the panel
-// dock is hidden. It answers whether showing the panel would change the frame.
-func panelFits(width, sidebarWidth int, sidebarShown bool) bool {
-	remW := max(40, max(minTermWidth, width)-activityRailWidth)
-	leftW := 0
+// sideWidths derives the body width right of the rail and the capped sidebar
+// width shared by layout and panel-fit hints.
+func sideWidths(width, sidebarWidth int, sidebarShown bool) (remW, leftW int) {
+	remW = max(40, max(minTermWidth, width)-activityRailWidth)
 	if sidebarShown {
 		leftW = min(sidebarWidth, remW/2)
 	}
+	return remW, leftW
+}
+
+func panelFitsIn(remW, leftW int) bool {
 	return remW-leftW >= minPanelCentreWidth
 }
 
+// panelFits answers whether showing the panel would change the frame, including
+// when its dock is hidden. Layout passes its shared widths to panelFitsIn.
+func panelFits(width, sidebarWidth int, sidebarShown bool) bool {
+	remW, leftW := sideWidths(width, sidebarWidth, sidebarShown)
+	return panelFitsIn(remW, leftW)
+}
+
 // dropVanishedSides cancels a drag on a side column that is no longer shown
-// (its dock was hidden or the panel no longer fits).
+// (its dock was hidden, its placement changed, or the panel no longer fits).
 func (m *WorkbenchModel) dropVanishedSides() {
-	left, right := m.leftSideShown(), m.rightSideShown() && panelFits(m.width, m.sidebarWidth, m.leftSideShown())
+	left := m.leftSideShown() && m.activePlacement != contracts.PlacementFullCanvas
+	right := m.rightSideShown() && m.activePlacement == "" && panelFits(m.width, m.sidebarWidth, m.leftSideShown())
 	if !left && strings.HasPrefix(m.activeDrag, "sidebar-") || !right && m.activeDrag == "sidepanel-width" {
 		m.activeDrag, m.hoverDivider = "", ""
 	}
@@ -159,7 +170,6 @@ func (m *WorkbenchModel) recomputeLayout() {
 
 // placeSlots rebuilds slotRects and the other layout rects.
 func (m *WorkbenchModel) placeSlots() {
-	totalW := max(minTermWidth, m.width)
 	bodyH := max(20, m.height-2)
 
 	m.slotRects = make(map[protocol.SurfaceID]SlotRect)
@@ -171,16 +181,14 @@ func (m *WorkbenchModel) placeSlots() {
 	railW := activityRailWidth
 	m.slotRects[protocol.SurfaceActivityRail] = m.frameRect(protocol.SurfaceActivityRail, 0, 1, railW, bodyH)
 
-	remW := max(40, totalW-railW)
+	remW, leftW := sideWidths(m.width, m.sidebarWidth, m.leftSideShown())
 
 	if m.activePlacement == contracts.PlacementFullCanvas {
 		m.slotRects[protocol.SurfaceFullCanvas] = m.frameRect(protocol.SurfaceFullCanvas, railW, 1, remW, bodyH)
 		return
 	}
 
-	leftW := 0
 	if m.leftSideShown() {
-		leftW = min(m.sidebarWidth, remW/2)
 		navH := max(3, m.sidebarNavH)
 		footH := max(3, m.sidebarFootH)
 		if navH+footH+6 > bodyH {
@@ -201,7 +209,7 @@ func (m *WorkbenchModel) placeSlots() {
 	}
 
 	rightW := 0
-	if m.rightSideShown() && panelFits(m.width, m.sidebarWidth, m.leftSideShown()) {
+	if m.rightSideShown() && panelFitsIn(remW, leftW) {
 		rightW = min(m.sidePaneW, (remW-leftW)/2)
 	}
 	centerW := max(30, remW-leftW-rightW)
