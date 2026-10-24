@@ -77,7 +77,7 @@ func TestFrontendWatchEvents(t *testing.T) {
 		if len(got) != 2 || got[0].Name != "alpha.saved" || got[0].Source != "alpha" || got[1].Name != "alpha.other" {
 			t.Errorf("got %+v", got)
 		}
-		if len(got) > 0 && got[0].Data["n"] != json.Number("1") && got[0].Data["n"] != float64(1) {
+		if len(got) > 0 && got[0].Data["n"] != json.Number("1") {
 			t.Errorf("data %+v", got[0].Data)
 		}
 	})
@@ -127,6 +127,67 @@ func TestFrontendWatchEventsInvalidPattern(t *testing.T) {
 		cancel, err := fe.WatchEvents("bad pattern *", func(protocol.EventDeliverParams) { t.Error("delivered") })
 		if contracts.CodeOf(err) != string(protocol.CodeInvalidParams) || cancel != nil {
 			t.Errorf("err=%v cancel=%v", err, cancel != nil)
+		}
+	})
+}
+
+func TestFrontendWatchEventsNumbersAreVerbatim(t *testing.T) {
+	h, _, fe := bootFrontend(t, nil)
+	var got []protocol.EventDeliverParams
+	h.loop(func() {
+		if _, err := fe.WatchEvents("alpha.*", func(p protocol.EventDeliverParams) { got = append(got, p) }); err != nil {
+			t.Error(err)
+		}
+	})
+	emitAs(t, h, "alpha", "alpha.big", map[string]any{"big": json.Number("9007199254740993"), "dec": json.Number("0.1000000000000000055")})
+	h.loop(func() {})
+	h.loop(func() {
+		if len(got) != 1 || got[0].Data["big"] != json.Number("9007199254740993") || got[0].Data["dec"] != json.Number("0.1000000000000000055") {
+			t.Errorf("got %+v", got)
+		}
+	})
+}
+
+// cancel is safe from a non-loop goroutine, and a delivery queued before it
+// returns is dropped.
+func TestFrontendWatchEventsCancelOffLoop(t *testing.T) {
+	h, _, fe := bootFrontend(t, nil)
+	var calls int
+	var cancel func()
+	h.loop(func() {
+		var err error
+		cancel, err = fe.WatchEvents("alpha.*", func(protocol.EventDeliverParams) { calls++ })
+		if err != nil {
+			t.Error(err)
+		}
+	})
+	done := make(chan struct{})
+	go func() { cancel(); cancel(); close(done) }()
+	<-done
+	emitAs(t, h, "alpha", "alpha.saved", nil)
+	h.loop(func() {})
+	h.loop(func() {
+		if calls != 0 {
+			t.Errorf("fn called %d times after off-loop cancel", calls)
+		}
+	})
+}
+
+// Host shutdown ends the subscription: nothing reaches fn afterwards.
+func TestFrontendWatchEventsShutdownEndsSubscription(t *testing.T) {
+	h, _, fe := bootFrontend(t, nil)
+	var calls int
+	h.loop(func() {
+		if _, err := fe.WatchEvents("alpha.*", func(protocol.EventDeliverParams) { calls++ }); err != nil {
+			t.Error(err)
+		}
+	})
+	h.root.endClosingCtx()
+	emitAs(t, h, "alpha", "alpha.saved", nil)
+	h.loop(func() {})
+	h.loop(func() {
+		if calls != 0 {
+			t.Errorf("fn called %d times after shutdown", calls)
 		}
 	})
 }

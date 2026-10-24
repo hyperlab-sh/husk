@@ -13,6 +13,8 @@ func CLIOnlyEventPattern(pattern string) bool {
 // EventDeliverParams is the params object of an event.deliver notification:
 // the event name, the host-stamped source (a plugin id, "husk" for core
 // publishers, "user" for a CLI emit) and the payload object (never null).
+// Numbers in Data decode as json.Number so integers above 2^53 and precise
+// decimals survive verbatim; decode with Decoder.UseNumber.
 type EventDeliverParams struct {
 	Name   string         `json:"name"`
 	Source string         `json:"source"`

@@ -290,12 +290,6 @@ func (b *Bus) Stats() Stats {
 	return b.stats
 }
 
-type deliverParams struct {
-	Name   string         `json:"name"`
-	Source string         `json:"source"`
-	Data   map[string]any `json:"data"`
-}
-
 func (en *entry) message() (protocol.Message, error) {
 	if !en.done {
 		en.done = true
@@ -303,7 +297,7 @@ func (en *entry) message() (protocol.Message, error) {
 		if d == nil {
 			d = map[string]any{}
 		}
-		en.params, en.err = json.Marshal(deliverParams{Name: en.ev.Name, Source: en.ev.Source, Data: d})
+		en.params, en.err = json.Marshal(protocol.EventDeliverParams{Name: en.ev.Name, Source: en.ev.Source, Data: d})
 	}
 	if en.err != nil {
 		return protocol.Message{}, en.err
