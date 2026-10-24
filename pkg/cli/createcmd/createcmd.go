@@ -68,6 +68,9 @@ func command(version string, guideFS fs.FS, getwd func() (string, error), write 
 			module = args[2]
 		}
 		if args[0] == "tui" && !validModulePath(module) {
+			if len(args) == 2 {
+				return output.Usage("invalid name %q: not a valid Go module path; pass <module> explicitly", name)
+			}
 			return output.Usage("invalid module path %q", module)
 		}
 		files, err := bundleFiles(name, guideFS)

@@ -124,7 +124,7 @@ func TestTUIFormatsModuleAndVersion(t *testing.T) {
 	} {
 		version := tc.version
 		for _, format := range []output.Format{output.JSON, output.Table} {
-			for _, module := range []string{"", "example.test/custom"} {
+			for _, module := range []string{"", "example.test/custom", "example.test/tool/v2"} {
 				root := t.TempDir()
 				args := []string{"tui", "app"}
 				if module != "" {
@@ -174,6 +174,9 @@ func TestTUIFormatsModuleAndVersion(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				if !strings.Contains(string(readme), "`go build -o app && ./app`") {
+					t.Fatalf("README build command does not name the scaffold executable for module %q: %s", module, readme)
+				}
 				if (tc.want == "") != !strings.Contains(string(mod), "require ") || (tc.want == "") != strings.Contains(string(readme), "go get github.com/hyperlab-sh/husk@latest") {
 					t.Fatalf("version handling: module=%s README=%s", mod, readme)
 				}
@@ -188,7 +191,7 @@ func TestTUIBuildVetAndHeadless(t *testing.T) {
 	}
 	root := t.TempDir()
 	cmd := command("v0.0.0", guide.Files, func() (string, error) { return root, nil }, writeFile)
-	if err := cmd.Run(t.Context(), []string{"tui", "app"}, output.Options{Format: output.Table, Stdout: &bytes.Buffer{}}); err != nil {
+	if err := cmd.Run(t.Context(), []string{"tui", "app", "example.test/custom"}, output.Options{Format: output.Table, Stdout: &bytes.Buffer{}}); err != nil {
 		t.Fatal(err)
 	}
 	repo, err := os.Getwd()
@@ -234,14 +237,30 @@ func TestTUIBuildVetAndHeadless(t *testing.T) {
 		t.Helper()
 		c := exec.CommandContext(t.Context(), args[0], args[1:]...)
 		c.Dir = workdir
-		c.Env = append(os.Environ(), "GOPROXY=off")
+		c.Env = append(os.Environ(), "GOPROXY=off", "GOFLAGS=-mod=mod")
 		out, err := c.CombinedOutput()
 		if err != nil {
 			t.Fatalf("%v: %v\n%s", args, err, out)
 		}
 		return out
 	}
-	run(dir, "go", "build", "-mod=mod", "-o", binary, ".")
+	readme, err := os.ReadFile(filepath.Join(dir, "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var build []string
+	for _, fragment := range strings.Split(string(readme), "`") {
+		if strings.HasPrefix(fragment, "go build ") {
+			command, _, _ := strings.Cut(fragment, " && ")
+			build = strings.Fields(command)
+			break
+		}
+	}
+	if len(build) == 0 {
+		t.Fatal("README has no build command")
+	}
+	// Execute the README's command, not an independently supplied output flag.
+	run(dir, build...)
 	run(dir, "go", "vet", "-mod=mod", ".")
 	run(dir, "go", "test", "-mod=mod", ".")
 	if out := run(root, binary, "--help"); !bytes.Contains(out, []byte("-bundle")) {
