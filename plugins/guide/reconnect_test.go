@@ -3,6 +3,7 @@ package guide
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -89,7 +90,7 @@ func (s *scriptedSocket) Write(b []byte) (int, error) {
 }
 
 func TestReconnectBackoffAndReset(t *testing.T) {
-	for _, mode := range []string{"refused", "malformed", "invalid-slice"} {
+	for _, mode := range []string{"refused", "malformed", "invalid-slice", "dial-error", "varying-errors"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			in, input := io.Pipe()
@@ -98,7 +99,12 @@ func TestReconnectBackoffAndReset(t *testing.T) {
 			advance := make(chan struct{})
 			done := make(chan error, 1)
 			logs := &lockedLog{}
+			failedDials := 0
 			cfg := config{token: "test-token", dial: func(ctx context.Context) (io.ReadWriteCloser, error) {
+				if mode == "dial-error" && failedDials < 8 {
+					failedDials++
+					return nil, errors.New("injected dial failure")
+				}
 				select {
 				case c := <-dials:
 					return c, nil
@@ -134,27 +140,47 @@ func TestReconnectBackoffAndReset(t *testing.T) {
 				}
 				return w, watch, s
 			}
-			for _, expected := range []time.Duration{100 * time.Millisecond, 200 * time.Millisecond, 400 * time.Millisecond, 800 * time.Millisecond, 1600 * time.Millisecond, 3200 * time.Millisecond, 5 * time.Second, 5 * time.Second} {
-				w, watch, _ := connect()
-				reply := protocol.Message{ID: watch.ID}
-				switch mode {
-				case "refused":
-					reply.Error = &protocol.Error{Code: protocol.CodeDenied, Message: "injected watch refusal"}
-				case "malformed":
-					reply.Result = raw([]int{1})
-				case "invalid-slice":
-					reply.Result = raw(map[string]any{"slices": []sliceValue{{"husk.geometry", raw("invalid geometry")}}})
+			delays := []time.Duration{100 * time.Millisecond, 200 * time.Millisecond, 400 * time.Millisecond, 800 * time.Millisecond, 1600 * time.Millisecond, 3200 * time.Millisecond, 5 * time.Second, 5 * time.Second}
+			if mode == "varying-errors" {
+				for len(delays) < 20 {
+					delays = append(delays, 5*time.Second)
 				}
-				if err := protocol.NewWriter(w).Send(reply); err != nil {
-					t.Fatal(err)
+			}
+			for i, expected := range delays {
+				if mode != "dial-error" {
+					w, watch, _ := connect()
+					reply := protocol.Message{ID: watch.ID}
+					switch mode {
+					case "refused":
+						reply.Error = &protocol.Error{Code: protocol.CodeDenied, Message: "injected watch refusal"}
+					case "malformed":
+						reply.Result = raw([]int{1})
+					case "invalid-slice":
+						reply.Result = raw(map[string]any{"slices": []sliceValue{{"husk.geometry", raw("invalid geometry")}}})
+					case "varying-errors":
+						reply.Error = &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf("injected refusal %d", i)}
+					}
+					if err := protocol.NewWriter(w).Send(reply); err != nil {
+						t.Fatal(err)
+					}
 				}
 				if got := receive(t, waits); got != expected {
 					t.Fatalf("retry = %s, want %s", got, expected)
 				}
 				advance <- struct{}{}
 			}
-			if count := strings.Count(logs.String(), "guide:"); count != 1 {
+			wantLogs := 1
+			if mode == "varying-errors" {
+				wantLogs = 17 // Sixteen distinct errors and one suppression notice.
+				if strings.Count(logs.String(), "further errors suppressed") != 1 {
+					t.Fatalf("missing suppression notice: %s", logs.String())
+				}
+			}
+			if count := strings.Count(logs.String(), "guide:"); count != wantLogs {
 				t.Fatalf("persistent failure logged %d times: %s", count, logs.String())
+			}
+			if mode == "dial-error" && strings.Count(logs.String(), "connect:") != 1 {
+				t.Fatalf("dial failure not deduplicated: %s", logs.String())
 			}
 			w, watch, s := connect()
 			// The following pods change is a barrier proving the baseline applied.
