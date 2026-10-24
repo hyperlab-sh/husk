@@ -68,6 +68,7 @@ func ReadBootstrap(env Env, inst InstanceRef, instanceDocs map[DocName]Doc) (Boo
 		}
 		doc, err := ParseDoc(raw)
 		if err == nil {
+			doc, _ = WithoutDuplicateSetting(doc, "husk.bundle")
 			mergeDoc(merged, doc, layer, origins, &problems, "")
 		}
 	}
@@ -75,7 +76,8 @@ func ReadBootstrap(env Env, inst InstanceRef, instanceDocs map[DocName]Doc) (Boo
 	if inst.Named() {
 		read(LayerInstance, "instances", inst.ID, "config.json")
 	}
-	mergeDoc(merged, instanceDocs["config"], LayerInstance, origins, &problems, "")
+	flags, _ := WithoutDuplicateSetting(instanceDocs["config"], "husk.bundle")
+	mergeDoc(merged, flags, LayerInstance, origins, &problems, "")
 	husk, _ := merged["husk"].(map[string]any)
 	value, ok := husk["bundle"]
 	if !ok {

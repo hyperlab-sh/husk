@@ -191,7 +191,8 @@ func (s *Service) Select(startup bool, layers []store.LayerDoc, names []string) 
 	case present:
 		name, fromSlice = slice, true
 	default:
-		for _, l := range layers {
+		clean, _ := c.CleanLayers(layers, map[string]c.SettingDecl{"profile.default": {Key: "profile.default"}})
+		for _, l := range clean {
 			if v, ok := c.Dotted(l.Doc, "profile.default"); ok && l.Layer == store.LayerUser {
 				name, _ = v.(string)
 				layer, key = "user", "profile.default"
