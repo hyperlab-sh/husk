@@ -429,8 +429,8 @@ Each entry has a `state`:
 | `effective` | Not shadowed by any entry that would always outrank it. |
 | `shadowed` | Another entry outranks it in every context where it could match; `shadowed_by` names that entry's source. |
 | `disabled` | A tombstone that is not itself shadowed. |
-| `unavailable` | Effective with a known action, but the action's owning plugin is not live, or a nonempty binding `plugin` condition names a plugin that is not live or does not declare the binding's `focus` surface. The action owner need not declare `focus`; without a `plugin` condition no surface-declaration check applies. Host actions do not require plugin liveness. Computed by the handler. |
-| `unknown_action` | Effective, but the action is not in the catalog, even if its `plugin` condition is unavailable. Computed by the handler. |
+| `unavailable` | Effective with a known action, but the action's owning plugin is not live, or a nonempty binding `plugin` condition names a plugin that is not live or does not declare the binding's `focus` surface. The action owner need not declare `focus`; without a `plugin` condition no surface-declaration check applies. Host actions do not require plugin liveness; a rail item id counts as a host action once the frontend registers it, even if its declaring plugin is not live (the binding's own `plugin` condition still applies). Computed by the handler. |
+| `unknown_action` | Effective, but the action is not in the catalog, even if its `plugin` condition is unavailable. A declared rail item id that the frontend has not registered, for example in a headless host, is `unknown_action`. Computed by the handler. |
 
 State precedence: the handler preserves static `shadowed` and `disabled` states unchanged. Only static `effective` entries are annotated: first `unknown_action` if the action is absent from the catalog, then `unavailable` if either availability check above fails, otherwise `effective`. These annotations do not change resolution, static shadowing or the stored listing.
 
