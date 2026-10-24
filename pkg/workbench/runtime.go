@@ -52,6 +52,13 @@ func (m *workbenchModel) syncRuntime() bool {
 				opened = true
 			}
 			if r.Placement == protocol.SurfacePlacementModal {
+				if m.settings != nil {
+					m.logf("closing runtime modal %s: Settings is open but its overlay was unpublished", r.Surface)
+					m.closeRuntime(r.Surface)
+					// closeRuntime synchronizes the updated declarations. Do not commit
+					// this stale next slice, which still contains the dismissed modal.
+					return true
+				}
 				m.modal = modalState{PluginID: r.Plugin, Surface: r.Surface}
 			}
 		}

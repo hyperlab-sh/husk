@@ -1,9 +1,12 @@
 package workbench
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,7 +33,8 @@ func (runtimeSettingsDeps) Release(string, protocol.SurfaceID) error {
 
 type runtimeSettingsFE struct {
 	*fakeFE
-	engine *surfaces.Engine
+	engine  *surfaces.Engine
+	viewErr error
 }
 
 func (f *runtimeSettingsFE) RuntimeSurfaces() []contracts.RuntimeSurface {
@@ -40,10 +44,81 @@ func (f *runtimeSettingsFE) CloseSurface(id protocol.SurfaceID) error {
 	return f.engine.CloseSurface(id)
 }
 func (f *runtimeSettingsFE) UpdateSurfaceView(fn func(*contracts.SurfaceView)) error {
+	if f.viewErr != nil {
+		return f.viewErr
+	}
 	if err := f.engine.UpdateView(fn); err != nil {
 		return err
 	}
 	return f.fakeFE.UpdateSurfaceView(fn)
+}
+
+type runtimeModalNotices struct{ messages []protocol.Message }
+
+func (n *runtimeModalNotices) Notify(msg protocol.Message) error {
+	n.messages = append(n.messages, msg)
+	return nil
+}
+
+func TestRuntimeModalClosesWhenSettingsViewWasUnpublished(t *testing.T) {
+	m, fe := generalFixture(t, contracts.SettingEntry{Key: "husk.value", Type: "string", Default: "saved", Owner: "husk"})
+	editGeneral(m, "husk.value", "unsaved")
+	center := m.settings
+	before := *center.general.fields["husk.value"]
+	deps := runtimeSettingsDeps{}
+	st := state.New(state.Options{})
+	engine, err := surfaces.New(st, surfaces.Options{Clock: deps, Logger: deps, Liveness: deps, Publications: deps, Declarations: deps})
+	if err != nil {
+		t.Fatal(err)
+	}
+	front := &runtimeSettingsFE{fakeFE: fe, engine: engine, viewErr: errors.New("view publication failed")}
+	m.fe = front
+	var logs bytes.Buffer
+	m.logOut = &logs
+	m.attachSlices()
+	m.settle()
+	if len(fe.Views) != 0 {
+		t.Fatal("failed view publication unexpectedly reached the host")
+	}
+	var notices runtimeModalNotices
+	engine.WatchPlugin("p", &notices)
+	opened, err := engine.SurfaceOpen("p", protocol.SurfaceOpenParams{Placement: protocol.SurfacePlacementModal, Name: "popup"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.settle()
+	if m.settings != center || m.modalOwner().Open() || len(m.runtime) != 0 || len(engine.RuntimeSurfaces()) != 0 {
+		t.Fatal("unpublished Settings overlay allowed two live modals")
+	}
+	field := center.general.fields["husk.value"]
+	if m.settingsTab() != "general" || !center.dirty() || field.text != before.text || field.revision != before.revision || !reflect.DeepEqual(field.baseline, before.baseline) {
+		t.Fatal("defensive modal close changed Settings edits")
+	}
+	var res surfaces.Surfaces
+	if err := json.Unmarshal(st.Snapshot().Slices[state.SurfacesNamespace].Value, &res); err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Runtime) != 0 || res.Occupants[opened.Surface].Plugin != "" {
+		t.Fatal("defensive close retained runtime State")
+	}
+	if len(notices.messages) != 1 || notices.messages[0].Method != protocol.MethodSurfaceResized {
+		t.Fatalf("close notices=%+v", notices.messages)
+	}
+	var resized protocol.SurfaceResizedParams
+	if err := json.Unmarshal(notices.messages[0].Params, &resized); err != nil {
+		t.Fatal(err)
+	}
+	if len(resized.Surfaces) != 1 || resized.Surfaces[0].Surface != opened.Surface || resized.Surfaces[0].Visible {
+		t.Fatalf("final resize=%+v", resized)
+	}
+	if !strings.Contains(logs.String(), string(opened.Surface)) || !strings.Contains(logs.String(), "Settings") {
+		t.Fatal("defensive modal dismissal was not logged")
+	}
+	front.viewErr = nil
+	m.settle()
+	if len(fe.Views) == 0 || fe.Views[len(fe.Views)-1].Overlays.SettingsCenter != "general" {
+		t.Fatal("Settings overlay did not recover after view publication resumed")
+	}
 }
 
 func TestRuntimeOpenPreservesSettingsEdits(t *testing.T) {
