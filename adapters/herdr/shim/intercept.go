@@ -30,16 +30,8 @@ func (r *runner) intercept(ctx context.Context, req proxy.Request) (any, *proxy.
 		return nil, &proxy.Error{Code: "invalid_params", Message: "invalid request params"}, true
 	}
 	switch req.Method {
-	case "plugin.pane.open":
-		if p.Plugin == r.m.ID {
-			return nil, &proxy.Error{Code: "unsupported", Message: paneUnsupported}, true
-		}
-	case "plugin.pane.focus", "plugin.pane.close":
-		if strings.HasPrefix(p.Pane, "husk:") {
-			return nil, &proxy.Error{Code: "unsupported", Message: paneUnsupported}, true
-		}
-	case "popup.close":
-		return nil, &proxy.Error{Code: "unsupported", Message: paneUnsupported}, true
+	case "plugin.pane.open", "plugin.pane.focus", "plugin.pane.close", "popup.close":
+		return r.interceptPane(ctx, req)
 	case "notification.show":
 		trim := func(s string, n int) string {
 			v := []rune(strings.TrimSpace(s))

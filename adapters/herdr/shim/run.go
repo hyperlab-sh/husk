@@ -35,6 +35,8 @@ type Options struct {
 	Clock                                                                     upstream.Clock
 	Now                                                                       func() time.Time
 	Spawn                                                                     func(Command) (Process, error)
+	// SpawnTerminal starts a pane session; nil uses SpawnTerminal.
+	SpawnTerminal func(Command, int, int) (TerminalProcess, error)
 	// StartServer is the serialized, detached server-start seam; nil uses flock.
 	StartServer func(context.Context) error
 	// ServerLaunch replaces only detached exec, leaving the start lock and ping
@@ -70,6 +72,10 @@ type runner struct {
 	proxy       *proxy.Server
 	lastDrop    time.Time
 	groupTimers map[Process]upstream.Timer
+	panes       map[protocol.SurfaceID]*pane
+	paneGate    chan struct{}
+	paneCounter uint64
+	paneTimers  map[Process]upstream.Timer
 }
 
 // Run serves Husk requests until stdin EOF or a terminal attach failure. Attach
@@ -86,6 +92,9 @@ func Run(ctx context.Context, o Options, in io.Reader, out, log io.Writer) error
 	}
 	if o.Spawn == nil {
 		o.Spawn = Spawn
+	}
+	if o.SpawnTerminal == nil {
+		o.SpawnTerminal = SpawnTerminal
 	}
 	if o.Platform == "" {
 		o.Platform = runtime.GOOS
@@ -113,7 +122,7 @@ func Run(ctx context.Context, o Options, in io.Reader, out, log io.Writer) error
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	r := &runner{o: o, m: m, id: id, ctx: ctx, cancel: cancel, log: log, processes: map[Process]bool{}, state: state{Server: "absent", Socket: o.Socket, Startup: []map[string]any{}, Surfaces: map[string]any{}}}
+	r := &runner{panes: map[protocol.SurfaceID]*pane{}, paneGate: make(chan struct{}, 1), o: o, m: m, id: id, ctx: ctx, cancel: cancel, log: log, processes: map[Process]bool{}, state: state{Server: "absent", Socket: o.Socket, Startup: []map[string]any{}, Surfaces: map[string]any{}}}
 	p, err := proxy.Start(ctx, proxy.Options{Dial: o.Client.Dial, Clock: o.Clock, Intercept: r.intercept, Warn: func(m string) { r.logLine(map[string]any{"level": "warning", "plugin": r.m.ID, "method": m}) }})
 	if err != nil {
 		return err
@@ -147,7 +156,11 @@ loop:
 			}
 			break loop
 		case m := <-messages:
-			if m.ID == nil || m.Method == "" {
+			if m.ID == nil {
+				r.paneNotification(m)
+				continue
+			}
+			if m.Method == "" {
 				continue
 			}
 			r.workers.Add(1)
@@ -173,8 +186,22 @@ loop:
 		t.Stop()
 	}
 	r.mu.Unlock()
+	r.mu.Lock()
+	panes := make([]*pane, 0, len(r.panes))
+	for _, p := range r.panes {
+		panes = append(panes, p)
+	}
+	r.mu.Unlock()
+	for _, p := range panes {
+		r.closePane(p)
+	}
 	r.workers.Wait()
 	r.stopCommands()
+	r.mu.Lock()
+	for _, t := range r.paneTimers {
+		t.Stop()
+	}
+	r.mu.Unlock()
 	if err != nil {
 		r.change(func(s *state) { s.LastError = err.Error() })
 		r.logLine(map[string]any{"level": "error", "message": err.Error()})
@@ -363,24 +390,22 @@ func retryable(err error) bool {
 	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || !errors.As(err, &e) || e.Code == "unavailable"
 }
 
-const paneUnsupported = "pane entrypoints are not supported yet"
-
 func (r *runner) request(m protocol.Message) (any, *protocol.Error) {
 	if m.Method != protocol.MethodActionInvoke {
 		return nil, &protocol.Error{Code: protocol.CodeUnknownMethod, Message: "unknown method"}
 	}
 	var p struct {
-		Action string `json:"action"`
-		Args   struct {
-			Context json.RawMessage `json:"context"`
-		} `json:"args"`
+		Action string   `json:"action"`
+		Args   paneArgs `json:"args"`
 	}
 	if json.Unmarshal(m.Params, &p) != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "invalid action params"}
 	}
 	local := strings.TrimPrefix(p.Action, r.id+".")
 	if strings.HasPrefix(local, "pane-") {
-		return nil, &protocol.Error{Code: protocol.CodeFailed, Message: paneUnsupported}
+		ctx, done := r.bounded(r.ctx, 10*time.Second)
+		defer done()
+		return r.openPane(ctx, strings.TrimPrefix(local, "pane-"), p.Args, correlationID(m.ID))
 	}
 	r.mu.Lock()
 	attached := r.state.Server == "attached"

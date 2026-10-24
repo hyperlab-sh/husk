@@ -84,6 +84,7 @@ type hostRecord struct {
 type testHost struct {
 	events chan hostRecord
 	invoke func(context.Context, any) (json.RawMessage, error)
+	call   func(context.Context, string, any) (json.RawMessage, error)
 }
 
 func (h *testHost) Call(ctx context.Context, m string, p any) (json.RawMessage, error) {
@@ -94,6 +95,9 @@ func (h *testHost) Call(ctx context.Context, m string, p any) (json.RawMessage, 
 	select {
 	case h.events <- hostRecord{m, raw}:
 	case <-ctx.Done():
+	}
+	if h.call != nil {
+		return h.call(ctx, m, p)
 	}
 	return json.RawMessage(`{}`), nil
 }

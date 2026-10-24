@@ -48,6 +48,12 @@ func TestMain(m *testing.M) {
 			os.Exit(reportRun(err, os.Stderr))
 		case "capture":
 			os.Exit(captureCommand())
+		case "pane-open":
+			os.Exit(openPaneFixture())
+		case "pane-output":
+			fmt.Fprint(os.Stdout, "\x1b[32mPANE OUTPUT\x1b[0m\x1b]2;Ready\x07")
+			_, _ = io.Copy(io.Discard, os.Stdin)
+			os.Exit(0)
 		}
 	}
 	os.Exit(m.Run())
