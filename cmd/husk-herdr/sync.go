@@ -72,7 +72,7 @@ type instancePlugin struct {
 func (env environment) instancePlugins(target []string) (map[string]instancePlugin, string, int) {
 	raw, diagnostic, code := env.huskCLI(append([]string{"plugin", "list", "--format", "json"}, target...))
 	if code != 0 {
-		return nil, strings.TrimSpace(string(diagnostic)), code
+		return nil, cliProblem(diagnostic), code
 	}
 	var plugins []instancePlugin
 	if err := json.Unmarshal(raw, &plugins); err != nil || plugins == nil {
@@ -103,49 +103,115 @@ func syncRegistry(args []string, out, diagnostics io.Writer, env environment) in
 	}
 	result := 0
 	for _, dir := range dirs {
-		var converted, conversionProblems bytes.Buffer
-		if execute([]string{"convert", dir}, &converted, &conversionProblems, env) != 0 {
-			fmt.Fprintf(out, "refused %s: %s\n", dir, oneLine(conversionProblems.String()))
-			result = max(result, 1)
-			continue
-		}
-		var doc struct {
-			ID string `json:"id"`
-		}
-		if json.Unmarshal(converted.Bytes(), &doc) != nil || doc.ID == "" {
-			fmt.Fprintf(out, "refused %s: unreadable conversion\n", dir)
-			result = max(result, 1)
-			continue
-		}
-		if _, found := present[doc.ID]; found {
-			fmt.Fprintf(out, "present %s\n", doc.ID)
-			continue
-		}
-		raw, diagnostic, exit := env.huskCLI(append([]string{"plugin", "add", dir, "--format", "json"}, target...))
-		var reply struct {
-			Added []struct{ Plugin, Status string }
-		}
-		if json.Unmarshal(raw, &reply) == nil {
-			for _, added := range reply.Added {
-				if added.Plugin == doc.ID && added.Status == "live" && exit == 0 {
-					fmt.Fprintf(out, "added %s\n", doc.ID)
-					present[doc.ID] = instancePlugin{ID: doc.ID}
-					goto next
+		id, problem := convertedID(dir, env)
+		if problem != "" {
+			label := dir
+			for _, rec := range records {
+				if rec.Root == dir && rec.Enabled && manifest.Supports(rec.Platforms, env.platform) {
+					if mapped, err := manifest.MapID(rec.ID); err == nil {
+						label = mapped
+					}
+					break
 				}
 			}
+			fmt.Fprintf(out, "refused %s: %s\n", label, problem)
+			result = max(result, 1)
+			continue
 		}
-		problem = oneLine(string(diagnostic))
-		if list, _, c := env.instancePlugins(target); c == 0 && list[doc.ID].LastError != "" {
-			problem += ": " + list[doc.ID].LastError
+		if _, found := present[id]; found {
+			fmt.Fprintf(out, "present %s\n", id)
+			continue
 		}
-		if problem == "" {
-			problem = "plugin did not become live: " + oneLine(string(raw))
+		line, code := addOne(dir, id, target, env)
+		fmt.Fprintln(out, line)
+		result = max(result, code)
+		if code == 0 {
+			present[id] = instancePlugin{ID: id}
 		}
-		fmt.Fprintf(out, "refused %s: %s\n", doc.ID, problem)
-		result = max(result, 1, exit)
-	next:
 	}
 	return result
+}
+
+func addOne(dir, id string, target []string, env environment) (string, int) {
+	raw, diagnostic, exit := env.huskCLI(append([]string{"plugin", "add", dir, "--format", "json"}, target...))
+	var reply struct {
+		Added []struct{ Plugin, Status string }
+	}
+	failedLaunch := false
+	if json.Unmarshal(raw, &reply) == nil {
+		for _, added := range reply.Added {
+			if added.Plugin != id {
+				continue
+			}
+			if added.Status == "live" && exit == 0 {
+				return "added " + id, 0
+			}
+			failedLaunch = added.Status == "failed"
+		}
+	}
+	problem := cliProblem(diagnostic)
+	if failedLaunch {
+		if list, _, code := env.instancePlugins(target); code == 0 && list[id].LastError != "" {
+			if problem != "" {
+				problem += ": "
+			}
+			problem += oneLine(list[id].LastError)
+		}
+	}
+	if problem == "" {
+		problem = "plugin did not become live: " + oneLine(string(raw))
+	}
+	return fmt.Sprintf("refused %s: %s", id, problem), max(1, exit)
+}
+
+// cliProblem renders the CLI's JSON-format error without leaking its envelope
+// into human-facing status lines. Non-CLI failures (such as exec) remain useful.
+func cliProblem(raw []byte) string {
+	var diagnostic struct {
+		Error *struct {
+			Code, Message string
+			Data          struct{ Reason string }
+		}
+	}
+	if json.Unmarshal(raw, &diagnostic) != nil || diagnostic.Error == nil || diagnostic.Error.Code == "" || diagnostic.Error.Message == "" {
+		return oneLine(string(raw))
+	}
+	err := diagnostic.Error
+	problem := err.Code + ": " + err.Message
+	if err.Data.Reason != "" {
+		problem += " (" + err.Data.Reason + ")"
+	}
+	return oneLine(problem)
+}
+
+func convertedID(dir string, env environment) (string, string) {
+	var converted, diagnostics bytes.Buffer
+	if execute([]string{"convert", dir}, &converted, &diagnostics, env) != 0 {
+		return "", conversionProblem(diagnostics.Bytes())
+	}
+	var doc struct{ ID string }
+	if json.Unmarshal(converted.Bytes(), &doc) != nil || doc.ID == "" {
+		return "", "unreadable conversion"
+	}
+	return doc.ID, ""
+}
+
+// Conversion stderr is JSON lines, including code-free informational notes.
+// Only the first actual problem belongs in a refusal's single status line.
+func conversionProblem(raw []byte) string {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	for {
+		var problem manifest.Problem
+		if err := decoder.Decode(&problem); err != nil {
+			if errors.Is(err, io.EOF) {
+				return "conversion failed"
+			}
+			return oneLine(string(raw))
+		}
+		if problem.Code != "" {
+			return oneLine(problem.Code + ": " + problem.Message)
+		}
+	}
 }
 
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }

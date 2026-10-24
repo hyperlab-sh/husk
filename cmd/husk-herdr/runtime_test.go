@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -29,6 +30,9 @@ func TestRuntimeOptionsUsesPaneMarkerAndCapturedLocations(t *testing.T) {
 				o, err := runtimeOptions(plugin, env)
 				if err != nil {
 					t.Fatal(err)
+				}
+				if o.Client != nil {
+					t.Fatal("runtime options must leave the production client and clock to shim.Run")
 				}
 				config := filepath.Join(home, ".config", "herdr")
 				state := filepath.Join(home, ".local", "state", "herdr")
@@ -77,7 +81,9 @@ func TestDoctorWithoutServerStillChecksRegistryRootsBindingsAndInstance(t *testi
 	if err := os.MkdirAll(root, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(env.registryPath, []byte(`[{"plugin_id":"sample:tool","enabled":true,"plugin_root":"/plugins/sample"}]`), 0600); err != nil {
+	plugin := syncFixture(t, home, "sample:tool", true)
+	records, _ := json.Marshal([]map[string]any{{"plugin_id": "sample:tool", "enabled": true, "plugin_root": plugin}})
+	if err := os.WriteFile(env.registryPath, records, 0600); err != nil {
 		t.Fatal(err)
 	}
 	config := `[[keys.command]]
@@ -112,7 +118,7 @@ command = 'sample-tools.go'
 		t.Fatalf("absent server made independent diagnostics fail: %d %s %s", code, &out, &diagnostics)
 	}
 	text := out.String()
-	for _, want := range []string{"server: absent (", "registry: " + env.registryPath, "registry_enabled=true", "root: /plugins/sample", "sample-tool.go", "sample:tool.other", "absent from instance; run husk-herdr sync", "manual check:"} {
+	for _, want := range []string{"server: absent (", "registry: " + env.registryPath, "registry_enabled=true", "root: " + plugin, "sample-tool.go", "sample:tool.other", "absent from instance; run husk-herdr sync", "manual check:"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %q in %s", want, text)
 		}

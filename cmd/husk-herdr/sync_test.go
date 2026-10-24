@@ -155,9 +155,37 @@ func TestSyncLiveRegistryAndDoctor(t *testing.T) {
 	}
 	bad := syncFixture(t, root, "invalid", false)
 	writeRegistry([]map[string]any{{"plugin_id": "invalid", "plugin_root": bad, "enabled": true}})
-	if code, out, diagnostic := run("sync"); code != 1 || !strings.HasPrefix(out, "refused ") || !strings.Contains(out, "duplicate_action") {
+	if code, out, diagnostic := run("sync"); code != 1 || out != "refused invalid: duplicate_action: duplicate mapped action \"go\"\n" {
 		t.Fatalf("refusal: %d %s %s", code, out, diagnostic)
 	}
+	// Admit a native plugin after the list snapshot but before sync adds the
+	// registry directory: this deterministically exercises a real CLI conflict.
+	occupied := syncFixture(t, root, "occupied", true)
+	native := filepath.Join(root, "native")
+	if err := os.Mkdir(native, 0700); err != nil {
+		t.Fatal(err)
+	}
+	nativeDoc, _ := json.Marshal(map[string]any{"manifest_version": 2, "protocol": 2, "id": "occupied", "name": "Native", "version": "1", "command": []string{exe, "detect", occupied}})
+	if err := os.WriteFile(filepath.Join(native, "husk-plugin.json"), nativeDoc, 0600); err != nil {
+		t.Fatal(err)
+	}
+	writeRegistry([]map[string]any{{"plugin_id": "occupied", "plugin_root": occupied, "enabled": true}})
+	actualCLI := env.runCLI
+	admitted := false
+	env.runCLI = func(args []string) ([]byte, []byte, int) {
+		raw, diagnostic, code := actualCLI(args)
+		if args[1] == "list" && !admitted {
+			admitted = true
+			if _, errout, exit := actualCLI([]string{"plugin", "add", native, "--format", "json", "--instance", "sync-unit"}); exit != 0 {
+				t.Fatalf("native admission: %d %s", exit, errout)
+			}
+		}
+		return raw, diagnostic, code
+	}
+	if code, out, diagnostic := run("sync", "--instance", "sync-unit"); code != 1 || out != "refused occupied: conflict: plugin occupied is already loaded (duplicate_plugin_id)\n" {
+		t.Fatalf("live CLI conflict: %d %s %s", code, out, diagnostic)
+	}
+	env.runCLI = actualCLI
 	// Sync never removes the plugin omitted from the new registry.
 	if present, problem, code := env.instancePlugins(nil); code != 0 || present["fresh-plugin"].ID == "" {
 		t.Fatalf("removed existing plugin: %v %s %d", present, problem, code)
@@ -187,10 +215,12 @@ func TestSyncCLIOutcomesAndTargeting(t *testing.T) {
 		text                    string
 	}{
 		{"live", `{"added":[{"plugin":"example","status":"live"}]}`, "", 0, 0, "added example"},
-		{"failed", `{"added":[{"plugin":"example","status":"failed"}]}`, "failed launch", 1, 1, "refused example: failed launch: exec denied"},
-		{"removed", `{"added":[{"plugin":"example","status":"removed"}]}`, "", 0, 1, "refused example"},
-		{"transport", ``, "connection lost", 5, 5, "refused example: connection lost"},
-		{"malformed", `not json`, "", 0, 1, "refused example"},
+		{"failed", `{"added":[{"plugin":"example","status":"failed"}]}`, "{\"error\":{\"code\":\"failed\",\"message\":\"plugins failed to launch: example\"}}\n", 1, 1, "refused example: failed: plugins failed to launch: example: exec denied"},
+		{"conflict", "", `{"error":{"code":"conflict","message":"plugin example is already loaded","data":{"reason":"duplicate_plugin_id","plugin":"example"}}}`, 1, 1, "refused example: conflict: plugin example is already loaded (duplicate_plugin_id)"},
+		{"removing", "", `{"error":{"code":"conflict","message":"plugin example is being removed","data":{"reason":"removing"}}}`, 1, 1, "refused example: conflict: plugin example is being removed (removing)"},
+		{"removed", `{"added":[{"plugin":"example","status":"removed"}]}`, "", 0, 1, `refused example: plugin did not become live: {"added":[{"plugin":"example","status":"removed"}]}`},
+		{"transport", ``, `{"error":{"code":"transport","message":"connection lost"}}`, 5, 5, "refused example: transport: connection lost"},
+		{"malformed", `not json`, "", 0, 1, "refused example: plugin did not become live: not json"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls := 0
@@ -213,7 +243,7 @@ func TestSyncCLIOutcomesAndTargeting(t *testing.T) {
 				return []byte(tc.reply), []byte(tc.diagnostic), tc.exit
 			}
 			var out, diagnostic bytes.Buffer
-			if code := execute([]string{"sync", "--instance", "named"}, &out, &diagnostic, env); code != tc.want || !strings.Contains(out.String(), tc.text) {
+			if code := execute([]string{"sync", "--instance", "named"}, &out, &diagnostic, env); code != tc.want || out.String() != tc.text+"\n" {
 				t.Fatalf("code=%d out=%s diagnostic=%s", code, &out, &diagnostic)
 			}
 		})
