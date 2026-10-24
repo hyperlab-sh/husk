@@ -347,10 +347,12 @@ type ModalOverlay struct {
 
 // KeyContext carries the focus and overlay facts a key resolution needs.
 type KeyContext struct {
+	// FocusSurface is overlays.modal.surface while a modal is open: the fixed
+	// modal-surface for a rail modal, or the dynamic id for a runtime modal.
 	FocusSurface string
 	FocusOwner   string
 	ModalOpen    bool
-	// ModalAction is the open modal's rail action id.
+	// ModalAction is the open modal's rail action id; empty for runtime modals.
 	ModalAction string
 	// Capture is set while the focused occupant takes text input on
 	// FocusSurface (husk.surfaces.capture).

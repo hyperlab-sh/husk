@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -22,6 +23,9 @@ func TestRuntimeOpenAdmissions(t *testing.T) {
 		if got.Surface != id || r.Runtime[id].Plugin != "example.files" || r.Occupants[id].Plugin != "example.files" {
 			t.Fatalf("runtime occupancy not committed: %+v", r)
 		}
+	}
+	if _, err := e.SurfaceOpen("example.files", protocol.SurfaceOpenParams{Placement: protocol.SurfacePlacementModal, Name: "modal"}); codeOf(t, err) != protocol.CodeConflict {
+		t.Fatal("reopening own modal must report name conflict before singleton busy")
 	}
 	for _, plugin := range []string{"example.files", "other"} {
 		_, err := e.SurfaceOpen(plugin, protocol.SurfaceOpenParams{Placement: protocol.SurfacePlacementModal, Name: "another"})
@@ -47,6 +51,55 @@ func TestRuntimeOpenAdmissions(t *testing.T) {
 	rows[0].Frame.Label = "mutated"
 	if e.RuntimeSurfaces()[0].Frame.Label != "label" {
 		t.Fatal("runtime frame leaked mutable data")
+	}
+}
+
+func TestRuntimeAdmissionPrecedence(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		modal, settings bool
+		count           int
+		params          protocol.SurfaceOpenParams
+		code            protocol.Code
+		reason          string
+	}{
+		{"invalid_before_conflict_limit_modal", true, true, 8, protocol.SurfaceOpenParams{Placement: protocol.SurfacePlacementModal, Name: "modal", Title: strings.Repeat("x", 81)}, protocol.CodeInvalidParams, ""},
+		{"conflict_before_limit_modal", true, true, 8, protocol.SurfaceOpenParams{Placement: protocol.SurfacePlacementModal, Name: "modal"}, protocol.CodeConflict, ""},
+		{"limit_before_runtime_modal", true, false, 8, protocol.SurfaceOpenParams{Placement: protocol.SurfacePlacementModal, Name: "new"}, protocol.CodeBusy, "too_many_surfaces"},
+		{"limit_before_Settings", false, true, 8, protocol.SurfaceOpenParams{Placement: protocol.SurfacePlacementModal, Name: "new"}, protocol.CodeBusy, "too_many_surfaces"},
+		{"limit_without_modal", false, false, 8, protocol.SurfaceOpenParams{Placement: protocol.SurfacePlacementModal, Name: "new"}, protocol.CodeBusy, "too_many_surfaces"},
+		{"runtime_modal_only", true, false, 1, protocol.SurfaceOpenParams{Placement: protocol.SurfacePlacementModal, Name: "new"}, protocol.CodeBusy, "modal_open"},
+		{"Settings_only", false, true, 0, protocol.SurfaceOpenParams{Placement: protocol.SurfacePlacementModal, Name: "new"}, protocol.CodeBusy, "modal_open"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st, e, _ := newEngine(t, Options{})
+			if tc.modal {
+				if _, err := e.SurfaceOpen("p", protocol.SurfaceOpenParams{Placement: protocol.SurfacePlacementModal, Name: "modal"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for i := len(e.RuntimeSurfaces()); i < tc.count; i++ {
+				if _, err := e.SurfaceOpen("p", protocol.SurfaceOpenParams{Placement: protocol.SurfacePlacementCanvas, Name: fmt.Sprintf("c%d", i)}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.settings {
+				if err := e.UpdateView(func(v *contracts.SurfaceView) { v.Overlays.SettingsCenter = "general" }); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before := resolution(t, st)
+			_, err := e.SurfaceOpen("p", tc.params)
+			if got := codeOf(t, err); got != tc.code {
+				t.Fatalf("code=%s want %s", got, tc.code)
+			}
+			if tc.reason != "" && err.(*Error).Data["reason"] != tc.reason {
+				t.Fatalf("reason=%v want %s", err.(*Error).Data, tc.reason)
+			}
+			if !reflect.DeepEqual(before, resolution(t, st)) || len(e.RuntimeSurfaces()) != tc.count {
+				t.Fatal("refused open changed runtime resolution")
+			}
+		})
 	}
 }
 

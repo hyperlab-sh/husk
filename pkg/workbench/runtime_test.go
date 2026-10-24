@@ -135,7 +135,7 @@ func TestRuntimeModalInputAndUserClose(t *testing.T) {
 			m := goldenModel()
 			fe := withFE(m)
 			openRuntimeFixture(m, fe, "p.popup", protocol.SurfacePlacementModal)
-			if ctx := m.keyContext(); ctx.FocusSurface != "p.popup" || ctx.FocusOwner != "p" {
+			if ctx := m.keyContext(); ctx.FocusSurface != "p.popup" || ctx.FocusOwner != "p" || !ctx.ModalOpen || ctx.ModalAction != "" || protocol.SurfaceID(ctx.FocusSurface) != m.surfaceView().Overlays.Modal.Surface {
 				t.Fatalf("context=%+v", ctx)
 			}
 			m.handleKey(tea.KeyPressMsg{Code: 'x', Text: "x"})
