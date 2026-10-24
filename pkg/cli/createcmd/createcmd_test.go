@@ -47,11 +47,18 @@ func TestNamesAndArgumentsBeforeFilesystem(t *testing.T) {
 			}
 		})
 	}
-	for _, args := range [][]string{nil, {"bundle"}, {"tui"}, {"tui", "app", ""}, {"tui", "app", "module", "extra"}, {"bundle", "app", "extra"}} {
+	for _, args := range [][]string{nil, {"bundle"}, {"tui"}, {"tui", "app", ""}, {"tui", "app."}, {"tui", "con"}, {"tui", "app", "module", "extra"}, {"bundle", "app", "extra"}} {
 		cmd := command("", fakeGuide, func() (string, error) { t.Fatal("filesystem reached for invalid arguments"); return "", nil }, writeFile)
 		err := cmd.Run(t.Context(), args, output.Options{})
-		if output.AsError(err).Exit != 2 {
+		e := output.AsError(err)
+		if e.Exit != 2 || e.Code != output.CodeUsage {
 			t.Fatalf("args %q: %v", args, err)
+		}
+		if len(args) == 2 && args[0] == "tui" {
+			want := "invalid name " + strconvQuote(args[1]) + ": not a valid Go module path; pass <module> explicitly"
+			if e.Message != want {
+				t.Fatalf("args %q: message = %q, want %q", args, e.Message, want)
+			}
 		}
 	}
 	for _, name := range []string{"0", "app", "a._-9", strings.Repeat("a", 64)} {
