@@ -36,7 +36,8 @@ func (e *Engine) SurfaceOpen(plugin string, p protocol.SurfaceOpenParams) (proto
 		return protocol.SurfaceOpenResult{}, &Error{Code: protocol.CodeBusy, Message: "runtime surface limit reached", Data: map[string]any{"reason": "too_many_surfaces"}}
 	}
 	if p.Placement == protocol.SurfacePlacementModal {
-		busy := e.slice.Get().Overlays.Modal.Plugin != ""
+		overlays := e.slice.Get().Overlays
+		busy := overlays.Modal.Plugin != "" || overlays.SettingsCenter != ""
 		for _, r := range e.runtime {
 			busy = busy || r.Placement == protocol.SurfacePlacementModal
 		}

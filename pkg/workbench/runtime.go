@@ -52,7 +52,6 @@ func (m *workbenchModel) syncRuntime() bool {
 				opened = true
 			}
 			if r.Placement == protocol.SurfacePlacementModal {
-				m.closeSettings()
 				m.modal = modalState{PluginID: r.Plugin, Surface: r.Surface}
 			}
 		}
