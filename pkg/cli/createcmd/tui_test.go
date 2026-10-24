@@ -72,7 +72,14 @@ func TestTUIGoldenAndBundleIdentity(t *testing.T) {
 	}
 	golden := filepath.Join("testdata", "golden", "tui")
 	if *update {
-		if err := writeGolden(golden, files); err != nil {
+		// Keep module and source snapshots as data, not a separate Go workspace.
+		snapshots := append([]file(nil), files...)
+		for i := range snapshots {
+			if snapshots[i].name == "go.mod" || snapshots[i].name == "main.go" {
+				snapshots[i].name += ".golden"
+			}
+		}
+		if err := writeGolden(golden, snapshots); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -87,7 +94,11 @@ func TestTUIGoldenAndBundleIdentity(t *testing.T) {
 		}
 	}
 	assertWrittenModes(t, root)
-	if got, want := tree(t, root), tree(t, golden); !reflect.DeepEqual(got, want) {
+	want := map[string]string{}
+	for name, content := range tree(t, golden) {
+		want[strings.TrimSuffix(name, ".golden")] = content
+	}
+	if got := tree(t, root); !reflect.DeepEqual(got, want) {
 		for name, content := range want {
 			if got[name] != content {
 				t.Errorf("TUI golden differs: %s", name)
