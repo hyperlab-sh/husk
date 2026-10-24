@@ -48,7 +48,18 @@ func TestActionStartsImmediatelyWithExactEnvironment(t *testing.T) {
 	path := env["HERDR_SOCKET_PATH"]
 	expected := map[string]string{"KEEP": "value", "HUSK_SOCKET_PATH": "/host.sock", "HUSK_INSTANCE": "unit", "HUSK_BIN_PATH": "/usr/local/husk", "HERDR_SOCKET_PATH": path, "HERDR_BIN_PATH": r.o.Binary, "HERDR_ENV": "1", "HERDR_PLUGIN_ID": "demo", "HERDR_PLUGIN_ROOT": r.o.Dir, "HERDR_PLUGIN_CONFIG_DIR": r.o.ConfigDir, "HERDR_PLUGIN_STATE_DIR": r.o.StateDir, "HERDR_PLUGIN_CONTEXT_JSON": env["HERDR_PLUGIN_CONTEXT_JSON"], "HERDR_PLUGIN_ACTION_ID": "go", "HERDR_WORKSPACE_ID": "w", "HERDR_TAB_ID": "t", "HERDR_PANE_ID": "p"}
 	if !reflect.DeepEqual(env, expected) {
-		t.Fatalf("environment keys/values differ: got=%v want=%v", env, expected)
+		keys := []string{}
+		for k, v := range env {
+			if want, ok := expected[k]; !ok || v != want {
+				keys = append(keys, k)
+			}
+		}
+		for k := range expected {
+			if _, ok := env[k]; !ok {
+				keys = append(keys, k)
+			}
+		}
+		t.Fatalf("environment table differs at keys %v", keys)
 	}
 	if spawn.command.Dir != r.o.Dir || !reflect.DeepEqual(spawn.command.Argv, []string{"./command", "arg"}) {
 		t.Fatalf("command=%+v", spawn.command)
@@ -122,7 +133,7 @@ func TestHooksReconnectAndEvents(t *testing.T) {
 	event := take(t, r.spawns)
 	env := envMap(event.command.Env)
 	if env["HERDR_PLUGIN_EVENT"] != "pane.focused" || !strings.Contains(env["HERDR_PLUGIN_EVENT_JSON"], `"event":"pane_focused"`) {
-		t.Fatalf("event env=%v", env)
+		t.Fatal("event name or event envelope is missing from command environment")
 	}
 	event.process.done <- 0
 	r.server.DropSubscriptions()
