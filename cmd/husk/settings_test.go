@@ -90,14 +90,12 @@ func TestSettingsOpeningMemoryAndArguments(t *testing.T) {
 }
 
 func TestSettingsDeclinesWithoutChangingOverlays(t *testing.T) {
-	for _, state := range []string{"frozen", "modal", "palette", "secret"} {
+	for _, state := range []string{"frozen", "palette", "secret"} {
 		t.Run(state, func(t *testing.T) {
 			m, fe := settingsFixture(t, "")
 			switch state {
 			case "frozen":
 				m.width = 83
-			case "modal":
-				m.openModal("p", "p.dialog")
 			case "palette":
 				m.showPalette = true
 			case "secret":

@@ -1414,9 +1414,9 @@ func (s modalState) Open() bool { return s.PluginID != "" || s.RailID != "" }
 // reads it here; nothing else keeps a copy.
 func (m *WorkbenchModel) modalOwner() modalState { return m.modal }
 
-// openModal makes pluginID's rail item railID the open modal.
+// openModal replaces Settings with pluginID's rail item railID as the open modal.
 func (m *WorkbenchModel) openModal(pluginID, railID string) {
-	m.clearPending()
+	m.closeSettings()
 	m.modal = modalState{PluginID: pluginID, RailID: railID}
 }
 
