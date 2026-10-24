@@ -26,7 +26,7 @@ What the adapter is **not**:
 - Not a Herdr client. It does not attach to Herdr's TUI socket, render Herdr's workspaces, tabs or user terminals, or replace Herdr's shell. The user's Herdr TUI, if they run one, is untouched.
 - Not a Herdr server manager. By default it attaches to the server the user already has and never stops, restarts or reconfigures it (see "The Herdr server").
 - Not a plugin installer. It reads Herdr's registry and manifests; `herdr plugin install|link|enable|disable` stay the way to change what exists, and `husk-herdr sync` only tells a running instance about the result (see "Hot registry changes").
-- Not core. No package under `cmd/husk` or `pkg/` imports it or names it, and no core spec names Herdr; this file is the only design doc that does.
+- Not core. No package under `cmd/husk` or `pkg/` imports it or names it, and no core spec names the adapted application; this file is the only design doc that does.
 
 Dependencies: the adapter imports `pkg/protocol` (the wire types, as any Go plugin does) and nothing else from Husk. It depends on the core deltas listed under "Core capabilities it needs". Core depends on nothing in the adapter.
 
@@ -59,7 +59,7 @@ adapters/herdr/shim     the plugin process: Husk stdio, commands, PTYs, surfaces
 adapters/herdr/fakeherdr an in-process Herdr server for tests (see "Test strategy")
 ```
 
-Directions: `manifest` imports the TOML library and nothing from Husk; `shim` imports `pkg/protocol` and the sibling packages; nothing under `adapters/` is imported by `cmd/husk` or `pkg/`, and a test in `adapters/herdr` pins that (`TestAdapterIsNotImportedByCore`, the mirror image of core's allow-list tests; it also fails when a core source file or a core design doc names Herdr).
+Directions: `manifest` imports the TOML library and nothing from Husk; `shim` imports `pkg/protocol` and the sibling packages; nothing under `adapters/` is imported by `cmd/husk` or `pkg/`, and a test in `adapters/herdr` pins that (`TestAdapterIsNotImportedByCore`, the mirror image of core's allow-list tests; it also fails when a core source file or a core design doc names the adapted application).
 
 Why one binary with roles, and not a single Husk plugin: a single plugin would have to declare every Herdr plugin's actions in one static manifest, which means either runtime-declared actions in core (a capability Herdr plugins themselves do not have: "runtime action registration is not part of plugin v1") or regenerating a manifest file on disk before every start. The converter seam gives the same result with no new core wire method: conversion runs at every Husk start and on `husk-herdr sync`, the catalog is as current as Herdr's registry, and each Herdr plugin is a Pod with its own liveness, log, token, `husk plugin remove` and `plugin.add`. Why not a core package: the placement rule above, and the application-agnostic rule that `TestDocsHaveNoApplicationResidue` and `TestHostSourceHasNoApplicationIdentifiers` enforce for the top-level docs and the host source (they do not scan `docs/docs/design/`, so `TestAdapterIsNotImportedByCore` covers the design docs); this file is the one documented exemption.
 
@@ -247,7 +247,7 @@ Each shim keeps `<id>.state` (instance scope, not persistent, 256 KiB cap) as it
 
 ### Invariants
 
-1. **Core never names Herdr.** No file under `cmd/husk` or `pkg/` imports `adapters/` or contains the string, and no design doc but this one does; the existing docs lint covers the top-level docs, and `TestAdapterIsNotImportedByCore` keeps the import direction and the design docs.
+1. **Core never names the adapted application.** No file under `cmd/husk` or `pkg/` imports `adapters/` or contains its name, and no design doc but this one does; the existing docs lint covers the top-level docs, and `TestAdapterIsNotImportedByCore` keeps the import direction and the design docs.
 2. **Unchanged plugins.** The adapter runs the manifest's argv commands with Herdr's documented environment and cwd; it never rewrites a plugin's files, and a plugin that works under Herdr and uses only documented variables and socket methods works under the adapter or fails with a named limit below.
 3. **The user's server is read, never managed.** In the default mode the adapter sends the server nothing a plugin command did not ask for, except `ping`, `plugin.list`, `pane.current`, `workspace.get`, `tab.get` and `events.subscribe`. It never stops, reloads, links, unlinks, enables or disables.
 4. **No hook runs twice because of Husk.** Under `hooks = "auto"` the shim runs startup and event hooks only for plugins the attached server does not have enabled.
