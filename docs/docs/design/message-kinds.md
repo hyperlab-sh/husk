@@ -675,7 +675,7 @@ introspection; the shapes are in [Hooks](hooks.md).
    surface through its bounded queue, which drops and logs when full rather
    than block the loop, and homed as `Outbound` in `MethodHomes`.
    `terminal.attach`, `terminal.write` and `terminal.detach` are plugin-only
-   inbound methods on the Terminal port; `surface.open` (deferred) will be
+   inbound methods on the Terminal port; `surface.open` (landed in minor 2.8) is
    one on the Surface port ([Pods](pods.md), Frontend seams).
    Recommended: keep them out of the bus; a watcher that wants terminal
    activity reads `husk.surfaces.terminals` through `state.watch`.
