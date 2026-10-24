@@ -424,7 +424,7 @@ func (s *Service) rebuild(ctx context.Context, in c.ReloadInput, startup bool) (
 		layerFiles[string(l.Layer)] = l.File
 	}
 	flat := map[string]any{}
-	ambiguous := flatten("", in.Doc.Doc, schema, flat)
+	ambiguous := c.FlattenSettings(in.Doc.Doc, schema, flat)
 	layers, resolvedSources := resolveSpellings(in.ConfigLayers, schema, flat, ambiguous, &r.Problems)
 	for name := range s.opts.PluginAdditions {
 		if name == "paths" || name == "dirs" {
@@ -623,50 +623,6 @@ func originOf(origins map[string]store.Layer, key string) string {
 	return string(origins[best])
 }
 
-// flatten turns a document into dotted keys. It stops at a schema key, so a
-// value of the wrong shape there (an object for a scalar) reaches validation
-// whole instead of becoming unknown leaves. An empty object at a schema
-// prefix says nothing and is dropped.
-func flatten(prefix string, m map[string]any, schema map[string]Entry, out map[string]any) map[string]bool {
-	duplicates := map[string]bool{}
-	flattenInto(prefix, m, schema, out, duplicates)
-	return duplicates
-}
-
-func flattenInto(prefix string, m map[string]any, schema map[string]Entry, out map[string]any, duplicates map[string]bool) {
-	put := func(key string, value any) {
-		if _, exists := out[key]; exists {
-			duplicates[key] = true
-		}
-		out[key] = value
-	}
-	for k, v := range m {
-		key := k
-		if prefix != "" {
-			key = prefix + "." + k
-		}
-		obj, isObj := v.(map[string]any)
-		if _, known := schema[key]; known || !isObj {
-			put(key, v)
-			continue
-		}
-		if len(obj) == 0 {
-			if !isSchemaPrefix(schema, key) {
-				put(key, v)
-			}
-			continue
-		}
-		flattenInto(key, obj, schema, out, duplicates)
-	}
-}
-func isSchemaPrefix(schema map[string]Entry, key string) bool {
-	for k := range schema {
-		if strings.HasPrefix(k, key+".") {
-			return true
-		}
-	}
-	return false
-}
 func cloneTyped(v any) any {
 	if ss, ok := v.([]string); ok {
 		return append([]string{}, ss...)

@@ -35,10 +35,11 @@ func TestDistributionOptOutFiresForTrueOnly(t *testing.T) {
 		layers  []store.LayerDoc
 		wantErr bool
 	}{
-		"true in distribution, passing palette": {`{"theme":{"allow_low_contrast":true}}`, map[string]store.Layer{"theme.allow_low_contrast": store.LayerDistribution}, []store.LayerDoc{dist("true")}, true},
-		"false in distribution":                 {`{"theme":{"allow_low_contrast":false}}`, map[string]store.Layer{"theme.allow_low_contrast": store.LayerDistribution}, []store.LayerDoc{dist("false")}, false},
-		"true overridden to false by user":      {`{"theme":{"allow_low_contrast":false}}`, map[string]store.Layer{"theme.allow_low_contrast": store.LayerUser}, []store.LayerDoc{dist("true"), {Layer: store.LayerUser, Doc: doc(`{"theme":{"allow_low_contrast":false}}`)}}, true},
-		"absent from distribution":              {`{}`, nil, nil, false},
+		"true in distribution, passing palette":  {`{"theme":{"allow_low_contrast":true}}`, map[string]store.Layer{"theme.allow_low_contrast": store.LayerDistribution}, []store.LayerDoc{dist("true")}, true},
+		"false in distribution":                  {`{"theme":{"allow_low_contrast":false}}`, map[string]store.Layer{"theme.allow_low_contrast": store.LayerDistribution}, []store.LayerDoc{dist("false")}, false},
+		"true overridden to false by user":       {`{"theme":{"allow_low_contrast":false}}`, map[string]store.Layer{"theme.allow_low_contrast": store.LayerUser}, []store.LayerDoc{dist("true"), {Layer: store.LayerUser, Doc: doc(`{"theme":{"allow_low_contrast":false}}`)}}, true},
+		"absent from distribution":               {`{}`, nil, nil, false},
+		"duplicate distribution opt out ignored": {`{}`, nil, []store.LayerDoc{{Layer: store.LayerDistribution, Doc: doc(`{"theme.allow_low_contrast":false,"theme":{"allow_low_contrast":true}}`)}}, false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			in := themeInput(t, tc.raw, tc.origins, tc.layers...)

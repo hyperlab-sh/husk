@@ -145,7 +145,8 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 	// Only a distribution value of true is an opt-out, whether or not a
 	// stronger layer overrides it; false is the default and no problem.
 	distributionOptOut := source == "distribution" && allow
-	for _, layer := range in.ConfigLayers {
+	clean, _ := c.CleanLayers(in.ConfigLayers, map[string]c.SettingDecl{"theme.allow_low_contrast": {Key: "theme.allow_low_contrast"}})
+	for _, layer := range clean {
 		if layer.Layer == "distribution" {
 			if v, exists := c.Dotted(layer.Doc, "theme.allow_low_contrast"); exists && v == true {
 				distributionOptOut = true

@@ -144,6 +144,7 @@ func TestProfileSelectionAtStartup(t *testing.T) {
 		code     string // a problem the flight must carry, or ""
 		written  bool   // the flight records a choice in the slice
 	}{
+		{"duplicate default selects none", []string{"work", "other"}, []store.LayerDoc{userLayer(`{"profile.default":"other","profile":{"default":"work"}}`)}, nil, "", "duplicate_key", false},
 		{"user default", []string{"work", "other"}, []store.LayerDoc{userLayer(`{"profile":{"default":"work"}}`)}, nil, "work", "", false},
 		{"flag beats default", []string{"work", "other"}, []store.LayerDoc{userLayer(`{"profile":{"default":"work"}}`)}, str("other"), "other", "", true},
 		{"no input", []string{"work"}, nil, nil, "", "", false},
