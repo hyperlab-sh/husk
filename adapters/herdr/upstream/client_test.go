@@ -160,7 +160,7 @@ func TestBackoff(t *testing.T) {
 	var b upstream.Backoff
 	for _, d := range []time.Duration{5, 10, 20, 30, 30, 30} {
 		if got := b.Next(); got != d*time.Second {
-			t.Fatalf("delay %v, want %vs", got, d)
+			t.Fatalf("delay %v, want %v", got, d*time.Second)
 		}
 	}
 }
@@ -303,10 +303,16 @@ func TestAbsentThenPresentAndReconnect(t *testing.T) {
 func TestWaitCancellationAndTerminalVersion(t *testing.T) {
 	t.Run("cancel retry", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
 		clock := newClock()
 		c := client(socket(t), clock)
 		done := make(chan error, 1)
-		go func() { _, err := c.WaitAttach(ctx, "0.9.0", nil); done <- err }()
+		absent := make(chan struct{})
+		go func() {
+			_, err := c.WaitAttach(ctx, "0.9.0", func(string) { close(absent) })
+			done <- err
+		}()
+		<-absent // Ping has completed and stopped its timer before retry inspection.
 		timer := clock.take(t, 5*time.Second)
 		cancel()
 		if err := <-done; !errors.Is(err, context.Canceled) {
@@ -409,7 +415,7 @@ func TestPassthroughAndContextRecords(t *testing.T) {
 			t.Fatalf("%s = %s", tt.method, raw)
 		}
 	}
-	conn, err := net.Dial("unix", path)
+	conn, err := c.Dial(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -23,6 +23,7 @@ type Error struct {
 	Data    map[string]string `json:"data,omitempty"`
 }
 
+// Error formats the stable code and human-readable message.
 func (e *Error) Error() string { return e.Code + ": " + e.Message }
 
 // Unavailable returns the failure actions expose while the server is absent.
@@ -97,13 +98,23 @@ func receive(s *bufio.Scanner) (response, error) {
 	return r, nil
 }
 
-func (c *Client) open(ctx context.Context) (net.Conn, func(), error) {
+// Dial opens a raw upstream connection for byte-exact proxy forwarding. The
+// context bounds dialing only; the caller owns closing the returned connection.
+func (c *Client) Dial(ctx context.Context) (net.Conn, error) {
 	conn, err := c.opts.Dial(ctx, "unix", c.opts.Socket)
 	if err != nil {
 		if ctx.Err() != nil {
-			return nil, nil, context.Cause(ctx)
+			return nil, context.Cause(ctx)
 		}
-		return nil, nil, Unavailable()
+		return nil, Unavailable()
+	}
+	return conn, nil
+}
+
+func (c *Client) open(ctx context.Context) (net.Conn, func(), error) {
+	conn, err := c.Dial(ctx)
+	if err != nil {
+		return nil, nil, err
 	}
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	closeConn := func() { stop(); _ = conn.Close() }
