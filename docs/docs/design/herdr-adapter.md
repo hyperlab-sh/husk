@@ -72,7 +72,7 @@ Plugin ids map `:` to `-`, then must match Husk's plugin-id rule. All distinct e
 | `[[panes]]` | Public `<mapped-id>.pane-<entrypoint>` actions, with placement and size metadata |
 | `[[build]]` | Never run; informational `build_not_run` diagnostic |
 | `[[startup]]`, `[[events]]` | May be parsed for diagnostics, never executed or subscribed by the shim |
-| `[[link_handlers]]` | Not implemented |
+| `[[link_handlers]]` | Ignored: not converted, no diagnostic |
 | Keys | Not imported; bind actions in a Husk keymap layer |
 
 Duplicate synthesized action ids fail with `duplicate_action`. Shortcut/default-key suggestions produce `suggestion_ignored`. Informational vendor metadata is not the runtime source of truth: the shim rereads the manifest. Fatal conversion emits its fatal problem first; direct conversion uses readable registry records for collisions but does not repeat discovery warnings.
@@ -109,7 +109,7 @@ The private socket is mode 0600 in a private 0700 temporary directory. Intercept
 |---|---|
 | `plugin.pane.open` | Own entrypoint opens locally. Another enabled, platform-compatible registry plugin routes through its public Husk pane action; `not_found` falls back to unchanged forwarding. |
 | `popup.close` | Close this shim's modal, otherwise forward unchanged. |
-| `plugin.action.invoke` | Own action spawns locally; another eligible registry plugin routes through Husk `action.invoke`, relaying context; `not_found` falls back to forwarding. |
+| `plugin.action.invoke` | An action of this plugin or of another eligible registry plugin routes through Husk `action.invoke` to that plugin's Pod, relaying context; `not_found` falls back to forwarding. A missing `plugin_id` takes the longest eligible id prefix of a qualified action id. |
 | Everything else | Forward byte for byte, including `notification.show`, `plugin.pane.focus`, `plugin.pane.close` and event streams requested by plugin commands. |
 
 Registry routing rereads changed registry data and never guesses from an unrelated native plugin's action id. Management requests from plugin commands are forwarded and logged, not sandboxed. An unavailable upstream produces one clear error per request. The next request can redial. Explicit `--session` passed to the real CLI bypasses the proxy and is a documented limitation.
@@ -118,7 +118,7 @@ Registry routing rereads changed registry data and never guesses from an unrelat
 
 `popup` opens runtime `modal`; `overlay`, `zoomed`, `tab` and `split` open runtime `canvas`. Missing placement defaults to overlay. Split is a full-canvas approximation, not a sidebar or a promise of future pane-layout support. Popup dimensions use manifest/request cells or percentages; host admission and geometry clamping apply. Other placement-specific focus/direction/target/workspace fields are ignored.
 
-Every successful open returns `{"type":"ok"}`, including non-popups: no pane id, synthetic identity or proxy focus/close control plane. Reopening an entrypoint opens another canvas or gets modal busy; it never focuses an old lifetime. Only host `busy` with reason `modal_open` maps to upstream `ui_busy`, preserving popup retry loops. Command-cap refusals are not popup conflicts.
+Every successful open returns `{"type":"ok"}`, including non-popups: no pane id, synthetic identity or proxy focus/close control plane. Reopening an entrypoint opens another canvas or gets modal busy; it never focuses an old lifetime. Only host `busy` with reason `modal_open` maps to upstream `ui_busy`, preserving popup retry loops. Command-cap refusals are not popup conflicts. Host `busy` with reason `too_many_surfaces` (the host's eight-runtime-surface limit) becomes the adapter-defined `limit_reached`; any other host error keeps its code.
 
 Each open chooses a unique bounded runtime name, declares border/label/close chrome and attaches with capture `all`. If geometry is not ready, wait for a positive resize before retrying. `pkg/ptyhost` owns the sole PTY implementation. The shim uses `pkg/ptyhost.Pump` as the sole output reader. Its callback synchronously acknowledges `terminal.write` chunks no larger than 64 KiB, one in flight per terminal session; the next PTY read waits for ingestion. Input has a bounded 4 MiB queue, dropping newest overflow bytes with a rate-limited warning rather than blocking stdin. Resize applies inner dimensions to the PTY.
 
