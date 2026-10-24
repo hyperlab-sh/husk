@@ -283,14 +283,14 @@ None in this version. `Stats()` exists for tests and a debug overlay. Pending ca
 
 ## Level 2: Migration from today
 
-The historical starting point was plugin-to-plugin hook calls brokered by the command host. The migration below records that split; the UI model now lives in `pkg/workbench`, while Calls lives in `pkg/stem/calls`.
+The historical starting point was plugin-to-plugin hook calls brokered by the host, in `cmd/husk`. The migration below records that split with the paths the code had then; the UI model now lives in `pkg/workbench`, while Calls lives in `pkg/stem/calls`.
 
 - `cmd/husk/registry.go`
   - Moves to `stem/calls`: `pendingHook`, `publicationRegistry.Pending`, `Clock`, `HookTimeout`, the constants `hookTimeout`, `maxPendingHookCalls`, `maxPendingPerSubscriber`, the cap checks and insertion in `callHook`, `pendingFor`, `expireHooks`, the matching half of `hookResult`, and the pending loop at the end of `removePlugin`. `clock` and `realClock` move with them.
   - Changes: one pending entry per hook call with a `Waiting` list becomes one Calls entry per subscriber. The plugin-chosen `request_id` stops being the table key; the hook runner keeps the mapping from the caller's `request_id` to its handles. The cap pre-check across all subscribers becomes `CanSend`.
   - Changes: the error strings `hookTimeoutError` (`"timeout"`) and `"plugin disconnected"` become the `timeout` and `cancelled` codes. The hook runner maps them back to those strings while the old `hook_result` wire shape lives.
   - Stays (for the registry split, then the hook runner and catalog): hook and event declaration, subscription, and caller-side delivery of `hook_result`.
-- `pkg/workbench/model.go`
+- `cmd/husk/model.go`
   - `hookSweepMsg`, `hookSweepInterval`, `hookSweepOn` and `startHookSweep` become `calls.SweepMsg`, `SweepInterval` and `Table.SweepCmd`. The `case hookSweepMsg` arm becomes `case calls.SweepMsg` with the same shape.
   - The `ipcEventMsg` arm that batches `startHookSweep()` after `routePublication` batches `SweepCmd()` after any requester sent.
   - Replies arrive as `calls.ReplyMsg` from the stdio reader instead of as `hook_result` envelopes inside `ipcEventMsg`.
