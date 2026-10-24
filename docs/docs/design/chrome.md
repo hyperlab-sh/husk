@@ -244,7 +244,17 @@ slot explorer, the palette).
 
 ### Runtime modal interactions
 
-Only one plugin modal is shown at a time. Opening a rail modal closes an existing runtime modal through the engine's host-close path before showing the rail modal. Home activation also closes an open runtime modal; it hides, rather than closes, runtime canvases. Opening the Settings center closes the runtime modal. Conversely, an accepted runtime modal replaces an open Settings center, discarding unsaved edits as any Settings dismissal does. These are replacement transitions, not stacked modal layers; see [Protocol](protocol.md), `surface.open`, for singleton admission and final hidden resize delivery. The rail-modal half of singleton admission depends on the frontend's `UpdateSurfaceView` write of `overlays.modal.plugin`; a frontend-less embedding has no open rail modal merely because `modal-surface` is claimed.
+Only one plugin modal is shown at a time. Opening a rail modal closes an
+existing runtime modal through the engine's host-close path before showing the
+rail modal. Home activation also closes an open runtime modal; it hides, rather
+than closes, runtime canvases. Opening the Settings center closes the runtime
+modal. Conversely, an accepted runtime modal replaces an open Settings center,
+discarding unsaved edits as any Settings dismissal does. These are replacement
+transitions, not stacked modal layers; see [Protocol](protocol.md),
+`surface.open`, for singleton admission and final hidden resize delivery. The
+rail-modal half of singleton admission depends on the frontend's
+`UpdateSurfaceView` write of `overlays.modal.plugin`; a frontend-less embedding
+has no open rail modal merely because `modal-surface` is claimed.
 
 ### The top bar
 

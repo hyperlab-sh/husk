@@ -542,8 +542,8 @@ namespaces while "Migration from today" had the TUI's `recomputeLayout` and
   `Frontend.UpdateSurfaceView(fn)`: `fn` edits a copy of `visible`,
   `placement` and `overlays`, and the engine commits it, leaving occupants
   and contributions as they are. An entry of `visible` that is neither a host
-  layout surface nor an open runtime surface refuses the whole update and nothing commits. The view
-  write takes the same foreign-write guard as a surface release, so a
+  layout surface nor an open runtime surface refuses the whole update and
+  nothing commits. The view write takes the same foreign-write guard as a surface release, so a
   `state.clear` of `husk.surfaces` in the same Update is still re-resolved
   from the declarations at the next pass. A resolution pass never touches the
   view half.
@@ -773,8 +773,17 @@ With one:
     holds it. `surface.resized` follows the frontend's geometry, focus and
     visibility writes: the host diffs the computed sizes at the end of each
     tick and pushes only the changes.
-
-20. **Runtime canvas stack and restoration (operator-confirmed C2 decision).** Runtime canvases use one global newest-first opening-order stack, not one stack per plugin and not replace-and-close. Home and rail activation hide it without changing runtime lifetime. Selecting the underlying rail item while the stack is shown reveals that item rather than toggling Home. `husk.surfaces.restore` explicitly re-shows the hidden top, with no default key and a palette entry only while hidden. Focus is captured each time the stack becomes shown, and restored when its last canvas closes. This is the canvas lifecycle decision recorded for C2; the future runtime stage/panel stacks must follow the same rule.
+20. **Runtime canvases form one stack** (lead ruling for runtime surfaces,
+    pending operator review of the restore action and of hide-not-close).
+    Runtime canvases use one global newest-first opening-order stack, not
+    one stack per plugin and not replace-and-close. Home and rail activation
+    hide it without changing runtime lifetime, so selecting the underlying
+    rail item while the stack is shown reveals that item rather than
+    toggling Home. `husk.surfaces.restore` explicitly re-shows the hidden
+    top, with no default key and a palette entry only while hidden. Focus is
+    captured each time the stack becomes shown, and restored when its last
+    canvas closes. Future runtime `stage` and `panel` stacks follow the same
+    rule (open question 6).
 
 ## Open questions
 
@@ -799,8 +808,8 @@ With one:
 5. **Test harness access to render buffers.** A harness may want surface lines
    from `husk state`. Recommendation: no; it uses the existing frame dump path,
    keeping frame-rate data out of State.
-6. **Runtime `stage` and `panel` placements.** `surface.open` (landed in minor 2.8) offers
-   `modal` and `canvas`; a plugin that wants to sit in the main stage or the
+6. **Runtime `stage` and `panel` placements.** `surface.open` (minor 2.8)
+   offers `modal` and `canvas`; a plugin that wants to sit in the main stage or the
    side panel beside the layout occupant has no placement yet. Recommendation:
    add both in a later minor with a stack rule matching runtime canvases:
    newest-first, with hidden entries kept open and the previous placement
