@@ -140,12 +140,12 @@ func TestWorkbenchOverTheRealHost(t *testing.T) {
 		tea.WithWindowSize(goldenW, goldenH),
 	)
 	prog.set(p)
-	h, err := newHost(prog, model, id, dir, pluginDocs(pluginDir), nil, host.WithFactory(factory))
+	h, err := attachTestHost(t.Context(), prog, model, id, dir, pluginDocs(pluginDir), host.WithFactory(factory))
 	if err != nil {
 		t.Fatal(err)
 	}
 	gateAtClose := make(chan bool, 4)
-	model.attach(gateOrderHost{Looped: h, prog: prog, gateAtClose: gateAtClose}, prog.closeGate)
+	model.host = gateOrderHost{Looped: h, prog: prog, gateAtClose: gateAtClose}
 
 	ended := make(chan error, 1)
 	go func() { _, err := p.Run(); ended <- err }()

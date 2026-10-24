@@ -16,7 +16,8 @@ import (
 
 func TestDumpFramePublicDemosPreserveFrames(t *testing.T) {
 	for _, opt := range []Options{
-		{Demo: "pubslots", Width: 120, Height: 36},
+		{Demo: "pubslots"},
+		{Demo: "pubslots", HoldAlt: true},
 		{DemoFrame: true, HoldAlt: true},
 		{DemoFrame: true, RailMode: "modal"},
 		{DemoFrame: true, RailMode: "full-canvas"},
@@ -24,9 +25,6 @@ func TestDumpFramePublicDemosPreserveFrames(t *testing.T) {
 	} {
 		t.Run(opt.Demo+"/"+opt.RailMode, func(t *testing.T) {
 			m := newModel()
-			if opt.Width > 0 {
-				m.width, m.height = opt.Width, opt.Height
-			}
 			if opt.Demo != "" {
 				m.recomputeLayout()
 				m.seedPubslotsDemo()
@@ -38,6 +36,10 @@ func TestDumpFramePublicDemosPreserveFrames(t *testing.T) {
 			got, err := DumpFrame(t.Context(), opt)
 			if err != nil || got != m.View().Content {
 				t.Fatalf("public demo changed its frame: error=%v", err)
+			}
+			lines := strings.Split(got, "\n")
+			if len(lines) != 40 || ansi.StringWidth(lines[0]) != 144 {
+				t.Fatalf("default frame size: width=%d height=%d", ansi.StringWidth(lines[0]), len(lines))
 			}
 		})
 	}
@@ -77,6 +79,19 @@ type closeHost struct {
 
 func (h closeHost) Close() error { h.close(); return nil }
 func (h closeHost) Planned() int { return 0 }
+
+func TestRunAlreadyCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	constructed := false
+	err := Run(ctx, Options{NewHost: func(contracts.Config, ...host.Option) (host.Looped, error) {
+		constructed = true
+		return nil, errors.New("unexpected host construction")
+	}})
+	if !errors.Is(err, context.Canceled) || err.Error() != context.Canceled.Error() || constructed {
+		t.Fatalf("Run error=%v constructed=%v; want unprefixed cancellation before construction", err, constructed)
+	}
+}
 
 func TestPublicRunnersReturnHostConstructionErrors(t *testing.T) {
 	failure := errors.New("cannot construct host")

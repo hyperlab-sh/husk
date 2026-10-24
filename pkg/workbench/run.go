@@ -23,9 +23,6 @@ type Options struct {
 	// Log receives host diagnostics. Nil uses the process's stderr. Interactive
 	// callers should buffer diagnostics until Run returns to protect the TUI.
 	Log io.Writer
-	// Width and Height override the initial 144 by 40 size when positive.
-	// Interactive terminal resize messages still determine the actual size.
-	Width, Height int
 	// HoldAlt latches Alt on startup, as if the modifier were held down.
 	HoldAlt bool
 	// RailMode selects the initial dump-frame rail placement: modal,
@@ -39,12 +36,6 @@ type Options struct {
 
 func configuredModel(opt Options) *workbenchModel {
 	m := newModel()
-	if opt.Width > 0 {
-		m.width = opt.Width
-	}
-	if opt.Height > 0 {
-		m.height = opt.Height
-	}
 	if opt.HoldAlt {
 		m.altLatched = true
 		m.modifiers.Alt = true
@@ -74,8 +65,13 @@ func attachHost(ctx context.Context, m *workbenchModel, prog *programRef, opt Op
 // Run starts the interactive workbench and blocks until it exits or ctx ends.
 // It owns the Bubble Tea program, post gate and host shutdown; it never exits
 // the process or prints an error returned to the caller. Returned errors carry
-// the binary's diagnostic prefix and can be printed directly.
+// the binary's diagnostic prefix and can be printed directly. Cancellation
+// returns ctx.Err() without a diagnostic prefix, including when ctx was already
+// cancelled before Run was called; callers can check it with errors.Is.
 func Run(ctx context.Context, opt Options) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	m := configuredModel(opt)
 	prog := newProgramRef()
 	p := tea.NewProgram(m, tea.WithContext(ctx))
@@ -86,6 +82,9 @@ func Run(ctx context.Context, opt Options) error {
 	_, err := p.Run()
 	prog.closeGate()
 	m.shutdownHost()
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 	if err != nil {
 		return fmt.Errorf("husk error: %w", err)
 	}
@@ -98,7 +97,11 @@ func Run(ctx context.Context, opt Options) error {
 // DumpFrame renders one settled frame without a terminal or signal handler.
 // It returns the current frame even when settling fails, so the caller can
 // print it alongside the error and choose the process exit status. DemoFrame
-// and Demo render their fixtures without constructing a host.
+// and Demo render their fixtures without constructing a host. An error before
+// rendering begins (host construction or invalid demo selection) always returns
+// an empty frame; settling errors always return the current, non-empty frame.
+// Unlike Run's diagnostic errors, DumpFrame errors have no binary prefix so
+// callers can distinguish their own startup and frame-dump diagnostics.
 func DumpFrame(ctx context.Context, opt Options) (string, error) {
 	m := configuredModel(opt)
 	if opt.Demo != "" {

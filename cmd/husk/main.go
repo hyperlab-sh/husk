@@ -57,7 +57,9 @@ func flagSet(name string) bool {
 	return set
 }
 
-// startInstanceID validates a supplied name, or uses the decimal pid.
+// startInstanceID is the id of the instance start mode becomes: the --instance
+// name when given (a given empty name is invalid, never the pid default), else
+// the decimal pid.
 func startInstanceID(name string, given bool, pid int) (string, error) {
 	if !given {
 		return strconv.Itoa(pid), nil
@@ -68,7 +70,10 @@ func startInstanceID(name string, given bool, pid int) (string, error) {
 	return name, nil
 }
 
-// startProfile validates --profile before anything touches the filesystem.
+// startProfile validates --profile before anything touches the filesystem. A
+// given empty name is invalid, like an empty --instance. It returns nil when
+// the flag was not given. The alphabet is Store's profile-directory alphabet,
+// the only one the specs fix.
 func startProfile(name string, given bool) (*string, error) {
 	if !given {
 		return nil, nil
@@ -83,6 +88,7 @@ func startProfile(name string, given bool) (*string, error) {
 type stringFlag []string
 
 func (m *stringFlag) String() string { return strings.Join(*m, ",") }
+
 func (m *stringFlag) Set(v string) error {
 	*m = append(*m, v)
 	return nil
@@ -111,7 +117,8 @@ func (f *bundleFlag) Set(value string) error {
 	return nil
 }
 
-// pluginInstanceDocs folds launch flags into the instance document.
+// pluginInstanceDocs folds all launch flags into one instance document, leaving
+// configured values alone unless their matching flag was explicitly supplied.
 func pluginInstanceDocs(fs *flag.FlagSet) map[string]map[string]any {
 	given := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { given[f.Name] = true })
@@ -135,7 +142,8 @@ func pluginInstanceDocs(fs *flag.FlagSet) map[string]map[string]any {
 	return map[string]map[string]any{"config": {"husk": husk}}
 }
 
-// pluginAdditions keeps additive flags separate until Settings resolves layers.
+// pluginAdditions keeps additive flags separate until Settings resolves the
+// effective configured layers, including the named-instance file.
 func pluginAdditions(fs *flag.FlagSet) (map[string][]string, error) {
 	out := map[string][]string{}
 	given := map[string]bool{}
@@ -183,10 +191,13 @@ func main() {
 		fmt.Fprintf(os.Stderr, "husk: %v\n", err)
 		os.Exit(2)
 	}
+	// Subcommands come first; a positional left over here is a misplaced one
+	// (`husk --instance notes ping`) and must not start an instance.
 	if flag.NArg() > 0 {
 		fmt.Fprintf(os.Stderr, "husk: unexpected argument %q; subcommands come first (husk <noun> [flags])\n", flag.Arg(0))
 		os.Exit(2)
 	}
+	// The name is validated before anything touches the filesystem.
 	id, err := startInstanceID(*instanceName, flagSet("instance"), os.Getpid())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "husk: %v\n", err)
@@ -221,10 +232,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "husk: runtime directory: %v\n", err)
 		os.Exit(1)
 	}
-	opt.NewHost = func(loop contracts.Config, opts ...host.Option) (host.Looped, error) {
-		return newHost(loop, id, runtimeDir, instanceDocs, profileFlag,
-			append([]host.Option{host.WithVersion(buildVersion()), host.WithPluginAdditions(additions)}, opts...)...)
-	}
+	opt.NewHost = hostFactory(id, runtimeDir, instanceDocs, profileFlag, additions)
 	if *dumpFrame {
 		os.Exit(dumpFrameMain(context.Background(), opt, os.Stdout, os.Stderr))
 	}
@@ -254,6 +262,15 @@ func printDumpFrame(frame string, err error, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// hostFactory supplies the binary's launch defaults before workbench options.
+// Both interactive and frame-dump runners use this same constructor seam.
+func hostFactory(id, dir string, docs map[string]map[string]any, profile *string, additions map[string][]string) func(contracts.Config, ...host.Option) (host.Looped, error) {
+	return func(loop contracts.Config, opts ...host.Option) (host.Looped, error) {
+		return newHost(loop, id, dir, docs, profile,
+			append([]host.Option{host.WithVersion(buildVersion()), host.WithPluginAdditions(additions)}, opts...)...)
+	}
 }
 
 // newHost fills the binary's launch configuration around the UI callbacks.
