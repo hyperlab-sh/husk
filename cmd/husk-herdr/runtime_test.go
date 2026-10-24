@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/hyperlab-sh/husk/adapters/herdr/fakeherdr"
 )
 
 func TestRuntimeOptionsUsesPaneMarkerAndCapturedLocations(t *testing.T) {
@@ -56,7 +58,15 @@ func TestDoctorWithoutServerStillChecksRegistryRootsBindingsAndInstance(t *testi
 	exe, _ := os.Executable()
 	// Only the home lookup knows this directory: reading process HOME instead
 	// would silently miss the registry-adjacent config and all useful bindings.
-	env := captureEnvironment(exe, "linux", func(string) string { return "" }, func() (string, error) { return home, nil })
+	sockets, err := os.MkdirTemp("/tmp", "ha-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(sockets)
+	server := fakeUpstream(t, filepath.Join(sockets, "u.sock"), fakeherdr.Options{})
+	server.Close()
+	values := map[string]string{"HERDR_ENV": "1", "HERDR_SOCKET_PATH": filepath.Join(sockets, "u.sock")}
+	env := guardUpstream(t, captureEnvironment(exe, "linux", func(key string) string { return values[key] }, func() (string, error) { return home, nil }))
 	if err := os.MkdirAll(filepath.Dir(env.configPath), 0700); err != nil {
 		t.Fatal(err)
 	}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/hyperlab-sh/husk/adapters/herdr/manifest"
 	"github.com/hyperlab-sh/husk/adapters/herdr/registry"
+	"github.com/hyperlab-sh/husk/adapters/herdr/upstream"
 )
 
 type environment struct {
@@ -21,6 +22,8 @@ type environment struct {
 	home         string
 	getenv       func(string) string
 	lookup       func(string) (string, bool)
+	runCLI       cliRunner
+	upstreamDial upstream.Dialer
 }
 
 func main() {
@@ -34,7 +37,7 @@ func main() {
 
 func execute(args []string, out, diagnostics io.Writer, env environment) int {
 	usage := func() int {
-		fmt.Fprintln(diagnostics, "usage: husk-herdr detect <dir> | discover | convert <dir> | run <dir> | doctor [--instance name]")
+		fmt.Fprintln(diagnostics, "usage: husk-herdr detect <dir> | discover | convert <dir> | run <dir> | sync [--instance name] | doctor [--instance name]")
 		return 2
 	}
 	if len(args) == 0 {
@@ -49,6 +52,8 @@ func execute(args []string, out, diagnostics io.Writer, env environment) int {
 		if len(args) != 1 {
 			return usage()
 		}
+	case "sync":
+		return syncRegistry(args[1:], out, diagnostics, env)
 	case "doctor":
 		return doctor(args[1:], out, diagnostics, env)
 	default:

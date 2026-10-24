@@ -30,8 +30,6 @@ func TestTerminalAttachFailuresUseCoreExitReporting(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer os.RemoveAll(sockets)
-			t.Setenv("HERDR_ENV", "1")
-			t.Setenv("HERDR_SOCKET_PATH", filepath.Join(sockets, "u.sock"))
 			options := fakeherdr.Options{}
 			want := "herdr_protocol: " + mode
 			minimum := "0.9.0"
@@ -52,12 +50,9 @@ func TestTerminalAttachFailuresUseCoreExitReporting(t *testing.T) {
 					return nil
 				}
 			}
-			if mode != "start" {
-				server, err := fakeherdr.Start(os.Getenv("HERDR_SOCKET_PATH"), options)
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer server.Close()
+			server := fakeUpstream(t, filepath.Join(sockets, "u.sock"), options)
+			if mode == "start" {
+				server.Close() // Absence at the allowlisted fixture socket only.
 			}
 			exe, _ := os.Executable()
 			binary := exe
