@@ -191,3 +191,27 @@ func TestFrontendWatchEventsShutdownEndsSubscription(t *testing.T) {
 		}
 	})
 }
+
+// The host caller has the user's trust: secrets. and services. patterns
+// register and receive their events (a plugin caller is refused them).
+func TestFrontendWatchEventsHostReceivesCLIOnlyEvents(t *testing.T) {
+	h, _, fe := bootFrontend(t, nil)
+	got := map[string]string{}
+	h.loop(func() {
+		for _, pat := range []string{"secrets.*", "services.reloaded"} {
+			if _, err := fe.WatchEvents(pat, func(p protocol.EventDeliverParams) { got[p.Name] = p.Source }); err != nil {
+				t.Errorf("%s: %v", pat, err)
+			}
+		}
+	})
+	h.loop(func() {
+		h.root.bus.Publish(eventbus.Event{Name: "secrets.read", Source: eventbus.SourceHost})
+		h.root.bus.Publish(eventbus.Event{Name: "services.reloaded", Source: eventbus.SourceHost})
+	})
+	h.loop(func() {})
+	h.loop(func() {
+		if got["secrets.read"] != eventbus.SourceHost || got["services.reloaded"] != eventbus.SourceHost {
+			t.Errorf("got %+v", got)
+		}
+	})
+}

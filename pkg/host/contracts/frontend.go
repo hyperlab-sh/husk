@@ -97,9 +97,12 @@ type Frontend interface {
 	// by the host. State writes fn makes flush with the next Update; fn must
 	// not call Looped.Tick. A refused
 	// pattern returns its CodedError (invalid_params) and registers nothing.
-	// cancel removes the subscription, is idempotent and safe from any
-	// goroutine; once it has returned fn is not called again. Host shutdown
-	// ends the subscription. Delivery uses the bus's per-subscriber queue and
+	// cancel removes the subscription and is idempotent and safe from any
+	// goroutine; called on the loop (from fn included) it stops fn at once;
+	// called from another goroutine, at most one delivery the loop is already
+	// handing to fn may still run after it returns. The secrets. and services.
+	// patterns are accepted (the host has the user's trust; only a plugin
+	// caller is refused them). Host shutdown ends the subscription. Delivery uses the bus's per-subscriber queue and
 	// back-pressure. Call on the loop.
 	WatchEvents(pattern string, fn func(protocol.EventDeliverParams)) (cancel func(), err error)
 
