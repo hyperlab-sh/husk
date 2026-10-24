@@ -11,11 +11,21 @@ import (
 // Keys implements contracts.KeybindingPort over the keybinding service. The
 // service scopes ListFor to the caller: plugins see their own entries and
 // problems plus effective host and declared rail-item bindings; users see the
-// full merged listing. It returns an already-detached clone, so the wrapper is
-// a shape translation, not another deep copy: no slice or map is shared with
-// the service.
+// full merged listing. Runtime availability is joined here, never in the
+// resolver. No slice or map in the result is shared with the service.
 type Keys struct {
 	Svc *keybinding.Service
+	// View captures current action liveness and live plugins' declared surfaces.
+	// Nil is an empty catalog; pure Resolve, Hints and KeysFor do not use it.
+	View func(context.Context) (KeyView, error)
+}
+
+// KeyView is the runtime catalog for one listing. Actions maps known action
+// ids to availability (host actions are true). Surfaces contains declarations
+// only for live plugins, keyed by plugin id and then surface id.
+type KeyView struct {
+	Actions  map[string]bool
+	Surfaces map[string]map[string]bool
 }
 
 var _ host.KeybindingPort = Keys{}
@@ -25,6 +35,13 @@ func (p Keys) List(ctx context.Context, hc host.Caller) (host.KeyListing, error)
 	listing, err := p.Svc.ListFor(hc)
 	if err != nil {
 		return host.KeyListing{}, coded(err)
+	}
+	var view KeyView
+	if p.View != nil {
+		view, err = p.View(ctx)
+		if err != nil {
+			return host.KeyListing{}, err
+		}
 	}
 	out := host.KeyListing{
 		Entries:  make([]host.KeyEntry, 0, len(listing.Entries)),
@@ -42,6 +59,15 @@ func (p Keys) List(ctx context.Context, hc host.Caller) (host.KeyListing, error)
 			Source:     e.Source,
 			State:      e.State,
 			ShadowedBy: nil,
+		}
+		if entry.State == "effective" {
+			live, known := view.Actions[entry.Action]
+			switch {
+			case !known:
+				entry.State = "unknown_action"
+			case !live || entry.Plugin != "" && !view.Surfaces[entry.Plugin][entry.Focus]:
+				entry.State = "unavailable"
+			}
 		}
 		if e.ShadowedBy != nil {
 			shadow := *e.ShadowedBy

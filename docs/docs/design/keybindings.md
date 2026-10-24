@@ -576,7 +576,7 @@ This is the complete list of loader codes, plus `invalid_plugin_catalog`, raised
 
 ## Level 2: Migration from today
 
-The read-only `husk keys` command is landed, including filtering, source/state tables and problems-only output. The handler's liveness/action-catalog join for `unavailable` and `unknown_action` remains separate work; the CLI already renders those states when supplied.
+The read-only `husk keys` command is landed, including filtering, source/state tables and problems-only output. The handler's liveness/action-catalog join for `unavailable` and `unknown_action` is landed for both socket and frontend listings; the CLI renders those states verbatim.
 
 | Today (`main`) | Change |
 |---|---|
