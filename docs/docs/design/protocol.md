@@ -345,18 +345,7 @@ Each `hit_targets` entry is a `RowHitTarget`:
 | `payload` | object of string values, optional | Metadata returned as `hit_payload`. |
 | `col_start`, `col_end` | integers, optional (minor 2.7) | Surface-relative content cells, start inclusive and end exclusive. Supply both or neither; `col_end > col_start >= 0`, otherwise `invalid_params`. |
 
-For publisher mouse input, the host scans targets in declared order and uses
-only the first whose `line` matches `y` and whose column range, if present,
-contains `x` (`col_start <= x < col_end`). An entry without a range matches the
-whole row, unchanged for older plugins; it can follow ranged entries as a
-fallback. Overlapping ranges keep declaration order, not narrowest-range
-priority. Coordinates are relative to the surface's inner content area, not
-the terminal or its border, and count terminal cells, not bytes or runes.
-Clicks and wheel events use the same resolution. A bad range rejects the
-entire `surface.update` before content or capture changes, following the
-notification `invalid_params` rule above. The generated schema checks paired
-presence and nonnegative bounds; the host additionally checks that the end
-exceeds the start.
+For publisher mouse input, the host scans targets in declared order and uses only the first whose `line` matches `y` and whose column range, if present, contains `x` (`col_start <= x < col_end`). An entry without a range matches the whole row, unchanged for older plugins; it can follow ranged entries as a fallback. Overlapping ranges keep declaration order, not narrowest-range priority. Coordinates are relative to the surface's inner content area, not the terminal or its border, and count terminal cells, not bytes or runes. Clicks and wheel events use the same resolution. A bad range rejects the entire `surface.update` before content or capture changes, following the notification `invalid_params` rule above. The generated schema checks paired presence and nonnegative bounds; the host additionally checks that the end exceeds the start.
 
 ### Surface close
 
