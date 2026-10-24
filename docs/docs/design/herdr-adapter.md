@@ -303,7 +303,7 @@ Each shim keeps `<id>.state` (instance scope, not persistent, 256 KiB cap) as it
 
 ### Core capabilities it needs
 
-All Level 1, none landed; every row but `plugin.add` is specified in the core specs. The adapter is blocked on executable converters for existing at all (actions, startup and event hooks need nothing else), on runtime surfaces, terminal surfaces, capture modes and mouse forwarding for its UI, and on `plugin.add` only for `sync`.
+Executable converters and discovery are landed; the remaining capabilities have the status recorded in their core specs. Actions, startup and event hooks need no further core capability; the UI and sync dependencies are listed below.
 
 | Capability | Spec | Used for |
 |---|---|---|
@@ -335,7 +335,7 @@ Status rows, per adapter unit and per core capability:
 | A1: `cmd/husk-herdr`, `adapters/herdr/manifest`, `adapters/herdr/registry` | in progress |
 | A2: `adapters/herdr/upstream`, `adapters/herdr/fakeherdr` | implemented: schema-backed fake, injectable client, version checks, EOF/error stream recovery seams and attach backoff |
 | A3 and later units | not started |
-| Core: executable converters | Level 1 ([Pods](pods.md)) |
+| Core: executable converters | Landed ([Pods](pods.md)) |
 | Core: live `plugin.add` | not yet specified; its own core spec |
 | Core: runtime surfaces | Level 1 ([Protocol](protocol.md), [State](state.md)) |
 | Core: terminal surfaces | Level 1 ([Protocol](protocol.md), [Pods](pods.md) frontend seams) |
@@ -346,7 +346,7 @@ Work units, in order. Sizes: S under a day, M two to three days, L a week. Core 
 
 | # | Unit | Size | Depends on |
 |---|---|---|---|
-| C1 | **Executable converters.** `manifest.ExecConverter` (`detect`, `convert`, `discover`), `--converter` flag, `husk.plugins.converters` setting (launch-only, like `plugins.paths`), converter problems into the plugin's declared `problems`, tests with a fake converter executable. | M | — |
+| C1 | **Landed: executable converters.** `manifest.ExecConverter` (`detect`, `convert`, `discover`), `--converter` flag, `husk.plugins.converters` setting (launch-only, like `plugins.paths`), converter problems into the plugin's declared `problems`, tests with a fake converter executable. | M | — |
 | A1 | **Conversion.** `adapters/herdr/manifest` and `registry`: TOML parsing, id mapping, platform filters, the entry table, golden fixtures, `husk-herdr detect|discover|convert`. | M | — |
 | A2 | **Fake server and upstream client.** `fakeherdr`, `upstream` (dial, ping, version compare, `events.subscribe` reader with EOF/error reconnect triggers), committed schema copy and the shape test. | M | — |
 | A3 | **Shim without UI.** `husk-herdr run`: Husk stdio, attach sequence and backoff, hooks rule, actions, startup and event hooks, the proxy with passthrough and the `plugin.action.invoke` and `notification.show` interceptions, the warning log for forwarded management methods, the state directory rule, the slice, the log lines, `doctor`. End-to-end test with the host and C1. | L | C1, A1, A2 |
