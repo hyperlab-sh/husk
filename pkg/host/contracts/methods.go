@@ -66,6 +66,7 @@ func MethodHomes() map[string]MethodHome {
 		protocol.MethodStateClear:    home("StatePort", "Clear", cliOnly),
 		protocol.MethodStateChanged:  {Port: Outbound},
 
+		protocol.MethodSurfaceFocus:   home("SurfacePort", "SurfaceFocus", pluginOnly),
 		protocol.MethodSurfaceOpen:    home("SurfacePort", "SurfaceOpen", pluginOnly),
 		protocol.MethodSurfaceUpdate:  home("SurfacePort", "SurfaceUpdate", pluginOnly),
 		protocol.MethodSurfaceClose:   home("SurfacePort", "SurfaceClose", pluginOnly),

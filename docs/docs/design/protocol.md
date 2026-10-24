@@ -247,7 +247,9 @@ Minor 2.7 (**landed**) adds optional paired `col_start` and `col_end` cell bound
 
 Minor 2.8 (**landed**) adds plugin-only `surface.open` for runtime `modal` and `canvas` surfaces, dynamic ids, runtime State and modal surface identity. All earlier minors remain served. Runtime `stage` and `panel` remain reserved.
 
-Minor 2.9 (**landed**, `protocol.Version` is `2.9`) adds `terminal.link`: a consumed ctrl+left click on an OSC 8 target or a row-local detected URL, delivered directly to the attached occupant. All earlier minors remain served.
+Minor 2.9 (**landed**)  adds `terminal.link`: a consumed ctrl+left click on an OSC 8 target or a row-local detected URL, delivered directly to the attached occupant. All earlier minors remain served.
+
+Minor 2.10 (landed) adds plugin-only `surface.focus` for an existing runtime surface. All earlier minors remain served; `protocol.Version` is `2.10`.
 
 Version history:
 
@@ -263,6 +265,7 @@ Version history:
 | 2.7 | Optional `RowHitTarget.col_start` and `col_end` restrict row hits to a half-open cell range. |
 | 2.8 | Runtime modal and canvas surfaces through `surface.open`, dynamic ids and runtime State. |
 | 2.9 | `terminal.link` reports consumed ctrl+left clicks on terminal URLs. |
+| 2.10 | `surface.focus` selects an owned runtime surface, promoting a canvas. |
 
 Where the version is checked, since there is no handshake:
 
@@ -306,7 +309,7 @@ A requester that stops waiting ([Calls](calls.md) times a request out, or a sock
 | | `hook.list` | request (minor 2.1) | socket caller to Husk |
 | `state` | `state.get`, `state.set`, `state.patch`, `state.snapshot`, `state.watch`, `state.clear` | request | plugin or CLI to Husk |
 | | `state.changed` | notification | Husk to a watching socket connection |
-| `surface` | `surface.open` | request | plugin to Husk (socket) |
+| `surface` | `surface.open`, `surface.focus` | request | plugin to Husk (socket) |
 | | `surface.update`, `surface.close` | notification | plugin to Husk (socket) |
 | | `surface.resized` | notification | Husk to plugin |
 | `terminal` | `terminal.attach` | request | plugin to Husk (socket) |
@@ -403,6 +406,8 @@ Two capabilities a manifest cannot express motivate the minor: a plugin that dec
 {"id":"o1","method":"surface.open","params":{"placement":"modal","name":"picker","title":"Pick one","width":"60%","height":20,"frame":{"border":true,"label":"Pick one","close":true}}}
 {"id":"o1","result":{"surface":"example.files.picker"}}
 ```
+
+**`surface.focus` (minor 2.10)** is a plugin-only request with params `{"surface":"example.files.picker"}` and result `{}`. Only the plugin that opened that runtime surface may focus it. An unknown or closed runtime id, or a layout surface without another plugin's occupant, answers `not_found`; another plugin's surface answers `denied`. Non-plugin callers answer `denied`. Focus creates nothing and preserves the terminal, dimensions and surface lifetime. Admission matches an open of that placement, excluding new-name and count checks: a canvas can be selected behind Settings, whereas a modal cannot displace Settings or another modal (`busy`, `modal_open`). An existing modal is itself the singleton, not a reason to refuse its own focus. A canvas moves to the top as if newly opened and re-shows a hidden stack; modal focus selects its existing keyboard target. Showing produces only the normal geometry/visibility notifications. Stack ordering is owned by [State](state.md).
 
 **`terminal.attach`** turns a surface the caller occupies (claimed or runtime) into a terminal surface: the host allocates a terminal emulator of the surface's inner size and from then on renders the emulator's screen instead of `surface.update` lines, which answer `invalid_params` (`terminal_attached`) until `terminal.detach`. Params: `surface`, and optional `capture` (`true`, `false`, `"text"` or `"all"`, default `"all"`, see `capture` below) and `scrollback` (lines, default 2000, max 20000). Result: `{"width", "height"}`, the emulator's size in cells, the same numbers the next `surface.resized` carries. A surface already attached answers `conflict`; a caller other than the live occupant is `denied`. An occupied surface without usable inner geometry (width or height below 1, for example while hidden or not yet laid out) answers `unavailable`. Wait for `surface.resized` with positive width and height before retrying.
 

@@ -37,6 +37,8 @@ const (
 	MethodStateChanged = "state.changed"
 	// MethodSurfaceOpen opens a runtime surface; see design/protocol.md.
 	MethodSurfaceOpen = "surface.open"
+	// MethodSurfaceFocus focuses an owned runtime surface (minor 2.10).
+	MethodSurfaceFocus = "surface.focus"
 	// MethodSurfaceUpdate renders a surface; see design/protocol.md.
 	MethodSurfaceUpdate = "surface.update"
 	// MethodSurfaceClose closes a surface; see design/protocol.md.
@@ -120,7 +122,7 @@ func Methods() []string {
 	return []string{MethodSessionPing, MethodProtocolError, MethodActionInvoke, MethodActionList,
 		MethodEventEmit, MethodEventDeliver, MethodEventWatch, MethodHookCall, MethodHookList,
 		MethodStateGet, MethodStateSet, MethodStatePatch, MethodStateSnapshot, MethodStateWatch, MethodStateClear, MethodStateChanged,
-		MethodSurfaceOpen, MethodSurfaceUpdate, MethodSurfaceClose, MethodSurfaceResized, MethodTerminalAttach, MethodTerminalWrite, MethodTerminalDetach, MethodTerminalInput, MethodTerminalLink, MethodInputKey, MethodInputMouse, MethodInputKeyState,
+		MethodSurfaceOpen, MethodSurfaceFocus, MethodSurfaceUpdate, MethodSurfaceClose, MethodSurfaceResized, MethodTerminalAttach, MethodTerminalWrite, MethodTerminalDetach, MethodTerminalInput, MethodTerminalLink, MethodInputKey, MethodInputMouse, MethodInputKeyState,
 		MethodThemeChanged, MethodThemeGet, MethodThemeList, MethodThemeCheck, MethodSlotContribute, MethodSlotContributions, MethodToastShow,
 		MethodSettingsGet, MethodSettingsList, MethodSettingsSchema, MethodSettingsValidate, MethodSettingsSet,
 		MethodSecretsGet, MethodSecretsNames, MethodSecretsSet, MethodSecretsGrant, MethodSecretsRevoke, MethodSecretsReveal,

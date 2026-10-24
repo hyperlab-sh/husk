@@ -548,6 +548,17 @@
       ],
       "type": "object"
     },
+    "SurfaceFocusParams": {
+      "properties": {
+        "surface": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "surface"
+      ],
+      "type": "object"
+    },
     "SurfaceKeyParams": {
       "properties": {
         "key": {
@@ -1225,6 +1236,12 @@
     "surface.close.result": {
       "description": "Result owned by design/protocol.md; no additional field constraints specified here."
     },
+    "surface.focus.params": {
+      "$ref": "#/$defs/SurfaceFocusParams"
+    },
+    "surface.focus.result": {
+      "$ref": "#/$defs/EmptyResult"
+    },
     "surface.open.params": {
       "$ref": "#/$defs/SurfaceOpenParams"
     },
@@ -1310,7 +1327,7 @@
   "$id": "https://github.com/hyperlab-sh/husk/blob/main/docs/docs/wire-schema-v2.json",
   "$ref": "#/$defs/Message",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "One UTF-8 JSON object per line, at most 4194304 bytes. Protocol 2.9. Generated from pkg/protocol; do not edit. x-methods indexes payload schemas; unknown fields are accepted.",
+  "description": "One UTF-8 JSON object per line, at most 4194304 bytes. Protocol 2.10. Generated from pkg/protocol; do not edit. x-methods indexes payload schemas; unknown fields are accepted.",
   "title": "Husk wire protocol v2",
   "x-methods": {
     "action.invoke": {
@@ -1680,6 +1697,15 @@
       },
       "result": {
         "$ref": "#/$defs/surface.close.result"
+      }
+    },
+    "surface.focus": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/surface.focus.params"
+      },
+      "result": {
+        "$ref": "#/$defs/surface.focus.result"
       }
     },
     "surface.open": {
