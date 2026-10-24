@@ -7,6 +7,39 @@ import (
 	"testing"
 )
 
+func TestRuntimeModalFocusPreservesLifetimeAndStack(t *testing.T) {
+	for _, settings := range []bool{false, true} {
+		t.Run(map[bool]string{false: "focused", true: "settings_race"}[settings], func(t *testing.T) {
+			m := goldenModel()
+			fe := withFE(m)
+			openRuntimeFixture(m, fe, "p.canvas", protocol.SurfacePlacementCanvas)
+			openRuntimeFixture(m, fe, "q.canvas", protocol.SurfacePlacementCanvas)
+			m.hideRuntime()
+			openRuntimeFixture(m, fe, "p.popup", protocol.SurfacePlacementModal)
+			before := m.modal
+			focus := m.runtimeFocus
+			if settings {
+				// Model the interval before Settings publishes its overlay. Normal
+				// sequential openSettings closes the modal first and cannot hit this race.
+				m.settings = &settingsCenter{tab: "general"}
+			}
+			fe.Runtime[2].FocusRevision++
+			if !m.syncRuntime() {
+				t.Fatal("modal activation was not observed")
+			}
+			if m.modal != before || len(fe.Runtime) != 3 {
+				t.Fatal("modal activation replaced or closed the existing popup")
+			}
+			if !m.runtimeHidden || topCanvas(m.runtime) != "q.canvas" || m.runtimeFocus != focus {
+				t.Fatal("modal focus reset the canvas stack")
+			}
+			if !settings && m.keyContext().FocusSurface != "p.popup" {
+				t.Fatal("modal did not retain keyboard focus")
+			}
+		})
+	}
+}
+
 func TestRuntimeFocusReorder(t *testing.T) {
 	for _, mode := range []string{"shown", "hidden", "settings"} {
 		t.Run(mode, func(t *testing.T) {
