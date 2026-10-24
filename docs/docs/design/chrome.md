@@ -8,7 +8,7 @@ description: "What the frontend draws around plugin content: every surface laid 
 Status: landed for layout, empty surfaces, rail geometry, bar composition and
 colour discipline. The built-in theme layer and `charm` default name are
 landed, and so is frontend ANSI index drawing. Scope:
-`cmd/husk` layout and rendering (the frontend). No wire,
+`pkg/workbench` layout and rendering (the frontend). No wire,
 manifest or plugin-visible change; `husk.surfaces.visible` and
 `husk.geometry.rects` change content, not shape.
 
@@ -43,7 +43,7 @@ This spec fixes five things:
 5. **The frame is drawn with surfaces, borders and inks only.** The accent
    marks exactly the focused or selected element and the status colours
    appear only on status glyphs, badges and toasts; see "Colour discipline".
-   Before the colour-discipline migration the chrome (`cmd/husk`) used
+   Before the colour-discipline migration the chrome (now in `pkg/workbench`) used
    `warning` in twelve places and `accent` in eight, and the frame read as
    loud whatever palette it was given.
 
@@ -120,7 +120,7 @@ A placement surface is drawn only while its rail item is active (or its modal
 is open), and it always has a plugin behind it: its registry occupant, or,
 when no plugin claimed it in a manifest, the plugin that declared the active
 rail item, which then receives its keys ([Architecture](../architecture.md),
-"Input routing"; `keyOwner` in `cmd/husk`). So a placement surface is never
+"Input routing"; `keyOwner` in `pkg/workbench`). So a placement surface is never
 empty and never shows its name, whatever `husk.surfaces.occupants` says; until
 content arrives it is a blank canvas like any occupied surface.
 
@@ -342,7 +342,7 @@ input modes under this name.
 
 ### Colour discipline
 
-Binding on `cmd/husk`, whatever theme is selected ([Built-in themes](themes.md)
+Binding on `pkg/workbench`, whatever theme is selected ([Built-in themes](themes.md)
 supplies the colours; this section says which role each piece of chrome may be
 drawn with). The frame must read as calm under every theme, the vibrant ones
 included: the rule, not the palette, is what keeps it so.
@@ -386,7 +386,7 @@ included: the rule, not the palette, is what keeps it so.
    `surface_selected`, text in `ink` and `ink_muted`, the frame in
    `border_focused`.
 
-**Audit of the pre-migration `cmd/husk`** (`render.go` and `secretprompt.go`,
+**Audit of the pre-migration chrome, now in `pkg/workbench`** (`render.go` and `secretprompt.go`,
 the only files that drew a status or accent role), every use that broke a
 rule and where it moved. Uses not listed (rail and bar backgrounds, idle
 icons, frame borders and `border_focused` on the focused surface, close
@@ -428,16 +428,16 @@ the dragged divider. The Settings center adds its own rule-2 uses (the Theme
 tab's current-theme marker, the focused tab label, the focused form field and
 the focused profile corner).
 Status roles appear only inside `drawToast` and in the shared `statusMark`
-helper (`cmd/husk/status.go`), which draws a status glyph or a one-word status
+helper (`pkg/workbench/status.go`), which draws a status glyph or a one-word status
 badge in its level colour, used by the secret prompt (its `⚠`) and the
 Settings center (its problem and warning lines and its status cells);
 `accent_secondary` and
 `accent_soft` appear nowhere. `TestChromeColourDiscipline` pins it: a
-source-level test over `cmd/husk/*.go` (excluding tests) that counts
+source-level test over `pkg/workbench/*.go` (excluding tests) that counts
 `m.palette.<Role>` references per role and receiver-qualified method,
 including package initializers, and rejects palette aliases. It fails when
 `AccentSecondary` or `AccentSoft` appears, or when `Success`, `Warning`,
-`Danger` or `Info` appears outside `WorkbenchModel`'s `drawToast` and shared
+`Danger` or `Info` appears outside `workbenchModel`'s `drawToast` and shared
 status helper, or when `Accent` appears other than once in each of
 `renderActivityRailBox`, `drawCommandPalette` and `dividerEdgeStyles` (the
 three places above).
@@ -465,11 +465,11 @@ regenerated for these moves ("Tests and goldens").
 
 ### Tests and goldens
 
-Every golden in `cmd/husk/testdata` changes (`TestGoldenFrameEmptyWorkbench`,
+Every golden in `pkg/workbench/testdata` changes (`TestGoldenFrameEmptyWorkbench`,
 `TestGoldenFrameOnePlugin`, `TestGoldenFramePaletteOpen`,
 `TestGoldenFrameFullSlots`): the rail is wider, the bars are different, and the
 empty workbench gains its side columns and surface names. They are regenerated
-once with `go test ./cmd/husk -run TestGoldenFrame -update` in the commit that
+once with `go test ./pkg/workbench -run TestGoldenFrame -update` in the commit that
 lands the layout change, and the commit body says what changed in each. The
 `--dump-frame` outputs change the same way. Tests the implementer adds or
 rewrites, each named for the behaviour it pins:
@@ -504,7 +504,7 @@ rewrites, each named for the behaviour it pins:
 
 ## Level 2: Migration from today
 
-All in `package main` under `cmd/husk`. `pkg/` is untouched.
+All UI code and its tests now live in `package workbench` under `pkg/workbench`; the model remains unexported.
 
 | Today | After |
 | :--- | :--- |
@@ -519,7 +519,7 @@ All in `package main` under `cmd/husk`. `pkg/` is untouched.
 | `dropVanishedSides`, `leaveUndrawnSides` | Unchanged; a side column now vanishes only by its dock or the fit rule, never because a plugin left |
 | Frontend traffic counter | Removed; frame-dump settling fingerprints published content and Pod status |
 | Every role use listed under "Colour discipline" | Landed: uses the role in the table's last column; `drawToast` keeps the level colour for glyph and title only |
-| `mode_label_test.go` | Rewritten for the table above and the inverted layout rule; other `cmd/husk` tests that assume zero plugins lay out no side rects, or read the top-bar label (`focus_fallback_test.go`, `surface_owner_test.go`), are updated the same way |
+| `mode_label_test.go` | Rewritten for the table above and the inverted layout rule; other `pkg/workbench` tests that assume zero plugins lay out no side rects, or read the top-bar label (`focus_fallback_test.go`, `surface_owner_test.go`), are updated the same way |
 
 A left press on the theme pill is routed in `input.go` before modal, divider,
 rail and surface hit-testing, including modal-only consumption (the open
@@ -612,7 +612,7 @@ size", "Input routing"), [Services](services.md) ("Settings", `theme.name`),
     `restart required` is the status it names, which is what rule 4 allows;
     colouring it is the badge case, not decoration. Titles stay inks: the
     secret prompt says "warning" with its glyph, not with a yellow headline.
-20. **The audit covers all of `cmd/husk`**, not one file: the secret prompt in
+20. **The audit covers all of `pkg/workbench`**, not one file: the secret prompt in
     `secretprompt.go` broke the same rules (`warning` title and border,
     `accent` id and keys) and is migrated with the rest.
 21. **A problem line is ink behind a status glyph.** The Settings center's

@@ -19,10 +19,11 @@ Surfaces module keeps focus and layout in it, `husk state` reads it from the
 CLI, Store persists from it and hydrates it on start, and a test harness
 inspects it instead of reaching into the Bubble Tea model.
 
-The problem it solves: today the truth is scattered across `WorkbenchModel`
-fields and the publication registry in `cmd/husk`, mixed with config-derived
-catalog data and with input bookkeeping. Nothing outside the model can read it,
-nothing persists it, and nothing tells a plugin it changed.
+The problem it solves: before State, truth was scattered across workbench model
+fields and the publication registry in the command host, mixed with config-derived
+catalog data and input bookkeeping. Nothing outside the model could read it,
+nothing persisted it, and nothing told a plugin it changed. The private
+`workbenchModel` now lives in `pkg/workbench` and reads the host's State snapshots.
 
 State is **not**:
 
@@ -663,7 +664,7 @@ With one:
   - `ownID` and `validPluginID`: the rule is restated in `substrate/state` for
     namespaces, without importing the wire package; a shared test asserts both
     accept the same inputs.
-- `cmd/husk/model.go`, `WorkbenchModel` fields:
+- `pkg/workbench/model.go`, `workbenchModel` fields:
   - To `husk.focus`: `focusedSlot`, `focusFallback`, `blurred` (inverted as
     `terminal_focused`).
   - To `husk.surfaces` (view half, written through `Frontend.UpdateSurfaceView`):
@@ -688,12 +689,12 @@ With one:
     `subChan`, `procs`, `quit`, `stopGrace`, `handoffGrace`,
     `handoffPending`, `pluginCtx`, `pluginCancel`, `sendQueueCapacity`,
     `writeTimeout`, `logOut` (plumbing).
-- `cmd/husk/layout.go`: `showSidebar`, `sidebarWidth`, `sidebarNavH`,
+- `pkg/workbench/layout.go`: `showSidebar`, `sidebarWidth`, `sidebarNavH`,
   `sidebarFootH`, `mainHeaderH`, `showSidePane` and `sidePaneW` move to
   `husk.layout`; `width`, `height`, `slotRects`, `modalRect` and the result of
   `tooSmall()` move to `husk.geometry`, written by `recomputeLayout` through
-  the handle `cmd/husk` obtains from `Frontend.OwnSlices`.
-  `dropVanishedSides` writes `husk.focus` through its handle. `cmd/husk` owns
+  the handle `pkg/workbench` obtains from `Frontend.OwnSlices`.
+  `dropVanishedSides` writes `husk.focus` through its handle. `pkg/workbench` owns
   these three namespaces and the view half of `husk.surfaces` (see "Frontend-owned
   slices"); the Surfaces engine owns none of them, and its `Resized` is
   driven by the geometry writes. `minTermWidth`, `minTermHeight` and
