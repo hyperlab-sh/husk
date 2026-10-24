@@ -258,10 +258,7 @@ stack behind the center, which stays open and keeps receiving keys. See
 hidden resize delivery. The rail-modal and Settings halves of modal admission
 depend on the frontend's `UpdateSurfaceView` writes of `overlays.modal.plugin`
 and `overlays.settings_center`; a frontend-less embedding has no open rail
-modal merely because `modal-surface` is claimed. `surface.focus` follows the
-same placement admission: selecting an existing canvas promotes and shows it
-behind Settings without replacing the center, while an existing modal keeps
-its singleton and keyboard target.
+modal merely because `modal-surface` is claimed.
 
 ### The top bar
 

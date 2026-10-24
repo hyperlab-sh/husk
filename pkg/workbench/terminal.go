@@ -74,8 +74,7 @@ func (m *workbenchModel) terminalCursor() *tea.Cursor {
 }
 
 // routeTerminalMouse runs after active divider dragging but before the line
-// surface's narrower mouse filter. An unfocused content click only focuses,
-// except ctrl+left presses, which also resolve terminal links.
+// surface's narrower mouse filter. An unfocused content click only focuses.
 func (m *workbenchModel) routeTerminalMouse(event tea.MouseMsg) bool {
 	mouse := event.Mouse()
 	if _, ok := event.(tea.MouseReleaseMsg); ok && m.terminalFocusClick && (mouse.Button == tea.MouseLeft || mouse.Button == tea.MouseNone) {
@@ -120,10 +119,7 @@ func (m *workbenchModel) routeTerminalMouse(event tea.MouseMsg) bool {
 		if !wheel && !m.modalOwner().Open() && m.focusedSlot != hit.id {
 			if _, ok := event.(tea.MouseClickMsg); ok {
 				m.setFocus(hit.id)
-				// Resolve links without encoding the focus click's fallback.
-				if mouse.Button == tea.MouseLeft {
-					m.terminalFocusClick = !m.fe.ResolveTerminalLink(hit.id, uv.MouseClickEvent(rel))
-				}
+				m.terminalFocusClick = mouse.Button == tea.MouseLeft
 			}
 			return true
 		}
