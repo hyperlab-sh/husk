@@ -26,6 +26,7 @@ func TestDoctorUsesFakeServerAndReportsHookDecision(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer fake.Close()
+	t.Setenv("HERDR_ENV", "1")
 	t.Setenv("HERDR_SOCKET_PATH", filepath.Join(sockets, "u.sock"))
 	t.Setenv("HUSK_BIN_PATH", filepath.Join(root, "missing-cli"))
 	exe, _ := os.Executable()

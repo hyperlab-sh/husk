@@ -87,13 +87,29 @@ func TestHookPolicy(t *testing.T) {
 		run     bool
 	}{{"auto", true, "server", false}, {"auto", false, "shim", true}, {"always", true, "shim", true}, {"never", false, "never", false}} {
 		t.Run(tc.policy+"_"+tc.owner, func(t *testing.T) {
-			r := newRig(t, tc.policy, tc.enabled, "[[startup]]\ncommand=['./startup']\n")
+			r := newRig(t, tc.policy, tc.enabled, "[[startup]]\ncommand=['./startup']\n[[events]]\non='pane.focused'\ncommand=['./event']\n")
 			r.start(t)
 			raw := r.host.until(t, protocol.MethodStateSet, "attached")
 			var published struct{ Value state }
 			_ = json.Unmarshal(raw, &published)
 			if published.Value.Hooks != tc.owner {
 				t.Fatalf("owner=%s", published.Value.Hooks)
+			}
+			subscriptions := 0
+			for _, req := range r.server.Requests() {
+				if req.Method == "events.subscribe" {
+					subscriptions++
+				}
+			}
+			want := 0
+			if tc.run {
+				want = 1
+			}
+			if subscriptions != want {
+				t.Fatalf("subscriptions=%d want %d", subscriptions, want)
+			}
+			if err := r.server.Emit("pane_focused", map[string]any{"type": "pane_focused", "pane_id": "p", "workspace_id": "w"}); err != nil {
+				t.Fatal(err)
 			}
 			if tc.run {
 				p := take(t, r.spawns)
@@ -102,8 +118,21 @@ func TestHookPolicy(t *testing.T) {
 					t.Fatal(env)
 				}
 				p.process.done <- 0
-				r.host.until(t, protocol.MethodStateSet, "attached")
+				event := take(t, r.spawns)
+				if event.command.Argv[0] != "./event" {
+					t.Fatal("missing event hook")
+				}
+				event.process.done <- 0
+				// EOF is a dispatch barrier: every match for the event must have
+				// finished launching before the attach loop can publish lost.
+				r.server.DropSubscriptions()
+				r.host.until(t, protocol.MethodStateSet, "lost")
+				r.clock.next(t, 5*time.Second)
 			} else {
+				// Drive a whole fake-clock monitoring window, then wait until the
+				// next ping is scheduled. Startup and subscription setup are done.
+				r.clock.fire(t, 5*time.Second)
+				r.clock.next(t, 5*time.Second)
 				reply := r.invoke(t, "demo.go")
 				if reply.Error != nil {
 					t.Fatal(reply.Error)
@@ -113,6 +142,11 @@ func TestHookPolicy(t *testing.T) {
 					t.Fatal("hook unexpectedly ran")
 				}
 				p.process.done <- 0
+			}
+			select {
+			case extra := <-r.spawns:
+				t.Fatalf("unexpected extra hook: %v", extra.command.Argv)
+			default:
 			}
 		})
 	}
@@ -175,7 +209,11 @@ func TestPaneStub(t *testing.T) {
 	if reply.Error == nil || reply.Error.Code != protocol.CodeFailed || reply.Error.Message != "pane entrypoints are not supported yet" {
 		t.Fatalf("pane=%+v", reply)
 	}
-	rr := &runner{m: manifest.Manifest{ID: "demo"}}
+	registryPath := filepath.Join(t.TempDir(), "plugins.json")
+	if err := os.WriteFile(registryPath, []byte(`[{"plugin_id":"other","enabled":true}]`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	rr := &runner{m: manifest.Manifest{ID: "demo"}, o: Options{RegistryPath: registryPath, Platform: "linux"}}
 	pp, err := proxy.Start(context.Background(), proxy.Options{Dial: upstream.New(upstream.Options{Socket: r.o.Socket}).Dial, Intercept: rr.intercept})
 	if err != nil {
 		t.Fatal(err)
@@ -184,7 +222,7 @@ func TestPaneStub(t *testing.T) {
 	errorShape := shape(t, "error_response")
 	for _, req := range []proxy.Request{{ID: "a", Method: "plugin.pane.open", Params: json.RawMessage(`{"plugin_id":"demo","entrypoint":"panel"}`)}, {ID: "b", Method: "plugin.pane.focus", Params: json.RawMessage(`{"pane_id":"husk:demo.panel"}`)}, {ID: "c", Method: "plugin.pane.close", Params: json.RawMessage(`{"pane_id":"husk:demo.panel"}`)}, {ID: "d", Method: "popup.close", Params: json.RawMessage(`{}`)}} {
 		_, failure, handled := rr.intercept(context.Background(), req)
-		if !handled || failure == nil || failure.Message != "pane entrypoints are not supported yet" {
+		if !handled || failure == nil || failure.Code != "unsupported" || failure.Message != "pane entrypoints are not supported yet" {
 			t.Fatalf("%s: %v %v", req.Method, handled, failure)
 		}
 		raw, _ := json.Marshal(req)
@@ -192,6 +230,21 @@ func TestPaneStub(t *testing.T) {
 		if err := errorShape.Validate(envelope); err != nil {
 			t.Fatal(err)
 		}
+		body := envelope["error"].(map[string]any)
+		if body["code"] != "unsupported" || body["message"] != "pane entrypoints are not supported yet" {
+			t.Fatalf("pane proxy error=%v", body)
+		}
+	}
+	// D191 only stubs this plugin's panes. Cross-plugin opens, including
+	// another converted registry plugin, remain byte-exact raw passthrough.
+	line := "{ \"id\":\"cross\", \"method\":\"plugin.pane.open\", \"params\":{\"plugin_id\":\"other\",\"entrypoint\":\"panel\",\"placement\":\"popup\"} }\r\n"
+	answer := proxyCall(t, pp.Path(), line)
+	if answer["error"] != nil || answer["result"].(map[string]any)["type"] != "ok" {
+		t.Fatalf("cross-plugin pane was not forwarded: %v", answer)
+	}
+	requests := r.server.Requests()
+	if len(requests) == 0 || string(requests[len(requests)-1].Raw) != line {
+		t.Fatal("cross-plugin pane request bytes changed")
 	}
 }
 

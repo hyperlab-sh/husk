@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
@@ -23,7 +24,6 @@ type SocketHost struct {
 	mu            sync.Mutex
 	notifications net.Conn
 	notifyDone    chan struct{}
-	notifyStop    func() bool
 }
 
 func (h *SocketHost) send(ctx context.Context, method string, params any, reply bool) (json.RawMessage, error) {
@@ -82,7 +82,6 @@ func (h *SocketHost) Notify(ctx context.Context, m string, p any) error {
 	if h.notifications != nil {
 		select {
 		case <-h.notifyDone:
-			h.notifyStop()
 			h.notifications = nil
 		default:
 		}
@@ -95,14 +94,31 @@ func (h *SocketHost) Notify(ctx context.Context, m string, p any) error {
 		h.notifications = c
 		h.notifyDone = make(chan struct{})
 		done := h.notifyDone
-		h.notifyStop = context.AfterFunc(ctx, func() { _ = c.Close() })
 		go func() {
 			defer close(done)
 			defer c.Close()
 			_ = protocol.ReadLoop(c, func(protocol.Message) {}, func(*protocol.LineError) {})
 		}()
 	}
-	return protocol.NewWriter(h.notifications).Send(protocol.Message{Method: m, Params: raw, Token: h.Token})
+	// Only dialing and this write belong to ctx. A completed notification must
+	// not leave a cancellation callback that later closes the shared reader.
+	c := h.notifications
+	canceled := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		defer close(canceled)
+		_ = c.SetWriteDeadline(time.Now())
+	})
+	err = protocol.NewWriter(c).Send(protocol.Message{Method: m, Params: raw, Token: h.Token})
+	if !stop() {
+		<-canceled
+	}
+	_ = c.SetWriteDeadline(time.Time{})
+	if err != nil {
+		_ = c.Close()
+		<-h.notifyDone
+		h.notifications = nil
+	}
+	return err
 }
 
 // Close joins the notification reader. Run calls this on shutdown.
@@ -110,7 +126,6 @@ func (h *SocketHost) Close() error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.notifications != nil {
-		h.notifyStop()
 		_ = h.notifications.Close()
 		<-h.notifyDone
 		h.notifications = nil

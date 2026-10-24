@@ -38,7 +38,7 @@ func TestMain(m *testing.M) {
 			os.Exit(0)
 		case "detect", "discover", "convert", "run":
 			exe, _ := os.Executable()
-			os.Exit(execute(os.Args[1:], os.Stdout, os.Stderr, captureEnvironment(exe, runtime.GOOS, os.Getenv, os.UserHomeDir)))
+			os.Exit(execute(os.Args[1:], os.Stdout, os.Stderr, captureEnvironment(exe, runtime.GOOS, os.Getenv, os.UserHomeDir, os.LookupEnv)))
 		case "capture":
 			os.Exit(captureCommand())
 		}
@@ -95,6 +95,7 @@ func TestRealHostConverterAndShim(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer fake.Close()
+	t.Setenv("HERDR_ENV", "1")
 	t.Setenv("HERDR_SOCKET_PATH", filepath.Join(sockets, "u.sock"))
 	exe, _ := os.Executable()
 	adapterConfig := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "husk-herdr")

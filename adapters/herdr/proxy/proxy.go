@@ -9,6 +9,9 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
+
+	"github.com/hyperlab-sh/husk/adapters/herdr/upstream"
 )
 
 // Request is the portion of a request needed by the interception policy.
@@ -29,7 +32,12 @@ type Options struct {
 	Dial      func(context.Context) (net.Conn, error)
 	Intercept func(context.Context, Request) (result any, failure *Error, handled bool)
 	Warn      func(method string)
+	Clock     upstream.Clock
 }
+
+type clock struct{}
+
+func (clock) AfterFunc(d time.Duration, f func()) upstream.Timer { return time.AfterFunc(d, f) }
 
 // Server owns its private directory, socket and workers.
 type Server struct {
@@ -46,6 +54,9 @@ type Server struct {
 
 // Start binds a 0600 socket in a fresh 0700 temporary directory.
 func Start(ctx context.Context, opts Options) (*Server, error) {
+	if opts.Clock == nil {
+		opts.Clock = clock{}
+	}
 	dir, err := os.MkdirTemp("", "husk-proxy-")
 	if err != nil {
 		return nil, err
@@ -202,7 +213,16 @@ func (s *Server) serve(c net.Conn) {
 		line := scan.Bytes()
 		var req Request
 		if json.Unmarshal(line, &req) == nil && s.opts.Intercept != nil {
-			result, failure, handled := s.opts.Intercept(ctx, req)
+			// Interceptors must honor cancellation. Keep dispatch synchronous so a
+			// timed-out relay cannot overtake the next pipelined request.
+			callCtx, stop := context.WithCancelCause(ctx)
+			timer := s.opts.Clock.AfterFunc(10*time.Second, func() { stop(context.DeadlineExceeded) })
+			result, failure, handled := s.opts.Intercept(callCtx, req)
+			timer.Stop()
+			if context.Cause(callCtx) == context.DeadlineExceeded {
+				result, failure, handled = nil, &Error{Code: "timeout", Message: "proxy interception timed out"}, true
+			}
+			stop(context.Canceled)
 			if handled {
 				answer(req.ID, result, failure)
 				continue

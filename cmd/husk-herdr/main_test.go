@@ -19,7 +19,7 @@ func testEnv(t *testing.T) (environment, string) {
 	if err := os.WriteFile(filepath.Join(dir, "herdr-plugin.toml"), []byte("id='sample:tool'\nname='Sample'\nversion='1'\nmin_herdr_version='0.9.0'\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	env := environment{"/opt/husk-herdr", "linux", filepath.Join(root, "config.toml"), filepath.Join(root, "plugins.json")}
+	env := environment{executable: "/opt/husk-herdr", platform: "linux", configPath: filepath.Join(root, "config.toml"), registryPath: filepath.Join(root, "plugins.json")}
 	if err := os.WriteFile(env.registryPath, []byte("[]"), 0600); err != nil {
 		t.Fatal(err)
 	}

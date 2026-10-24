@@ -51,14 +51,17 @@ func (c *testClock) AfterFunc(d time.Duration, f func()) upstream.Timer {
 }
 func (c *testClock) fire(t *testing.T, d time.Duration) {
 	t.Helper()
+	c.next(t, d).fire()
+}
+func (c *testClock) next(t *testing.T, d time.Duration) *testTimer {
+	t.Helper()
 	for {
 		tm := take(t, c.timers)
 		tm.mu.Lock()
 		active := tm.active
 		tm.mu.Unlock()
 		if active && tm.d == d {
-			tm.fire()
-			return
+			return tm
 		}
 	}
 }
@@ -169,7 +172,7 @@ func (b *lockedBuffer) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 func (b *lockedBuffer) String() string { b.mu.Lock(); defer b.mu.Unlock(); return string(b.data) }
-func newRig(t *testing.T, policy string, enabled bool, extra string) *rig {
+func newRig(t *testing.T, policy string, enabled bool, extra string, configure ...func(*fakeherdr.Options)) *rig {
 	t.Helper()
 	dir := t.TempDir()
 	socketDir, err := os.MkdirTemp("/tmp", "ha-")
@@ -177,7 +180,11 @@ func newRig(t *testing.T, policy string, enabled bool, extra string) *rig {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(socketDir) })
-	srv, err := fakeherdr.Start(filepath.Join(socketDir, "u.sock"), fakeherdr.Options{Plugins: []map[string]any{{"plugin_id": "demo", "enabled": enabled}}, Pane: map[string]any{"pane_id": "p", "workspace_id": "w", "tab_id": "t", "cwd": "/project", "agent": "worker", "agent_status": "working"}, Workspace: map[string]any{"workspace_id": "w", "label": "Project"}, Tab: map[string]any{"tab_id": "t", "label": "Main"}, Passthrough: []string{"vendor.unknown"}})
+	options := fakeherdr.Options{Plugins: []map[string]any{{"plugin_id": "demo", "enabled": enabled}}, Pane: map[string]any{"pane_id": "p", "workspace_id": "w", "tab_id": "t", "cwd": "/project", "agent": "worker", "agent_status": "working"}, Workspace: map[string]any{"workspace_id": "w", "label": "Project"}, Tab: map[string]any{"tab_id": "t", "label": "Main"}, Passthrough: []string{"vendor.unknown"}}
+	for _, f := range configure {
+		f(&options)
+	}
+	srv, err := fakeherdr.Start(filepath.Join(socketDir, "u.sock"), options)
 	if err != nil {
 		t.Fatal(err)
 	}

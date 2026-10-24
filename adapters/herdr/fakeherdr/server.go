@@ -37,6 +37,15 @@ type Options struct {
 	Gates                map[string]<-chan struct{}
 	Passthrough          []string
 	OnRequest            func(Request)
+	// DisconnectFirst closes the first N validated requests for each named
+	// method before replying. Errors injects explicit remote error replies.
+	DisconnectFirst map[string]int
+	Errors          map[string]ReplyError
+}
+
+// ReplyError is an injected upstream error body.
+type ReplyError struct {
+	Code, Message string
 }
 
 // Server owns a private test socket, its connections, and all serving workers.
@@ -49,6 +58,7 @@ type Server struct {
 	requestSchema *jsonschema.Schema
 	knownMethods  map[string]bool
 	passthrough   map[string]bool
+	disconnect    map[string]int
 	mu            sync.Mutex
 	peers         map[*peer]bool
 	records       []Request
@@ -90,6 +100,15 @@ func Start(path string, opts Options) (*Server, error) {
 	for _, method := range opts.Passthrough {
 		passthrough[method] = true
 	}
+	disconnect := map[string]int{}
+	for method, count := range opts.DisconnectFirst {
+		disconnect[method] = count
+	}
+	errors := map[string]ReplyError{}
+	for method, err := range opts.Errors {
+		errors[method] = err
+	}
+	opts.Errors = errors
 	gates := map[string]<-chan struct{}{}
 	for method, gate := range opts.Gates {
 		gates[method] = gate
@@ -125,7 +144,7 @@ func Start(path string, opts Options) (*Server, error) {
 		opts.Version = "0.9.5"
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Server{listener: listener, ctx: ctx, cancel: cancel, opts: opts, catalog: catalog, requestSchema: requestSchema, knownMethods: knownMethods, passthrough: passthrough, peers: map[*peer]bool{}}
+	s := &Server{listener: listener, ctx: ctx, cancel: cancel, opts: opts, catalog: catalog, requestSchema: requestSchema, knownMethods: knownMethods, passthrough: passthrough, disconnect: disconnect, peers: map[*peer]bool{}}
 	s.wg.Add(1)
 	go s.accept()
 	return s, nil
@@ -196,6 +215,21 @@ func (s *Server) serve(p *peer) {
 				}
 				continue
 			}
+		}
+		s.mu.Lock()
+		drop := s.disconnect[req.Method] > 0
+		if drop {
+			s.disconnect[req.Method]--
+		}
+		s.mu.Unlock()
+		if drop {
+			return
+		}
+		if failure, ok := s.opts.Errors[req.Method]; ok {
+			if err := p.write(map[string]any{"id": req.ID, "error": map[string]string{"code": failure.Code, "message": failure.Message}}); err != nil {
+				return
+			}
+			continue
 		}
 		gate := s.opts.Gates[req.Method]
 		if gate == nil && req.Method == "ping" {
