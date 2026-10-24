@@ -4,11 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -19,10 +17,8 @@ import (
 )
 
 func doctor(args []string, out, diagnostics io.Writer, env environment) int {
-	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
-	fs.SetOutput(diagnostics)
-	instance := fs.String("instance", "", "Husk instance name")
-	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
+	target, ok := instanceArgs("doctor", args, diagnostics)
+	if !ok {
 		return 2
 	}
 	o, err := runtimeOptions("", env)
@@ -31,7 +27,7 @@ func doctor(args []string, out, diagnostics io.Writer, env environment) int {
 		return 1
 	}
 	fmt.Fprintf(out, "binary: %s\nsocket: %s\n", o.Binary, o.Socket)
-	session, err := upstream.New(upstream.Options{Socket: o.Socket}).Attach(context.Background(), "0.9.0")
+	session, err := upstream.New(upstream.Options{Socket: o.Socket, Dial: env.upstreamDial}).Attach(context.Background(), "0.9.0")
 	result := 0
 	if err != nil {
 		status := "absent"
@@ -109,40 +105,14 @@ func doctor(args []string, out, diagnostics io.Writer, env environment) int {
 		}
 	}
 	// User-only diagnostics use the installed Husk CLI, never the shim token.
-	binary := os.Getenv("HUSK_BIN_PATH")
-	if binary == "" {
-		binary = "husk"
-	}
-	cliArgs := []string{"plugin", "list", "--format", "json"}
-	if *instance != "" {
-		cliArgs = append(cliArgs, "--instance", *instance)
-	}
-	cmd := exec.Command(binary, cliArgs...)
-	for _, v := range os.Environ() {
-		k, _, _ := strings.Cut(v, "=")
-		if !strings.HasPrefix(k, "HUSK_") || k == "HUSK_SOCKET_PATH" || k == "HUSK_INSTANCE" || k == "HUSK_BIN_PATH" {
-			cmd.Env = append(cmd.Env, v)
-		}
-	}
-	raw, e := cmd.Output()
-	if e != nil {
-		fmt.Fprintf(out, "instance: unavailable (%v)\n", e)
+	present, problem, code := env.instancePlugins(target)
+	if code != 0 {
+		fmt.Fprintf(out, "instance: unavailable (%s)\n", problem)
 	} else {
-		var list struct {
-			Plugins []struct {
-				ID string `json:"id"`
-			} `json:"plugins"`
-		}
-		if json.Unmarshal(raw, &list) == nil {
-			present := map[string]bool{}
-			for _, p := range list.Plugins {
-				present[p.ID] = true
-			}
-			for _, rec := range records {
-				id, _ := manifest.MapID(rec.ID)
-				if rec.Enabled && manifest.Supports(rec.Platforms, env.platform) && !present[id] {
-					fmt.Fprintf(out, "plugin %s absent from instance; run husk-herdr sync\n", rec.ID)
-				}
+		for _, rec := range records {
+			id, _ := manifest.MapID(rec.ID)
+			if _, found := present[id]; rec.Enabled && manifest.Supports(rec.Platforms, env.platform) && !found {
+				fmt.Fprintf(out, "plugin %s absent from instance; run husk-herdr sync\n", rec.ID)
 			}
 		}
 	}

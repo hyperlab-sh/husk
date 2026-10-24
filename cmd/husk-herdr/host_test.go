@@ -8,7 +8,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -34,14 +33,14 @@ func TestMain(m *testing.M) {
 			if os.Getenv("HUSK_PLUGIN_TOKEN") != "" || os.Getenv("HUSK_INSTANCE") != "inherited-instance" {
 				os.Exit(7)
 			}
-			fmt.Fprintln(os.Stdout, `{"plugins":[{"id":"example"}]}`)
+			fmt.Fprintln(os.Stdout, `[{"id":"example"}]`)
 			os.Exit(0)
 		case "detect", "discover", "convert", "run":
 			exe, _ := os.Executable()
-			os.Exit(execute(os.Args[1:], os.Stdout, os.Stderr, captureEnvironment(exe, runtime.GOOS, os.Getenv, os.UserHomeDir, os.LookupEnv)))
+			os.Exit(execute(os.Args[1:], os.Stdout, os.Stderr, childEnvironment(exe)))
 		case "terminal-start-failure":
 			exe, _ := os.Executable()
-			o, err := runtimeOptions(os.Args[2], captureEnvironment(exe, runtime.GOOS, os.Getenv, os.UserHomeDir, os.LookupEnv))
+			o, err := runtimeOptions(os.Args[2], childEnvironment(exe))
 			if err == nil {
 				o.StartServer = func(context.Context) error { return os.ErrPermission }
 				err = shim.Run(context.Background(), o, os.Stdin, os.Stdout, os.Stderr)
@@ -98,13 +97,7 @@ func TestRealHostConverterAndShim(t *testing.T) {
 	if err = os.Mkdir(runtimeDir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	fake, err := fakeherdr.Start(filepath.Join(sockets, "u.sock"), fakeherdr.Options{Plugins: []map[string]any{{"plugin_id": "sample:tools", "enabled": true}, {"plugin_id": "sample.empty", "enabled": true}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer fake.Close()
-	t.Setenv("HERDR_ENV", "1")
-	t.Setenv("HERDR_SOCKET_PATH", filepath.Join(sockets, "u.sock"))
+	fakeUpstream(t, filepath.Join(sockets, "u.sock"), fakeherdr.Options{Plugins: []map[string]any{{"plugin_id": "sample:tools", "enabled": true}, {"plugin_id": "sample.empty", "enabled": true}}})
 	exe, _ := os.Executable()
 	adapterConfig := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "husk-herdr")
 	_ = os.MkdirAll(adapterConfig, 0700)

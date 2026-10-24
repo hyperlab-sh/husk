@@ -21,13 +21,7 @@ func TestDoctorUsesFakeServerAndReportsHookDecision(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(sockets)
-	fake, err := fakeherdr.Start(filepath.Join(sockets, "u.sock"), fakeherdr.Options{Plugins: []map[string]any{{"plugin_id": "example", "enabled": true}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer fake.Close()
-	t.Setenv("HERDR_ENV", "1")
-	t.Setenv("HERDR_SOCKET_PATH", filepath.Join(sockets, "u.sock"))
+	fakeUpstream(t, filepath.Join(sockets, "u.sock"), fakeherdr.Options{Plugins: []map[string]any{{"plugin_id": "example", "enabled": true}}})
 	t.Setenv("HUSK_BIN_PATH", filepath.Join(root, "missing-cli"))
 	exe, _ := os.Executable()
 	dir := filepath.Join(root, "husk-herdr")
@@ -36,7 +30,7 @@ func TestDoctorUsesFakeServerAndReportsHookDecision(t *testing.T) {
 	_ = os.MkdirAll(filepath.Join(root, "herdr"), 0700)
 	_ = os.WriteFile(filepath.Join(root, "herdr", "plugins.json"), []byte(`[{"plugin_id":"example","enabled":true}]`), 0600)
 	var out, errout bytes.Buffer
-	env := captureEnvironment(exe, runtime.GOOS, os.Getenv, os.UserHomeDir)
+	env := guardUpstream(t, captureEnvironment(exe, runtime.GOOS, os.Getenv, os.UserHomeDir))
 	if code := execute([]string{"doctor", "--instance", "unit"}, &out, &errout, env); code != 0 {
 		t.Fatalf("doctor=%d: %s", code, &errout)
 	}
