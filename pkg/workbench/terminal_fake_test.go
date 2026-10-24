@@ -18,6 +18,12 @@ func (f *fakeFE) SendTerminalKey(id protocol.SurfaceID, key uv.KeyPressEvent) {
 		term.Key(key)
 	}
 }
+func (f *fakeFE) ResolveTerminalLink(id protocol.SurfaceID, event uv.MouseEvent) bool {
+	if term, ok := f.TerminalDrawers[id].(interface{ Link(uv.MouseEvent) bool }); ok {
+		return term.Link(event)
+	}
+	return false
+}
 func (f *fakeFE) SendTerminalMouse(id protocol.SurfaceID, event uv.MouseEvent) {
 	f.TerminalMice = append(f.TerminalMice, event)
 	if term, ok := f.TerminalDrawers[id].(interface{ Mouse(uv.MouseEvent) }); ok {

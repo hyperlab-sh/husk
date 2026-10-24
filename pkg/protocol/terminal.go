@@ -153,6 +153,14 @@ type TerminalLinkParams struct {
 	Col     int       `json:"col"`
 }
 
+// Validate checks the target, URL presence and zero-based cell coordinates.
+func (p TerminalLinkParams) Validate() error {
+	if !p.Surface.Valid() || p.URL == "" || p.Row < 0 || p.Col < 0 {
+		return &Error{Code: CodeInvalidParams, Message: "terminal.link requires a valid surface, non-empty url and nonnegative row/col"}
+	}
+	return nil
+}
+
 // TerminalInputParams carries encoded input and emulator query replies.
 type TerminalInputParams struct {
 	Surface SurfaceID `json:"surface"`

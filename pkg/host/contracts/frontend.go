@@ -149,6 +149,9 @@ type Frontend interface {
 	TerminalView(surface protocol.SurfaceID) TerminalDrawer
 	// SendTerminalKey encodes a press for an attached surface. Loop only.
 	SendTerminalKey(surface protocol.SurfaceID, key uv.KeyPressEvent)
+	// ResolveTerminalLink resolves an inner-relative link gesture without
+	// encoding mouse input; true means the gesture was consumed. Loop only.
+	ResolveTerminalLink(surface protocol.SurfaceID, event uv.MouseEvent) bool
 	// SendTerminalMouse encodes an inner-relative mouse event. Loop only.
 	SendTerminalMouse(surface protocol.SurfaceID, event uv.MouseEvent)
 	// SendTerminalPaste encodes raw or bracketed paste. Loop only.

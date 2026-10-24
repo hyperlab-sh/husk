@@ -5,9 +5,29 @@ import (
 	"strings"
 	"testing"
 
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 	"go.uber.org/goleak"
 )
+
+func TestTerminalLinkInstalledAtAttachment(t *testing.T) {
+	st, e, pods := newEngine(t, Options{})
+	t.Cleanup(e.CloseTerminals)
+	id := protocol.SurfaceMainStage
+	pods.launch("p")
+	pods.claim("p", string(id))
+	settle(st, e)
+	var got string
+	_, err := e.TerminalAttach("p", protocol.TerminalAttachParams{Surface: id}, protocol.TerminalAttachResult{Width: 40, Height: 3}, nil,
+		func(url string, row, col int) { got = url })
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Terminal(id).Write([]byte("https://attached.test"))
+	if !e.Terminal(id).Link(uv.MouseClickEvent{X: 3, Button: uv.MouseLeft, Mod: uv.ModCtrl}) || got != "https://attached.test" {
+		t.Fatalf("attachment link handler = %q", got)
+	}
+}
 
 func TestTerminalLifecycleAndLimits(t *testing.T) {
 	dead := map[string]bool{}
@@ -31,17 +51,17 @@ func TestTerminalLifecycleAndLimits(t *testing.T) {
 		{"geometry", "p", attach, protocol.TerminalAttachResult{}, protocol.CodeUnavailable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := e.TerminalAttach(tc.plugin, tc.p, tc.size, nil)
+			_, err := e.TerminalAttach(tc.plugin, tc.p, tc.size, nil, nil)
 			if got := codeOf(t, err); got != tc.code {
 				t.Fatalf("code %s", got)
 			}
 		})
 	}
-	got, err := e.TerminalAttach("p", attach, size, nil)
+	got, err := e.TerminalAttach("p", attach, size, nil, nil)
 	if err != nil || got != size {
 		t.Fatalf("attach %+v %v", got, err)
 	}
-	if _, err = e.TerminalAttach("p", attach, size, nil); codeOf(t, err) != protocol.CodeConflict {
+	if _, err = e.TerminalAttach("p", attach, size, nil, nil); codeOf(t, err) != protocol.CodeConflict {
 		t.Fatal("double attach allowed")
 	}
 	if err = e.SurfaceUpdate("p", protocol.SurfaceUpdateParams{Surface: id}); codeOf(t, err) != protocol.CodeInvalidParams {
@@ -94,7 +114,7 @@ func TestTerminalLifecycleAndLimits(t *testing.T) {
 				e.LivenessChanged()
 				settle(st, e)
 			}
-			if _, err := e.TerminalAttach("p", attach, size, func(b []byte) { input <- b }); err != nil {
+			if _, err := e.TerminalAttach("p", attach, size, func(b []byte) { input <- b }, nil); err != nil {
 				t.Fatal(err)
 			}
 			if err := e.TerminalWrite("p", protocol.TerminalWriteParams{Surface: id, Data: base64.StdEncoding.EncodeToString([]byte("\x1b[6n"))}); err != nil {

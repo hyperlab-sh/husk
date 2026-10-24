@@ -23,7 +23,7 @@ func TestTerminalAttachCaptureFocusAndIdle(t *testing.T) {
 		mode    protocol.CaptureMode
 	}{{nil, protocol.CaptureAll}, {protocol.CaptureBool(true), protocol.CaptureText}, {protocol.CaptureBool(false), protocol.CaptureNone}, {protocol.CaptureValueText.Ptr(), protocol.CaptureText}, {protocol.CaptureValueAll.Ptr(), protocol.CaptureAll}} {
 		input := make(chan []byte, 2)
-		if _, err := e.TerminalAttach("p", protocol.TerminalAttachParams{Surface: id, Capture: tc.capture}, protocol.TerminalAttachResult{Width: 20, Height: 5}, func(b []byte) { input <- b }); err != nil {
+		if _, err := e.TerminalAttach("p", protocol.TerminalAttachParams{Surface: id, Capture: tc.capture}, protocol.TerminalAttachResult{Width: 20, Height: 5}, func(b []byte) { input <- b }, nil); err != nil {
 			t.Fatal(err)
 		}
 		if resolution(t, st).Capture[id] != tc.mode {

@@ -13,7 +13,8 @@ type attachment struct {
 
 // TerminalAttach allocates an emulator only for the current live occupant.
 // send is a nonblocking, worker-safe offer to that occupant's outbound queue.
-func (e *Engine) TerminalAttach(plugin string, p protocol.TerminalAttachParams, size protocol.TerminalAttachResult, send func([]byte)) (protocol.TerminalAttachResult, error) {
+// link is a nonblocking, loop-only delivery callback, installed before exposure.
+func (e *Engine) TerminalAttach(plugin string, p protocol.TerminalAttachParams, size protocol.TerminalAttachResult, send func([]byte), link func(string, int, int)) (protocol.TerminalAttachResult, error) {
 	if err := p.Validate(); err != nil {
 		return size, errf(protocol.CodeInvalidParams, "%v", err)
 	}
@@ -34,6 +35,7 @@ func (e *Engine) TerminalAttach(plugin string, p protocol.TerminalAttachParams, 
 		e.terminals = map[protocol.SurfaceID]attachment{}
 	}
 	term := terminals.New(size.Width, size.Height, history, send)
+	term.SetLinkHandler(link)
 	e.terminals[p.Surface] = attachment{plugin, term}
 	term.Focus(e.terminalFocus[p.Surface])
 	e.terminalDirty = true

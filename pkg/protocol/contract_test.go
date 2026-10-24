@@ -35,6 +35,34 @@ func repositoryFile(t *testing.T, parts ...string) []byte {
 	return b
 }
 
+func TestTerminalLinkValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		p     TerminalLinkParams
+		valid bool
+	}{
+		{"origin", TerminalLinkParams{Surface: SurfaceMainStage, URL: "https://example.test"}, true},
+		{"offset", TerminalLinkParams{Surface: SurfaceMainStage, URL: "custom://target", Row: 4, Col: 8}, true},
+		{"surface", TerminalLinkParams{Surface: "invalid", URL: "https://example.test"}, false},
+		{"url", TerminalLinkParams{Surface: SurfaceMainStage}, false},
+		{"row", TerminalLinkParams{Surface: SurfaceMainStage, URL: "https://example.test", Row: -1}, false},
+		{"col", TerminalLinkParams{Surface: SurfaceMainStage, URL: "https://example.test", Col: -1}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.p.Validate()
+			if (err == nil) != tc.valid {
+				t.Fatalf("Validate = %v, valid = %v", err, tc.valid)
+			}
+			if err != nil {
+				var e *Error
+				if !errors.As(err, &e) || e.Code != CodeInvalidParams {
+					t.Fatalf("error = %v", err)
+				}
+			}
+		})
+	}
+}
+
 func TestErrorCodeCompleteness(t *testing.T) {
 	spec := string(repositoryFile(t, "docs", "docs", "design", "protocol.md"))
 	start := strings.Index(spec, "### Error codes")

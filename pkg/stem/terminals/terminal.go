@@ -165,7 +165,7 @@ func (t *Terminal) Mouse(event uv.MouseEvent) {
 	if t.closed {
 		return
 	}
-	if t.linkMouse(event) {
+	if t.Link(event) {
 		return
 	}
 	mode := t.mouseMode()
