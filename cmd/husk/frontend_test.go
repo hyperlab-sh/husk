@@ -393,7 +393,7 @@ func TestPodFailureToastsAndCleanExitDoesNot(t *testing.T) {
 	if m.activeToast == nil || m.activeToast.Level != "warn" || m.activeToast.Message != "killed: signal: killed" {
 		t.Fatalf("signal toast = %+v", m.activeToast)
 	}
-	// A clean exit is a log line only.
+	// Pods logs a clean exit; the frontend raises no toast.
 	step("good", "live", "")
 	step("good", "exited", "")
 	if m.activeToast != nil {
