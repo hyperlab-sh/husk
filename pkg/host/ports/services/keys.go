@@ -40,7 +40,7 @@ func (p Keys) List(ctx context.Context, hc host.Caller) (host.KeyListing, error)
 	if p.View != nil {
 		view, err = p.View(ctx)
 		if err != nil {
-			return host.KeyListing{}, err
+			return host.KeyListing{}, coded(err)
 		}
 	}
 	out := host.KeyListing{

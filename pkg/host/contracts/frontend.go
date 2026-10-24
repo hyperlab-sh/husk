@@ -55,7 +55,10 @@ type Frontend interface {
 	Setting(key string) (value any, source string, err error)
 
 	// KeyListing returns the full CLI keys.list view, including states and
-	// shadowed entries, through the shared listing port. Any goroutine.
+	// shadowed entries, through the shared listing port. Any goroutine. An
+	// off-loop call blocks until the loop captures the runtime catalog; it
+	// requires a running, responsive loop (including before the first Update).
+	// Call on the loop to avoid waiting. This is not a snapshot-only read.
 	KeyListing() KeyListing
 
 	// Profiles returns the serving profile.list entries. Any goroutine.

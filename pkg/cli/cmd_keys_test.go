@@ -90,18 +90,29 @@ func TestKeysFilters(t *testing.T) {
 func TestKeysRuntimeStatesDisplay(t *testing.T) {
 	for _, state := range []string{"effective", "shadowed", "disabled", "unknown_action", "unavailable", "future_state"} {
 		for _, format := range []string{"json", "table"} {
-			t.Run(state+"/"+format, func(t *testing.T) {
-				reply := `{"entries":[{"keys":["x"],"action":"files.run","source":{"layer":"user"},"state":"` + state + `"}],"problems":[]}`
-				_, h := serviceServer(t, reply, nil)
-				if code := h.run("keys", "--shadowed", "--format", format); code != 0 {
-					t.Fatalf("exit %d", code)
-				}
-				if format == "json" {
-					assertJSONEqual(t, h.out.Bytes(), reply)
-				} else if got := normalizedTable(h.out.String()); got != "KEY SCOPE ACTION LAYER SOURCE STATE\nx global files.run user #0 "+state {
-					t.Fatalf("table = %q", got)
-				}
-			})
+			for _, shadowed := range []bool{false, true} {
+				mode := map[bool]string{false: "default", true: "shadowed"}[shadowed]
+				t.Run(state+"/"+format+"/"+mode, func(t *testing.T) {
+					reply := `{"entries":[{"keys":["x"],"action":"files.run","source":{"layer":"user"},"state":"` + state + `"}],"problems":[]}`
+					_, h := serviceServer(t, reply, nil)
+					args := []string{"keys", "--format", format}
+					if shadowed {
+						args = append(args, "--shadowed")
+					}
+					if code := h.run(args...); code != 0 {
+						t.Fatalf("exit %d", code)
+					}
+					wantJSON, wantTable := reply, "KEY SCOPE ACTION LAYER SOURCE STATE\nx global files.run user #0 "+state
+					if state == "shadowed" && !shadowed {
+						wantJSON, wantTable = `{"entries":[],"problems":[]}`, ""
+					}
+					if format == "json" {
+						assertJSONEqual(t, h.out.Bytes(), wantJSON)
+					} else if got := normalizedTable(h.out.String()); got != wantTable {
+						t.Fatalf("table = %q, want %q", got, wantTable)
+					}
+				})
+			}
 		}
 	}
 }

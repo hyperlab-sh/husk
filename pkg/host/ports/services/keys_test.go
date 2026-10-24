@@ -5,10 +5,80 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/hyperlab-sh/husk/pkg/host/contracts"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 	services "github.com/hyperlab-sh/husk/pkg/services"
 	"github.com/hyperlab-sh/husk/pkg/services/keybinding"
 	"github.com/hyperlab-sh/husk/pkg/substrate/store"
 )
+
+func TestKeysListViewErrorsAreCoded(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		code protocol.Code
+	}{
+		{"deadline", context.DeadlineExceeded, protocol.CodeTimeout},
+		{"cancelled", context.Canceled, protocol.CodeCancelled},
+		{"loop gone", contracts.NewError(protocol.CodeUnavailable, "the host loop no longer runs", nil), protocol.CodeUnavailable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			port := Keys{Svc: keybinding.New(), View: func(context.Context) (KeyView, error) { return KeyView{}, tc.err }}
+			_, err := port.List(t.Context(), userCaller)
+			if got := contracts.CodeOf(err); got != string(tc.code) {
+				t.Fatalf("code = %q, want %q (error: %v)", got, tc.code, err)
+			}
+		})
+	}
+}
+
+func TestKeysListScopedRuntimeView(t *testing.T) {
+	svc := keybinding.New()
+	applyTo(t, svc, services.ReloadInput{
+		Layers: []store.LayerDoc{{Layer: store.LayerUser, Doc: doc(t, `{"version":1,"bind":[{"key":"x","action":"files.run"},{"key":"y","action":"other.run"}]}`)}},
+		Declared: map[store.DocName]map[string]store.Doc{store.DeclaredPlugins: {
+			"files": doc(t, `{"id":"files","actions":[{"id":"files.run"}]}`),
+			"other": doc(t, `{"id":"other","actions":[{"id":"other.run"}]}`),
+		}},
+	})
+	for _, caller := range []contracts.Caller{userCaller, filesCaller} {
+		for _, nilView := range []bool{false, true} {
+			name := string(caller.Kind) + map[bool]string{false: "/runtime", true: "/nil"}[nilView]
+			t.Run(name, func(t *testing.T) {
+				port := Keys{Svc: svc}
+				want := "unknown_action"
+				if !nilView {
+					port.View = func(context.Context) (KeyView, error) {
+						return KeyView{Actions: map[string]bool{"files.run": false}}, nil
+					}
+					want = "unavailable"
+				}
+				listing, err := port.List(t.Context(), caller)
+				if err != nil {
+					t.Fatal(err)
+				}
+				found := false
+				for _, entry := range listing.Entries {
+					if caller.Kind == protocol.CallerPlugin && entry.Action == "other.run" {
+						t.Error("foreign action leaked")
+					}
+					if nilView && entry.State == "effective" {
+						t.Error("empty catalog left an effective entry")
+					}
+					if entry.Action == "files.run" {
+						found = true
+						if entry.State != want {
+							t.Errorf("state = %q, want %q", entry.State, want)
+						}
+					}
+				}
+				if !found {
+					t.Fatal("own action missing")
+				}
+			})
+		}
+	}
+}
 
 func TestKeysListRuntimeStates(t *testing.T) {
 	for _, tc := range []struct {
