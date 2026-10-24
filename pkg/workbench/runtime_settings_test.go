@@ -86,7 +86,11 @@ func TestRuntimeModalClosesWhenSettingsViewWasUnpublished(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.settle()
+	// Inspect the first sync: later settle passes must not mask a stale modal
+	// being committed after the host close already synchronized declarations.
+	if !m.syncRuntime() {
+		t.Fatal("new runtime modal was not observed")
+	}
 	if m.settings != center || m.modalOwner().Open() || len(m.runtime) != 0 || len(engine.RuntimeSurfaces()) != 0 {
 		t.Fatal("unpublished Settings overlay allowed two live modals")
 	}
