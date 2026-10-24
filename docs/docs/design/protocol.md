@@ -245,7 +245,9 @@ Minor 2.6 (**landed**) adds the optional boolean `yield` to `surface.close`: a l
 
 Minor 2.7 (**landed**) adds optional paired `col_start` and `col_end` cell bounds to `RowHitTarget` in `surface.update`. Whole-row targets remain unchanged; ranged targets match a half-open column interval as well as their row. All earlier minors remain served.
 
-Minor 2.8 (**landed**, `protocol.Version` is `2.8`) adds plugin-only `surface.open` for runtime `modal` and `canvas` surfaces, dynamic ids, runtime State and modal surface identity. All earlier minors remain served. `terminal.link` stays deferred to minor 2.9; runtime `stage` and `panel` remain reserved.
+Minor 2.8 (**landed**) adds plugin-only `surface.open` for runtime `modal` and `canvas` surfaces, dynamic ids, runtime State and modal surface identity. All earlier minors remain served. Runtime `stage` and `panel` remain reserved.
+
+Minor 2.9 (**landed**, `protocol.Version` is `2.9`) adds `terminal.link`: a consumed ctrl+left click on an OSC 8 target or a row-local detected URL, delivered directly to the attached occupant. All earlier minors remain served.
 
 Version history:
 
@@ -260,6 +262,7 @@ Version history:
 | 2.6 | Optional `surface.close.yield` retains an occupied layout claim as a fallback. |
 | 2.7 | Optional `RowHitTarget.col_start` and `col_end` restrict row hits to a half-open cell range. |
 | 2.8 | Runtime modal and canvas surfaces through `surface.open`, dynamic ids and runtime State. |
+| 2.9 | `terminal.link` reports consumed ctrl+left clicks on terminal URLs. |
 
 Where the version is checked, since there is no handshake:
 
