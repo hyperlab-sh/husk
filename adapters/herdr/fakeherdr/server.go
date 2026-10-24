@@ -149,7 +149,7 @@ func Start(path string, opts Options) (*Server, error) {
 	return s, nil
 }
 
-// Close stops accepting, closes even stalled pings/subscriptions, and joins all
+// Close stops accepting, closes even stalled pings, and joins all
 // serving goroutines. It is safe to call repeatedly or concurrently.
 func (s *Server) Close() {
 	s.once.Do(func() {

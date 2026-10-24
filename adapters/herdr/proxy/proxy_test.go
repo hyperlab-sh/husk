@@ -17,6 +17,17 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
+func guardedDial(t *testing.T, allowed string) upstream.Dialer {
+	t.Helper()
+	return func(ctx context.Context, network, path string) (net.Conn, error) {
+		if network != "unix" || path != allowed {
+			t.Errorf("refused non-fixture upstream %s %s", network, path)
+			return nil, os.ErrPermission
+		}
+		return (&net.Dialer{}).DialContext(ctx, network, path)
+	}
+}
+
 func TestByteExactPipeliningAndManagementWarning(t *testing.T) {
 	dir, err := os.MkdirTemp("/tmp", "hp-")
 	if err != nil {
@@ -30,7 +41,7 @@ func TestByteExactPipeliningAndManagementWarning(t *testing.T) {
 	}
 	defer fake.Close()
 	warnings := make(chan string, 4)
-	s, err := Start(context.Background(), Options{Dial: upstream.New(upstream.Options{Socket: filepath.Join(dir, "u.sock")}).Dial, Warn: func(m string) { warnings <- m }})
+	s, err := Start(context.Background(), Options{Dial: upstream.New(upstream.Options{Socket: filepath.Join(dir, "u.sock"), Dial: guardedDial(t, filepath.Join(dir, "u.sock"))}).Dial, Warn: func(m string) { warnings <- m }})
 	if err != nil {
 		t.Fatal(err)
 	}

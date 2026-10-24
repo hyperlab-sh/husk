@@ -33,7 +33,7 @@ type InvocationContext struct {
 // BuildContext reads server focus, not Husk focus. Non-null caller-supplied
 // schema fields override the active context just as merge_plugin_context does.
 // The generic source "api" is pinned upstream context.rs:374 and :405
-// at revision 5608de0608918aba2f9d501e7793b984a0ca9cfa. Startup uses "startup"; event hooks use "api".
+// at revision 5608de0608918aba2f9d501e7793b984a0ca9cfa.
 func BuildContext(ctx context.Context, client *upstream.Client, correlation, source string, provided json.RawMessage) (InvocationContext, error) {
 	c := InvocationContext{InvocationSource: source, CorrelationID: correlation}
 	raw, err := client.Call(ctx, "pane.current", map[string]any{})

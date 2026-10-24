@@ -78,7 +78,7 @@ func envMap(env []string) map[string]string {
 
 // CommandEnvironment scrubs credentials and stale invocation variables before
 // adding the upstream environment table. A command is not a Husk plugin.
-func CommandEnvironment(base []string, dir, binary, socket, configDir, stateDir, id, action, event string, eventJSON json.RawMessage, c InvocationContext) []string {
+func CommandEnvironment(base []string, dir, binary, socket, configDir, stateDir, id, action string, c InvocationContext) []string {
 	m := envMap(base)
 	for k := range m {
 		if strings.HasPrefix(k, "HUSK_") && k != "HUSK_SOCKET_PATH" && k != "HUSK_INSTANCE" && k != "HUSK_BIN_PATH" {
@@ -89,7 +89,7 @@ func CommandEnvironment(base []string, dir, binary, socket, configDir, stateDir,
 		}
 	}
 	raw, _ := json.Marshal(c)
-	values := map[string]string{"HERDR_SOCKET_PATH": socket, "HERDR_BIN_PATH": binary, "HERDR_ENV": "1", "HERDR_PLUGIN_ID": id, "HERDR_PLUGIN_ROOT": dir, "HERDR_PLUGIN_CONFIG_DIR": configDir, "HERDR_PLUGIN_STATE_DIR": stateDir, "HERDR_PLUGIN_CONTEXT_JSON": string(raw), "HERDR_PLUGIN_ACTION_ID": action, "HERDR_PLUGIN_EVENT": event, "HERDR_PLUGIN_EVENT_JSON": string(eventJSON), "HERDR_WORKSPACE_ID": c.WorkspaceID, "HERDR_TAB_ID": c.TabID, "HERDR_PANE_ID": c.FocusedPaneID, "HERDR_PLUGIN_CLICKED_URL": c.ClickedURL, "HERDR_PLUGIN_LINK_HANDLER_ID": c.LinkHandlerID}
+	values := map[string]string{"HERDR_SOCKET_PATH": socket, "HERDR_BIN_PATH": binary, "HERDR_ENV": "1", "HERDR_PLUGIN_ID": id, "HERDR_PLUGIN_ROOT": dir, "HERDR_PLUGIN_CONFIG_DIR": configDir, "HERDR_PLUGIN_STATE_DIR": stateDir, "HERDR_PLUGIN_CONTEXT_JSON": string(raw), "HERDR_PLUGIN_ACTION_ID": action, "HERDR_WORKSPACE_ID": c.WorkspaceID, "HERDR_TAB_ID": c.TabID, "HERDR_PANE_ID": c.FocusedPaneID, "HERDR_PLUGIN_CLICKED_URL": c.ClickedURL, "HERDR_PLUGIN_LINK_HANDLER_ID": c.LinkHandlerID}
 	for k, v := range values {
 		if v != "" {
 			m[k] = v
@@ -106,10 +106,6 @@ func CommandEnvironment(base []string, dir, binary, socket, configDir, stateDir,
 	}
 	return result
 }
-
-// openerEnvironment retains desktop/session variables but removes credentials,
-// proxy routing and invocation context. A browser is not a plugin command and
-// may outlive both this shim and its private socket.
 
 func ensureDirs(paths ...string) error {
 	for _, p := range paths {
