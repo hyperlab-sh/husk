@@ -40,6 +40,29 @@
       ],
       "type": "object"
     },
+    "EventDeliverParams": {
+      "properties": {
+        "data": {
+          "additionalProperties": {},
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "source",
+        "data"
+      ],
+      "type": "object"
+    },
     "FrameSpec": {
       "properties": {
         "border": {
@@ -943,8 +966,7 @@
       "description": "Result owned by design/services.md; no additional field constraints specified here."
     },
     "event.deliver.params": {
-      "description": "Payload owned by design/message-kinds.md; no additional field constraints specified here.",
-      "type": "object"
+      "$ref": "#/$defs/EventDeliverParams"
     },
     "event.deliver.result": {
       "description": "Result owned by design/message-kinds.md; no additional field constraints specified here."
