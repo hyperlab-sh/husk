@@ -71,7 +71,7 @@ Given the keys typed so far `K` and the context `C`, the winner is found in thes
 
 1. **Candidates.** A binding is a candidate when:
    - its sequence equals or begins with `K`; a tombstone only when its sequence equals `K` (D92: a tombstone unbinds the sequence it names, never a prefix of it); and
-   - it is global, or its `focus` equals `C.FocusSurface` and (`plugin` is empty or equals `C.FocusOwner`); and
+   - it is global, or its `focus` equals `C.FocusSurface`, or `C.ModalOpen` and its `focus` is `modal-surface` (that scope means whichever modal is open, rail or runtime), and in either case `plugin` is empty or equals `C.FocusOwner`; and
    - the context filters below (frozen, modal, capture) keep it.
 2. **Scope first.** A surface-scoped candidate ranks above a global candidate.
 3. **Layer second.** Within one scope, the higher-ranked layer wins: `profile` > `user` > `distribution` > `focus-local` > `husk`.
@@ -104,7 +104,7 @@ Consequences, stated so they are tested rather than inferred:
 | Fact | Source | Effect on candidates |
 |---|---|---|
 | `Frozen` (terminal below the minimum size) | frontend geometry | Only candidates whose action is `husk.quit`, and tombstones, remain. Nothing is forwarded to any plugin. |
-| `ModalOpen`, `ModalAction` (a modal surface is open; the rail item id that opened it) | `husk.surfaces.overlays.modal` | Only candidates scoped to `modal-surface`, global candidates whose action is `husk.modal.close` or equals `ModalAction`, and tombstones remain. Keys that then yield `NoMatch` go to the modal's plugin. `FocusSurface` is `modal-surface` and `FocusOwner` the modal's plugin while a modal is open. |
+| `ModalOpen`, `ModalAction` (a modal surface is open; the rail item id that opened it) | `husk.surfaces.overlays.modal` | Only candidates scoped to the open modal (`focus` is `modal-surface` or equals `FocusSurface`), global candidates whose action is `husk.modal.close` or equals `ModalAction`, and tombstones remain. Keys that then yield `NoMatch` go to the modal's plugin. While a modal is open, `FocusSurface` is `overlays.modal.surface` (`modal-surface` for a rail modal, the dynamic id for a runtime modal, [State](state.md), "Runtime and terminal surfaces") and `FocusOwner` the modal's plugin. The `modal-surface` scope matches every open modal, so the `husk` layer's `esc` closes a runtime modal too, and a plugin's own manifest bindings with `focus: "modal-surface"` fire in that plugin's runtime modals as well as its rail modal (the `plugin` condition still holds them to the focused owner). `ModalAction` is empty for a runtime modal. |
 | `Capture` (the focused occupant has declared text capture for the focused surface) | `husk.surfaces.capture[FocusSurface]`, see "Text capture" | Global candidates whose first key is a text key are removed, from every layer, except, while `ModalOpen`, candidates whose action is `husk.modal.close` or equals `ModalAction`, which this filter never removes (with no modal open there is no exemption; `ModalAction` is empty and is not compared). Surface-scoped candidates, candidates on modified keys, on function keys and on `esc` remain. |
 | Palette open | frontend | `Resolve` is not called. The palette consumes every key (Invariant 9). |
 | Settings center open (`husk.surfaces.overlays.settings_center` non-empty) | frontend | `Resolve` is not called. The center consumes every key: its closed set acts and every other key is ignored ([Settings center](settings-center.md), "Focus and keys"; its Theme tab is the theme selector of [Services](services.md), "The theme selector"). Unlike the palette, no opener key closes it; only `esc` and `ctrl+c` do. **Landed.** |
@@ -306,7 +306,7 @@ type Binding struct {
 // KeyContext is what Input knows when a key arrives. Every field comes from the
 // frontend's own view of State; the service reads no State.
 type KeyContext struct {
-	FocusSurface string // focused surface id; "modal-surface" while a modal is open; empty when none
+	FocusSurface string // focused surface id; overlays.modal.surface while a modal is open ("modal-surface" or a runtime modal's dynamic id); empty when none
 	FocusOwner   string // plugin occupying it; empty when unoccupied
 	ModalOpen    bool
 	ModalAction  string // rail item id that opened the modal; empty when none
@@ -616,7 +616,7 @@ Behavior changes users can notice, compared with the layer-first draft of this s
 9. **Sequences of up to four keys as a `keys` array, 1500 ms timeout owned by Input, no replay.** The array form exists because `" "` is a key. The key that breaks a sequence is resolved on its own so that a bound key fires and an unbound key reaches the occupant; `esc` is the one exception, consumed as the cancel key without being resolved.
 10. **No chord cancel on reload.** The next key is resolved against the current keymap; a rule for it would add a wire between the coordinator and Input for no observable gain.
 11. **Palette and inspector keys stay widget-local.** They are the input handling of two host-owned surfaces.
-12. **Modal grab considers only `modal-surface` scope plus the modal's own close action.**
+12. **Modal grab considers only `modal-surface` scope plus the modal's own close action.** `modal-surface` scope means any open modal, rail or runtime, so one `esc` binding closes both and a plugin's modal-scoped bindings follow it into its runtime modals; a separate scope for runtime modals would need every close key bound twice.
 13. **Manifest `shortcut` fields are suggestions, reported and ignored.** Otherwise a plugin could still declare a global key through the rail.
 14. **A foreign action in a manifest binding is dropped.** A plugin binds its own actions and `husk.*` only.
 15. **Conversion owns the manifest rules; the service owns key parsing.** One owner per rule; two codes (`global_not_allowed`, `foreign_action`) whose messages say what was wrong (D27).
