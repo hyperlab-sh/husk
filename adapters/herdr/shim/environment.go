@@ -89,7 +89,7 @@ func CommandEnvironment(base []string, dir, binary, socket, configDir, stateDir,
 		}
 	}
 	raw, _ := json.Marshal(c)
-	values := map[string]string{"HERDR_SOCKET_PATH": socket, "HERDR_BIN_PATH": binary, "HERDR_ENV": "1", "HERDR_PLUGIN_ID": id, "HERDR_PLUGIN_ROOT": dir, "HERDR_PLUGIN_CONFIG_DIR": configDir, "HERDR_PLUGIN_STATE_DIR": stateDir, "HERDR_PLUGIN_CONTEXT_JSON": string(raw), "HERDR_PLUGIN_ACTION_ID": action, "HERDR_WORKSPACE_ID": c.WorkspaceID, "HERDR_TAB_ID": c.TabID, "HERDR_PANE_ID": c.FocusedPaneID, "HERDR_PLUGIN_CLICKED_URL": c.ClickedURL, "HERDR_PLUGIN_LINK_HANDLER_ID": c.LinkHandlerID}
+	values := map[string]string{"HERDR_SOCKET_PATH": socket, "HERDR_BIN_PATH": binary, "HERDR_ENV": "1", "HERDR_PLUGIN_ID": id, "HERDR_PLUGIN_ROOT": dir, "HERDR_PLUGIN_CONFIG_DIR": configDir, "HERDR_PLUGIN_STATE_DIR": stateDir, "HERDR_PLUGIN_CONTEXT_JSON": string(raw), "HERDR_PLUGIN_ACTION_ID": action, "HERDR_WORKSPACE_ID": c.WorkspaceID, "HERDR_TAB_ID": c.TabID, "HERDR_PANE_ID": c.FocusedPaneID}
 	for k, v := range values {
 		if v != "" {
 			m[k] = v

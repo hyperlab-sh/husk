@@ -64,7 +64,7 @@ func (r *runner) intercept(ctx context.Context, req proxy.Request) (any, *proxy.
 				if remote.Code == protocol.CodeNotFound {
 					return nil, nil, false
 				}
-				return nil, &proxy.Error{Code: string(remote.Code), Message: remote.Message}, true
+				return nil, paneProxyError(remote), true
 			}
 			return nil, &proxy.Error{Code: "unavailable", Message: err.Error()}, true
 		}

@@ -2,6 +2,7 @@ package shim
 
 import (
 	"bufio"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/creack/pty"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
 func paneIOHelper() int {
@@ -51,16 +53,13 @@ func TestPaneRealPTYInputResizeAndExit(t *testing.T) {
 	chunks := make(chan string, 16)
 	go func() {
 		defer close(chunks)
-		b := make([]byte, 4096)
-		for {
-			n, err := p.Read(b)
-			if n > 0 {
-				chunks <- string(b[:n])
+		_ = p.Pump(protocol.SurfaceMainStage, func(params protocol.TerminalWriteParams) error {
+			b, err := base64.StdEncoding.DecodeString(params.Data)
+			if err == nil {
+				chunks <- string(b)
 			}
-			if err != nil {
-				return
-			}
-		}
+			return err
+		})
 	}()
 	output := ""
 	for !strings.Contains(output, "size=41x9") {

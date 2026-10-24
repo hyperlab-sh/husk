@@ -290,7 +290,7 @@ func (r *runner) launch(e manifest.Entry, action, correlation string, provided j
 	}
 	if r.commands >= 32 {
 		r.mu.Unlock()
-		return nil, &protocol.Error{Code: protocol.CodeBusy, Message: "maximum concurrent commands reached"}
+		return nil, &protocol.Error{Code: protocol.CodeBusy, Message: "maximum concurrent commands reached", Data: json.RawMessage(`{"reason":"too_many_commands"}`)}
 	}
 	process, err := r.o.Spawn(Command{Argv: e.Command, Env: env, Dir: r.o.Dir})
 	if err != nil {

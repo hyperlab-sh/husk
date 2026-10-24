@@ -31,7 +31,23 @@ type paneProcess struct {
 	closed chan struct{}
 }
 
-func (p *paneProcess) Read(b []byte) (int, error) { return p.reader.Read(b) }
+func (p *paneProcess) Pump(surface protocol.SurfaceID, send func(protocol.TerminalWriteParams) error) error {
+	b := make([]byte, protocol.MaxTerminalBytes)
+	for {
+		n, err := p.reader.Read(b)
+		if n > 0 {
+			if err := send(protocol.TerminalWriteParams{Surface: surface, Data: base64.StdEncoding.EncodeToString(b[:n])}); err != nil {
+				return err
+			}
+		}
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
+	}
+}
 func (p *paneProcess) Write(b []byte) (int, error) {
 	if p.write != nil {
 		return p.write(b)
@@ -53,7 +69,7 @@ type paneSpawn struct {
 
 func paneRig(t *testing.T) (*rig, chan paneSpawn) {
 	t.Helper()
-	r := newRig(t, "never", false, "")
+	r := newRig(t, false, "")
 	spawns := make(chan paneSpawn, 16)
 	r.o.SpawnTerminal = func(c Command, w, h int) (TerminalProcess, error) {
 		rd, wr := io.Pipe()

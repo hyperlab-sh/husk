@@ -86,7 +86,7 @@ func TestSpawnWaitIsBoundedWhenDescendantRetainsStderr(t *testing.T) {
 }
 
 func TestExitedLeaderReleasesCommandCapWhileGroupIsTracked(t *testing.T) {
-	r := newRig(t, "never", false, "")
+	r := newRig(t, false, "")
 	original := r.o.Spawn
 	group := &descendantGroup{testProcess: &testProcess{pid: 42, done: make(chan int, 1), signals: make(chan syscall.Signal, 4)}, alive: true}
 	calls := 0

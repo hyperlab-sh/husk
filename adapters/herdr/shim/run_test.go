@@ -18,7 +18,7 @@ import (
 )
 
 func TestActionStartsImmediatelyWithExactEnvironment(t *testing.T) {
-	r := newRig(t, "never", true, "")
+	r := newRig(t, true, "")
 	r.start(t)
 	r.host.until(t, protocol.MethodStateSet, "")
 	reply := r.invoke(t, "demo.go")
@@ -78,7 +78,7 @@ func TestActionStartsImmediatelyWithExactEnvironment(t *testing.T) {
 }
 
 func TestEOFStopsProcessGroupOnInjectedGrace(t *testing.T) {
-	r := newRig(t, "never", false, "")
+	r := newRig(t, false, "")
 	r.start(t)
 	r.host.until(t, protocol.MethodStateSet, "")
 	if reply := r.invoke(t, "demo.go"); reply.Error != nil {
@@ -141,7 +141,7 @@ func TestRegistryRoutingAndNotFoundFallback(t *testing.T) {
 }
 
 func TestUnavailableAndTerminalAttachFailures(t *testing.T) {
-	r := newRig(t, "never", false, "")
+	r := newRig(t, false, "")
 	r.server.Close()
 	r.start(t)
 	r.host.until(t, protocol.MethodStateSet, "")
@@ -152,7 +152,7 @@ func TestUnavailableAndTerminalAttachFailures(t *testing.T) {
 }
 
 func TestSpawnFailureIsFailed(t *testing.T) {
-	r := newRig(t, "never", false, "")
+	r := newRig(t, false, "")
 	r.o.Spawn = func(Command) (Process, error) { return nil, errors.New("spawn refused") }
 	r.start(t)
 	r.host.until(t, protocol.MethodStateSet, "")

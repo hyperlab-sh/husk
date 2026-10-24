@@ -14,7 +14,7 @@ func TestContextFailureClassification(t *testing.T) {
 	for _, method := range []string{"pane.current", "workspace.get", "tab.get"} {
 		for _, remote := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/remote=%t", method, remote), func(t *testing.T) {
-				r := newRig(t, "never", false, "", func(o *fakeherdr.Options) {
+				r := newRig(t, false, "", func(o *fakeherdr.Options) {
 					if remote {
 						o.Errors = map[string]fakeherdr.ReplyError{method: {Code: "invalid_params", Message: "context refused"}}
 					} else {

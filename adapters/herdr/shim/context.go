@@ -12,6 +12,8 @@ import (
 
 // InvocationContext follows PluginInvocationContext in the committed schema.
 // Unknown fields, including Husk focus and caller credentials, never enter it.
+// ClickedURL and LinkHandlerID preserve caller-supplied schema fields in context
+// JSON only; they do not enable handlers or export link-handler environment.
 type InvocationContext struct {
 	WorkspaceID       string          `json:"workspace_id,omitempty"`
 	WorkspaceLabel    string          `json:"workspace_label,omitempty"`
