@@ -106,10 +106,10 @@ Attach sequence, in the shim, before `live` work begins:
 2. Resolve the socket: the `session` setting, else `HERDR_SOCKET_PATH` **if Husk itself runs inside a Herdr pane** (the variable then names the user's session; the shim does not strip it from its own environment), else the default session socket under the Herdr config directory (`HERDR_CONFIG_PATH` respected, as Herdr does).
 3. `ping`. A reply is the server; its `version` is recorded. No socket, or no reply within 2 s: with `server = "attach"` (default) the shim stays up, writes `{"server": "absent"}` to its slice, and retries every 5 s with backoff to 30 s; its actions answer `unavailable` with `data.reason` `herdr_absent` until a server appears. With `server = "start"`, the shim takes the adapter's start lock (a `flock` on `<husk state dir>/herdr/start.lock`, so twelve shims start one server), runs `herdr server` detached (its own session, stdio to the log) if the lock holder found no server, waits for `ping` up to 10 s, and releases the lock. Failure: `failed`, `last_error` `herdr server did not start`.
 4. Compare `min_herdr_version` with the server version (semver, Herdr's rule). Older server: `failed`, `herdr_too_old`, nothing else runs.
-5. Read `plugin.list` upstream once: whether this plugin id is **enabled in the server** decides the hooks rule below; the answer is re-read on each reconnect. This call has its own 2 s injected-clock deadline, independent of `ping`; a timeout follows step 3's absent/retry path.
+5. Read `plugin.list` upstream once: whether this plugin id is **enabled in the server** decides the hooks rule below; the answer is re-read on each reconnect. This call has its own 2 s deadline, independent of `ping`'s; a timeout follows step 3's absent/retry path.
 6. Open the event subscription (if the plugin has `[[events]]`), open the proxy socket, run startup hooks (per the rule), then serve.
 
-Reconnect: an upstream EOF, a schema-defined error reply, or a defensive id-less error body on the `events.subscribe` stream marks `{"server": "lost"}`, drops the subscription, and re-runs steps 3 to 6 with the same backoff. Actions during the gap answer `unavailable` / `herdr_absent`. Open terminal surfaces keep running: their processes already have what they need. Checked against CLI 0.9.5's bundled API schema (`schema_version: 1`, `protocol: 22`): it defines no event-loss signal. Errors use the schema's `error_response` (`id`, `error{code,message}`). The client also treats an id-less error body on the stream as terminal, defensively; the schema does not define one. The adapter does not invent an event-loss message.
+Reconnect: an upstream EOF or an error on the `events.subscribe` stream marks `{"server": "lost"}`, drops the subscription, and re-runs steps 3 to 6 with the same backoff. Actions during the gap answer `unavailable` / `herdr_absent`. Open terminal surfaces keep running: their processes already have what they need. Herdr's API schema (bundled with CLI 0.9.5, `schema_version: 1`, `protocol: 22`) defines no event-loss signal, and the adapter invents none. A stream error is a reply in the schema's `error_response` shape (`id`, `error{code,message}`); the client also ends the stream, defensively, on an id-less error body (which the schema does not define) and on a line that is not an event.
 
 ### Discovery and conversion
 
@@ -266,8 +266,8 @@ Each shim keeps `<id>.state` (instance scope, not persistent, 256 KiB cap) as it
 | Server older than `min_herdr_version` | shim, step 4 | exits 1 | `failed`, `herdr_too_old: needs 0.9.0, server is 0.8.2` |
 | Server older than 0.9 (adapter minimum) | shim | exits 1 | `failed`, `herdr_too_old` naming the adapter's floor |
 | Malformed attach reply, invalid server version/result, or remote attach error other than `unavailable` | upstream attach | terminal `herdr_protocol`, naming the method; no retry | `failed`, `last_error` from the named error |
-| Name-only hook subscription needs pane-specific parameters (`pane.agent_status_changed`, `pane.output_matched`, `pane.scroll_changed`) | upstream `Subscribe` | refuses before dialing; no schema-invalid request is sent | `invalid_subscription`, naming the hook |
-| Upstream EOF, a schema-defined error reply, or a defensive id-less error body on the event subscription | shim | slice `server: lost`; resubscribe and re-read `plugin.list` on reconnect; running terminals continue | nothing unless an action is invoked meanwhile (`unavailable`) |
+| An `on` name whose schema subscription requires pane-specific parameters (`pane.agent_status_changed`, `pane.output_matched`, `pane.scroll_changed`) | upstream `Subscribe` | refuses the whole subscription before dialing; other names are passed through unchecked | `invalid_subscription`, naming the hook |
+| Upstream EOF or an error on the event subscription (a schema `error_response`, an id-less error body, or a line that is not an event) | shim | slice `server: lost`; resubscribe and re-read `plugin.list` on reconnect; running terminals continue | nothing unless an action is invoked meanwhile (`unavailable`) |
 | Registry missing or unreadable | converter `discover` | prints nothing, exit 0, one problem line | no Herdr plugins; `husk-herdr doctor` names the file |
 | Manifest invalid, `min_herdr_version` missing, platform unsupported, id unmappable | converter `convert` | that plugin fails conversion | listed as a refused plugin like any invalid manifest ([Pods](pods.md)) |
 | Entry excluded by its `platforms` | converter | dropped silently | the action is absent, as it would be refused in Herdr |
@@ -327,11 +327,12 @@ All Level 1, none landed; every row but `plugin.add` is specified in the core sp
 
 ## Level 2: Status and work units
 
-Adapter implementation status is recorded per unit. Core capability rows retain their separate rollout status:
+Status rows, per adapter unit and per core capability:
 
 | Area | Status |
 |---|---|
-| `cmd/husk-herdr`, `adapters/herdr/manifest`, `adapters/herdr/registry`, A3+ | not started (A1 in progress) |
+| A1: `cmd/husk-herdr`, `adapters/herdr/manifest`, `adapters/herdr/registry` | in progress |
+| A3 and later units | not started |
 | A2: `adapters/herdr/upstream`, `adapters/herdr/fakeherdr` | implemented: schema-backed fake, injectable client, version checks, EOF/error stream recovery seams and attach backoff |
 | Core: executable converters | Level 1 ([Pods](pods.md)) |
 | Core: live `plugin.add` | not yet specified; its own core spec |
