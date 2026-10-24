@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hyperlab-sh/husk/adapters/herdr/fakeherdr"
 	"github.com/hyperlab-sh/husk/adapters/herdr/manifest"
 	"github.com/hyperlab-sh/husk/adapters/herdr/proxy"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
@@ -67,9 +68,9 @@ type paneSpawn struct {
 	size    [2]int
 }
 
-func paneRig(t *testing.T) (*rig, chan paneSpawn) {
+func paneRig(t *testing.T, configure ...func(*fakeherdr.Options)) (*rig, chan paneSpawn) {
 	t.Helper()
-	r := newRig(t, false, "")
+	r := newRig(t, false, "", configure...)
 	spawns := make(chan paneSpawn, 16)
 	r.o.SpawnTerminal = func(c Command, w, h int) (TerminalProcess, error) {
 		rd, wr := io.Pipe()
@@ -401,9 +402,13 @@ func TestPaneProxyRoutingAndFallback(t *testing.T) {
 	}}
 	r := &runner{m: manifest.Manifest{ID: "demo"}, o: Options{Host: h, RegistryPath: path, Platform: "linux"}}
 	req := proxy.Request{Method: "plugin.pane.open", Params: json.RawMessage(`{"plugin_id":"other","entrypoint":"panel","placement":"popup","width":"60%"}`)}
-	_, failure, handled := r.intercept(context.Background(), req)
+	result, failure, handled := r.intercept(context.Background(), req)
 	if !called || !handled || failure != nil {
 		t.Fatalf("cross pane: %v %v", handled, failure)
+	}
+	raw, err := json.Marshal(result)
+	if err != nil || string(raw) != `{"type":"ok"}` {
+		t.Fatalf("relayed pane action result=%s, err=%v", raw, err)
 	}
 	h.invoke = func(context.Context, any) (json.RawMessage, error) {
 		return nil, &protocol.Error{Code: protocol.CodeNotFound, Message: "not loaded"}

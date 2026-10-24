@@ -167,7 +167,7 @@ func (r *runner) openPane(ctx context.Context, entry string, args paneArgs, corr
 	c, err := BuildContext(contextCtx, r.o.Client, correlation, "api", args.Context)
 	done()
 	if err != nil {
-		return nil, wireFailure(err)
+		return nil, contextFailure(err)
 	}
 	base := append([]string(nil), r.o.Env...)
 	for k, v := range args.Env {
@@ -202,7 +202,12 @@ func (r *runner) openPane(ctx context.Context, entry string, args paneArgs, corr
 		return nil, wireFailure(context.Canceled)
 	}
 	r.mu.Lock()
-	if r.stopping || r.commands >= 32 {
+	if r.stopping {
+		r.mu.Unlock()
+		p.mu.Unlock()
+		return nil, wireFailure(context.Canceled)
+	}
+	if r.commands >= 32 {
 		r.mu.Unlock()
 		p.mu.Unlock()
 		return nil, &protocol.Error{Code: protocol.CodeBusy, Message: "maximum concurrent commands reached", Data: json.RawMessage(`{"reason":"too_many_commands"}`)}
