@@ -29,8 +29,8 @@ func Run() error {
 		dial: func(ctx context.Context) (io.ReadWriteCloser, error) {
 			return (&net.Dialer{}).DialContext(ctx, "unix", path)
 		},
-		retry: func(ctx context.Context) error {
-			timer := time.NewTimer(100 * time.Millisecond)
+		retry: func(ctx context.Context, delay time.Duration) error {
+			timer := time.NewTimer(delay)
 			defer timer.Stop()
 			select {
 			case <-timer.C:
@@ -45,7 +45,7 @@ func Run() error {
 type config struct {
 	token string
 	dial  func(context.Context) (io.ReadWriteCloser, error)
-	retry func(context.Context) error
+	retry func(context.Context, time.Duration) error
 }
 type input struct {
 	host       bool
@@ -53,7 +53,6 @@ type input struct {
 	messages   []protocol.Message
 	conn       io.ReadWriteCloser
 	ended      bool
-	recovered  bool
 	err        error
 }
 type pendingKind int
@@ -138,25 +137,30 @@ func run(parent context.Context, cfg config, stdin io.ReadCloser, stdout, log io
 	}()
 	generation := uint64(0)
 	p := &plugin{cfg: cfg, stdout: protocol.NewWriter(stdout), log: log, pending: make(map[string]pending)}
+	delay := time.Duration(0)
+	nextDelay := 100 * time.Millisecond
+	loggedErrors := make(map[string]bool)
+	logError := func(err error) {
+		if message := err.Error(); !loggedErrors[message] {
+			fmt.Fprintln(log, "guide:", message)
+			loggedErrors[message] = true
+		}
+	}
 	connect := func() {
 		generation++
-		gen := generation
+		gen, wait := generation, delay
+		delay = nextDelay
+		nextDelay = min(2*nextDelay, 5*time.Second)
 		start(func() {
-			reported := false
-			for ctx.Err() == nil {
-				c, err := cfg.dial(ctx)
-				if err == nil {
-					send(input{generation: gen, conn: c, recovered: reported})
-					return
-				}
-				if !reported {
-					send(input{generation: gen, err: fmt.Errorf("connect: %w", err)})
-					reported = true
-				}
-				if cfg.retry(ctx) != nil {
-					return
-				}
+			if wait > 0 && cfg.retry(ctx, wait) != nil {
+				return
 			}
+			c, err := cfg.dial(ctx)
+			if err != nil {
+				send(input{generation: gen, ended: true, err: fmt.Errorf("connect: %w", err)})
+				return
+			}
+			send(input{generation: gen, conn: c})
 		})
 	}
 	disconnect := func() {
@@ -182,21 +186,20 @@ func run(parent context.Context, cfg config, stdin io.ReadCloser, stdout, log io
 				continue
 			}
 			if event.conn != nil {
-				if event.recovered {
-					fmt.Fprintln(log, "guide: connection recovered")
-				}
 				conn = event.conn
 				p.socket = protocol.NewWriter(conn)
 				gen := generation
 				reader := conn
 				start(func() { pump(ctx, reader, false, gen, send) })
 				if err := p.call(watchReply, protocol.MethodStateWatch, map[string]any{"slices": []string{"husk.geometry", "husk.surfaces", "husk.focus", "husk.pods"}}); err != nil {
+					logError(err)
 					disconnect()
 					connect()
 					continue
 				}
 				if p.toggle != nil || p.shown || !p.keysReady {
 					if err := p.requestKeys(); err != nil {
+						logError(err)
 						disconnect()
 						connect()
 					}
@@ -207,7 +210,10 @@ func run(parent context.Context, cfg config, stdin io.ReadCloser, stdout, log io
 				if event.host {
 					return event.err
 				}
-				fmt.Fprintln(log, "guide: watch disconnected; reconnecting")
+				if event.err == nil {
+					event.err = errors.New("watch disconnected; reconnecting")
+				}
+				logError(event.err)
 				disconnect()
 				connect()
 				continue
@@ -216,26 +222,32 @@ func run(parent context.Context, cfg config, stdin io.ReadCloser, stdout, log io
 				fmt.Fprintln(log, "guide:", event.err)
 				continue
 			}
-			for _, m := range event.messages {
-				var err error
-				if event.host {
-					err = p.fromHost(m)
-				} else {
-					err = p.fromSocket(m)
-				}
-				if err != nil {
-					if event.host && p.socket == nil {
-						return err
+			var batchErr error
+			if event.host {
+				batchErr = p.hostBatch(event.messages)
+			} else {
+				for _, m := range event.messages {
+					if batchErr = p.fromSocket(m); batchErr != nil {
+						break
 					}
-					fmt.Fprintln(log, "guide: transport:", err)
-					disconnect()
-					connect()
-					break
+					if p.baseline {
+						delay, nextDelay = 100*time.Millisecond, 200*time.Millisecond
+						if len(loggedErrors) > 0 {
+							fmt.Fprintln(log, "guide: connection recovered")
+							clear(loggedErrors)
+						}
+					}
 				}
+			}
+			if batchErr != nil {
+				logError(batchErr)
+				disconnect()
+				connect()
+				continue
 			}
 			if p.socket != nil {
 				if err := p.flush(); err != nil {
-					fmt.Fprintln(log, "guide: transport:", err)
+					logError(err)
 					disconnect()
 					connect()
 				}
@@ -272,6 +284,16 @@ func (p *plugin) requestKeys() error {
 	p.keysReady = false
 	return p.call(keysReply, protocol.MethodKeysList, struct{}{})
 }
+
+// hostBatch completes local mutations and stdout replies before reconnecting.
+func (p *plugin) hostBatch(messages []protocol.Message) error {
+	var err error
+	for _, m := range messages {
+		err = errors.Join(err, p.fromHost(m))
+	}
+	return err
+}
+
 func (p *plugin) fromHost(m protocol.Message) error {
 	if m.ID != nil && m.Method != "" {
 		if m.Method != protocol.MethodActionInvoke {
@@ -295,13 +317,7 @@ func (p *plugin) fromHost(m protocol.Message) error {
 		p.shown = !p.shown
 		if !p.shown {
 			p.dirty = false
-			if err := p.update([]string{}); err != nil {
-				return err
-			}
-			if err := p.state(); err != nil {
-				return err
-			}
-			return p.reply(m, map[string]bool{"shown": false}, nil)
+			return errors.Join(p.update([]string{}), p.state(), p.reply(m, map[string]bool{"shown": false}, nil))
 		}
 		p.toggle = &m
 		p.dirty = true
@@ -422,8 +438,5 @@ func (p *plugin) flush() error {
 	} else {
 		p.loggedRefusal = ""
 	}
-	if err := p.state(); err != nil {
-		return err
-	}
-	return p.reply(req, map[string]bool{"shown": p.shown}, failure)
+	return errors.Join(p.state(), p.reply(req, map[string]bool{"shown": p.shown}, failure))
 }
