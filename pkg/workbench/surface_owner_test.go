@@ -13,7 +13,7 @@ import (
 )
 
 func TestModalOwnerSingleSourceOfTruth(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	if mo := m.modalOwner(); mo.Open() || mo.PluginID != "" || mo.RailID != "" {
 		t.Fatalf("fresh model modal = %+v, want closed", mo)
 	}
@@ -35,7 +35,7 @@ func TestModalOwnerSingleSourceOfTruth(t *testing.T) {
 }
 
 func TestSurfaceOwnerFallsBackToRegistryOccupant(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	m.catalog.Occupants[protocol.SurfaceMainStage] = "occ"
 	if got := m.surfaceOwner(protocol.SurfaceMainStage); got != "occ" {
 		t.Fatalf("stage owner = %q, want occ", got)
@@ -48,9 +48,9 @@ func TestSurfaceOwnerFallsBackToRegistryOccupant(t *testing.T) {
 }
 
 func TestHitOrderIsDeterministicWithOverlappingRects(t *testing.T) {
-	m := newWorkbenchModel()
-	same := SlotRect{X: 0, Y: 0, Width: 10, Height: 5, InnerX: 0, InnerY: 0, InnerW: 10, InnerH: 5}
-	m.slotRects = map[protocol.SurfaceID]SlotRect{
+	m := newModel()
+	same := slotRect{X: 0, Y: 0, Width: 10, Height: 5, InnerX: 0, InnerY: 0, InnerW: 10, InnerH: 5}
+	m.slotRects = map[protocol.SurfaceID]slotRect{
 		protocol.SurfaceActivityRail:   same,
 		protocol.SurfaceMainStage:      same,
 		protocol.SurfaceSidePanel:      same,
@@ -75,7 +75,7 @@ func TestHitOrderIsDeterministicWithOverlappingRects(t *testing.T) {
 }
 
 func TestTopBarHasNoDebugCaseLabels(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	m.width, m.height = 120, 30
 	m.recomputeLayout()
 	check := func(name string) {
@@ -96,7 +96,7 @@ func TestTopBarHasNoDebugCaseLabels(t *testing.T) {
 // surface: input goes to it and a frame left by a departed opener is dropped.
 // (Refusing a write from a non-occupant is the Surfaces engine's job.)
 func TestModalSurfaceOwnerIsOccupantNotOpener(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	addPublicationTestPlugin(m, hello{PluginID: "occ", Slots: []protocol.SurfaceID{protocol.SurfaceModal}})
 	_, opener := addPublicationTestPlugin(m, hello{PluginID: "opener"})
 	m.openModal("opener", "r.opener")
@@ -116,7 +116,7 @@ func TestModalSurfaceOwnerIsOccupantNotOpener(t *testing.T) {
 }
 
 func TestNoStaleModalContentAfterOpenerLeaves(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	addPublicationTestPlugin(m, hello{PluginID: "occ", Slots: []protocol.SurfaceID{protocol.SurfaceModal}})
 	addPublicationTestPlugin(m, hello{PluginID: "opener"})
 	m.openModal("opener", "r.opener")
@@ -140,12 +140,12 @@ func TestNoStaleModalContentAfterOpenerLeaves(t *testing.T) {
 
 func TestOverlappingSurfacesClickReachesTopmostOwnerOnly(t *testing.T) {
 	for i := 0; i < 50; i++ {
-		m := newWorkbenchModel()
+		m := newModel()
 		m.width, m.height = 120, 30
 		_, canvas := addPublicationTestPlugin(m, hello{PluginID: "canvas", Slots: []protocol.SurfaceID{protocol.SurfaceFullCanvas}})
 		_, stage := addPublicationTestPlugin(m, hello{PluginID: "stage", Slots: []protocol.SurfaceID{protocol.SurfaceMainStage}})
-		r := SlotRect{X: 30, Y: 10, Width: 20, Height: 6, InnerX: 30, InnerY: 10, InnerW: 20, InnerH: 6}
-		m.slotRects = map[protocol.SurfaceID]SlotRect{protocol.SurfaceFullCanvas: r, protocol.SurfaceMainStage: r}
+		r := slotRect{X: 30, Y: 10, Width: 20, Height: 6, InnerX: 30, InnerY: 10, InnerW: 20, InnerH: 6}
+		m.slotRects = map[protocol.SurfaceID]slotRect{protocol.SurfaceFullCanvas: r, protocol.SurfaceMainStage: r}
 		m.Update(tea.MouseClickMsg{X: 35, Y: 12, Button: tea.MouseLeft})
 		if m.focusedSlot != protocol.SurfaceFullCanvas {
 			t.Fatalf("iteration %d: focusedSlot = %q, want full-canvas", i, m.focusedSlot)

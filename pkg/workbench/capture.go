@@ -9,7 +9,7 @@ import (
 
 type captureTimeoutMsg struct{ gen uint64 }
 
-func (m *WorkbenchModel) releaseCapture() {
+func (m *workbenchModel) releaseCapture() {
 	if m.keyContext().Capture == protocol.CaptureNone {
 		return
 	}

@@ -87,7 +87,7 @@ func TestPluginCommandStartupDiagnostics(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			h, err := host.New(contracts.Config{
 				InstanceID: "diagnostics", RuntimeDir: shortRuntimeDir(t, "diagnostics"),
-				InstanceDocs: pluginFlagDocs(t, "--plugin", dir),
+				InstanceDocs: pluginDocs(dir),
 				Post: func(msg any) bool {
 					if closed.Load() {
 						return false

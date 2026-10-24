@@ -84,14 +84,14 @@ func (s *settingsCenter) dirty() bool {
 	return false
 }
 
-func (m *WorkbenchModel) settingsTab() string {
+func (m *workbenchModel) settingsTab() string {
 	if m.settings == nil {
 		return ""
 	}
 	return m.settings.tab
 }
 
-func (m *WorkbenchModel) openSettings(args map[string]any) (map[string]any, error) {
+func (m *workbenchModel) openSettings(args map[string]any) (map[string]any, error) {
 	tab := ""
 	if value, ok := args["tab"]; ok {
 		var valid bool
@@ -133,7 +133,7 @@ func (m *WorkbenchModel) openSettings(args map[string]any) (map[string]any, erro
 	return nil, nil
 }
 
-func (m *WorkbenchModel) closeSettings() {
+func (m *workbenchModel) closeSettings() {
 	if m.settings != nil {
 		m.lastSettingsTab = m.settings.tab
 	}
@@ -143,7 +143,7 @@ func (m *WorkbenchModel) closeSettings() {
 
 // refreshSettings reads immutable serving snapshots, never Store. It also
 // catches reloads that changed no palette or occupancy and keeps the cursor by name.
-func (m *WorkbenchModel) refreshSettings() {
+func (m *workbenchModel) refreshSettings() {
 	s := m.settings
 	if s == nil {
 		return
@@ -245,7 +245,7 @@ func settingsListTop(top, cursor, count, height int) int {
 	return max(0, min(top, count-height))
 }
 
-func (m *WorkbenchModel) settingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m *workbenchModel) settingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	s := m.settings
 	s.discardHiddenPluginDialogs()
 	key := legacyKeyString(msg)
@@ -376,7 +376,7 @@ func (m *WorkbenchModel) settingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *WorkbenchModel) selectSettingsTheme() {
+func (m *workbenchModel) selectSettingsTheme() {
 	s := m.settings
 	if s.pending || m.fe == nil || s.cursor >= len(s.themes) {
 		return
@@ -447,7 +447,7 @@ func settingsFirstProblem(problems []protocol.Problem) *protocol.Problem {
 	return nil
 }
 
-func (m *WorkbenchModel) openSettingsProfiles() {
+func (m *workbenchModel) openSettingsProfiles() {
 	s := m.settings
 	if s.switching {
 		return
@@ -456,7 +456,7 @@ func (m *WorkbenchModel) openSettingsProfiles() {
 	m.refreshSettings()
 }
 
-func (m *WorkbenchModel) buildSettingsProfiles(choice string) {
+func (m *workbenchModel) buildSettingsProfiles(choice string) {
 	s := m.settings
 	options := []huh.Option[string]{huh.NewOption("(none)", "")}
 	s.profileNames, s.profileTop = []string{""}, 0
@@ -475,7 +475,7 @@ func (m *WorkbenchModel) buildSettingsProfiles(choice string) {
 	m.cmds = append(m.cmds, s.profileForm.Init())
 }
 
-func (m *WorkbenchModel) useSettingsProfile() {
+func (m *workbenchModel) useSettingsProfile() {
 	s := m.settings
 	name := s.profileChoice
 	s.profileForm = nil
@@ -500,7 +500,7 @@ func (m *WorkbenchModel) useSettingsProfile() {
 
 // settingsMouse consumes all events while the center is open. The pill is
 // routed before this function, so it switches to Theme rather than closing.
-func (m *WorkbenchModel) settingsMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
+func (m *workbenchModel) settingsMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 	s := m.settings
 	mouse := event.Mouse()
 	point := image.Pt(mouse.X, mouse.Y)

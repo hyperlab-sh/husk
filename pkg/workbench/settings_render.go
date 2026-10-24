@@ -46,26 +46,26 @@ func settingsHuhTheme(p drawPalette) huh.Theme {
 	})
 }
 
-func (m *WorkbenchModel) settingsRect() image.Rectangle {
+func (m *workbenchModel) settingsRect() image.Rectangle {
 	w, h := min(100, m.width-4), min(32, m.height-4)
 	x, y := (m.width-w)/2, (m.height-h)/2
 	return image.Rect(x, y, x+w, y+h)
 }
-func (m *WorkbenchModel) settingsContentRect() image.Rectangle {
+func (m *workbenchModel) settingsContentRect() image.Rectangle {
 	r := m.settingsRect()
 	return image.Rect(r.Min.X+15, r.Min.Y+1, r.Max.X-2, r.Max.Y-2)
 }
-func (m *WorkbenchModel) settingsCornerRect() image.Rectangle {
+func (m *workbenchModel) settingsCornerRect() image.Rectangle {
 	r := m.settingsRect()
 	w := ansi.StringWidth(m.settingsCorner())
 	return image.Rect(r.Max.X-2-w, r.Min.Y, r.Max.X-2, r.Min.Y+1)
 }
-func (m *WorkbenchModel) settingsProfileRect() image.Rectangle {
+func (m *workbenchModel) settingsProfileRect() image.Rectangle {
 	r := m.settingsRect()
 	return image.Rect(r.Max.X-34, r.Min.Y+1, r.Max.X-2, r.Min.Y+min(r.Dy()-2, len(m.settings.profiles)+5))
 }
 
-func (m *WorkbenchModel) settingsCorner() string {
+func (m *workbenchModel) settingsCorner() string {
 	s := m.settings
 	name := s.active
 	if name == "" {
@@ -78,7 +78,7 @@ func (m *WorkbenchModel) settingsCorner() string {
 	return ansi.Truncate(text, 24, "…")
 }
 
-func (m *WorkbenchModel) drawSettings(c *canvas) uv.Rectangle {
+func (m *workbenchModel) drawSettings(c *canvas) uv.Rectangle {
 	s := m.settings
 	r := m.settingsRect()
 	base := lipgloss.NewStyle().Foreground(m.palette.Ink).Background(m.palette.SurfaceElevated)

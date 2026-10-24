@@ -15,7 +15,7 @@ func TestRailTileGeometry(t *testing.T) {
 	for _, h := range []int{3, 4, 7, 8, 11, 14, 15, 22, 38} {
 		t.Run(fmt.Sprint(h), func(t *testing.T) {
 			m := goldenModel()
-			m.slotRects[protocol.SurfaceActivityRail] = SlotRect{X: 0, Y: 1, Width: activityRailWidth, Height: h}
+			m.slotRects[protocol.SurfaceActivityRail] = slotRect{X: 0, Y: 1, Width: activityRailWidth, Height: h}
 			m.modifiers.Alt = true
 			if activityRailWidth != 7 {
 				t.Fatalf("rail width %d, want 7", activityRailWidth)
@@ -213,7 +213,7 @@ func TestThemePillClickIsConsumed(t *testing.T) {
 				}
 				// Overlap a target deliberately to prove pill precedence rather than
 				// relying on today's region layout stopping above the bottom bar.
-				r := SlotRect{X: 0, Y: m.height - 1, Width: m.width, Height: 1, InnerX: 0, InnerY: m.height - 1, InnerW: m.width, InnerH: 1}
+				r := slotRect{X: 0, Y: m.height - 1, Width: m.width, Height: 1, InnerX: 0, InnerY: m.height - 1, InnerW: m.width, InnerH: 1}
 				m.slotRects[protocol.SurfaceMainStage] = r
 				if modal {
 					m.modalRect = r
@@ -249,7 +249,7 @@ func TestThemePillClickIsConsumed(t *testing.T) {
 
 func TestDumpFrameActivityTracksContent(t *testing.T) {
 	m := goldenModel()
-	d := dumpFrameDriver{WorkbenchModel: m}
+	d := dumpFrameDriver{workbenchModel: m}
 	m.content("p", protocol.SurfaceUpdateParams{Surface: protocol.SurfaceMainStage, Title: "one", Lines: []string{"first"}})
 	prior := d.activity()
 	for _, change := range []func(){

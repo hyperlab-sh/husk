@@ -71,7 +71,7 @@ type settingsPlugins struct {
 	dirty              bool
 }
 
-func (m *WorkbenchModel) refreshSettingsPlugins() {
+func (m *workbenchModel) refreshSettingsPlugins() {
 	s := m.settings
 	s.discardHiddenPluginDialogs()
 	if s.tab != "installed" && s.tab != "store" {
@@ -205,7 +205,7 @@ func (m *WorkbenchModel) refreshSettingsPlugins() {
 	}
 }
 
-func (m *WorkbenchModel) settingsPluginKey(msg tea.KeyPressMsg) tea.Cmd {
+func (m *workbenchModel) settingsPluginKey(msg tea.KeyPressMsg) tea.Cmd {
 	p := m.settings.plugins
 	if p == nil {
 		return nil
@@ -309,7 +309,7 @@ func (m *WorkbenchModel) settingsPluginKey(msg tea.KeyPressMsg) tea.Cmd {
 	return nil
 }
 
-func (m *WorkbenchModel) confirmSettingsRemoval() {
+func (m *workbenchModel) confirmSettingsRemoval() {
 	p := m.settings.plugins
 	if p.cursor >= len(p.rows) || m.fe == nil {
 		return
@@ -318,7 +318,7 @@ func (m *WorkbenchModel) confirmSettingsRemoval() {
 }
 
 // Rebuilds retain the original target, independently of the table cursor.
-func (m *WorkbenchModel) confirmSettingsRemovalFor(id string) {
+func (m *workbenchModel) confirmSettingsRemovalFor(id string) {
 	p := m.settings.plugins
 	p.confirmID, p.confirmed = id, false
 	p.confirm = huh.NewConfirm().Title("Remove " + plainText(id) + " from this instance?").Description("It is unloaded, not uninstalled: its files, settings and saved state stay, and the next start loads it again.").Value(&p.confirmed).Affirmative(" yes ").Negative(" no ")
@@ -331,7 +331,7 @@ func (m *WorkbenchModel) confirmSettingsRemovalFor(id string) {
 	p.confirmView = p.confirm.View()
 	p.dirty = true
 }
-func (m *WorkbenchModel) removeSettingsPlugin(id string) {
+func (m *workbenchModel) removeSettingsPlugin(id string) {
 	s := m.settings
 	p := s.plugins
 	p.removing[id] = true
@@ -347,7 +347,7 @@ func (m *WorkbenchModel) removeSettingsPlugin(id string) {
 		p.dirty = true
 	})
 }
-func (m *WorkbenchModel) openSettingsSurfaceFilter() {
+func (m *workbenchModel) openSettingsSurfaceFilter() {
 	p := m.settings.plugins
 	p.surfaceBefore = p.surface
 	options := []huh.Option[string]{huh.NewOption("any surface", "")}
@@ -389,7 +389,7 @@ func settingsPluginCommand(e contracts.CatalogEntry) []string {
 	return []string{e.Source, "fetch it, then: husk plugin add <directory>"}
 }
 
-func (m *WorkbenchModel) cacheSettingsPlugins() {
+func (m *workbenchModel) cacheSettingsPlugins() {
 	s := m.settings
 	p := s.plugins
 	base := lipgloss.NewStyle().Foreground(m.palette.Ink).Background(m.palette.SurfaceElevated)
@@ -590,7 +590,7 @@ func (m *WorkbenchModel) cacheSettingsPlugins() {
 	}
 }
 
-func (m *WorkbenchModel) settingsPluginsMouse(point image.Point) {
+func (m *workbenchModel) settingsPluginsMouse(point image.Point) {
 	p := m.settings.plugins
 	r := m.settingsContentRect()
 	at := p.top + point.Y - r.Min.Y
@@ -627,7 +627,7 @@ func (m *WorkbenchModel) settingsPluginsMouse(point image.Point) {
 
 // settingsPluginConfirmLayout is shared by drawing and button hit-testing.
 // It is pure: View must not publish mouse geometry or mutate the dialog.
-func (m *WorkbenchModel) settingsPluginConfirmLayout() ([]string, image.Rectangle) {
+func (m *workbenchModel) settingsPluginConfirmLayout() ([]string, image.Rectangle) {
 	p := m.settings.plugins
 	content := m.settingsContentRect()
 	lines := strings.Split(p.confirmView, "\n")
@@ -638,7 +638,7 @@ func (m *WorkbenchModel) settingsPluginConfirmLayout() ([]string, image.Rectangl
 
 // settingsPluginDialogMouse reports whether the dialog consumed the click.
 // An outside dismissal lets the same click reach its visible target.
-func (m *WorkbenchModel) settingsPluginDialogMouse(point image.Point) bool {
+func (m *workbenchModel) settingsPluginDialogMouse(point image.Point) bool {
 	p := m.settings.plugins
 	if p.confirm == nil {
 		r := m.settingsContentRect()

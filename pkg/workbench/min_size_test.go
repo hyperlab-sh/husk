@@ -12,9 +12,9 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
-func sizedModel(t *testing.T, w, h int) *WorkbenchModel {
+func sizedModel(t *testing.T, w, h int) *workbenchModel {
 	t.Helper()
-	m := newWorkbenchModel()
+	m := newModel()
 	m.Update(tea.WindowSizeMsg{Width: w, Height: h})
 	return m
 }
@@ -93,7 +93,7 @@ func TestResizeBelowMinimumKeepsLayoutAndRecovers(t *testing.T) {
 	}
 }
 
-func dividerPoint(t *testing.T, m *WorkbenchModel) (int, int) {
+func dividerPoint(t *testing.T, m *workbenchModel) (int, int) {
 	t.Helper()
 	sb, ok := m.slotRects[protocol.SurfaceSidebarList]
 	if !ok {
@@ -108,7 +108,7 @@ func dividerPoint(t *testing.T, m *WorkbenchModel) (int, int) {
 
 // borderedSidebarModel is a sized model whose sidebar list is occupied by a
 // plugin that declared a border, so its right edge is a real divider.
-func borderedSidebarModel(t *testing.T, w, h int) *WorkbenchModel {
+func borderedSidebarModel(t *testing.T, w, h int) *workbenchModel {
 	t.Helper()
 	m := sizedModel(t, w, h)
 	addTestPlugin(m, "p", map[protocol.SurfaceID]frame.Spec{protocol.SurfaceSidebarList: {Border: true}})

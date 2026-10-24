@@ -16,7 +16,7 @@ var demoFrameSpecs = map[protocol.SurfaceID]protocol.FrameSpec{
 
 // setupDemoFrame registers the built-in demo plugin (no external process) and
 // activates the requested rail placement, if any.
-func (m *WorkbenchModel) setupDemoFrame(railMode string) {
+func (m *workbenchModel) setupDemoFrame(railMode string) {
 	demoLines := []string{
 		"This surface is a blank canvas; all chrome you see is a frame.",
 		"",
@@ -58,7 +58,7 @@ func (m *WorkbenchModel) setupDemoFrame(railMode string) {
 
 // The pubslots demo fills the catalog directly, the way a refresh from a host
 // would, without sockets or child processes.
-func (m *WorkbenchModel) seedPubslotsDemo() {
+func (m *workbenchModel) seedPubslotsDemo() {
 	m.plugins["a"], m.plugins["b"] = true, true
 	m.catalog.Occupants[protocol.SurfaceMainStage] = "a"
 	m.catalog.Slots["a.agent-line-action"] = &publishedSlot{

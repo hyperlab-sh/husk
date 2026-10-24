@@ -12,7 +12,7 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
-func addTestPlugin(m *WorkbenchModel, id string, frames map[protocol.SurfaceID]frame.Spec, items ...contracts.RailItem) {
+func addTestPlugin(m *workbenchModel, id string, frames map[protocol.SurfaceID]frame.Spec, items ...contracts.RailItem) {
 	var wire map[protocol.SurfaceID]protocol.FrameSpec
 	if frames != nil {
 		wire = make(map[protocol.SurfaceID]protocol.FrameSpec, len(frames))
@@ -38,7 +38,7 @@ func framedRailItem(id string, spec frame.Spec, placement contracts.RailPlacemen
 // A modal declaring a frame only through its rail item must get its chrome
 // (regression: frameFor used to consult only the canvas/stage rail item).
 func TestFrameForModalRailItemFrameOnly(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	addTestPlugin(m, "p.modal", nil, framedRailItem("r.modal", frame.Spec{Border: true, Label: "L", Close: true}, contracts.PlacementModal))
 	m.openModal("p.modal", "r.modal")
 	m.recomputeLayout()
@@ -52,7 +52,7 @@ func TestFrameForModalRailItemFrameOnly(t *testing.T) {
 // An unframed modal opened over a framed canvas must not inherit the canvas
 // frame; the framed canvas keeps its own.
 func TestFrameForUnframedModalOverFramedCanvas(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	addTestPlugin(m, "p.canvas", nil, framedRailItem("r.canvas", frame.Spec{Border: true, Close: true}, contracts.PlacementFullCanvas))
 	addTestPlugin(m, "p.modal", nil, framedRailItem("r.modal2", frame.Spec{}, contracts.PlacementModal))
 	m.activeRailID = "r.canvas"
@@ -70,7 +70,7 @@ func TestFrameForUnframedModalOverFramedCanvas(t *testing.T) {
 
 // hello "frames" takes precedence over the rail item's "frame".
 func TestFrameForHelloFramesPrecedence(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	hello := frame.Spec{Border: true, Label: "from-hello"}
 	addTestPlugin(m, "p.modal", map[protocol.SurfaceID]frame.Spec{protocol.SurfaceModal: hello},
 		framedRailItem("r.modal3", frame.Spec{Label: "from-rail"}, contracts.PlacementModal))
@@ -85,7 +85,7 @@ func TestFrameForHelloFramesPrecedence(t *testing.T) {
 
 // geometryOf reads one surface's rect from the husk.geometry value the model
 // writes, which is what the host turns into surface.resized.
-func geometryOf(t *testing.T, m *WorkbenchModel, id protocol.SurfaceID) (geoRect, bool) {
+func geometryOf(t *testing.T, m *workbenchModel, id protocol.SurfaceID) (geoRect, bool) {
 	t.Helper()
 	var doc struct {
 		Rects map[protocol.SurfaceID]geoRect `json:"rects"`
@@ -100,7 +100,7 @@ func geometryOf(t *testing.T, m *WorkbenchModel, id protocol.SurfaceID) (geoRect
 // A visible modal must appear in husk.geometry with its frame-aware inner
 // size, track terminal resizes, and disappear when closed.
 func TestGeometryModalLifecycle(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	addTestPlugin(m, "p.modal", nil, framedRailItem("r.framed", frame.Spec{Border: true, Close: true}, contracts.PlacementModal))
 	m.openModal("p.modal", "r.framed")
 	m.width, m.height = 120, 40
@@ -145,7 +145,7 @@ func TestGeometryModalLifecycle(t *testing.T) {
 // row keeps the surface width (ANSI- and wide-rune-safe), and the close glyph
 // occupies the rightmost cell, matching closeHitAt.
 func TestRenderFrameBorderlessWidthInvariant(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	cases := []struct {
 		name  string
 		label string
@@ -160,7 +160,7 @@ func TestRenderFrameBorderlessWidthInvariant(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rect := SlotRect{X: 0, Y: 0, Width: tc.w, Height: 3, InnerX: 0, InnerY: 0, InnerW: tc.w, InnerH: 3}
+			rect := slotRect{X: 0, Y: 0, Width: tc.w, Height: 3, InnerX: 0, InnerY: 0, InnerW: tc.w, InnerH: 3}
 			lines := m.surfaceContentLines(nil, tc.w, 3)
 			rows := drawnRect(t, rect, func(c *canvas) {
 				m.drawFrame(c, protocol.SurfaceModal, rect, frame.Spec{Label: tc.label, Close: tc.close}, tc.label, lines)
@@ -186,8 +186,8 @@ func TestRenderFrameBorderlessWidthInvariant(t *testing.T) {
 // A bordered surface too narrow for the close glyph must omit it rather than
 // overflow the border row.
 func TestRenderFrameBorderedNarrowClose(t *testing.T) {
-	m := newWorkbenchModel()
-	rect := SlotRect{X: 0, Y: 0, Width: 3, Height: 3, InnerX: 1, InnerY: 1, InnerW: 1, InnerH: 1}
+	m := newModel()
+	rect := slotRect{X: 0, Y: 0, Width: 3, Height: 3, InnerX: 1, InnerY: 1, InnerW: 1, InnerH: 1}
 	lines := m.surfaceContentLines(nil, 1, 1)
 	rows := drawnRect(t, rect, func(c *canvas) {
 		m.drawFrame(c, protocol.SurfaceMainStage, rect, frame.Spec{Border: true, Label: "Lab", Close: true}, "Lab", lines)
@@ -205,13 +205,13 @@ func TestRenderFrameBorderedNarrowClose(t *testing.T) {
 // The architecture explorer always fills the main-stage slot exactly, with or
 // without a plugin-declared border on the main stage.
 func TestExplorerFillsMainStageSlot(t *testing.T) {
-	newModel := func() *WorkbenchModel {
-		m := newWorkbenchModel()
+	newModel := func() *workbenchModel {
+		m := newModel()
 		m.width, m.height = 144, 40
 		m.recomputeLayout()
 		return m
 	}
-	check := func(t *testing.T, m *WorkbenchModel) {
+	check := func(t *testing.T, m *workbenchModel) {
 		t.Helper()
 		rect := m.slotRects[protocol.SurfaceMainStage]
 		rows := drawnRect(t, rect, m.drawHotspotArchitectureStage)
@@ -239,7 +239,7 @@ func TestExplorerFillsMainStageSlot(t *testing.T) {
 // While a modal is open, close hit testing must not fall through to the
 // underlying canvas/stage close button (esc parity: only the modal goes).
 func TestCloseHitAtTopmostModalOnly(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	addTestPlugin(m, "p.canvas", nil, framedRailItem("r.canvas", frame.Spec{Border: true, Close: true}, contracts.PlacementFullCanvas))
 	addTestPlugin(m, "p.modal", nil, framedRailItem("r.modalx", frame.Spec{Border: true, Close: true}, contracts.PlacementModal))
 	m.activeRailID = "r.canvas"

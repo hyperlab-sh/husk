@@ -51,9 +51,9 @@ func auditChromeRoles(f *ast.File) (map[string]map[string]int, []string) {
 				case "AccentSecondary", "AccentSoft":
 					allowed = false
 				case "Success", "Warning", "Danger", "Info":
-					allowed = name == "(*WorkbenchModel).drawToast" || name == "(*WorkbenchModel).statusMark"
+					allowed = name == "(*workbenchModel).drawToast" || name == "(*workbenchModel).statusMark"
 				case "Accent":
-					allowed = name == "(*WorkbenchModel).renderActivityRailBox" || name == "(*WorkbenchModel).drawCommandPalette" || name == "(*WorkbenchModel).dividerEdgeStyles" || name == "(*WorkbenchModel).drawSettings" || name == "(*WorkbenchModel).cacheSettingsGeneral"
+					allowed = name == "(*workbenchModel).renderActivityRailBox" || name == "(*workbenchModel).drawCommandPalette" || name == "(*workbenchModel).dividerEdgeStyles" || name == "(*workbenchModel).drawSettings" || name == "(*workbenchModel).cacheSettingsGeneral"
 				}
 				if !allowed {
 					violations = append(violations, fmt.Sprintf("%s: forbidden %s", name, role))
@@ -94,24 +94,24 @@ func TestChromeRoleAuditRejectsBypasses(t *testing.T) {
 		name, source string
 		bad          bool
 	}{
-		{"assignment alias", `func (m *WorkbenchModel) draw() { p := m.palette; _ = p.Warning }`, true},
-		{"declaration alias", `func (m *WorkbenchModel) draw() { var p = m.palette; _ = p.Warning }`, true},
+		{"assignment alias", `func (m *workbenchModel) draw() { p := m.palette; _ = p.Warning }`, true},
+		{"declaration alias", `func (m *workbenchModel) draw() { var p = m.palette; _ = p.Warning }`, true},
 		{"package alias", `var p = m.palette`, true},
 		{"foreign toast", `func (m *Other) drawToast() { _ = m.palette.Warning }`, true},
 		{"foreign status mark", `func (m *Other) statusMark() { _ = m.palette.Success }`, true},
 		{"foreign rail", `func (m *Other) renderActivityRailBox() { _ = m.palette.Accent }`, true},
 		{"foreign settings", `func (m *Other) drawSettings() { _ = m.palette.Accent }`, true},
-		{"host settings focus", `func (m *WorkbenchModel) drawSettings() { _ = m.palette.Accent }`, false},
-		{"host General group focus", `func (m *WorkbenchModel) cacheSettingsGeneral() { _ = m.palette.Accent }`, false},
+		{"host settings focus", `func (m *workbenchModel) drawSettings() { _ = m.palette.Accent }`, false},
+		{"host General group focus", `func (m *workbenchModel) cacheSettingsGeneral() { _ = m.palette.Accent }`, false},
 		{"foreign General group focus", `func (m *Other) cacheSettingsGeneral() { _ = m.palette.Accent }`, true},
-		{"bare function", `func drawToast(m *WorkbenchModel) { _ = m.palette.Warning }`, true},
-		{"package literal", `var f = func(m *WorkbenchModel) { _ = m.palette.Warning }`, true},
-		{"package literal alias", `var f = func(m *WorkbenchModel) { p := m.palette; _ = p.Warning }`, true},
-		{"secondary accent", `func (m *WorkbenchModel) drawToast() { _ = m.palette.AccentSecondary }`, true},
-		{"soft accent", `func (m *WorkbenchModel) drawToast() { _ = m.palette.AccentSoft }`, true},
-		{"host toast", `func (m *WorkbenchModel) drawToast() { _ = m.palette.Warning }`, false},
-		{"host status mark", `func (m *WorkbenchModel) statusMark() { _ = m.palette.Success }`, false},
-		{"neutral literal", `var f = func(m *WorkbenchModel) { _ = m.palette.Ink }`, false},
+		{"bare function", `func drawToast(m *workbenchModel) { _ = m.palette.Warning }`, true},
+		{"package literal", `var f = func(m *workbenchModel) { _ = m.palette.Warning }`, true},
+		{"package literal alias", `var f = func(m *workbenchModel) { p := m.palette; _ = p.Warning }`, true},
+		{"secondary accent", `func (m *workbenchModel) drawToast() { _ = m.palette.AccentSecondary }`, true},
+		{"soft accent", `func (m *workbenchModel) drawToast() { _ = m.palette.AccentSoft }`, true},
+		{"host toast", `func (m *workbenchModel) drawToast() { _ = m.palette.Warning }`, false},
+		{"host status mark", `func (m *workbenchModel) statusMark() { _ = m.palette.Success }`, false},
+		{"neutral literal", `var f = func(m *workbenchModel) { _ = m.palette.Ink }`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f, err := parser.ParseFile(token.NewFileSet(), "chrome.go", "package main\n"+tc.source, 0)
@@ -157,15 +157,15 @@ func TestChromeColourDiscipline(t *testing.T) {
 			t.Fatalf("chrome role discipline violated: %v; references per function: %v", violations, counts)
 		}
 		for _, fn := range []string{"renderActivityRailBox", "drawCommandPalette", "dividerEdgeStyles"} {
-			name := "(*WorkbenchModel)." + fn
+			name := "(*workbenchModel)." + fn
 			if counts[name]["Accent"] != 1 {
 				t.Errorf("want one accent reference in %s; counts: %v", name, counts)
 			}
 		}
-		if counts["(*WorkbenchModel).drawSettings"]["Accent"] != 3 {
+		if counts["(*workbenchModel).drawSettings"]["Accent"] != 3 {
 			t.Errorf("want three settings accent reads: focused corner, focused tabs and current theme")
 		}
-		if counts["(*WorkbenchModel).cacheSettingsGeneral"]["Accent"] != 1 {
+		if counts["(*workbenchModel).cacheSettingsGeneral"]["Accent"] != 1 {
 			t.Errorf("want one General accent read for the focused plugin group")
 		}
 	})

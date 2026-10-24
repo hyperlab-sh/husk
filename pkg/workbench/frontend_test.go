@@ -554,7 +554,7 @@ func TestConfigNoticeSurvivesAFailureInTheSameSettle(t *testing.T) {
 // The config line and plugin failures join one toast whichever settle brings
 // which: a notice then a launch failure, and a failure then a notice.
 func TestConfigNoticeAndFailuresJoinAcrossSettles(t *testing.T) {
-	boot := func() (*WorkbenchModel, *fakeFE) {
+	boot := func() (*workbenchModel, *fakeFE) {
 		m := goldenModel()
 		fe := withFE(m)
 		fe.pods, fe.occ, fe.podErr = map[string]string{}, map[protocol.SurfaceID]string{}, map[string]string{}

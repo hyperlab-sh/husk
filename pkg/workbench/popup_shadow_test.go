@@ -251,7 +251,7 @@ func TestShadowNoSGRBleed(t *testing.T) {
 
 // shadowViewModel is a plugin-stage workbench at 144x40 with an optional modal
 // and an optional palette, and no toast.
-func shadowViewModel(modal, palette bool) *WorkbenchModel {
+func shadowViewModel(modal, palette bool) *workbenchModel {
 	m := pureViewModel("plugin", false)
 	if modal {
 		m.plugins["p.modal"] = true
@@ -265,12 +265,12 @@ func shadowViewModel(modal, palette bool) *WorkbenchModel {
 	return m
 }
 
-func modalPopupRect(m *WorkbenchModel) uv.Rectangle {
+func modalPopupRect(m *workbenchModel) uv.Rectangle {
 	r := m.modalRect
 	return uv.Rect(r.X, r.Y, r.Width, r.Height)
 }
 
-func palettePopupRect(m *WorkbenchModel) uv.Rectangle {
+func palettePopupRect(m *workbenchModel) uv.Rectangle {
 	c := newCanvas(m.width, m.height)
 	defer c.release()
 	return m.drawCommandPalette(c)
@@ -348,7 +348,7 @@ func requireShadowAt(t *testing.T, base, got uv.Lines, popup uv.Rectangle, probe
 	}
 }
 
-func rgb8(m *WorkbenchModel, c color.Color) [3]int {
+func rgb8(m *workbenchModel, c color.Color) [3]int {
 	r, g, b, _ := c.RGBA()
 	return [3]int{int(r >> 8), int(g >> 8), int(b >> 8)}
 }

@@ -87,7 +87,7 @@ func TestCharmV2DecodedKeyStateAndReleaseNames(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			key := decodeCharmKey(t, tc.input)
-			m := newWorkbenchModel()
+			m := newModel()
 			_, out := addPublicationTestPlugin(m, hello{PluginID: "p", Slots: []protocol.SurfaceID{protocol.SurfaceSidebarList}})
 			out.Reset()
 			m.Update(key)

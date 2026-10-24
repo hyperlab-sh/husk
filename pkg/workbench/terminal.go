@@ -10,14 +10,14 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
-func (m *WorkbenchModel) terminalView(id protocol.SurfaceID) contracts.TerminalDrawer {
+func (m *workbenchModel) terminalView(id protocol.SurfaceID) contracts.TerminalDrawer {
 	if m.fe == nil {
 		return nil
 	}
 	return m.fe.TerminalView(id)
 }
 
-func (m *WorkbenchModel) terminalKey(id protocol.SurfaceID, msg tea.KeyPressMsg) bool {
+func (m *workbenchModel) terminalKey(id protocol.SurfaceID, msg tea.KeyPressMsg) bool {
 	if m.terminalView(id) == nil {
 		return false
 	}
@@ -25,7 +25,7 @@ func (m *WorkbenchModel) terminalKey(id protocol.SurfaceID, msg tea.KeyPressMsg)
 	return true
 }
 
-func (m *WorkbenchModel) drawTerminal(c *canvas, id protocol.SurfaceID, r SlotRect) bool {
+func (m *workbenchModel) drawTerminal(c *canvas, id protocol.SurfaceID, r slotRect) bool {
 	t := m.terminalView(id)
 	if t == nil {
 		return false
@@ -35,7 +35,7 @@ func (m *WorkbenchModel) drawTerminal(c *canvas, id protocol.SurfaceID, r SlotRe
 	return true
 }
 
-func (m *WorkbenchModel) terminalLabel(id protocol.SurfaceID, fallback string) string {
+func (m *workbenchModel) terminalLabel(id protocol.SurfaceID, fallback string) string {
 	if t := m.terminalView(id); t != nil && t.Title() != "" {
 		text := strings.Map(func(r rune) rune {
 			if unicode.IsControl(r) {
@@ -49,7 +49,7 @@ func (m *WorkbenchModel) terminalLabel(id protocol.SurfaceID, fallback string) s
 	return fallback
 }
 
-func (m *WorkbenchModel) terminalCursor() *tea.Cursor {
+func (m *workbenchModel) terminalCursor() *tea.Cursor {
 	if m.showPalette || m.settings != nil || m.secretPrompt != nil || m.blurred {
 		return nil
 	}
@@ -75,14 +75,14 @@ func (m *WorkbenchModel) terminalCursor() *tea.Cursor {
 
 // routeTerminalMouse runs after active divider dragging but before the line
 // surface's narrower mouse filter. An unfocused content click only focuses.
-func (m *WorkbenchModel) routeTerminalMouse(event tea.MouseMsg) bool {
+func (m *workbenchModel) routeTerminalMouse(event tea.MouseMsg) bool {
 	mouse := event.Mouse()
 	if click, ok := event.(tea.MouseClickMsg); ok && click.Button == tea.MouseLeft && m.detectDividerAt(mouse.X, mouse.Y) != "" {
 		return false
 	}
 	type target struct {
 		id protocol.SurfaceID
-		r  SlotRect
+		r  slotRect
 	}
 	var targets []target
 	if m.modalOwner().Open() {

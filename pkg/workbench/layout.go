@@ -35,14 +35,14 @@ const (
 const surfaceGutter = 1
 
 // tooSmall reports whether the real terminal is below the supported minimum.
-func (m *WorkbenchModel) tooSmall() bool {
+func (m *workbenchModel) tooSmall() bool {
 	return m.width < minTermWidth || m.height < minTermHeight
 }
 
 // layoutFrozen reports whether layout and slot_resize traffic must stay
 // untouched: the terminal size is known and below the minimum. An unknown
 // (zero) size is not frozen so startup and headless paths still lay out.
-func (m *WorkbenchModel) layoutFrozen() bool {
+func (m *workbenchModel) layoutFrozen() bool {
 	return m.width > 0 && m.height > 0 && m.tooSmall()
 }
 
@@ -50,7 +50,7 @@ func (m *WorkbenchModel) layoutFrozen() bool {
 // m.width cells wide, telling the user the terminal is too small. Message
 // variants shrink with the available width and are truncated as a last resort,
 // so no line ever exceeds the real terminal.
-func (m *WorkbenchModel) renderTooSmall() string {
+func (m *workbenchModel) renderTooSmall() string {
 	w, h := m.width, m.height
 	if w <= 0 || h <= 0 {
 		return ""
@@ -76,11 +76,11 @@ func (m *WorkbenchModel) renderTooSmall() string {
 }
 
 // Side docks are preferences, independent of surface occupancy.
-func (m *WorkbenchModel) leftSideShown() bool {
+func (m *workbenchModel) leftSideShown() bool {
 	return m.showSidebar
 }
 
-func (m *WorkbenchModel) rightSideShown() bool {
+func (m *workbenchModel) rightSideShown() bool {
 	return m.showSidePane
 }
 
@@ -107,7 +107,7 @@ func panelFits(width, sidebarWidth int, sidebarShown bool) bool {
 
 // dropVanishedSides cancels a drag on a side column that is no longer shown
 // (its dock was hidden, its placement changed, or the panel no longer fits).
-func (m *WorkbenchModel) dropVanishedSides() {
+func (m *workbenchModel) dropVanishedSides() {
 	left := m.leftSideShown() && m.activePlacement != contracts.PlacementFullCanvas
 	right := m.rightSideShown() && m.activePlacement == "" && panelFits(m.width, m.sidebarWidth, m.leftSideShown())
 	if !left && strings.HasPrefix(m.activeDrag, "sidebar-") || !right && m.activeDrag == "sidepanel-width" {
@@ -120,7 +120,7 @@ func (m *WorkbenchModel) dropVanishedSides() {
 // or the terminal got too narrow for the panel. A slot that never had a rect
 // keeps focus. The slot we left is remembered and restored when it is drawn
 // again, unless focus has moved on since.
-func (m *WorkbenchModel) leaveUndrawnSides(prev map[protocol.SurfaceID]SlotRect) {
+func (m *workbenchModel) leaveUndrawnSides(prev map[protocol.SurfaceID]slotRect) {
 	switch m.focusedSlot {
 	case protocol.SurfaceSidebarNavigation, protocol.SurfaceSidebarList, protocol.SurfaceSidebarFooter, protocol.SurfaceSidePanel:
 	default:
@@ -135,7 +135,7 @@ func (m *WorkbenchModel) leaveUndrawnSides(prev map[protocol.SurfaceID]SlotRect)
 }
 
 // centreSlot is the surface focus falls back to when a side column goes.
-func (m *WorkbenchModel) centreSlot() protocol.SurfaceID {
+func (m *workbenchModel) centreSlot() protocol.SurfaceID {
 	if m.activePlacement == contracts.PlacementStage {
 		return protocol.SurfaceWorkspaceStage
 	}
@@ -145,7 +145,7 @@ func (m *WorkbenchModel) centreSlot() protocol.SurfaceID {
 // restoreFocusFallback gives focus back to the slot it was pushed off, once
 // that slot is actually drawn (it has a rect in the freshly built layout) and
 // focus has not moved on. A stage placement never draws the side panel.
-func (m *WorkbenchModel) restoreFocusFallback() {
+func (m *workbenchModel) restoreFocusFallback() {
 	fb := m.focusFallback
 	if fb == "" || m.focusedSlot != m.centreSlot() {
 		return
@@ -157,7 +157,7 @@ func (m *WorkbenchModel) restoreFocusFallback() {
 	m.focusedSlot, m.focusFallback = fb, ""
 }
 
-func (m *WorkbenchModel) recomputeLayout() {
+func (m *workbenchModel) recomputeLayout() {
 	if m.layoutFrozen() {
 		return
 	}
@@ -169,12 +169,12 @@ func (m *WorkbenchModel) recomputeLayout() {
 }
 
 // placeSlots rebuilds slotRects and the other layout rects.
-func (m *WorkbenchModel) placeSlots() {
+func (m *workbenchModel) placeSlots() {
 	bodyH := max(20, m.height-2)
 
-	m.slotRects = make(map[protocol.SurfaceID]SlotRect)
+	m.slotRects = make(map[protocol.SurfaceID]slotRect)
 	// The overlay is a layer, not a region: it includes both bars and has no chrome.
-	m.slotRects[protocol.SurfaceAppOverlay] = SlotRect{
+	m.slotRects[protocol.SurfaceAppOverlay] = slotRect{
 		Width: m.width, Height: m.height, InnerW: m.width, InnerH: m.height,
 	}
 
@@ -235,10 +235,10 @@ func (m *WorkbenchModel) placeSlots() {
 	}
 }
 
-// frameRect builds a SlotRect whose inner (content) area is inset by one cell
+// frameRect builds a slotRect whose inner (content) area is inset by one cell
 // per axis only when the surface's declared frame has a border.
-func (m *WorkbenchModel) frameRect(slotID protocol.SurfaceID, x, y, w, h int) SlotRect {
-	r := SlotRect{
+func (m *workbenchModel) frameRect(slotID protocol.SurfaceID, x, y, w, h int) slotRect {
+	r := slotRect{
 		X: x, Y: y, Width: w, Height: h,
 		InnerX: x, InnerY: y, InnerW: max(1, w), InnerH: max(1, h),
 	}
@@ -254,7 +254,7 @@ func (m *WorkbenchModel) frameRect(slotID protocol.SurfaceID, x, y, w, h int) Sl
 // field of the rail item that opened the surface (the active modal item for
 // the modal surface, the active canvas/stage item otherwise). Absent means a
 // blank canvas.
-func (m *WorkbenchModel) frameFor(slotID protocol.SurfaceID) frame.Spec {
+func (m *workbenchModel) frameFor(slotID protocol.SurfaceID) frame.Spec {
 	if slotID == protocol.SurfaceAppOverlay {
 		return frame.Spec{}
 	}
@@ -296,7 +296,7 @@ func (m *WorkbenchModel) frameFor(slotID protocol.SurfaceID) frame.Spec {
 // slotHit is one laid-out surface in hit-test order.
 type slotHit struct {
 	ID   protocol.SurfaceID
-	Rect SlotRect
+	Rect slotRect
 }
 
 // slotZ is the explicit stacking order of laid-out surfaces; higher is drawn
@@ -317,7 +317,7 @@ func slotZ(id protocol.SurfaceID) int {
 
 // hitOrder lists the laid-out surfaces topmost first: descending slotZ, ties
 // broken by slot ID, so overlapping rects always resolve to the same surface.
-func (m *WorkbenchModel) hitOrder() []slotHit {
+func (m *workbenchModel) hitOrder() []slotHit {
 	hits := make([]slotHit, 0, len(m.slotRects))
 	for id, r := range m.slotRects {
 		if id == protocol.SurfaceAppOverlay {
@@ -332,7 +332,7 @@ func (m *WorkbenchModel) hitOrder() []slotHit {
 }
 
 // railItemByID finds a registered rail item by ID.
-func (m *WorkbenchModel) railItemByID(id string) (contracts.RailItem, bool) {
+func (m *workbenchModel) railItemByID(id string) (contracts.RailItem, bool) {
 	if id == "" {
 		return contracts.RailItem{}, false
 	}
@@ -344,6 +344,6 @@ func (m *WorkbenchModel) railItemByID(id string) (contracts.RailItem, bool) {
 	return contracts.RailItem{}, false
 }
 
-func (m *WorkbenchModel) activeRailItem() (contracts.RailItem, bool) {
+func (m *workbenchModel) activeRailItem() (contracts.RailItem, bool) {
 	return m.railItemByID(m.activeRailID)
 }

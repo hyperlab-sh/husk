@@ -14,7 +14,7 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/substrate/state"
 )
 
-func pluginsFixture(t testing.TB, tab string) (*WorkbenchModel, *fakeFE) {
+func pluginsFixture(t testing.TB, tab string) (*workbenchModel, *fakeFE) {
 	t.Helper()
 	m, fe := settingsFixture(t, "")
 	fe.ConfigPath = "/home/example/.config/husk"
@@ -37,7 +37,7 @@ func pluginsFixture(t testing.TB, tab string) (*WorkbenchModel, *fakeFE) {
 	m.settle()
 	return m, fe
 }
-func pluginText(m *WorkbenchModel) string {
+func pluginText(m *workbenchModel) string {
 	return ansi.Strip(strings.Join(m.settings.plugins.lines, "\n"))
 }
 

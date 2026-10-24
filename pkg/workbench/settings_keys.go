@@ -11,7 +11,7 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/host/contracts"
 )
 
-func (m *WorkbenchModel) settingsKeysKey(msg tea.KeyPressMsg) {
+func (m *workbenchModel) settingsKeysKey(msg tea.KeyPressMsg) {
 	s := m.settings
 	key := legacyKeyString(msg)
 	switch key {
@@ -41,7 +41,7 @@ func (m *WorkbenchModel) settingsKeysKey(msg tea.KeyPressMsg) {
 	}
 	m.clampSettingsKeysTop()
 }
-func (m *WorkbenchModel) settingsKeyRows() []contracts.KeyEntry {
+func (m *workbenchModel) settingsKeyRows() []contracts.KeyEntry {
 	s := m.settings
 	query := strings.ToLower(s.keyQuery)
 	var rows []contracts.KeyEntry
@@ -58,7 +58,7 @@ func (m *WorkbenchModel) settingsKeyRows() []contracts.KeyEntry {
 
 // The filter, blank row and table header are fixed. Both Update and View use
 // these exact body/viewport counts, including bounded diagnostics and no-match.
-func (m *WorkbenchModel) settingsKeysExtent(rowCount int) (body, height int) {
+func (m *workbenchModel) settingsKeysExtent(rowCount int) (body, height int) {
 	problems := len(m.settings.keyListing.Problems)
 	body = max(1, rowCount) + min(20, problems)
 	if problems > 20 {
@@ -66,11 +66,11 @@ func (m *WorkbenchModel) settingsKeysExtent(rowCount int) (body, height int) {
 	}
 	return body, max(1, m.settingsContentRect().Dy()-3)
 }
-func (m *WorkbenchModel) settingsKeysMaxTop() int {
+func (m *workbenchModel) settingsKeysMaxTop() int {
 	body, height := m.settingsKeysExtent(len(m.settingsKeyRows()))
 	return max(0, body-height)
 }
-func (m *WorkbenchModel) clampSettingsKeysTop() {
+func (m *workbenchModel) clampSettingsKeysTop() {
 	s := m.settings
 	s.keyTop = max(0, min(s.keyTop, m.settingsKeysMaxTop()))
 }
@@ -111,7 +111,7 @@ func settingsKeyWidths(cells [][]string, width int) []int {
 
 // settingsKeysLines is pure. State is clamped on input, reload and resize;
 // local clamping also keeps a standalone View safe without mutating the model.
-func (m *WorkbenchModel) settingsKeysLines() []string {
+func (m *workbenchModel) settingsKeysLines() []string {
 	s := m.settings
 	width := m.settingsContentRect().Dx()
 	base := lipgloss.NewStyle().Foreground(m.palette.Ink).Background(m.palette.SurfaceElevated)

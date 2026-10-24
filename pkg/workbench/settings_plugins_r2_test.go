@@ -10,7 +10,7 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/host/contracts"
 )
 
-func settingsClick(m *WorkbenchModel, x, y int) {
+func settingsClick(m *workbenchModel, x, y int) {
 	m.Update(tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
 }
 

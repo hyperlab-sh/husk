@@ -26,21 +26,21 @@ import (
 // probeModel runs a function on the program loop, the one goroutine allowed to
 // read the model.
 type probeModel struct {
-	*WorkbenchModel
+	*workbenchModel
 }
 
 type probeMsg struct {
-	fn   func(*WorkbenchModel)
+	fn   func(*workbenchModel)
 	done chan struct{}
 }
 
 func (p probeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if pm, ok := msg.(probeMsg); ok {
-		pm.fn(p.WorkbenchModel)
+		pm.fn(p.workbenchModel)
 		close(pm.done)
 		return p, nil
 	}
-	_, cmd := p.WorkbenchModel.Update(msg)
+	_, cmd := p.workbenchModel.Update(msg)
 	return p, cmd
 }
 
@@ -140,7 +140,7 @@ func TestWorkbenchOverTheRealHost(t *testing.T) {
 		tea.WithWindowSize(goldenW, goldenH),
 	)
 	prog.set(p)
-	h, err := newHost(prog, model, id, dir, pluginFlagDocs(t, "--plugin", pluginDir), nil, host.WithFactory(factory))
+	h, err := newHost(prog, model, id, dir, pluginDocs(pluginDir), nil, host.WithFactory(factory))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestWorkbenchOverTheRealHost(t *testing.T) {
 	go func() { _, err := p.Run(); ended <- err }()
 	t.Cleanup(func() { prog.closeGate(); p.Kill() })
 
-	probe := func(fn func(*WorkbenchModel)) {
+	probe := func(fn func(*workbenchModel)) {
 		t.Helper()
 		pm := probeMsg{fn: fn, done: make(chan struct{})}
 		p.Send(pm)
@@ -165,12 +165,12 @@ func TestWorkbenchOverTheRealHost(t *testing.T) {
 	}
 	// await re-probes until cond holds; each probe is a round trip through the
 	// loop, so the host's pending posts run in between.
-	await := func(what string, cond func(*WorkbenchModel) bool) {
+	await := func(what string, cond func(*workbenchModel) bool) {
 		t.Helper()
 		deadline := time.Now().Add(20 * time.Second)
 		for {
 			ok := false
-			probe(func(m *WorkbenchModel) { ok = cond(m) })
+			probe(func(m *workbenchModel) { ok = cond(m) })
 			if ok {
 				return
 			}
@@ -191,7 +191,7 @@ func TestWorkbenchOverTheRealHost(t *testing.T) {
 	case <-t.Context().Done():
 		t.Fatal("plugin never started")
 	}
-	await("alpha live", func(m *WorkbenchModel) bool { return m.plugins["alpha"] })
+	await("alpha live", func(m *workbenchModel) bool { return m.plugins["alpha"] })
 
 	// The plugin speaks over the real socket with its launch token.
 	conn, err := net.Dial("unix", instance.SocketPath(dir, id))
@@ -212,14 +212,14 @@ func TestWorkbenchOverTheRealHost(t *testing.T) {
 	if err := json.Unmarshal(line, &reply); err != nil || reply.Error != nil {
 		t.Fatalf("surface.update reply %s (%v)", line, err)
 	}
-	await("alpha content", func(m *WorkbenchModel) bool {
+	await("alpha content", func(m *workbenchModel) bool {
 		su := m.slotUpdates[protocol.SurfaceSidebarList]
 		return su != nil && su.PluginID == "alpha" && len(su.Lines) == 1 && su.Lines[0] == "hello from alpha"
 	})
 
 	// A resize reaches State as husk.geometry.
 	p.Send(tea.WindowSizeMsg{Width: 120, Height: 36})
-	await("geometry for 120x36", func(m *WorkbenchModel) bool {
+	await("geometry for 120x36", func(m *workbenchModel) bool {
 		e, ok := m.fe.Snapshot().Slices[state.GeometryNamespace]
 		if !ok {
 			return false

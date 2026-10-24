@@ -11,7 +11,7 @@ import (
 
 // sidesModelPanelGone hides the panel dock while it has focus, pushing focus
 // to the stage and remembering the panel.
-func sidesModelPanelGone(t *testing.T) *WorkbenchModel {
+func sidesModelPanelGone(t *testing.T) *workbenchModel {
 	t.Helper()
 	m := goldenModel()
 	hostPlugin(m, "p.list", protocol.SurfaceSidebarList)
@@ -98,10 +98,10 @@ func TestStagePlacementFocusFallback(t *testing.T) {
 // panelGoneThen runs a user focus change after the panel left, brings the
 // panel back, and expects focus unchanged.
 func TestUserFocusChangesDropFallback(t *testing.T) {
-	for name, move := range map[string]func(*WorkbenchModel){
+	for name, move := range map[string]func(*workbenchModel){
 		// husk.home declines on the home layout, so give it somewhere to go.
-		"home":         func(m *WorkbenchModel) { m.stageMode = "hotspots"; m.run("husk.home", nil) },
-		"toggle stage": func(m *WorkbenchModel) { m.run("husk.hotspots.toggle_stage", nil) },
+		"home":         func(m *workbenchModel) { m.stageMode = "hotspots"; m.run("husk.home", nil) },
+		"toggle stage": func(m *workbenchModel) { m.run("husk.hotspots.toggle_stage", nil) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			m := sidesModelPanelGone(t)
@@ -115,7 +115,7 @@ func TestUserFocusChangesDropFallback(t *testing.T) {
 	}
 }
 
-func stageRailItem(m *WorkbenchModel) contracts.RailItem {
+func stageRailItem(m *workbenchModel) contracts.RailItem {
 	ri := contracts.RailItem{Plugin: "p.stage", ID: "p.stage.open", Placement: contracts.PlacementStage}
 	withFE(m).Rails = append(withFE(m).Rails, ri)
 	return ri
@@ -154,7 +154,7 @@ func TestStagePlacementNeverRestoresSidePanel(t *testing.T) {
 // narrowPanelWidth is a terminal width at which the side panel is shown but
 // not drawn: the centre column beside the sidebar is one cell short of
 // minPanelCentreWidth.
-func narrowPanelWidth(m *WorkbenchModel) int {
+func narrowPanelWidth(m *workbenchModel) int {
 	return activityRailWidth + m.sidebarWidth + minPanelCentreWidth - 1
 }
 
@@ -221,7 +221,7 @@ func TestTabFromSidebarFooterUnderStagePlacement(t *testing.T) {
 // returning panel must not take focus afterwards. The side panel plugin is the
 // one that leaves, so the stage keeps its own occupant.
 func TestContributionClickClearsFocusFallback(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	addPublicationTestPlugin(m, hello{PluginID: "p", Slots: []protocol.SurfaceID{protocol.SurfaceMainStage}, PublishedSlots: []slotDecl{{ID: "p.actions", Kind: "inline"}}})
 	addPublicationTestPlugin(m, hello{PluginID: "x"})
 	contribute(m, "p.actions", contribution{PluginID: "x", ID: "x.button", Content: "[Go]", OnClick: "x.click"})

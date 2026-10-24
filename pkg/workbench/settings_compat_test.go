@@ -14,21 +14,21 @@ import (
 // settingsCompatModel embeds a form in the real workbench's cell compositor.
 // It checks both field kinds without changing the workbench's behaviour.
 type settingsCompatModel struct {
-	*WorkbenchModel
+	*workbenchModel
 	form *huh.Form
 }
 
 func (m *settingsCompatModel) Init() tea.Cmd {
-	return tea.Batch(m.WorkbenchModel.Init(), m.form.Init())
+	return tea.Batch(m.workbenchModel.Init(), m.form.Init())
 }
 func (m *settingsCompatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	_, base := m.WorkbenchModel.Update(msg)
+	_, base := m.workbenchModel.Update(msg)
 	_, field := m.form.Update(msg)
 	return m, tea.Batch(base, field)
 }
 func (m *settingsCompatModel) View() tea.View {
 	c := newCanvas(goldenW, goldenH)
-	c.blitBlock(0, 0, m.WorkbenchModel.View().Content)
+	c.blitBlock(0, 0, m.workbenchModel.View().Content)
 	c.blitBlock(20, 5, m.form.View())
 	v := tea.NewView(c.render())
 	c.release()

@@ -6,172 +6,49 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/charmbracelet/x/ansi"
 	"github.com/hyperlab-sh/husk/pkg/host"
 	"github.com/hyperlab-sh/husk/pkg/host/contracts"
-	"github.com/hyperlab-sh/husk/pkg/protocol"
+	"github.com/hyperlab-sh/husk/pkg/workbench"
 )
 
-// planHost is a stepHost that plans plugins and optionally fails to run.
-type planHost struct {
-	stepHost
-	planned int
-	runErr  error
-}
-
-func (h planHost) Planned() int { return h.planned }
-func (h planHost) Run(ctx context.Context) error {
-	if h.runErr != nil {
-		return h.runErr
-	}
-	return h.stepHost.Run(ctx)
-}
-
-var _ host.Looped = planHost{}
-
-// A run where no plugin went live exits 1, after printing the frame and the
-// diagnosis, so scripts and CI see the failure.
-func TestDumpFrameMainExitsNonZeroWhenNoPluginWentLive(t *testing.T) {
-	m, prog := dumpModel()
-	fe := withFE(m)
-	m.attach(planHost{stepHost: stepHost{fe: fe}, planned: 1}, nil)
-	feed(prog, starting(m, "broken"), func() { fe.pods["broken"] = "failed"; fe.publish() })
-	var out, errOut bytes.Buffer
-	code := dumpFrameMain(m, planHost{stepHost: stepHost{fe: fe}, planned: 1}, prog, "", &out, &errOut)
-	if code != 1 {
-		t.Fatalf("exit code = %d, want 1", code)
-	}
-	if !strings.Contains(errOut.String(), "no plugin went live") {
-		t.Errorf("stderr %q lacks the diagnosis", errOut.String())
-	}
-	if got := len(strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n")); got != goldenH {
-		t.Errorf("the frame must still be printed, got %d rows", got)
-	}
-}
-
-// A discovery refusal is not an empty plugin plan: it fails unless an
-// accepted plugin goes live, retaining both the refusal and the frame.
-func TestDumpFrameMainRefusalsRequireALivePlugin(t *testing.T) {
-	for _, tc := range []struct {
-		name    string
-		refused bool
-		live    bool
-		code    int
-	}{
-		{"empty plan", false, false, 0},
-		{"all refused before a Pod", true, false, 1},
-		{"live sibling", true, true, 0},
+// The UI returns a frame and an error; only the binary decides exit status.
+func TestDumpFrameMainOutputAndExitPolicy(t *testing.T) {
+	for _, cause := range []string{
+		"", "no plugin went live", "host stopped: bind failed",
+		"timed out waiting for plugins", "--rail modal: no loaded plugin declares a modal rail item",
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			m, prog := dumpModel()
-			fe := withFE(m)
-			if tc.refused {
-				fe.Refused = []contracts.PluginRefusal{{Reason: "manifest requires name and version"}}
+		t.Run(cause, func(t *testing.T) {
+			var err error
+			want := 0
+			if cause != "" {
+				err, want = errors.New(cause), 1
 			}
-			h := planHost{stepHost: stepHost{fe: fe}}
-			if tc.live {
-				h.planned = 1
-				feed(prog,
-					register(m, "healthy", []protocol.SurfaceID{protocol.SurfaceMainStage}),
-					slotMsg(m, "healthy", protocol.SurfaceMainStage, "HEALTHY-SIBLING"),
-				)
-			}
-			m.attach(h, nil)
 			var out, errOut bytes.Buffer
-			m.logOut = &errOut
-			if code := dumpFrameMain(m, h, prog, "", &out, &errOut); code != tc.code {
-				t.Errorf("exit code=%d want=%d; stderr=%q", code, tc.code, errOut.String())
+			code := printDumpFrame("current frame", err, &out, &errOut)
+			if code != want || out.String() != "current frame\n" {
+				t.Fatalf("exit=%d frame=%q; want exit=%d and frame even on failure", code, out.String(), want)
 			}
-			if tc.code == 1 && !strings.Contains(errOut.String(), "no plugin went live") {
-				t.Errorf("stderr lacks failure diagnosis: %q", errOut.String())
-			}
-			if tc.refused {
-				if n := strings.Count(errOut.String(), "plugin refused: manifest requires name and version"); n != 1 {
-					t.Errorf("refusal printed %d times, want once: %q", n, errOut.String())
+			if cause == "" {
+				if errOut.Len() != 0 {
+					t.Fatalf("success stderr=%q", errOut.String())
 				}
-				if !strings.Contains(ansi.Strip(out.String()), "Plugin failed") {
-					t.Error("frame lost the refusal toast")
-				}
-			}
-			if tc.live && !strings.Contains(ansi.Strip(out.String()), "HEALTHY-SIBLING") {
-				t.Error("frame lost the live sibling's content")
-			}
-			if got := len(strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n")); got != goldenH {
-				t.Errorf("frame has %d rows, want %d", got, goldenH)
+			} else if errOut.String() != "husk: --dump-frame: "+cause+"\n" {
+				t.Fatalf("diagnosis must appear exactly once: %q", errOut.String())
 			}
 		})
 	}
 }
 
-// A host that stops on its own (socket path too long, bind failure) fails the
-// run at once instead of rendering an empty workbench.
-func TestDumpFrameMainExitsNonZeroWhenHostStops(t *testing.T) {
-	m, prog := dumpModel()
-	h := planHost{stepHost: stepHost{fe: withFE(m)}, planned: 1, runErr: errors.New("start server: socket path is 116 bytes")}
-	m.attach(h, nil)
+func TestDumpFrameMainUsesWorkbench(t *testing.T) {
 	var out, errOut bytes.Buffer
-	start := time.Now()
-	code := dumpFrameMain(m, h, prog, "", &out, &errOut)
-	if code != 1 {
-		t.Fatalf("exit code = %d, want 1", code)
+	if code := dumpFrameMain(context.Background(), workbench.Options{DemoFrame: true}, &out, &errOut); code != 0 || out.Len() == 0 || errOut.Len() != 0 {
+		t.Fatalf("demo exit=%d frame bytes=%d stderr=%q", code, out.Len(), errOut.String())
 	}
-	if !strings.Contains(errOut.String(), "host stopped") || !strings.Contains(errOut.String(), "socket path is 116 bytes") {
-		t.Errorf("stderr %q lacks the host error", errOut.String())
-	}
-	if time.Since(start) > dumpFrameTimeout/2 {
-		t.Error("the host failure waited out the settle window")
-	}
-}
-
-// The cause of a stopped host reaches stderr once: the model's log and the
-// run's error must not both print it.
-func TestDumpFrameMainReportsAStoppedHostOnce(t *testing.T) {
-	m, prog := dumpModel()
-	var out, errOut bytes.Buffer
-	m.logOut = &errOut
-	h := planHost{stepHost: stepHost{fe: withFE(m)}, planned: 1, runErr: errors.New("start server: socket path is 116 bytes")}
-	m.attach(h, nil)
-	if code := dumpFrameMain(m, h, prog, "", &out, &errOut); code != 1 {
-		t.Fatalf("exit code = %d, want 1", code)
-	}
-	if n := strings.Count(errOut.String(), "socket path is 116 bytes"); n != 1 {
-		t.Errorf("the cause printed %d times, want once: %q", n, errOut.String())
-	}
-}
-
-func TestDumpFrameMainExitsZeroOnSuccess(t *testing.T) {
-	m, prog := dumpModel()
-	var out, errOut bytes.Buffer
-	if code := dumpFrameMain(m, planHost{stepHost: stepHost{fe: withFE(m)}}, prog, "", &out, &errOut); code != 0 {
-		t.Fatalf("exit code = %d, stderr %q", code, errOut.String())
-	}
-}
-
-// --rail with a placement no loaded plugin declares exits 1, with the cause
-// once on stderr and the frame still on stdout.
-func TestDumpFrameMainExitsNonZeroWhenNoRailItemMatches(t *testing.T) {
-	for _, mode := range []string{"modal", "full-canvas", "stage"} {
-		t.Run(mode, func(t *testing.T) {
-			m, prog := dumpModel()
-			h := planHost{stepHost: stepHost{fe: withFE(m)}, planned: 1}
-			m.attach(h, nil)
-			feed(prog,
-				register(m, "alpha", []protocol.SurfaceID{protocol.SurfaceMainStage}),
-				slotMsg(m, "alpha", protocol.SurfaceMainStage, "ONLY-STAGE"),
-			)
-			var out, errOut bytes.Buffer
-			if code := dumpFrameMain(m, h, prog, mode, &out, &errOut); code != 1 {
-				t.Fatalf("exit code = %d, want 1", code)
-			}
-			want := "no loaded plugin declares a " + mode + " rail item"
-			if n := strings.Count(errOut.String(), want); n != 1 {
-				t.Errorf("stderr %q has the cause %d times, want once", errOut.String(), n)
-			}
-			if !strings.Contains(ansi.Strip(out.String()), "ONLY-STAGE") {
-				t.Errorf("the frame must still be printed:\n%s", out.String())
-			}
-		})
+	failure := errors.New("host construction failed")
+	opt := workbench.Options{NewHost: func(contracts.Config, ...host.Option) (host.Looped, error) { return nil, failure }}
+	out.Reset()
+	if code := dumpFrameMain(context.Background(), opt, &out, &errOut); code != 1 || out.Len() != 0 || strings.Count(errOut.String(), failure.Error()) != 1 || errOut.String() != "husk: "+failure.Error()+"\n" {
+		t.Fatalf("construction exit=%d stderr=%q", code, errOut.String())
 	}
 }

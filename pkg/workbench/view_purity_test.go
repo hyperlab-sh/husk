@@ -13,8 +13,8 @@ import (
 
 // pureViewModel builds a model exercising every View branch that reads
 // plugin state: an occupied main stage, hotspots, modal, toast and palette.
-func pureViewModel(stageMode string, overlays bool) *WorkbenchModel {
-	m := newWorkbenchModel()
+func pureViewModel(stageMode string, overlays bool) *workbenchModel {
+	m := newModel()
 	m.logOut = nil
 	m.width, m.height = 144, 40
 	m.plugins["p.stage"] = true

@@ -15,11 +15,11 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/theme"
 )
 
-// Golden frame tests run the real WorkbenchModel under a tea.Program (via
+// Golden frame tests run the real model under a tea.Program (via
 // teatest), drive it with messages, and compare the final View() content
 // against files in testdata/. Regenerate them after an intended visual change:
 //
-//	go test ./cmd/husk -run TestGoldenFrame -update
+//	go test ./pkg/workbench -run TestGoldenFrame -update
 //
 // Inspect the diff of the .golden files before committing: they hold the raw
 // ANSI frame, so a palette or geometry change shows up as a byte change.
@@ -30,8 +30,8 @@ const (
 
 // goldenModel is a hermetic workbench: no socket, no OS modifier polling, no
 // log output, fixed size.
-func goldenModel() *WorkbenchModel {
-	m := newWorkbenchModel()
+func goldenModel() *workbenchModel {
+	m := newModel()
 	m.logOut = nil
 	m.pollMods = func() (protocol.ModifierState, bool) { return protocol.ModifierState{}, false }
 	m.width, m.height = goldenW, goldenH
@@ -41,14 +41,14 @@ func goldenModel() *WorkbenchModel {
 
 // goldenPlugin registers a plugin occupying the given slots with one line of
 // content each, through the same content sink a real host feeds.
-func goldenPlugin(m *WorkbenchModel, id string, slots map[protocol.SurfaceID][]string) {
+func goldenPlugin(m *workbenchModel, id string, slots map[protocol.SurfaceID][]string) {
 	addPlugin(m, id, slots)
 }
 
 // runGolden runs m under teatest, sends msgs in order, quits, and returns the
 // frame the program would show last. Messages and the quit travel the same
 // queue, so ordering is deterministic without sleeps.
-func runGolden(t *testing.T, m *WorkbenchModel, msgs ...tea.Msg) string {
+func runGolden(t *testing.T, m *workbenchModel, msgs ...tea.Msg) string {
 	t.Helper()
 	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(goldenW, goldenH))
 	for _, msg := range msgs {
@@ -57,9 +57,9 @@ func runGolden(t *testing.T, m *WorkbenchModel, msgs ...tea.Msg) string {
 	if err := tm.Quit(); err != nil {
 		t.Fatal(err)
 	}
-	final, ok := tm.FinalModel(t, teatest.WithFinalTimeout(5*time.Second)).(*WorkbenchModel)
+	final, ok := tm.FinalModel(t, teatest.WithFinalTimeout(5*time.Second)).(*workbenchModel)
 	if !ok {
-		t.Fatal("final model is not *WorkbenchModel")
+		t.Fatal("final model is not *workbenchModel")
 	}
 	return final.View().Content
 }
@@ -160,7 +160,7 @@ var goldenFrames = map[string]func(t *testing.T) string{
 	},
 }
 
-func fullSlotsModel() *WorkbenchModel {
+func fullSlotsModel() *workbenchModel {
 	m := goldenModel()
 	goldenPlugin(m, "p.full", map[protocol.SurfaceID][]string{
 		protocol.SurfaceSidebarNavigation: {"nav"},

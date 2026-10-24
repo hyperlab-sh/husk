@@ -37,7 +37,7 @@ func base16Pair(t *testing.T) (protocol.Palette, map[string]int) {
 	return p, indices
 }
 
-func base16Model(t *testing.T) *WorkbenchModel {
+func base16Model(t *testing.T) *workbenchModel {
 	t.Helper()
 	m := goldenModel()
 	p, idx := base16Pair(t)

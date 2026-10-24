@@ -38,7 +38,7 @@ func (h stepHost) Update(msg any) bool {
 
 // dumpModel is a hermetic workbench for the --dump-frame driver tests, wired
 // to a stepHost and the program reference runDumpFrame fills in.
-func dumpModel() (*WorkbenchModel, *programRef) {
+func dumpModel() (*workbenchModel, *programRef) {
 	m := goldenModel()
 	fe := withFE(m)
 	fe.pods, fe.occ = map[string]string{}, map[protocol.SurfaceID]string{}
@@ -47,7 +47,7 @@ func dumpModel() (*WorkbenchModel, *programRef) {
 }
 
 // starting declares a Pod that has not registered yet.
-func starting(m *WorkbenchModel, id string) hostStep {
+func starting(m *workbenchModel, id string) hostStep {
 	fe := withFE(m)
 	return func() {
 		fe.pods[id] = "starting"
@@ -56,7 +56,7 @@ func starting(m *WorkbenchModel, id string) hostStep {
 }
 
 // register brings a plugin live with its surfaces and optional rail items.
-func register(m *WorkbenchModel, id string, slots []protocol.SurfaceID, rail ...contracts.RailItem) hostStep {
+func register(m *workbenchModel, id string, slots []protocol.SurfaceID, rail ...contracts.RailItem) hostStep {
 	fe := withFE(m)
 	return func() {
 		fe.pods[id] = "live"
@@ -68,7 +68,7 @@ func register(m *WorkbenchModel, id string, slots []protocol.SurfaceID, rail ...
 	}
 }
 
-func slotMsg(m *WorkbenchModel, id string, slot protocol.SurfaceID, line string) hostStep {
+func slotMsg(m *workbenchModel, id string, slot protocol.SurfaceID, line string) hostStep {
 	return func() {
 		m.content(id, protocol.SurfaceUpdateParams{Surface: slot, Title: string(slot), Lines: []string{line}})
 	}

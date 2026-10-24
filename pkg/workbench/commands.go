@@ -23,7 +23,7 @@ type railButton struct {
 	endY     int
 }
 
-func (m *WorkbenchModel) railButtons() []railButton {
+func (m *workbenchModel) railButtons() []railButton {
 	rect := m.slotRects[protocol.SurfaceActivityRail]
 	bodyH := rect.Height
 
@@ -80,7 +80,7 @@ func (m *WorkbenchModel) railButtons() []railButton {
 	return btns
 }
 
-func (m *WorkbenchModel) detectRailHoverAt(x, y int) int {
+func (m *workbenchModel) detectRailHoverAt(x, y int) int {
 	railRect, ok := m.slotRects[protocol.SurfaceActivityRail]
 	if !ok {
 		return -1
@@ -100,13 +100,13 @@ func (m *WorkbenchModel) detectRailHoverAt(x, y int) int {
 // orderedRailItems returns rail items in registration order: plugins appear in
 // the order they connected, items in the order each plugin declared them. Husk
 // has no preferred application order.
-func (m *WorkbenchModel) orderedRailItems() []contracts.RailItem {
+func (m *workbenchModel) orderedRailItems() []contracts.RailItem {
 	return slices.Clone(m.railItems)
 }
 
 // firstRailItemWithPlacement returns the first registered rail item that opens
 // the given placement.
-func (m *WorkbenchModel) firstRailItemWithPlacement(p contracts.RailPlacement) (contracts.RailItem, bool) {
+func (m *workbenchModel) firstRailItemWithPlacement(p contracts.RailPlacement) (contracts.RailItem, bool) {
 	for _, item := range m.orderedRailItems() {
 		if item.Placement == p {
 			return item, true
@@ -126,7 +126,7 @@ type paletteCommand struct {
 	PluginID    string
 }
 
-func (m *WorkbenchModel) allCommands() []paletteCommand {
+func (m *workbenchModel) allCommands() []paletteCommand {
 	rows := m.builtinCommands()
 	if m.fe == nil {
 		return rows
@@ -162,7 +162,7 @@ func homeTitle(key string) string {
 
 // builtinCommands lists the host's own workbench commands. Each row's shortcut
 // column shows the spellings the effective keymap binds to it.
-func (m *WorkbenchModel) builtinCommands() []paletteCommand {
+func (m *workbenchModel) builtinCommands() []paletteCommand {
 	rows := []paletteCommand{
 		{ID: "husk.settings.open", Title: "Open settings", Category: "Workbench", Description: "Open the Settings center"},
 		{ID: "husk.theme.select", Title: "Select theme", Category: "Workbench", Description: "Open Settings on the Theme tab"},
@@ -285,12 +285,12 @@ func paletteWindowTop(top, cursor, n int) int {
 
 // movePaletteCursor moves the cursor by delta over n results, wrapping at both
 // ends, and scrolls the window to keep it visible.
-func (m *WorkbenchModel) movePaletteCursor(delta, n int) {
+func (m *workbenchModel) movePaletteCursor(delta, n int) {
 	m.paletteCursor = ((m.paletteCursor+delta)%n + n) % n
 	m.paletteTop = paletteWindowTop(m.paletteTop, m.paletteCursor, n)
 }
 
-func (m *WorkbenchModel) filteredCommands() []paletteCommand {
+func (m *workbenchModel) filteredCommands() []paletteCommand {
 	all := m.allCommands()
 	q := strings.ToLower(strings.TrimSpace(m.paletteQuery))
 	if q == "" {
@@ -308,7 +308,7 @@ func (m *WorkbenchModel) filteredCommands() []paletteCommand {
 }
 
 // executeCommand runs a palette command as the user.
-func (m *WorkbenchModel) executeCommand(cmdID string) (tea.Model, tea.Cmd) {
+func (m *workbenchModel) executeCommand(cmdID string) (tea.Model, tea.Cmd) {
 	m.run(cmdID, nil)
 	return m, nil
 }
@@ -332,7 +332,7 @@ func railShortcutLabel(key string) string {
 	return strings.Join(parts, "+")
 }
 
-func (m *WorkbenchModel) showLocalToast(level, title, message string) tea.Cmd {
+func (m *workbenchModel) showLocalToast(level, title, message string) tea.Cmd {
 	m.toastSeq++
 	seq := m.toastSeq
 	m.activeToast = &contracts.Toast{
@@ -349,7 +349,7 @@ func (m *WorkbenchModel) showLocalToast(level, title, message string) tea.Cmd {
 
 // liveHint keeps public host and declared rail keys, but advertises plugin
 // actions only while their catalog owner is live. Called after the hints cap.
-func (m *WorkbenchModel) liveHint(action string) bool {
+func (m *workbenchModel) liveHint(action string) bool {
 	if strings.HasPrefix(action, "husk.") {
 		return true
 	}
@@ -378,7 +378,7 @@ const maxPluginFooterHints = 4
 // docks, palette, quit) come from the effective keymap; action keys come only
 // from the hints bindings declared for the focused surface. With no plugins
 // connected nothing application-specific is advertised.
-func (m *WorkbenchModel) footerHints() []footerHint {
+func (m *workbenchModel) footerHints() []footerHint {
 	var hints []footerHint
 	if m.captureReleased {
 		hints = append(hints, footerHint{m.firstKey("husk.capture.release"), "release"})

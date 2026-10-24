@@ -9,7 +9,7 @@ import (
 )
 
 // publishedContent composes regions even before the publisher's first frame.
-func (m *WorkbenchModel) publishedContent(surface protocol.SurfaceID, width, height int) publishedLayout {
+func (m *workbenchModel) publishedContent(surface protocol.SurfaceID, width, height int) publishedLayout {
 	var source []string
 	if su := m.slotUpdates[surface]; su != nil {
 		source = su.Lines
@@ -19,7 +19,7 @@ func (m *WorkbenchModel) publishedContent(surface protocol.SurfaceID, width, hei
 
 // clickContributionAt lets visible content win over overlapping resize hit
 // zones on borderless surfaces. Borders and blank cells remain draggable.
-func (m *WorkbenchModel) clickContributionAt(x, y int) bool {
+func (m *workbenchModel) clickContributionAt(x, y int) bool {
 	for _, hit := range m.hitOrder() {
 		slot, rect := hit.ID, hit.Rect
 		if slot == protocol.SurfaceActivityRail {
@@ -43,7 +43,7 @@ func (m *WorkbenchModel) clickContributionAt(x, y int) bool {
 
 // clickContribution re-renders from current state rather than trusting a stale
 // frame hit map after a resize, registry mutation or plugin disconnect.
-func (m *WorkbenchModel) clickContribution(surface protocol.SurfaceID, x, y, width, height int) bool {
+func (m *workbenchModel) clickContribution(surface protocol.SurfaceID, x, y, width, height int) bool {
 	if surface == protocol.SurfaceMainStage && m.stageMode == "hotspots" {
 		return false // architecture view hides the publisher's content
 	}
@@ -82,7 +82,7 @@ func (m *WorkbenchModel) clickContribution(surface protocol.SurfaceID, x, y, wid
 
 // publisherMousePayload resolves row metadata in content-relative coordinates
 // for every publisher input path, including modal clicks and wheel events.
-func (m *WorkbenchModel) publisherMousePayload(surface protocol.SurfaceID, x, y int, button string) protocol.SurfaceMouseParams {
+func (m *workbenchModel) publisherMousePayload(surface protocol.SurfaceID, x, y int, button string) protocol.SurfaceMouseParams {
 	payload := protocol.SurfaceMouseParams{Surface: surface, X: x, Y: y, Button: button}
 	if su := m.slotUpdates[surface]; su != nil {
 		for _, hit := range su.HitTargets {
@@ -97,7 +97,7 @@ func (m *WorkbenchModel) publisherMousePayload(surface protocol.SurfaceID, x, y 
 
 // Modal content uses the same frame-aware inner rect as rendering. Borders
 // consume one cell per edge; labels/close glyphs never add a content title row.
-func (m *WorkbenchModel) handlePublishedModalMouse(x, y int, left, wheelDown, wheelUp bool) bool {
+func (m *workbenchModel) handlePublishedModalMouse(x, y int, left, wheelDown, wheelUp bool) bool {
 	rect := m.modalRect
 	if !image.Pt(x, y).In(rect.Rect()) {
 		return false

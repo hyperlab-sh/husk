@@ -11,7 +11,7 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/services/secrets"
 )
 
-func openPrompt(m *WorkbenchModel, id uint64, p secrets.Prompt) chan secrets.Answer {
+func openPrompt(m *workbenchModel, id uint64, p secrets.Prompt) chan secrets.Answer {
 	reply := make(chan secrets.Answer, 1)
 	m.Update(secretPromptOpenMsg{id: id, prompt: p, reply: reply})
 	return reply

@@ -209,7 +209,7 @@ func TestBlitBlockOpaqueAndClipped(t *testing.T) {
 // drawnRect runs draw on a canvas larger than rect, pre-filled with a
 // sentinel, fails if draw wrote any cell outside rect, and returns rect's rows
 // serialized on their own (each exactly rect.Width cells).
-func drawnRect(t *testing.T, rect SlotRect, draw func(c *canvas)) []string {
+func drawnRect(t *testing.T, rect slotRect, draw func(c *canvas)) []string {
 	t.Helper()
 	const margin = 4
 	w, h := rect.X+rect.Width+margin, rect.Y+rect.Height+margin

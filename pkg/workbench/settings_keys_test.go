@@ -12,7 +12,7 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
-func keysFixture(t testing.TB) (*WorkbenchModel, *fakeFE) {
+func keysFixture(t testing.TB) (*workbenchModel, *fakeFE) {
 	t.Helper()
 	m, fe := settingsFixture(t, "")
 	fe.KeyRows = contracts.KeyListing{Entries: []contracts.KeyEntry{

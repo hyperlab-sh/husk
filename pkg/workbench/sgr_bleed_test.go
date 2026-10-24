@@ -160,7 +160,7 @@ func TestPublishedLineOpenStyleStopsAtContent(t *testing.T) {
 	// Slot content keeps an open style in the line string; blitting it stops
 	// the style at the last content cell, so the rest of the row stays
 	// unstyled.
-	m := newWorkbenchModel()
+	m := newModel()
 	lines := m.surfaceContentLines(&protocol.SurfaceUpdateParams{Lines: []string{"\x1b[41mhi"}}, 4, 1)
 	c := newCanvas(6, 1)
 	c.blitLines(1, 0, 4, 1, lines)
@@ -174,7 +174,7 @@ func TestPublishedLineOpenStyleStopsAtContent(t *testing.T) {
 // surfaceContentLines clips: lines past the height are dropped and wide lines
 // are truncated to the width; nothing wraps or scrolls.
 func TestSurfaceContentLinesClips(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	lines := m.surfaceContentLines(&protocol.SurfaceUpdateParams{Lines: []string{"one", "two-is-long", "three"}}, 5, 2)
 	if want := []string{"one", "two-…"}; !reflect.DeepEqual(lines, want) {
 		t.Fatalf("got %q, want %q", lines, want)
@@ -186,7 +186,7 @@ func TestSurfaceContentLinesClips(t *testing.T) {
 // side panel. Red may appear only on stage content cells the palette leaves
 // visible.
 func TestCommandPaletteOverStyledStageNoBleed(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	m.width, m.height = 144, 40
 	m.plugins["p.stage"] = true
 	m.catalog.Occupants[protocol.SurfaceMainStage] = "p.stage"

@@ -21,7 +21,7 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/theme"
 )
 
-func settingsFixture(t testing.TB, tab string) (*WorkbenchModel, *fakeFE) {
+func settingsFixture(t testing.TB, tab string) (*workbenchModel, *fakeFE) {
 	t.Helper()
 	m := goldenModel()
 	fe := withFE(m)
@@ -41,7 +41,7 @@ func settingsFixture(t testing.TB, tab string) (*WorkbenchModel, *fakeFE) {
 	}
 	return m, fe
 }
-func settingsPress(m *WorkbenchModel, key string) {
+func settingsPress(m *workbenchModel, key string) {
 	codes := map[string]rune{"esc": tea.KeyEscape, "tab": tea.KeyTab, "enter": tea.KeyEnter, "up": tea.KeyUp, "down": tea.KeyDown, "right": tea.KeyRight, "home": tea.KeyHome, "end": tea.KeyEnd, "pgup": tea.KeyPgUp, "pgdown": tea.KeyPgDown}
 	msg := tea.KeyPressMsg{Code: codes[key]}
 	if strings.HasPrefix(key, "ctrl+") {
@@ -462,7 +462,7 @@ func TestSettingsWidgetImportsStayInsideCenter(t *testing.T) {
 		}
 		for _, imp := range parsed.Imports {
 			importPath, _ := strconv.Unquote(imp.Path.Value)
-			if (importPath == "charm.land/huh/v2" || strings.HasPrefix(importPath, "charm.land/bubbles/v2")) && !strings.HasPrefix(filepath.ToSlash(rel), "cmd/husk/settings") {
+			if (importPath == "charm.land/huh/v2" || strings.HasPrefix(importPath, "charm.land/bubbles/v2")) && !strings.HasPrefix(filepath.ToSlash(rel), "pkg/workbench/settings") {
 				t.Errorf("widget import outside center: %s", rel)
 			}
 		}
