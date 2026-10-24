@@ -27,6 +27,10 @@ func TestPluginCommandStartupDiagnostics(t *testing.T) {
 	}{
 		{"missing", 0, contracts.PodFailed},
 		{"not executable", 0o600, contracts.PodFailed},
+		{"missing interpreter", 0o700, contracts.PodFailed},
+		{"bare name not on PATH", 0, contracts.PodFailed},
+		{"absolute external command", 0, contracts.PodFailed},
+		{"dangling symlink", 0, contracts.PodFailed},
 		{"working", 0o700, contracts.PodLive},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -52,8 +56,27 @@ func TestPluginCommandStartupDiagnostics(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			doc := `{"manifest_version":2,"protocol":2,"id":"alpha","name":"Alpha","version":"1","command":["./plugin","-test.run=TestPluginCommandChild","--","plugin-command-child"]}`
-			if err := os.WriteFile(filepath.Join(dir, manifest.FileName), []byte(doc), 0o600); err != nil {
+			command := []string{"./plugin", "-test.run=TestPluginCommandChild", "--", "plugin-command-child"}
+			switch tc.name {
+			case "missing interpreter":
+				if err := os.WriteFile(filepath.Join(dir, "plugin"), []byte("#!/nonexistent/interp\n"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			case "bare name not on PATH":
+				t.Setenv("PATH", t.TempDir())
+				command = []string{"husk-no-such-cmd-xyz"}
+			case "absolute external command":
+				command = []string{filepath.Join(root, "missing-external")}
+			case "dangling symlink":
+				if err := os.Symlink(filepath.Join(dir, "absent-target"), filepath.Join(dir, "plugin")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			doc, err := json.Marshal(map[string]any{"manifest_version": 2, "protocol": 2, "id": "alpha", "name": "Alpha", "version": "1", "command": command})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, manifest.FileName), doc, 0o600); err != nil {
 				t.Fatal(err)
 			}
 			m := goldenModel()
@@ -122,25 +145,31 @@ func TestPluginCommandStartupDiagnostics(t *testing.T) {
 					lines = append(lines, line)
 				}
 			}
-			switch tc.name {
-			case "missing":
-				want := fmt.Sprintf("command %q not found in %s; build it first", "./plugin", dir)
-				if lastError != want {
-					t.Errorf("last_error = %q, want %q", lastError, want)
-				}
-				wantLine := "husk: error: alpha: " + want
-				if len(lines) != 1 || lines[0] != wantLine {
-					t.Errorf("stderr lines = %q, want [%q]", lines, wantLine)
-				}
-			case "not executable":
-				want := "fork/exec " + filepath.Join(dir, "plugin") + ": permission denied"
-				if lastError != want || len(lines) != 1 || !strings.Contains(lines[0], want) {
-					t.Errorf("last_error=%q stderr=%q, want unchanged error %q once", lastError, lines, want)
-				}
-			case "working":
+			if tc.status == contracts.PodLive {
 				if lastError != "" || len(lines) != 0 {
 					t.Errorf("live plugin: last_error=%q stderr=%q", lastError, lines)
 				}
+				return
+			}
+			var want string
+			switch tc.name {
+			case "missing", "dangling symlink":
+				want = fmt.Sprintf("command %q not found in %s; build it first", "./plugin", dir)
+			case "not executable":
+				want = "fork/exec " + filepath.Join(dir, "plugin") + ": permission denied"
+			case "missing interpreter":
+				want = "fork/exec " + filepath.Join(dir, "plugin") + ": no such file or directory"
+			case "bare name not on PATH":
+				want = `exec: "husk-no-such-cmd-xyz": executable file not found in $PATH`
+			case "absolute external command":
+				want = "fork/exec " + command[0] + ": no such file or directory"
+			}
+			if lastError != want {
+				t.Errorf("last_error = %q, want %q", lastError, want)
+			}
+			wantLine := "husk: error: alpha: launch failed: " + want
+			if len(lines) != 1 || lines[0] != wantLine {
+				t.Errorf("stderr lines = %q, want [%q]", lines, wantLine)
 			}
 		})
 	}
@@ -153,4 +182,22 @@ func TestPluginCommandChild(t *testing.T) {
 	}
 	_, _ = io.Copy(io.Discard, os.Stdin)
 	os.Exit(0)
+}
+
+func TestPodFailureTransitionsOnlyToast(t *testing.T) {
+	for _, from := range []contracts.PodStatus{"", contracts.PodStarting, contracts.PodLive} {
+		t.Run(string(from), func(t *testing.T) {
+			m := goldenModel()
+			var stderr bytes.Buffer
+			m.logOut = &stderr
+			m.notePodTransition("alpha", from, contracts.PodFailed, "failure cause")
+			m.notePodTransition("alpha", contracts.PodFailed, contracts.PodFailed, "failure cause")
+			if stderr.Len() != 0 {
+				t.Errorf("frontend duplicated Pods failure log: %q", stderr.String())
+			}
+			if len(m.failures) != 1 || m.failures[0] != "alpha: failure cause" {
+				t.Errorf("failure toasts = %q, want one with the original cause", m.failures)
+			}
+		})
+	}
 }
