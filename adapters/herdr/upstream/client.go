@@ -349,12 +349,17 @@ type Stream struct {
 // Names requiring pane-specific parameters in the committed schema are refused
 // with invalid_subscription before dialing, as a guard. The shim first uses
 // FilterHookSubscriptions to omit only unusable entries and log each refusal.
-// Other names pass through unchecked. A server refusal is returned with its own
+// Skip this call when no allowed names remain; an empty list is also refused
+// with invalid_subscription before dialing. Other names pass through unchecked.
+// A server refusal with the matching request id is returned with its own
 // code and message, without retrying or failing the attach: the shim logs it and
 // suspends event hooks until the next attach while remaining live. Only malformed
 // acknowledgements become herdr_protocol. The supplied context owns the entire
 // stream, not only its opening handshake.
 func (c *Client) Subscribe(ctx context.Context, names []string) (*Stream, error) {
+	if len(names) == 0 {
+		return nil, &Error{Code: "invalid_subscription", Message: "events.subscribe: no hook names"}
+	}
 	entries := make([]map[string]string, 0, len(names))
 	seen := map[string]bool{}
 	for _, name := range names {
@@ -378,6 +383,10 @@ func (c *Client) Subscribe(ctx context.Context, names []string) (*Stream, error)
 	r, err := receive(s.scan)
 	if err != nil {
 		s.Close()
+		var remote *Error
+		if errors.As(err, &remote) && r.ID != "1" {
+			return nil, protocolError("events.subscribe", fmt.Errorf("invalid acknowledgement"))
+		}
 		return nil, callError(ctx, "events.subscribe", err)
 	}
 	var ack struct {
