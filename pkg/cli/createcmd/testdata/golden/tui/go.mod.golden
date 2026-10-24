@@ -1,5 +1,5 @@
 module "example.test/demo"
 
-go 1.26.6
+go 1.26
 
 require github.com/hyperlab-sh/husk "v1.2.3"

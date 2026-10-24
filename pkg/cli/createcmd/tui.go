@@ -7,6 +7,7 @@ import (
 )
 
 func tuiFiles(name, module, version, goVersion string, bundle []file) ([]file, error) {
+	version = dependencyVersion(version)
 	files := make([]file, 0, len(bundle)+3)
 	for _, f := range bundle {
 		f.name = "bundle/" + f.name
@@ -27,7 +28,7 @@ func tuiFiles(name, module, version, goVersion string, bundle []file) ([]file, e
 			return nil, err
 		}
 		text := strings.NewReplacer("@NAME@", name, "@MODULE@", strconv.Quote(module), "@GO@", goVersion,
-			"@REQUIRE@", require, "@GET@", get, "@VERSION@", strconv.Quote(version)).Replace(string(raw))
+			"@REQUIRE@", require, "@GET@", get).Replace(string(raw))
 		files = append(files, file{entry.dest, []byte(text), 0644})
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].name < files[j].name })

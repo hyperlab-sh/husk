@@ -66,7 +66,7 @@ func TestTUIGoldenAndBundleIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	files, err := tuiFiles("demo", "example.test/demo", "v1.2.3", "1.26.6", bundle)
+	files, err := tuiFiles("demo", "example.test/demo", "v1.2.3", "1.26", bundle)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,14 @@ func TestTUIGoldenAndBundleIdentity(t *testing.T) {
 }
 
 func TestTUIFormatsModuleAndVersion(t *testing.T) {
-	for _, version := range []string{"", "v1.2.3"} {
+	for _, tc := range []struct{ version, want string }{
+		{"", ""}, {"v1.2.3", "v1.2.3"}, {"v1.2.3-rc.1", "v1.2.3-rc.1"},
+		{"v0.0.0-20261023000000-abc123", "v0.0.0-20261023000000-abc123"},
+		{"v0.0.0-20261023000000-abc123+dirty", ""}, {"v1.2.3+build", ""},
+		{"(devel)", ""}, {"devel go1.26", ""}, {"not-a-version", ""},
+		{"v1.2", ""}, {"v01.2.3", ""}, {"v1.2.3-01", ""}, {"v1.2.3-rc..1", ""},
+	} {
+		version := tc.version
 		for _, format := range []output.Format{output.JSON, output.Table} {
 			for _, module := range []string{"", "example.test/custom"} {
 				root := t.TempDir()
@@ -157,17 +164,17 @@ func TestTUIFormatsModuleAndVersion(t *testing.T) {
 				if module == "" {
 					module = "app"
 				}
-				if !strings.Contains(string(mod), "module "+strconvQuote(module)+"\n") || !strings.Contains(string(mod), "go "+strings.TrimPrefix(runtime.Version(), "go")+"\n") {
+				if !strings.Contains(string(mod), "module "+strconvQuote(module)+"\n") || !strings.Contains(string(mod), "go "+goDirective(runtime.Version())+"\n") {
 					t.Fatalf("module=%s", mod)
 				}
-				if version != "" && !strings.Contains(string(mod), "require github.com/hyperlab-sh/husk "+strconvQuote(version)+"\n") {
+				if tc.want != "" && !strings.Contains(string(mod), "require github.com/hyperlab-sh/husk "+strconvQuote(tc.want)+"\n") {
 					t.Fatalf("dependency version missing: %s", mod)
 				}
 				readme, err := os.ReadFile(filepath.Join(dir, "README.md"))
 				if err != nil {
 					t.Fatal(err)
 				}
-				if (version == "") != !strings.Contains(string(mod), "require ") || (version == "") != strings.Contains(string(readme), "go get github.com/hyperlab-sh/husk@latest") {
+				if (tc.want == "") != !strings.Contains(string(mod), "require ") || (tc.want == "") != strings.Contains(string(readme), "go get github.com/hyperlab-sh/husk@latest") {
 					t.Fatalf("version handling: module=%s README=%s", mod, readme)
 				}
 			}
@@ -180,7 +187,7 @@ func TestTUIBuildVetAndHeadless(t *testing.T) {
 		t.Skip("generated application build belongs to the slow lane")
 	}
 	root := t.TempDir()
-	cmd := command("", guide.Files, func() (string, error) { return root, nil }, writeFile)
+	cmd := command("v0.0.0", guide.Files, func() (string, error) { return root, nil }, writeFile)
 	if err := cmd.Run(t.Context(), []string{"tui", "app"}, output.Options{Format: output.Table, Stdout: &bytes.Buffer{}}); err != nil {
 		t.Fatal(err)
 	}
@@ -203,16 +210,31 @@ func TestTUIBuildVetAndHeadless(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = f.WriteString("\nrequire github.com/hyperlab-sh/husk v0.0.0\n\nreplace github.com/hyperlab-sh/husk => " + strconvQuote(repo) + "\n")
+	_, err = f.WriteString("\nreplace github.com/hyperlab-sh/husk => " + strconvQuote(repo) + "\n")
 	closeErr := f.Close()
 	if err != nil || closeErr != nil {
 		t.Fatalf("replace: %v %v", err, closeErr)
+	}
+	sums, err := os.ReadFile(filepath.Join(repo, "go.sum"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.sum"), sums, 0644); err != nil {
+		t.Fatal(err)
+	}
+	runtimeTests, err := os.ReadFile(filepath.Join("testdata", "tui-runtime-test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main_test.go"), runtimeTests, 0644); err != nil {
+		t.Fatal(err)
 	}
 	binary := filepath.Join(dir, "app")
 	run := func(workdir string, args ...string) []byte {
 		t.Helper()
 		c := exec.CommandContext(t.Context(), args[0], args[1:]...)
 		c.Dir = workdir
+		c.Env = append(os.Environ(), "GOPROXY=off")
 		out, err := c.CombinedOutput()
 		if err != nil {
 			t.Fatalf("%v: %v\n%s", args, err, out)
@@ -221,6 +243,7 @@ func TestTUIBuildVetAndHeadless(t *testing.T) {
 	}
 	run(dir, "go", "build", "-mod=mod", "-o", binary, ".")
 	run(dir, "go", "vet", "-mod=mod", ".")
+	run(dir, "go", "test", "-mod=mod", ".")
 	if out := run(root, binary, "--help"); !bytes.Contains(out, []byte("-bundle")) {
 		t.Fatalf("help=%s", out)
 	}

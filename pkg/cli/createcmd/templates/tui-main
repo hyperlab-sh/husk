@@ -7,8 +7,10 @@ import (
 	"flag"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 
 	"github.com/hyperlab-sh/husk/pkg/cli"
@@ -59,8 +61,8 @@ func main() {
 	var log bytes.Buffer
 	opt := workbench.Options{Log: &log, NewHost: func(cfg contracts.Config, opts ...host.Option) (host.Looped, error) {
 		cfg.Distribution = distribution
-		cfg.InstanceDocs = map[string]map[string]any{"config": {"husk": map[string]any{"bundle": bundle}}}
-		return host.NewInstance(cfg, append([]host.Option{host.WithVersion(@VERSION@)}, opts...)...)
+		cfg = withBundle(cfg, bundle)
+		return host.NewInstance(cfg, append([]host.Option{host.WithVersion(hostVersion())}, opts...)...)
 	}}
 	if *dump {
 		var frame string
@@ -74,4 +76,49 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+func hostVersion() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return ""
+	}
+	return dependencyVersion(info)
+}
+
+func dependencyVersion(info *debug.BuildInfo) string {
+	for _, dep := range info.Deps {
+		if dep.Path != "github.com/hyperlab-sh/husk" {
+			continue
+		}
+		if dep.Replace != nil {
+			dep = dep.Replace
+		}
+		if dep.Version == "(devel)" {
+			return ""
+		}
+		return dep.Version
+	}
+	return ""
+}
+
+func withBundle(cfg contracts.Config, bundle string) contracts.Config {
+	cfg.InstanceDocs = maps.Clone(cfg.InstanceDocs)
+	if cfg.InstanceDocs == nil {
+		cfg.InstanceDocs = map[string]map[string]any{}
+	}
+	doc := maps.Clone(cfg.InstanceDocs["config"])
+	if doc == nil {
+		doc = map[string]any{}
+	}
+	settings, _ := doc["husk"].(map[string]any)
+	settings = maps.Clone(settings)
+	if settings == nil {
+		settings = map[string]any{}
+	}
+	// The standalone app loads only its adjacent or explicitly selected bundle.
+	settings["bundle"] = bundle
+	doc["husk"] = settings
+	cfg.InstanceDocs["config"] = doc
+	return cfg
 }
