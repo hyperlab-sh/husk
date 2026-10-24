@@ -16,10 +16,17 @@ import (
 
 	"github.com/hyperlab-sh/husk/adapters/herdr/manifest"
 	"github.com/hyperlab-sh/husk/adapters/herdr/proxy"
-	"github.com/hyperlab-sh/husk/adapters/herdr/settings"
 	"github.com/hyperlab-sh/husk/adapters/herdr/upstream"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
+
+func correlationID(id *protocol.ID) string {
+	var s string
+	if json.Unmarshal([]byte(id.String()), &s) == nil {
+		return s
+	}
+	return id.String()
+}
 
 type clock struct{}
 
@@ -29,33 +36,21 @@ func (clock) AfterFunc(d time.Duration, f func()) upstream.Timer { return time.A
 type Options struct {
 	Dir, Binary, Socket, ConfigDir, StateDir, RegistryPath, LogPath, Platform string
 	Env                                                                       []string
-	Settings                                                                  settings.Config
 	Client                                                                    *upstream.Client
 	Host                                                                      Host
 	Clock                                                                     upstream.Clock
 	Now                                                                       func() time.Time
 	Spawn                                                                     func(Command) (Process, error)
-	// SpawnTerminal starts a pane session; nil uses SpawnTerminal.
+	// SpawnTerminal replaces the shared PTY helper for deterministic tests.
 	SpawnTerminal func(Command, int, int) (TerminalProcess, error)
-	// SpawnOpener starts a detached URL opener. It is never joined or stopped
-	// with plugin commands; nil uses Spawn.
-	SpawnOpener func(Command) (Process, error)
-	// StartServer is the serialized, detached server-start seam; nil uses flock.
-	StartServer func(context.Context) error
-	// ServerLaunch replaces only detached exec, leaving the start lock and ping
-	// sequence intact. Nil starts the resolved binary in a new session.
-	ServerLaunch func(binary string, args, env []string) error
 }
-
 type state struct {
-	Server    string           `json:"server"`
-	Socket    string           `json:"socket"`
-	Version   string           `json:"version"`
-	Hooks     string           `json:"hooks"`
-	Startup   []map[string]any `json:"startup"`
-	Surfaces  map[string]any   `json:"surfaces"`
-	Commands  int              `json:"commands_running"`
-	LastError string           `json:"last_error"`
+	Server    string         `json:"server"`
+	Socket    string         `json:"socket"`
+	Version   string         `json:"version"`
+	Surfaces  map[string]any `json:"surfaces"`
+	Commands  int            `json:"commands_running"`
+	LastError string         `json:"last_error"`
 }
 type runner struct {
 	o           Options
@@ -69,21 +64,20 @@ type runner struct {
 	publish     sync.Mutex
 	state       state
 	processes   map[Process]bool
+	commands    int
 	stopping    bool
 	workers     sync.WaitGroup
 	children    sync.WaitGroup
 	proxy       *proxy.Server
-	lastDrop    time.Time
 	groupTimers map[Process]upstream.Timer
 	panes       map[protocol.SurfaceID]*pane
 	paneGate    chan struct{}
 	paneCounter uint64
 	paneTimers  map[Process]upstream.Timer
-	links       []compiledLinkHandler
 }
 
-// Run serves Husk requests until stdin EOF or a terminal attach failure. Attach
-// and action work never hold up the stdin reader, so EOF always begins shutdown.
+// Run serves Husk requests until stdin EOF. Upstream work is per request and
+// never holds the stdin reader, so EOF always begins shutdown.
 func Run(ctx context.Context, o Options, in io.Reader, out, log io.Writer) error {
 	if closer, ok := o.Host.(io.Closer); ok {
 		defer closer.Close()
@@ -99,9 +93,6 @@ func Run(ctx context.Context, o Options, in io.Reader, out, log io.Writer) error
 	}
 	if o.SpawnTerminal == nil {
 		o.SpawnTerminal = SpawnTerminal
-	}
-	if o.SpawnOpener == nil {
-		o.SpawnOpener = Spawn
 	}
 	if o.Platform == "" {
 		o.Platform = runtime.GOOS
@@ -129,16 +120,13 @@ func Run(ctx context.Context, o Options, in io.Reader, out, log io.Writer) error
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	r := &runner{panes: map[protocol.SurfaceID]*pane{}, paneGate: make(chan struct{}, 1), o: o, m: m, id: id, ctx: ctx, cancel: cancel, log: log, processes: map[Process]bool{}, state: state{Server: "absent", Socket: o.Socket, Startup: []map[string]any{}, Surfaces: map[string]any{}}}
-	r.links = compileLinkHandlers(m, o.Platform)
-	p, err := proxy.Start(ctx, proxy.Options{Dial: o.Client.Dial, Clock: o.Clock, Intercept: r.intercept, Warn: func(m string) { r.logLine(map[string]any{"level": "warning", "plugin": r.m.ID, "method": m}) }})
+	r := &runner{o: o, m: m, id: id, ctx: ctx, cancel: cancel, log: log, processes: map[Process]bool{}, panes: map[protocol.SurfaceID]*pane{}, paneGate: make(chan struct{}, 1), state: state{Server: "unchecked", Socket: o.Socket, Surfaces: map[string]any{}}}
+	p, err := proxy.Start(ctx, proxy.Options{Dial: o.Client.Dial, Clock: o.Clock, Intercept: r.intercept, Warn: func(method string) { r.logLine(map[string]any{"level": "warning", "plugin": m.ID, "method": method}) }})
 	if err != nil {
 		return err
 	}
 	r.proxy = p
-	terminal := make(chan error, 1)
-	r.workers.Add(1)
-	go func() { defer r.workers.Done(); terminal <- r.attach() }()
+	r.change(func(*state) {})
 	messages := make(chan protocol.Message)
 	readDone := make(chan error, 1)
 	writer := protocol.NewWriter(out)
@@ -153,8 +141,6 @@ func Run(ctx context.Context, o Options, in io.Reader, out, log io.Writer) error
 loop:
 	for {
 		select {
-		case err = <-terminal:
-			break loop
 		case <-ctx.Done():
 			err = nil
 			break loop
@@ -193,8 +179,6 @@ loop:
 	for _, t := range r.groupTimers {
 		t.Stop()
 	}
-	r.mu.Unlock()
-	r.mu.Lock()
 	panes := make([]*pane, 0, len(r.panes))
 	for _, p := range r.panes {
 		panes = append(panes, p)
@@ -210,10 +194,6 @@ loop:
 		t.Stop()
 	}
 	r.mu.Unlock()
-	if err != nil {
-		r.change(func(s *state) { s.LastError = err.Error() })
-		r.logLine(map[string]any{"level": "error", "message": err.Error()})
-	}
 	return err
 }
 func (r *runner) logLine(v any) {
@@ -234,170 +214,22 @@ func (r *runner) change(f func(*state)) {
 }
 func (r *runner) bounded(parent context.Context, d time.Duration) (context.Context, func()) {
 	ctx, cancel := context.WithCancel(parent)
-	t := r.o.Clock.AfterFunc(d, cancel)
-	return ctx, func() { t.Stop(); cancel() }
+	timer := r.o.Clock.AfterFunc(d, cancel)
+	return ctx, func() { timer.Stop(); cancel() }
 }
-func (r *runner) wait(d time.Duration) bool {
-	ready := make(chan struct{})
-	t := r.o.Clock.AfterFunc(d, func() { close(ready) })
-	defer t.Stop()
-	select {
-	case <-ready:
-		return true
-	case <-r.ctx.Done():
-		return false
+func (r *runner) checkServer(ctx context.Context) *protocol.Error {
+	version, err := r.o.Client.Check(ctx, r.m.MinVersion)
+	if err != nil {
+		r.change(func(s *state) { s.Server = "absent"; s.LastError = err.Error() })
+		var named *upstream.Error
+		if errors.As(err, &named) && named.Code != "unavailable" {
+			return &protocol.Error{Code: protocol.CodeFailed, Message: err.Error()}
+		}
+		return &protocol.Error{Code: protocol.CodeUnavailable, Message: upstream.Unavailable().Message, Data: json.RawMessage(`{"reason":"herdr_absent"}`)}
 	}
+	r.change(func(s *state) { s.Server = "available"; s.Version = version; s.LastError = "" })
+	return nil
 }
-func (r *runner) attach() error {
-	var backoff upstream.Backoff
-	var startupServer *serverIdentity
-	for {
-		var identity serverIdentity
-		observe := func(pong upstream.Pong) error {
-			var err error
-			identity, err = identifyServer(r.o.Socket, pong)
-			return err
-		}
-		var session *upstream.Session
-		var err error
-		if r.o.Settings.Server == "start" {
-			session, err = r.o.Client.Attach(r.ctx, r.m.MinVersion, observe)
-			if retryable(err) && r.ctx.Err() == nil {
-				start := r.o.StartServer
-				if start == nil {
-					start = func(ctx context.Context) error { return startServer(ctx, r.o) }
-				}
-				if err = start(r.ctx); err != nil {
-					return fmt.Errorf("herdr server did not start: %w", err)
-				}
-				session, err = r.o.Client.Attach(r.ctx, r.m.MinVersion, observe)
-			}
-		} else {
-			session, err = r.o.Client.Attach(r.ctx, r.m.MinVersion, observe)
-		}
-		if err != nil {
-			var named *upstream.Error
-			if errors.As(err, &named) && named.Code == "herdr_too_old" {
-				r.change(func(s *state) { s.Server = "too_old" })
-			}
-			if r.ctx.Err() != nil {
-				return nil
-			}
-			if retryable(err) {
-				r.change(func(s *state) { s.Server = "absent" })
-				if !r.wait(backoff.Next()) {
-					return nil
-				}
-				continue
-			}
-			return err
-		}
-		enabled := false
-		var plugins []struct {
-			ID      string `json:"plugin_id"`
-			Enabled bool   `json:"enabled"`
-		}
-		if err = json.Unmarshal(session.Plugins, &plugins); err != nil {
-			return fmt.Errorf("herdr_protocol: plugin.list: %w", err)
-		}
-		for _, p := range plugins {
-			if p.ID == r.m.ID && p.Enabled {
-				enabled = true
-			}
-		}
-		owner := r.o.Settings.HookOwner(r.m.ID, enabled)
-		var names []string
-		if owner == "shim" {
-			for _, e := range r.m.Events {
-				if manifest.Supports(e.Platforms, r.o.Platform) {
-					names = append(names, e.On)
-				}
-			}
-		}
-		allowed, refused := upstream.FilterHookSubscriptions(names)
-		for _, f := range refused {
-			r.logLine(map[string]any{"code": f.Err.Code, "message": f.Err.Message})
-		}
-		var stream *upstream.Stream
-		if len(allowed) > 0 {
-			stream, err = r.o.Client.Subscribe(r.ctx, allowed)
-			if err != nil {
-				if r.ctx.Err() != nil {
-					return nil
-				}
-				if retryable(err) && !upstream.IsRemote(err) {
-					r.change(func(s *state) { s.Server = "lost" })
-					if !r.wait(backoff.Next()) {
-						return nil
-					}
-					continue
-				}
-				var remote *upstream.Error
-				if errors.As(err, &remote) && remote.Code == "herdr_protocol" && !upstream.IsRemote(err) {
-					return err
-				}
-				// An explicit subscription refusal suspends event hooks only.
-				r.logLine(map[string]any{"message": err.Error()})
-			}
-		}
-		backoff = upstream.Backoff{}
-		r.change(func(s *state) { s.Server = "attached"; s.Version = session.Version; s.Hooks = owner; s.LastError = "" })
-		if owner == "server" {
-			startupServer = nil
-		}
-		if owner == "shim" && (startupServer == nil || *startupServer != identity) {
-			completed := identity
-			startupServer = &completed
-			for _, e := range r.m.Startup {
-				if manifest.Supports(e.Platforms, r.o.Platform) {
-					if _, err := r.launch(e, "", "startup", nil, "plugin.startup", "startup", nil); err != nil {
-						r.logLine(map[string]any{"event": "startup", "error": err.Error()})
-					}
-				}
-			}
-		}
-		if stream != nil {
-			for {
-				event, e := stream.Next()
-				if e != nil {
-					if r.ctx.Err() != nil {
-						return nil
-					}
-					r.logLine(map[string]any{"message": e.Error()})
-					break
-				}
-				for _, hook := range r.m.Events {
-					if manifest.Supports(hook.Platforms, r.o.Platform) && (hook.On == event.Event || strings.Replace(hook.On, ".", "_", 1) == event.Event) {
-						raw, _ := json.Marshal(event)
-						if _, err := r.launch(hook, "", hook.On, raw, hook.On, "api", nil); err != nil {
-							var refusal *protocol.Error
-							if !errors.As(err, &refusal) || refusal.Code != protocol.CodeBusy {
-								r.logLine(map[string]any{"event": hook.On, "error": err.Error()})
-							}
-						}
-					}
-				}
-			}
-		} else {
-			r.probe(identity)
-			if r.ctx.Err() != nil {
-				return nil
-			}
-		}
-		r.change(func(s *state) { s.Server = "lost" })
-		if !r.wait(backoff.Next()) {
-			return nil
-		}
-	}
-}
-func retryable(err error) bool {
-	if err == nil {
-		return false
-	}
-	var e *upstream.Error
-	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || !errors.As(err, &e) || e.Code == "unavailable"
-}
-
 func (r *runner) request(m protocol.Message) (any, *protocol.Error) {
 	if m.Method != protocol.MethodActionInvoke {
 		return nil, &protocol.Error{Code: protocol.CodeUnknownMethod, Message: "unknown method"}
@@ -425,60 +257,39 @@ func (r *runner) request(m protocol.Message) (any, *protocol.Error) {
 	if len(p.Args) > 0 && json.Unmarshal(p.Args, &args) != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "invalid action args"}
 	}
-	r.mu.Lock()
-	attached := r.state.Server == "attached"
-	r.mu.Unlock()
-	if !attached {
-		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "herdr server unavailable", Data: json.RawMessage(`{"reason":"herdr_absent"}`)}
-	}
 	for _, e := range r.m.Actions {
 		if strings.ReplaceAll(e.ID, ":", "-") == local && manifest.Supports(e.Platforms, r.o.Platform) {
-			result, err := r.launch(e, e.ID, "", nil, correlationID(m.ID), "api", args.Context)
+			result, err := r.launch(e, e.ID, correlationID(m.ID), args.Context)
 			if err != nil {
-				var wire *protocol.Error
-				if errors.As(err, &wire) {
-					return nil, wire
-				}
-				return nil, &protocol.Error{Code: protocol.CodeFailed, Message: err.Error()}
+				return nil, wireFailure(err)
 			}
 			return result, nil
 		}
 	}
 	return nil, &protocol.Error{Code: protocol.CodeNotFound, Message: "unknown action"}
 }
-func (r *runner) launch(e manifest.Entry, action, event string, eventJSON json.RawMessage, correlation, source string, provided json.RawMessage) (map[string]any, error) {
+func (r *runner) launch(e manifest.Entry, action, correlation string, provided json.RawMessage) (map[string]any, error) {
 	ctx, done := r.bounded(r.ctx, 2*time.Second)
 	defer done()
-	c, err := BuildContext(ctx, r.o.Client, correlation, source, provided)
+	if failure := r.checkServer(ctx); failure != nil {
+		return nil, failure
+	}
+	c, err := BuildContext(ctx, r.o.Client, correlation, "api", provided)
 	if err != nil {
 		var remote *upstream.Error
-		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || errors.As(err, &remote) && remote.Code == "unavailable" {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.As(err, &remote) && remote.Code == "unavailable" {
 			return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: err.Error(), Data: json.RawMessage(`{"reason":"herdr_absent"}`)}
 		}
 		return nil, err
 	}
-	env := CommandEnvironment(r.o.Env, r.o.Dir, r.o.Binary, r.proxy.Path(), r.o.ConfigDir, r.o.StateDir, r.m.ID, action, event, eventJSON, c)
+	env := CommandEnvironment(r.o.Env, r.o.Dir, r.o.Binary, r.proxy.Path(), r.o.ConfigDir, r.o.StateDir, r.m.ID, action, "", nil, c)
 	r.mu.Lock()
 	if r.stopping || r.ctx.Err() != nil {
 		r.mu.Unlock()
 		return nil, context.Canceled
 	}
-	running := 0
-	for _, leader := range r.processes {
-		if leader {
-			running++
-		}
-	}
-	if running >= 32 {
-		now := r.o.Now()
-		log := r.lastDrop.IsZero() || now.Sub(r.lastDrop) >= time.Second
-		if log {
-			r.lastDrop = now
-		}
+	if r.commands >= 32 {
 		r.mu.Unlock()
-		if log {
-			r.logLine(map[string]any{"code": "command_limit", "message": "maximum concurrent commands reached"})
-		}
 		return nil, &protocol.Error{Code: protocol.CodeBusy, Message: "maximum concurrent commands reached"}
 	}
 	process, err := r.o.Spawn(Command{Argv: e.Command, Env: env, Dir: r.o.Dir})
@@ -487,22 +298,17 @@ func (r *runner) launch(e manifest.Entry, action, event string, eventJSON json.R
 		r.logLine(map[string]any{"command": e.Command, "error": err.Error()})
 		return nil, err
 	}
+	r.commands++
 	r.processes[process] = true
 	r.children.Add(1)
 	r.mu.Unlock()
-	at := r.o.Now()
-	logRecord := map[string]any{"log_id": fmt.Sprintf("command-%d", process.PID()), "plugin_id": r.m.ID, "command": e.Command, "status": "running", "started_unix_ms": at.UnixMilli()}
-	if action != "" {
-		logRecord["action_id"] = action
-	}
-	if event != "" {
-		logRecord["event"] = event
-	}
+	record := map[string]any{"log_id": fmt.Sprintf("command-%d", process.PID()), "plugin_id": r.m.ID, "command": e.Command, "status": "running", "started_unix_ms": r.o.Now().UnixMilli(), "action_id": action}
 	r.change(func(s *state) { s.Commands++ })
 	go func() {
 		defer r.children.Done()
 		status, stderr := process.Wait()
 		r.mu.Lock()
+		r.commands--
 		if groupAlive(process) {
 			r.processes[process] = false
 			r.observeGroup(process)
@@ -511,20 +317,12 @@ func (r *runner) launch(e manifest.Entry, action, event string, eventJSON json.R
 		}
 		r.mu.Unlock()
 		r.logLine(map[string]any{"command": e.Command, "status": status, "stderr": stderr, "at": r.o.Now().UTC().Format(time.RFC3339Nano)})
-		r.change(func(s *state) {
-			s.Commands--
-			if event == "startup" {
-				s.Startup = append(s.Startup, map[string]any{"command": e.Command, "status": status, "at": r.o.Now().UTC().Format(time.RFC3339Nano)})
-				if len(s.Startup) > 32 {
-					s.Startup = s.Startup[len(s.Startup)-32:]
-				}
-			}
-		})
-		if action != "" && status != 0 {
+		r.change(func(s *state) { s.Commands-- })
+		if status != 0 {
 			_ = r.o.Host.Notify(r.ctx, protocol.MethodToastShow, map[string]any{"message": fmt.Sprintf("%s: %s exited %d", r.m.Name, e.Title, status), "level": "warn"})
 		}
 	}()
-	return map[string]any{"started": true, "pid": process.PID(), "log": r.o.LogPath, "context": c, "command_log": logRecord, "action_info": map[string]any{"plugin_id": r.m.ID, "action_id": action, "title": e.Title, "command": e.Command}}, nil
+	return map[string]any{"started": true, "pid": process.PID(), "log": r.o.LogPath, "context": c, "command_log": record, "action_info": map[string]any{"plugin_id": r.m.ID, "action_id": action, "title": e.Title, "command": e.Command}}, nil
 }
 func (r *runner) stopCommands() {
 	r.mu.Lock()
@@ -532,20 +330,16 @@ func (r *runner) stopCommands() {
 	for p := range r.processes {
 		ps = append(ps, p)
 	}
+	for _, p := range ps {
+		if _, stopping := r.paneTimers[p]; !stopping {
+			_ = p.Signal(syscall.SIGTERM)
+		}
+	}
 	r.mu.Unlock()
 	if len(ps) == 0 {
 		r.children.Wait()
 		return
 	}
-	r.mu.Lock()
-	for _, p := range ps {
-		if _, tracked := r.processes[p]; tracked {
-			if _, alreadyStopping := r.paneTimers[p]; !alreadyStopping {
-				_ = p.Signal(syscall.SIGTERM)
-			}
-		}
-	}
-	r.mu.Unlock()
 	done := make(chan struct{})
 	go func() { r.children.Wait(); close(done) }()
 	killed := make(chan struct{})
@@ -564,8 +358,6 @@ func (r *runner) stopCommands() {
 		return
 	case <-done:
 	}
-	// Leaders can exit while descendants keep their process group alive. Such
-	// groups still get the full TERM/KILL policy, even after leader reaping.
 	for {
 		r.mu.Lock()
 		alive := false
@@ -591,7 +383,6 @@ func (r *runner) stopCommands() {
 		}
 	}
 }
-
 func groupAlive(p Process) bool {
 	if g, ok := p.(interface{ GroupAlive() bool }); ok {
 		return g.GroupAlive()
@@ -599,7 +390,7 @@ func groupAlive(p Process) bool {
 	return false
 }
 
-// observeGroup is called with mu held. Empty observation fences later signals.
+// observeGroup runs with mu held. Empty observation fences later signals.
 func (r *runner) observeGroup(p Process) {
 	if r.stopping {
 		return

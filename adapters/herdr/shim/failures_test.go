@@ -23,12 +23,10 @@ func TestTerminalVersionFailurePublishesTooOld(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.start(t)
-	err = take(t, r.exit)
-	r.exit <- nil
-	if err == nil || !strings.Contains(err.Error(), "herdr_too_old") {
-		t.Fatalf("terminal failure=%v", err)
+	reply := r.invoke(t, "demo.go")
+	if reply.Error == nil || reply.Error.Code != protocol.CodeFailed || !strings.Contains(reply.Error.Message, "herdr_too_old") {
+		t.Fatalf("version failure=%+v", reply)
 	}
-	r.host.until(t, protocol.MethodStateSet, "too_old")
 }
 
 func TestMissingBinaryFailsBeforeCommands(t *testing.T) {
@@ -39,23 +37,10 @@ func TestMissingBinaryFailsBeforeCommands(t *testing.T) {
 	}
 }
 
-func TestStartFailureIsTerminal(t *testing.T) {
-	r := newRig(t, "never", false, "")
-	r.server.Close()
-	r.o.Settings.Server = "start"
-	r.o.StartServer = func(context.Context) error { return os.ErrPermission }
-	r.start(t)
-	err := take(t, r.exit)
-	r.exit <- nil
-	if err == nil || !strings.Contains(err.Error(), "herdr server did not start") {
-		t.Fatalf("start failure=%v", err)
-	}
-}
-
 func TestCommandCapReturnsBusy(t *testing.T) {
 	r := newRig(t, "never", false, "")
 	r.start(t)
-	r.host.until(t, protocol.MethodStateSet, "attached")
+	r.host.until(t, protocol.MethodStateSet, "")
 	for range 32 {
 		if reply := r.invoke(t, "demo.go"); reply.Error != nil {
 			t.Fatal(reply.Error)

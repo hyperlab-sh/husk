@@ -3,8 +3,7 @@
 //	herdr api schema --output adapters/herdr/fakeherdr/schema.json
 //
 // It reports schema_version 1 and protocol 22. Tests never invoke the CLI or
-// contact a real server. This version defines no event-loss message; recovery
-// fixtures use EOF or the schema's error body, not an invented signal.
+// contact a real server.
 package fakeherdr
 
 import (
@@ -76,7 +75,6 @@ func TestSchemaShapes(t *testing.T) {
 		{"pane.current", map[string]any{}, "pane_current"},
 		{"workspace.get", map[string]any{"workspace_id": "workspace-1"}, "workspace_info"},
 		{"tab.get", map[string]any{"tab_id": "tab-1"}, "tab_info"},
-		{"events.subscribe", map[string]any{"subscriptions": []any{map[string]any{"type": "pane.focused"}}}, "subscription_started"},
 		{"popup.close", map[string]any{}, "ok"},
 		{"notification.show", map[string]any{"title": "test"}, "notification_show"},
 		{"plugin.pane.open", map[string]any{"plugin_id": "fixture", "entrypoint": "main"}, "plugin_pane_opened"},

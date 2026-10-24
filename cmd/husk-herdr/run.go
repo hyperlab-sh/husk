@@ -44,7 +44,7 @@ func runtimeOptions(dir string, env environment) (shim.Options, error) {
 	if !ok {
 		return shim.Options{}, fmt.Errorf("absolute configuration directory is required")
 	}
-	o := shim.Options{Dir: dir, Binary: binary, Socket: socket, Settings: c, Env: os.Environ(), RegistryPath: env.registryPath, Platform: env.platform, Host: &shim.SocketHost{Path: os.Getenv("HUSK_SOCKET_PATH"), Token: os.Getenv("HUSK_PLUGIN_TOKEN")}, LogPath: stderrPath()}
+	o := shim.Options{Dir: dir, Binary: binary, Socket: socket, Env: os.Environ(), RegistryPath: env.registryPath, Platform: env.platform, Host: &shim.SocketHost{Path: os.Getenv("HUSK_SOCKET_PATH"), Token: os.Getenv("HUSK_PLUGIN_TOKEN")}, LogPath: stderrPath()}
 	if env.upstreamDial != nil {
 		o.Client = upstream.New(upstream.Options{Socket: socket, Dial: env.upstreamDial})
 	}

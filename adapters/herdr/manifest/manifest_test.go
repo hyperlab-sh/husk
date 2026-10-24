@@ -27,8 +27,6 @@ func TestConversionProblems(t *testing.T) {
 		{"empty_entry_platforms", minimal + "[[actions]]\nid='show'\ntitle='Show'\ncommand=['true']\nplatforms=[]\n", "manifest_invalid", nil, true},
 		{"duplicate", minimal + "[[actions]]\nid='pane-view'\ntitle='View'\ncommand=['true']\n[[panes]]\nid='view'\ntitle='View'\ncommand=['true']\n", "duplicate_action", nil, true},
 		{"entry_collision", minimal + "[[actions]]\nid='a:b'\ntitle='A'\ncommand=['true']\n[[actions]]\nid='a-b'\ntitle='B'\ncommand=['true']\n", "duplicate_action", nil, true},
-		{"pattern", minimal + "[[link_handlers]]\npattern='(?=lookahead)'\naction='missing'\n", "pattern_unsupported", nil, false},
-		{"unknown_action", minimal + "[[link_handlers]]\npattern='.*'\naction='missing'\n", "unknown_action", nil, false},
 		{"suggestion", minimal + "[[actions]]\nid='show'\ntitle='Show'\ncommand=['true']\ndefault_key='prefix+s'\n", "suggestion_ignored", nil, false},
 		{"command", minimal + "[[startup]]\ncommand=[]\n", "manifest_invalid", nil, true},
 		{"entry_id", minimal + "[[actions]]\nid='with.dot'\ntitle='Show'\ncommand=['true']\n", "id_unmappable", nil, true},
@@ -43,7 +41,7 @@ func TestConversionProblems(t *testing.T) {
 			if len(problems) != 1 || problems[0].Code != tc.code || problems[0].Field == "" {
 				t.Fatalf("problems=%+v, want %s", problems, tc.code)
 			}
-			if !tc.fatal && (len(doc.Vendor.LinkHandlers) > 0 || tc.code == "suggestion_ignored" && len(doc.Actions) != 1) {
+			if !tc.fatal && (tc.code == "suggestion_ignored" && len(doc.Actions) != 1) {
 				t.Fatal("nonfatal conversion did not retain only valid declarations")
 			}
 		})

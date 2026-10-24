@@ -5,7 +5,6 @@ package manifest
 import (
 	"fmt"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -34,24 +33,21 @@ type Entry struct {
 	Width       any      `toml:"width" json:"width,omitempty"`
 	Height      any      `toml:"height" json:"height,omitempty"`
 	On          string   `toml:"on" json:"on,omitempty"`
-	Pattern     string   `toml:"pattern" json:"pattern,omitempty"`
-	Action      string   `toml:"action" json:"action,omitempty"`
 }
 
 // Manifest is the source document; commands remain uninterpreted argv.
 type Manifest struct {
-	ID           string   `toml:"id"`
-	Name         string   `toml:"name"`
-	Version      string   `toml:"version"`
-	Description  string   `toml:"description"`
-	MinVersion   string   `toml:"min_herdr_version"`
-	Platforms    []string `toml:"platforms"`
-	Build        []Entry  `toml:"build"`
-	Startup      []Entry  `toml:"startup"`
-	Actions      []Entry  `toml:"actions"`
-	Events       []Entry  `toml:"events"`
-	Panes        []Entry  `toml:"panes"`
-	LinkHandlers []Entry  `toml:"link_handlers"`
+	ID          string   `toml:"id"`
+	Name        string   `toml:"name"`
+	Version     string   `toml:"version"`
+	Description string   `toml:"description"`
+	MinVersion  string   `toml:"min_herdr_version"`
+	Platforms   []string `toml:"platforms"`
+	Build       []Entry  `toml:"build"`
+	Startup     []Entry  `toml:"startup"`
+	Actions     []Entry  `toml:"actions"`
+	Events      []Entry  `toml:"events"`
+	Panes       []Entry  `toml:"panes"`
 }
 
 // Action is a public host action declaration.
@@ -64,13 +60,12 @@ type Action struct {
 
 // Vendor is informational metadata, not the runtime's source of truth.
 type Vendor struct {
-	ID           string   `json:"id"`
-	MinVersion   string   `json:"min_version"`
-	Actions      []Entry  `json:"actions"`
-	Panes        []Entry  `json:"panes"`
-	Startup      []Entry  `json:"startup"`
-	Events       []string `json:"events"`
-	LinkHandlers []Entry  `json:"link_handlers"`
+	ID         string   `json:"id"`
+	MinVersion string   `json:"min_version"`
+	Actions    []Entry  `json:"actions"`
+	Panes      []Entry  `json:"panes"`
+	Startup    []Entry  `json:"startup"`
+	Events     []string `json:"events"`
 }
 
 // Document is the v2 converter output, independent of host implementation types.
@@ -219,18 +214,17 @@ func Convert(data []byte, opts Options) (*Document, []Problem, []string) {
 	if !filepath.IsAbs(opts.Dir) || !filepath.IsAbs(opts.Executable) {
 		return fail("manifest_invalid", "command", fmt.Errorf("converter executable and plugin directory must be absolute"))
 	}
-	d := &Document{ManifestVersion: 2, Protocol: 2, ID: id, Name: m.Name, Version: m.Version, Description: m.Description, Command: []string{opts.Executable, "run", opts.Dir}, Actions: []Action{}, Keybindings: []any{}, Vendor: Vendor{ID: m.ID, MinVersion: m.MinVersion, Actions: []Entry{}, Panes: []Entry{}, Startup: []Entry{}, Events: []string{}, LinkHandlers: []Entry{}}}
+	d := &Document{ManifestVersion: 2, Protocol: 2, ID: id, Name: m.Name, Version: m.Version, Description: m.Description, Command: []string{opts.Executable, "run", opts.Dir}, Actions: []Action{}, Keybindings: []any{}, Vendor: Vendor{ID: m.ID, MinVersion: m.MinVersion, Actions: []Entry{}, Panes: []Entry{}, Startup: []Entry{}, Events: []string{}}}
 	d.Events.Subscribe = []string{}
 	var notes []string
 	if len(m.Build) > 0 {
 		notes = append(notes, "build_not_run: install-time commands are not executed")
 	}
 	actionIDs := map[string]bool{}
-	sourceActions := map[string]bool{}
 	for _, group := range []struct {
 		name    string
 		entries []Entry
-	}{{"actions", m.Actions}, {"panes", m.Panes}, {"startup", m.Startup}, {"events", m.Events}, {"link_handlers", m.LinkHandlers}} {
+	}{{"actions", m.Actions}, {"panes", m.Panes}, {"startup", m.Startup}, {"events", m.Events}} {
 		for i, e := range group.entries {
 			field := fmt.Sprintf("%s[%d]", group.name, i)
 			if !validPlatforms(e.Platforms) {
@@ -239,7 +233,7 @@ func Convert(data []byte, opts Options) (*Document, []Problem, []string) {
 			if !Supports(e.Platforms, opts.Platform) {
 				continue
 			}
-			if group.name != "link_handlers" && (len(e.Command) == 0 || e.Command[0] == "") {
+			if len(e.Command) == 0 || e.Command[0] == "" {
 				return fail("manifest_invalid", field, fmt.Errorf("command must be nonempty argv"))
 			}
 			switch group.name {
@@ -270,7 +264,6 @@ func Convert(data []byte, opts Options) (*Document, []Problem, []string) {
 				actionIDs[local] = true
 				d.Actions = append(d.Actions, Action{id + "." + local, title, e.Description, true})
 				if group.name == "actions" {
-					sourceActions[e.ID] = true
 					d.Vendor.Actions = append(d.Vendor.Actions, e)
 				} else {
 					d.Vendor.Panes = append(d.Vendor.Panes, e)
@@ -289,16 +282,6 @@ func Convert(data []byte, opts Options) (*Document, []Problem, []string) {
 				if !slices.Contains(d.Vendor.Events, e.On) {
 					d.Vendor.Events = append(d.Vendor.Events, e.On)
 				}
-			case "link_handlers":
-				if _, err := regexp.Compile(e.Pattern); err != nil {
-					problems = append(problems, Problem{"pattern_unsupported", err.Error(), field + ".pattern"})
-					continue
-				}
-				if !sourceActions[e.Action] {
-					problems = append(problems, Problem{"unknown_action", "handler must name a declared action", field + ".action"})
-					continue
-				}
-				d.Vendor.LinkHandlers = append(d.Vendor.LinkHandlers, e)
 			}
 		}
 	}

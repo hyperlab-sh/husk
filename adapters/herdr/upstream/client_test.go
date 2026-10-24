@@ -92,7 +92,15 @@ func server(t *testing.T, path string, opts fakeherdr.Options) *fakeherdr.Server
 	return s
 }
 func client(path string, clock *manualClock) *upstream.Client {
-	return upstream.New(upstream.Options{Socket: path, Clock: clock})
+	return upstream.New(upstream.Options{Socket: path, Clock: clock, Dial: guardedDial(path)})
+}
+func guardedDial(allowed string) upstream.Dialer {
+	return func(ctx context.Context, network, path string) (net.Conn, error) {
+		if network != "unix" || path != allowed || !strings.HasPrefix(filepath.Dir(path), "/tmp/ha-") {
+			return nil, os.ErrPermission
+		}
+		return (&net.Dialer{}).DialContext(ctx, network, path)
+	}
 }
 func named(t *testing.T, err error, code string) *upstream.Error {
 	t.Helper()
@@ -165,15 +173,6 @@ func TestVersions(t *testing.T) {
 	}
 }
 
-func TestBackoff(t *testing.T) {
-	var b upstream.Backoff
-	for _, d := range []time.Duration{5, 10, 20, 30, 30, 30} {
-		if got := b.Next(); got != d*time.Second {
-			t.Fatalf("delay %v, want %v", got, d*time.Second)
-		}
-	}
-}
-
 func TestAttachAndVersionRefusal(t *testing.T) {
 	for _, old := range []bool{false, true} {
 		t.Run(map[bool]string{false: "attached", true: "too_old"}[old], func(t *testing.T) {
@@ -183,7 +182,7 @@ func TestAttachAndVersionRefusal(t *testing.T) {
 				version = "0.8.2"
 			}
 			s := server(t, path, fakeherdr.Options{Version: version, Plugins: []map[string]any{{"plugin_id": "sample", "name": "Sample", "version": "1.0.0", "manifest_path": "plugin.toml", "plugin_root": "plugin", "enabled": true}}})
-			session, err := client(path, newClock()).Attach(t.Context(), "0.9.0")
+			got, err := client(path, newClock()).Check(t.Context(), "0.9.0")
 			if old {
 				named(t, err, "herdr_too_old")
 				if len(s.Requests()) != 1 {
@@ -194,14 +193,14 @@ func TestAttachAndVersionRefusal(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if session.Version != version || !strings.Contains(string(session.Plugins), `"enabled":true`) {
-				t.Fatalf("session = %+v", session)
+			if got != version {
+				t.Fatalf("version = %q", got)
 			}
 			methods := []string{}
 			for _, r := range s.Requests() {
 				methods = append(methods, r.Method)
 			}
-			if !reflect.DeepEqual(methods, []string{"ping", "plugin.list"}) {
+			if !reflect.DeepEqual(methods, []string{"ping"}) {
 				t.Fatal(methods)
 			}
 		})
@@ -238,164 +237,8 @@ func TestInjectedDialerAndUnavailable(t *testing.T) {
 	}})
 	_, err := c.Call(t.Context(), "pane.current", nil)
 	e := named(t, err, "unavailable")
-	if calls != 1 || e.Message != "herdr server unavailable" || e.Data["reason"] != "herdr_absent" {
+	if calls != 1 || e.Message != "herdr server unavailable; start herdr and try again" || e.Data["reason"] != "herdr_absent" {
 		t.Fatalf("calls=%d, error=%+v", calls, e)
-	}
-}
-
-func TestAbsentThenPresentAndReconnect(t *testing.T) {
-	path := socket(t)
-	clock := newClock()
-	c := client(path, clock)
-	statuses := make(chan string, 8)
-	type outcome struct {
-		session *upstream.Session
-		err     error
-	}
-	wait := func() <-chan outcome {
-		done := make(chan outcome, 1)
-		go func() {
-			s, e := c.WaitAttach(t.Context(), "0.9.0", func(v string) { statuses <- v })
-			done <- outcome{s, e}
-		}()
-		return done
-	}
-	done := wait()
-	if v := <-statuses; v != "absent" {
-		t.Fatal(v)
-	}
-	timer := clock.take(t, 5*time.Second)
-	first := server(t, path, fakeherdr.Options{})
-	timer.fire()
-	got := <-done
-	if got.err != nil || got.session.Version != "0.9.5" {
-		t.Fatalf("%+v", got)
-	}
-	if v := <-statuses; v != "attached" {
-		t.Fatal(v)
-	}
-	stream, err := c.Subscribe(t.Context(), []string{"pane.focused"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	first.DropSubscriptions()
-	_, err = stream.Next()
-	if !errors.Is(err, io.EOF) {
-		t.Fatalf("drop error = %v", err)
-	}
-	first.Close()
-	done = wait()
-	if v := <-statuses; v != "absent" {
-		t.Fatal(v)
-	}
-	timer = clock.take(t, 5*time.Second)
-	second := server(t, path, fakeherdr.Options{Version: "0.10.0"})
-	timer.fire()
-	got = <-done
-	if got.err != nil || got.session.Version != "0.10.0" {
-		t.Fatalf("reattach = %+v", got)
-	}
-	if v := <-statuses; v != "attached" {
-		t.Fatal(v)
-	}
-	records := second.Requests()
-	if len(records) != 2 || records[1].Method != "plugin.list" {
-		t.Fatal(records)
-	}
-	stream, err = c.Subscribe(t.Context(), []string{"pane.focused"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	stream.Close()
-}
-
-func TestWaitCancellationAndTerminalVersion(t *testing.T) {
-	t.Run("cancel retry", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(t.Context())
-		defer cancel()
-		clock := newClock()
-		c := client(socket(t), clock)
-		done := make(chan error, 1)
-		absent := make(chan struct{})
-		go func() {
-			_, err := c.WaitAttach(ctx, "0.9.0", func(string) { close(absent) })
-			done <- err
-		}()
-		<-absent // Ping has completed and stopped its timer before retry inspection.
-		timer := clock.take(t, 5*time.Second)
-		cancel()
-		if err := <-done; !errors.Is(err, context.Canceled) {
-			t.Fatal(err)
-		}
-		timer.mu.Lock()
-		active := timer.active
-		timer.mu.Unlock()
-		if active {
-			t.Fatal("retry timer not stopped")
-		}
-	})
-	t.Run("old is terminal", func(t *testing.T) {
-		path := socket(t)
-		s := server(t, path, fakeherdr.Options{Version: "0.8.2"})
-		var states []string
-		_, err := client(path, newClock()).WaitAttach(t.Context(), "0.9.0", func(v string) { states = append(states, v) })
-		named(t, err, "herdr_too_old")
-		if !reflect.DeepEqual(states, []string{"too_old"}) || len(s.Requests()) != 1 {
-			t.Fatalf("states=%v, requests=%v", states, s.Requests())
-		}
-	})
-}
-
-func TestEventsAndStreamErrors(t *testing.T) {
-	for _, mode := range []string{"eof", "error reply", "defensive id-less error", "cancel"} {
-		t.Run(mode, func(t *testing.T) {
-			path := socket(t)
-			s := server(t, path, fakeherdr.Options{})
-			ctx, cancel := context.WithCancel(t.Context())
-			defer cancel()
-			stream, err := client(path, newClock()).Subscribe(ctx, []string{"pane.focused", "pane.focused"})
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer stream.Close()
-			req := s.Requests()[0]
-			if len(req.Params["subscriptions"].([]any)) != 1 {
-				t.Fatal("names not deduplicated")
-			}
-			if err = s.Emit("pane_focused", map[string]any{"type": "pane_focused", "pane_id": "p", "workspace_id": "w"}); err != nil {
-				t.Fatal(err)
-			}
-			event, err := stream.Next()
-			if err != nil || event.Event != "pane_focused" || !strings.Contains(string(event.Data), `"pane_id":"p"`) {
-				t.Fatalf("event=%+v, err=%v", event, err)
-			}
-			switch mode {
-			case "eof":
-				s.DropSubscriptions()
-			case "cancel":
-				cancel()
-			default:
-				if err = s.FailSubscriptions("unavailable", "stream failed", mode == "error reply"); err != nil {
-					t.Fatal(err)
-				}
-			}
-			_, err = stream.Next()
-			switch mode {
-			case "eof":
-				if !errors.Is(err, io.EOF) {
-					t.Fatal(err)
-				}
-			case "cancel":
-				if !errors.Is(err, context.Canceled) {
-					t.Fatal(err)
-				}
-			default:
-				e := named(t, err, "unavailable")
-				if e.Message != "stream failed" {
-					t.Fatal(e)
-				}
-			}
-		})
 	}
 }
 

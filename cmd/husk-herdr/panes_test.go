@@ -42,11 +42,16 @@ type paneFrameHost struct {
 	content  contracts.ContentSink
 	observed map[protocol.SurfaceID]bool
 	records  []contracts.RuntimeSurface
+	invoked  bool
 }
 
 func (h *paneFrameHost) Update(msg any) bool {
 	handled := h.Looped.Update(msg)
 	fe := h.Frontend()
+	if !h.invoked && strings.Contains(string(fe.Snapshot().Slices["pane-fixture.state"].Value), `"server":"unchecked"`) {
+		h.invoked = true
+		fe.InvokeAction("pane-fixture.open", nil, protocol.CallerHost, nil, func(map[string]any, bool, error) {})
+	}
 	for _, r := range fe.RuntimeSurfaces() {
 		terminal := fe.TerminalView(r.Surface)
 		if !h.observed[r.Surface] && terminal != nil && terminal.Title() == "Ready" {
@@ -83,14 +88,14 @@ func TestPaneHostFrames(t *testing.T) {
 			if err = os.MkdirAll(config, 0700); err != nil {
 				t.Fatal(err)
 			}
-			if err = os.WriteFile(filepath.Join(config, "config.toml"), []byte(fmt.Sprintf("herdr_bin=%q\nhooks='always'\n", exe)), 0600); err != nil {
+			if err = os.WriteFile(filepath.Join(config, "config.toml"), []byte(fmt.Sprintf("herdr_bin=%q\n", exe)), 0600); err != nil {
 				t.Fatal(err)
 			}
 			dir := filepath.Join(root, "plugin")
 			if err = os.MkdirAll(dir, 0700); err != nil {
 				t.Fatal(err)
 			}
-			manifest := fmt.Sprintf("id='pane-fixture'\nname='Pane fixture'\nversion='1'\nmin_herdr_version='0.9.0'\n[[startup]]\ncommand=[%q,'pane-open']\n[[panes]]\nid='pane'\ntitle='Pane fixture'\nplacement=%q\nwidth='60%%'\nheight=16\ncommand=[%q,'pane-output']\n", exe, placement, exe)
+			manifest := fmt.Sprintf("id='pane-fixture'\nname='Pane fixture'\nversion='1'\nmin_herdr_version='0.9.0'\n[[actions]]\nid='open'\ntitle='Open'\ncommand=[%q,'pane-open']\n[[panes]]\nid='pane'\ntitle='Pane fixture'\nplacement=%q\nwidth='60%%'\nheight=16\ncommand=[%q,'pane-output']\n", exe, placement, exe)
 			if err = os.WriteFile(filepath.Join(dir, "herdr-plugin.toml"), []byte(manifest), 0600); err != nil {
 				t.Fatal(err)
 			}

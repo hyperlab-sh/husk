@@ -38,24 +38,10 @@ func TestMain(m *testing.M) {
 		case "detect", "discover", "convert", "run":
 			exe, _ := os.Executable()
 			os.Exit(execute(os.Args[1:], os.Stdout, os.Stderr, childEnvironment(exe)))
-		case "terminal-start-failure":
-			exe, _ := os.Executable()
-			o, err := runtimeOptions(os.Args[2], childEnvironment(exe))
-			if err == nil {
-				o.StartServer = func(context.Context) error { return os.ErrPermission }
-				err = shim.Run(context.Background(), o, os.Stdin, os.Stdout, os.Stderr)
-			}
-			os.Exit(reportRun(err, os.Stderr))
 		case "capture":
 			os.Exit(captureCommand())
 		case "pane-open":
 			os.Exit(openPaneFixture())
-		case "link-shim":
-			os.Exit(runLinkShim())
-		case "link-output":
-			fmt.Fprint(os.Stdout, "\x1b]8;;custom://handled\x1b\\LINK\x1b]8;;\x1b\\\r\nhttps://handled.test\r\nhttps://external.test\x1b]2;LinksReady\x07")
-			_, _ = io.Copy(io.Discard, os.Stdin)
-			os.Exit(0)
 		case "pane-output":
 			fmt.Fprint(os.Stdout, "\x1b[32mPANE OUTPUT\x1b[0m\x1b]2;Ready\x07")
 			_, _ = io.Copy(io.Discard, os.Stdin)
@@ -113,7 +99,7 @@ func TestRealHostConverterAndShim(t *testing.T) {
 	exe, _ := os.Executable()
 	adapterConfig := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "husk-herdr")
 	_ = os.MkdirAll(adapterConfig, 0700)
-	if err = os.WriteFile(filepath.Join(adapterConfig, "config.toml"), []byte(fmt.Sprintf("herdr_bin=%q\nhooks='auto'\n", exe)), 0600); err != nil {
+	if err = os.WriteFile(filepath.Join(adapterConfig, "config.toml"), []byte(fmt.Sprintf("herdr_bin=%q\n", exe)), 0600); err != nil {
 		t.Fatal(err)
 	}
 	capture, err := net.Listen("unix", filepath.Join(sockets, "capture.sock"))
@@ -177,8 +163,6 @@ func TestRealHostConverterAndShim(t *testing.T) {
 	loopDone := make(chan struct{})
 	ready := make(chan struct{})
 	var readyOnce sync.Once
-	toastReady := make(chan struct{})
-	var toastOnce sync.Once
 	cfg := contracts.Config{InstanceID: "adapter", RuntimeDir: runtimeDir, InstanceDocs: map[string]map[string]any{"config": {"husk": map[string]any{"plugins": map[string]any{"paths": dirs}}}}, Post: func(m any) bool {
 		select {
 		case <-stop:
@@ -207,13 +191,10 @@ func TestRealHostConverterAndShim(t *testing.T) {
 				} else {
 					r.Update(m)
 				}
-				if toast, ok := r.Frontend().ActiveToast(); ok && toast.Plugin == "sample-tools" && toast.Message == "From command\nVisible in Husk" {
-					toastOnce.Do(func() { close(toastReady) })
-				}
 				snap := r.Frontend().Snapshot()
 				attached := true
 				for _, id := range []string{"sample-tools", "sample.empty"} {
-					if !strings.Contains(string(snap.Slices[id+".state"].Value), `"server":"attached"`) {
+					if !strings.Contains(string(snap.Slices[id+".state"].Value), `"server":"unchecked"`) {
 						attached = false
 					}
 				}
@@ -287,16 +268,5 @@ func TestRealHostConverterAndShim(t *testing.T) {
 		}
 		_, _ = io.WriteString(got.conn, "x")
 		_ = got.conn.Close()
-	}
-	select {
-	case <-toastReady:
-	case <-time.After(10 * time.Second):
-		t.Fatal("proxy notification did not become a host toast")
-	}
-	snap := r.Frontend().Snapshot()
-	for _, id := range []string{"sample-tools", "sample.empty"} {
-		if !strings.Contains(string(snap.Slices[id+".state"].Value), `"hooks":"server"`) {
-			t.Fatalf("auto hooks were duplicated for %s", id)
-		}
 	}
 }

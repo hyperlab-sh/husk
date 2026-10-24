@@ -7,16 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
 	"testing"
 	"time"
 
-	"github.com/hyperlab-sh/husk/adapters/herdr/manifest"
-	"github.com/hyperlab-sh/husk/adapters/herdr/proxy"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
@@ -60,7 +56,7 @@ func TestPaneReviewInputQueueDoesNotKillBlockedProgram(t *testing.T) {
 		return p, nil
 	}
 	r.start(t)
-	r.host.until(t, protocol.MethodStateSet, "attached")
+	r.host.until(t, protocol.MethodStateSet, "")
 	if reply := r.invoke(t, "demo.pane-panel"); reply.Error != nil {
 		t.Fatal(reply.Error)
 	}
@@ -121,36 +117,6 @@ func TestPaneReviewInputByteCapAndWarningRate(t *testing.T) {
 	if remaining != 0 {
 		t.Fatal("newest overflow bytes were retained")
 	}
-}
-
-func TestPaneReviewStaleDuplicateReopens(t *testing.T) {
-	r, spawns := paneRig(t)
-	original := r.host.call
-	r.host.call = func(ctx context.Context, m string, p any) (json.RawMessage, error) {
-		if m == protocol.MethodSurfaceFocus {
-			return nil, &protocol.Error{Code: protocol.CodeNotFound, Message: "gone"}
-		}
-		return original(ctx, m, p)
-	}
-	r.start(t)
-	r.host.until(t, protocol.MethodStateSet, "attached")
-	first := r.invoke(t, "demo.pane-panel")
-	if first.Error != nil {
-		t.Fatal(first.Error)
-	}
-	old := take(t, spawns)
-	second := r.invoke(t, "demo.pane-panel")
-	if second.Error != nil {
-		t.Fatal(second.Error)
-	}
-	fresh := take(t, spawns)
-	if string(first.Result) == string(second.Result) || old.process == fresh.process {
-		t.Fatal("stale lifetime reused")
-	}
-	if take(t, old.process.signals) != syscall.SIGHUP || take(t, old.process.signals) != syscall.SIGTERM {
-		t.Fatal("stale PTY was not retired")
-	}
-	assertNoPaneClose(t, r.host) // focus already confirmed the old host lifetime gone
 }
 
 func TestPaneReviewStateCheckRetryAndHostCloseOrigin(t *testing.T) {
@@ -239,7 +205,7 @@ func TestPaneReviewEOFStopsPTYAndPendingAttach(t *testing.T) {
 				return original(ctx, m, p)
 			}
 			r.start(t)
-			r.host.until(t, protocol.MethodStateSet, "attached")
+			r.host.until(t, protocol.MethodStateSet, "")
 			var process *paneProcess
 			if mode == "running" {
 				if reply := r.invoke(t, "demo.pane-panel"); reply.Error != nil {
@@ -290,32 +256,6 @@ func TestPaneReviewEOFStopsPTYAndPendingAttach(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestPaneReviewCrossPluginControlLimit(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "plugins.json")
-	if err := os.WriteFile(path, []byte(`[{"plugin_id":"other","enabled":true}]`), 0600); err != nil {
-		t.Fatal(err)
-	}
-	h := &testHost{events: make(chan hostRecord, 8), invoke: func(context.Context, any) (json.RawMessage, error) {
-		return json.RawMessage(`{"type":"plugin_pane_opened","plugin_pane":{"plugin_id":"other","entrypoint":"panel","pane":{"pane_id":"husk:other.panel-1","terminal_id":"husk:other.panel-1","workspace_id":"w","tab_id":"t","focused":true,"agent_status":"idle","revision":0}}}`), nil
-	}}
-	r := &runner{m: manifest.Manifest{ID: "demo"}, o: Options{Host: h, RegistryPath: path, Platform: "linux"}}
-	result, failure, handled := r.intercept(context.Background(), proxy.Request{ID: "open", Method: "plugin.pane.open", Params: json.RawMessage(`{"plugin_id":"other","entrypoint":"panel","placement":"overlay"}`)})
-	if !handled || failure != nil {
-		t.Fatalf("cross-plugin open: %v %v", handled, failure)
-	}
-	if err := shape(t, "success_response").Validate(map[string]any{"id": "open", "result": result}); err != nil {
-		t.Fatal(err)
-	}
-	paneID := result.(map[string]any)["plugin_pane"].(map[string]any)["pane"].(map[string]any)["pane_id"]
-	params, _ := json.Marshal(map[string]any{"pane_id": paneID})
-	for _, method := range []string{"plugin.pane.focus", "plugin.pane.close"} {
-		_, failure, handled := r.intercept(context.Background(), proxy.Request{Method: method, Params: params})
-		if !handled || failure == nil || failure.Code != "not_found" {
-			t.Fatalf("%s foreign lifetime: %v %v", method, handled, failure)
-		}
 	}
 }
 

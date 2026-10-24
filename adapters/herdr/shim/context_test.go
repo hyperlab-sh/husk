@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/hyperlab-sh/husk/adapters/herdr/fakeherdr"
-	"github.com/hyperlab-sh/husk/adapters/herdr/upstream"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -45,9 +44,9 @@ func TestContextGoldensMatchCommittedSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	allowed := document["schemas"].(map[string]any)["request"].(map[string]any)["$defs"].(map[string]any)["PluginInvocationContext"].(map[string]any)["properties"].(map[string]any)
-	for _, tc := range []struct{ name, source, correlation, provided string }{{"api", "api", "request-1", ""}, {"startup", "startup", "plugin.startup", ""}, {"event", "api", "pane.focused", ""}, {"proxy", "api", "request-2", `{"invocation_source":"command_palette","correlation_id":"external","focused_pane_id":"provided","workspace_label":"","selected_text":"selection","workspace_id":null,"invented":"drop"}`}} {
+	for _, tc := range []struct{ name, source, correlation, provided string }{{"api", "api", "request-1", ""}, {"proxy", "api", "request-2", `{"invocation_source":"command_palette","correlation_id":"external","focused_pane_id":"provided","workspace_label":"","selected_text":"selection","workspace_id":null,"invented":"drop"}`}} {
 		t.Run(tc.name, func(t *testing.T) {
-			c, err := BuildContext(context.Background(), upstream.New(upstream.Options{Socket: r.o.Socket}), tc.correlation, tc.source, json.RawMessage(tc.provided))
+			c, err := BuildContext(context.Background(), r.o.Client, tc.correlation, tc.source, json.RawMessage(tc.provided))
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -29,31 +29,20 @@ type paneArgs struct {
 }
 
 type pane struct {
-	id               protocol.SurfaceID
-	entry, placement string
-	context          InvocationContext
-	title            string
-	mu               sync.Mutex
-	process          TerminalProcess
-	size             protocol.TerminalAttachResult
-	closed           bool
-	changed          chan struct{}
-	input            *paneInput
-	ctx              context.Context
-	cancel           context.CancelFunc
-	once             sync.Once
+	id        protocol.SurfaceID
+	placement string
+	mu        sync.Mutex
+	process   TerminalProcess
+	size      protocol.TerminalAttachResult
+	closed    bool
+	changed   chan struct{}
+	input     *paneInput
+	ctx       context.Context
+	cancel    context.CancelFunc
+	once      sync.Once
 }
 
-func (p *pane) result(kind, plugin string) map[string]any {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.placement == "popup" {
-		return map[string]any{"type": "ok"}
-	}
-	return map[string]any{"type": kind, "plugin_pane": map[string]any{"plugin_id": plugin, "entrypoint": p.entry, "pane": map[string]any{
-		"pane_id": "husk:" + string(p.id), "terminal_id": "husk:" + string(p.id), "workspace_id": p.context.WorkspaceID, "tab_id": p.context.TabID, "focused": true, "agent_status": "idle", "revision": 0, "title": p.title,
-	}}}
-}
+func (p *pane) result() map[string]any { return map[string]any{"type": "ok"} }
 
 func wireFailure(err error) *protocol.Error {
 	if err == nil {
@@ -70,7 +59,7 @@ func wireFailure(err error) *protocol.Error {
 }
 
 func (r *runner) openPane(ctx context.Context, entry string, args paneArgs, correlation string) (any, *protocol.Error) {
-	// Serialize admission and duplicate checks, but let cancellation pass the gate.
+	// Serialize surface admission, but let cancellation pass the gate.
 	select {
 	case r.paneGate <- struct{}{}:
 	case <-ctx.Done():
@@ -88,37 +77,8 @@ func (r *runner) openPane(ctx context.Context, entry string, args paneArgs, corr
 	if e == nil {
 		return nil, &protocol.Error{Code: protocol.CodeNotFound, Message: "unknown pane entrypoint"}
 	}
-	r.mu.Lock()
-	var existing *pane
-	for _, p := range r.panes {
-		if p.entry == e.ID {
-			existing = p
-			break
-		}
-	}
-	r.mu.Unlock()
-	if existing != nil {
-		_, err := r.o.Host.Call(ctx, protocol.MethodSurfaceFocus, protocol.SurfaceFocusParams{Surface: existing.id})
-		if err == nil {
-			return existing.result("plugin_pane_opened", r.m.ID), nil
-		}
-		var failure *protocol.Error
-		if !errors.As(err, &failure) || failure.Code != protocol.CodeNotFound {
-			return nil, wireFailure(err)
-		}
-		// Focus confirms this lifetime no longer exists in the host. Retire its
-		// process and local slot, then admit a fresh lifetime under the gate.
-		r.closePaneFrom(existing, true)
-	}
-	r.mu.Lock()
-	attached := r.state.Server == "attached"
-	count := len(r.panes)
-	r.mu.Unlock()
-	if !attached {
-		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "herdr server unavailable", Data: json.RawMessage(`{"reason":"herdr_absent"}`)}
-	}
-	if count >= 8 {
-		return nil, &protocol.Error{Code: protocol.CodeBusy, Message: "maximum terminal surfaces reached", Data: json.RawMessage(`{"reason":"too_many_surfaces"}`)}
+	if failure := r.checkServer(ctx); failure != nil {
+		return nil, failure
 	}
 	placement := args.Placement
 	if placement == "" {
@@ -164,7 +124,7 @@ func (r *runner) openPane(ctx context.Context, entry string, args paneArgs, corr
 		return nil, &protocol.Error{Code: protocol.CodeFailed, Message: "invalid surface.open reply"}
 	}
 	pctx, cancel := context.WithCancel(r.ctx)
-	p := &pane{id: opened.Surface, entry: e.ID, placement: placement, title: e.Title, changed: make(chan struct{}, 1), input: newPaneInput(), ctx: pctx, cancel: cancel}
+	p := &pane{id: opened.Surface, placement: placement, changed: make(chan struct{}, 1), input: newPaneInput(), ctx: pctx, cancel: cancel}
 	r.mu.Lock()
 	if r.stopping || r.ctx.Err() != nil {
 		r.mu.Unlock()
@@ -210,9 +170,6 @@ func (r *runner) openPane(ctx context.Context, entry string, args paneArgs, corr
 	if err != nil {
 		return nil, wireFailure(err)
 	}
-	p.mu.Lock()
-	p.context = c
-	p.mu.Unlock()
 	base := append([]string(nil), r.o.Env...)
 	for k, v := range args.Env {
 		base = append(base, k+"="+v)
@@ -246,13 +203,7 @@ func (r *runner) openPane(ctx context.Context, entry string, args paneArgs, corr
 		return nil, wireFailure(context.Canceled)
 	}
 	r.mu.Lock()
-	running := 0
-	for _, live := range r.processes {
-		if live {
-			running++
-		}
-	}
-	if r.stopping || running >= 32 {
+	if r.stopping || r.commands >= 32 {
 		r.mu.Unlock()
 		p.mu.Unlock()
 		return nil, &protocol.Error{Code: protocol.CodeBusy, Message: "maximum concurrent commands reached", Data: json.RawMessage(`{"reason":"too_many_commands"}`)}
@@ -264,6 +215,7 @@ func (r *runner) openPane(ctx context.Context, entry string, args paneArgs, corr
 		return nil, wireFailure(err)
 	}
 	p.process = process
+	r.commands++
 	r.processes[process] = true
 	r.children.Add(1)
 	r.mu.Unlock()
@@ -274,7 +226,7 @@ func (r *runner) openPane(ctx context.Context, entry string, args paneArgs, corr
 	})
 	go r.servePane(p, e.Command)
 	success = true
-	return p.result("plugin_pane_opened", r.m.ID), nil
+	return p.result(), nil
 }
 
 func (r *runner) closePane(p *pane) { r.closePaneFrom(p, false) }
@@ -377,6 +329,7 @@ func (r *runner) servePane(p *pane, argv []string) {
 	}()
 	status, stderr := process.Wait()
 	r.mu.Lock()
+	r.commands--
 	if groupAlive(process) {
 		r.processes[process] = false
 		r.observeGroup(process)
@@ -403,8 +356,6 @@ func (r *runner) servePane(p *pane, argv []string) {
 
 func (r *runner) paneNotification(m protocol.Message) {
 	switch m.Method {
-	case protocol.MethodTerminalLink:
-		r.linkNotification(m.Params)
 	case protocol.MethodTerminalInput:
 		var p protocol.TerminalInputParams
 		if json.Unmarshal(m.Params, &p) != nil {

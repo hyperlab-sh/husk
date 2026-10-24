@@ -144,7 +144,7 @@ func (s *Server) serve(c net.Conn) {
 		defer out.Unlock()
 		_ = json.NewEncoder(c).Encode(v)
 	}
-	absent := &Error{Code: "unavailable", Message: "herdr server unavailable"}
+	absent := &Error{Code: "unavailable", Message: "herdr server unavailable; start herdr and try again"}
 	stopped := make(chan struct{})
 	if up != nil {
 		defer up.Close()

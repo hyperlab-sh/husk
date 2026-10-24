@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -103,7 +102,7 @@ func TestPanePlacementsAndOpaqueTraffic(t *testing.T) {
 		t.Run(placement, func(t *testing.T) {
 			r, spawns := paneRig(t)
 			r.start(t)
-			r.host.until(t, protocol.MethodStateSet, "attached")
+			r.host.until(t, protocol.MethodStateSet, "")
 			reply := paneInvoke(t, r, map[string]any{"placement": placement, "width": "60%", "height": 15, "env": map[string]string{"EXTRA": "set"}})
 			if reply.Error != nil {
 				t.Fatal(reply.Error)
@@ -157,37 +156,31 @@ func TestPanePlacementsAndOpaqueTraffic(t *testing.T) {
 				t.Fatal("hidden canvas was killed")
 			default:
 			}
-			// A duplicate focuses the original, preserving the pane record and process.
-			again := paneInvoke(t, r, map[string]any{"placement": placement})
-			if again.Error != nil || string(again.Result) != string(reply.Result) {
-				t.Fatalf("duplicate changed lifetime: %s %s", reply.Result, again.Result)
+			if string(reply.Result) != `{"type":"ok"}` {
+				t.Fatalf("pane reply=%s", reply.Result)
 			}
-			r.host.until(t, protocol.MethodSurfaceFocus, "")
-			select {
-			case <-spawns:
-				t.Fatal("duplicate spawned another process")
-			default:
-			}
-			path := env["HERDR_SOCKET_PATH"]
-			if placement != "popup" {
-				focused := proxyCall(t, path, `{"id":"f","method":"plugin.pane.focus","params":{"pane_id":"husk:`+string(attached.Surface)+`"}}`+"\n")
-				if err := shape(t, "success_response").Validate(focused); err != nil {
-					t.Fatal(err)
-				}
-			}
-			method := "plugin.pane.close"
-			params := map[string]any{"pane_id": "husk:" + string(attached.Surface)}
 			if placement == "popup" {
-				method = "popup.close"
-				params = map[string]any{}
-			}
-			raw, _ := json.Marshal(map[string]any{"id": "close", "method": method, "params": params})
-			closed := proxyCall(t, path, string(raw)+"\n")
-			if err := shape(t, "success_response").Validate(closed); err != nil {
-				t.Fatal(err)
-			}
-			if take(t, p.signals) != syscall.SIGHUP || take(t, p.signals) != syscall.SIGTERM {
-				t.Fatal("close did not hang up and terminate group")
+				closed := proxyCall(t, env["HERDR_SOCKET_PATH"], "{\"id\":\"close\",\"method\":\"popup.close\",\"params\":{}}\n")
+				if closed["result"].(map[string]any)["type"] != "ok" {
+					t.Fatal(closed)
+				}
+				if take(t, p.signals) != syscall.SIGHUP || take(t, p.signals) != syscall.SIGTERM {
+					t.Fatal("popup close did not stop group")
+				}
+			} else {
+				again := paneInvoke(t, r, map[string]any{"placement": placement})
+				if again.Error != nil {
+					t.Fatal(again.Error)
+				}
+				fresh := take(t, spawns)
+				if fresh.process == p {
+					t.Fatal("reopen reused process")
+				}
+				var next protocol.SurfaceOpenParams
+				_ = json.Unmarshal(r.host.until(t, protocol.MethodSurfaceOpen, ""), &next)
+				if next.Name == opened.Name {
+					t.Fatal("reopen reused runtime name")
+				}
 			}
 		})
 	}
@@ -203,7 +196,7 @@ func TestPaneBusyRefusalStartsNoProcess(t *testing.T) {
 		return original(ctx, m, p)
 	}
 	r.start(t)
-	r.host.until(t, protocol.MethodStateSet, "attached")
+	r.host.until(t, protocol.MethodStateSet, "")
 	reply := paneInvoke(t, r, map[string]any{"placement": "popup"})
 	if reply.Error == nil || reply.Error.Code != protocol.CodeBusy {
 		t.Fatalf("Husk busy=%+v", reply)
@@ -244,7 +237,7 @@ func TestPaneExitHostCloseAndGrace(t *testing.T) {
 				return original(ctx, m, p)
 			}
 			r.start(t)
-			r.host.until(t, protocol.MethodStateSet, "attached")
+			r.host.until(t, protocol.MethodStateSet, "")
 			if reply := r.invoke(t, "demo.pane-panel"); reply.Error != nil {
 				t.Fatal(reply.Error)
 			}
@@ -302,7 +295,7 @@ func TestPaneInitialGeometryAndSpawnFailure(t *testing.T) {
 				return original(ctx, m, p)
 			}
 			r.start(t)
-			r.host.until(t, protocol.MethodStateSet, "attached")
+			r.host.until(t, protocol.MethodStateSet, "")
 			reply := make(chan protocol.Message, 1)
 			go func() { reply <- r.invoke(t, "demo.pane-panel") }()
 			if mode == "initial_geometry" {
@@ -326,55 +319,6 @@ func TestPaneInitialGeometryAndSpawnFailure(t *testing.T) {
 	}
 }
 
-func TestPaneLimits(t *testing.T) {
-	for _, limit := range []string{"surfaces", "commands"} {
-		t.Run(limit, func(t *testing.T) {
-			r, spawns := paneRig(t)
-			if limit == "surfaces" {
-				path := filepath.Join(r.o.Dir, "herdr-plugin.toml")
-				data, err := os.ReadFile(path)
-				if err != nil {
-					t.Fatal(err)
-				}
-				for i := range 9 {
-					data = append(data, []byte(fmt.Sprintf("\n[[panes]]\nid='p%d'\ntitle='Pane'\ncommand=['./pane']\n", i))...)
-				}
-				if err = os.WriteFile(path, data, 0600); err != nil {
-					t.Fatal(err)
-				}
-			}
-			r.start(t)
-			r.host.until(t, protocol.MethodStateSet, "attached")
-			if limit == "surfaces" {
-				for i := range 8 {
-					if reply := r.invoke(t, fmt.Sprintf("demo.pane-p%d", i)); reply.Error != nil {
-						t.Fatal(reply.Error)
-					}
-					take(t, spawns)
-				}
-				if reply := r.invoke(t, "demo.pane-p8"); reply.Error == nil || reply.Error.Code != protocol.CodeBusy {
-					t.Fatalf("ninth pane accepted: %+v", reply)
-				}
-			} else {
-				for range 32 {
-					if reply := r.invoke(t, "demo.go"); reply.Error != nil {
-						t.Fatal(reply.Error)
-					}
-					take(t, r.spawns)
-				}
-				if reply := r.invoke(t, "demo.pane-panel"); reply.Error == nil || reply.Error.Code != protocol.CodeBusy {
-					t.Fatalf("33rd command accepted: %+v", reply)
-				}
-			}
-			select {
-			case <-spawns:
-				t.Fatal("limit spawned another PTY")
-			default:
-			}
-		})
-	}
-}
-
 func TestPaneChunkBackpressure(t *testing.T) {
 	r, spawns := paneRig(t)
 	original := r.host.call
@@ -393,7 +337,7 @@ func TestPaneChunkBackpressure(t *testing.T) {
 		return original(ctx, m, p)
 	}
 	r.start(t)
-	r.host.until(t, protocol.MethodStateSet, "attached")
+	r.host.until(t, protocol.MethodStateSet, "")
 	if reply := r.invoke(t, "demo.pane-panel"); reply.Error != nil {
 		t.Fatal(reply.Error)
 	}
@@ -455,9 +399,5 @@ func TestPaneProxyRoutingAndFallback(t *testing.T) {
 		if _, _, handled := r.intercept(context.Background(), req); handled {
 			t.Fatalf("%s should forward", req.Method)
 		}
-	}
-	_, failure, handled = r.intercept(context.Background(), proxy.Request{Method: "plugin.pane.focus", Params: json.RawMessage(`{"pane_id":"husk:demo.closed"}`)})
-	if !handled || failure == nil || failure.Code != "not_found" {
-		t.Fatal("closed synthetic id reached upstream")
 	}
 }

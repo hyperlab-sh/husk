@@ -14,14 +14,13 @@ import (
 
 	"github.com/hyperlab-sh/husk/adapters/herdr/manifest"
 	"github.com/hyperlab-sh/husk/adapters/herdr/proxy"
-	"github.com/hyperlab-sh/husk/adapters/herdr/settings"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
 func TestActionStartsImmediatelyWithExactEnvironment(t *testing.T) {
 	r := newRig(t, "never", true, "")
 	r.start(t)
-	r.host.until(t, protocol.MethodStateSet, "attached")
+	r.host.until(t, protocol.MethodStateSet, "")
 	reply := r.invoke(t, "demo.go")
 	if reply.Error != nil {
 		t.Fatal(reply.Error)
@@ -78,115 +77,10 @@ func TestActionStartsImmediatelyWithExactEnvironment(t *testing.T) {
 	}
 }
 
-func TestHookPolicy(t *testing.T) {
-	for _, tc := range []struct {
-		policy  string
-		enabled bool
-		owner   string
-		run     bool
-	}{{"auto", true, "server", false}, {"auto", false, "shim", true}, {"always", true, "shim", true}, {"never", false, "never", false}} {
-		t.Run(tc.policy+"_"+tc.owner, func(t *testing.T) {
-			r := newRig(t, tc.policy, tc.enabled, "[[startup]]\ncommand=['./startup']\n[[events]]\non='pane.focused'\ncommand=['./event']\n")
-			r.start(t)
-			raw := r.host.until(t, protocol.MethodStateSet, "attached")
-			var published struct{ Value state }
-			_ = json.Unmarshal(raw, &published)
-			if published.Value.Hooks != tc.owner {
-				t.Fatalf("owner=%s", published.Value.Hooks)
-			}
-			subscriptions := 0
-			for _, req := range r.server.Requests() {
-				if req.Method == "events.subscribe" {
-					subscriptions++
-				}
-			}
-			want := 0
-			if tc.run {
-				want = 1
-			}
-			if subscriptions != want {
-				t.Fatalf("subscriptions=%d want %d", subscriptions, want)
-			}
-			if err := r.server.Emit("pane_focused", map[string]any{"type": "pane_focused", "pane_id": "p", "workspace_id": "w"}); err != nil {
-				t.Fatal(err)
-			}
-			if tc.run {
-				p := take(t, r.spawns)
-				env := envMap(p.command.Env)
-				if env["HERDR_PLUGIN_EVENT"] != "startup" {
-					t.Fatal(env)
-				}
-				p.process.done <- 0
-				event := take(t, r.spawns)
-				if event.command.Argv[0] != "./event" {
-					t.Fatal("missing event hook")
-				}
-				event.process.done <- 0
-				// EOF is a dispatch barrier: every match for the event must have
-				// finished launching before the attach loop can publish lost.
-				r.server.DropSubscriptions()
-				r.host.until(t, protocol.MethodStateSet, "lost")
-				r.clock.next(t, 5*time.Second)
-			} else {
-				// Drive a whole fake-clock monitoring window, then wait until the
-				// next ping is scheduled. Startup and subscription setup are done.
-				r.clock.fire(t, 5*time.Second)
-				r.clock.next(t, 5*time.Second)
-				reply := r.invoke(t, "demo.go")
-				if reply.Error != nil {
-					t.Fatal(reply.Error)
-				}
-				p := take(t, r.spawns)
-				if p.command.Argv[0] != "./command" {
-					t.Fatal("hook unexpectedly ran")
-				}
-				p.process.done <- 0
-			}
-			select {
-			case extra := <-r.spawns:
-				t.Fatalf("unexpected extra hook: %v", extra.command.Argv)
-			default:
-			}
-		})
-	}
-}
-
-func TestHooksReconnectAndEvents(t *testing.T) {
-	r := newRig(t, "auto", false, "[[startup]]\ncommand=['./startup']\n[[events]]\non='pane.focused'\ncommand=['./event']\n[[events]]\non='pane.output_matched'\ncommand=['./invalid']\n")
-	r.start(t)
-	r.host.until(t, protocol.MethodStateSet, "attached")
-	startup := take(t, r.spawns)
-	startup.process.done <- 0
-	if !strings.Contains(r.logs.String(), "invalid_subscription") {
-		t.Fatal("invalid subscription not logged")
-	}
-	if err := r.server.Emit("pane_focused", map[string]any{"type": "pane_focused", "pane_id": "p", "workspace_id": "w"}); err != nil {
-		t.Fatal(err)
-	}
-	event := take(t, r.spawns)
-	env := envMap(event.command.Env)
-	if env["HERDR_PLUGIN_EVENT"] != "pane.focused" || !strings.Contains(env["HERDR_PLUGIN_EVENT_JSON"], `"event":"pane_focused"`) {
-		t.Fatal("event name or event envelope is missing from command environment")
-	}
-	event.process.done <- 0
-	r.server.DropSubscriptions()
-	r.host.until(t, protocol.MethodStateSet, "lost")
-	r.clock.fire(t, 5*time.Second)
-	r.host.until(t, protocol.MethodStateSet, "attached")
-	if err := r.server.Emit("pane_focused", map[string]any{"type": "pane_focused", "pane_id": "p", "workspace_id": "w"}); err != nil {
-		t.Fatal(err)
-	}
-	again := take(t, r.spawns)
-	if again.command.Argv[0] != "./event" {
-		t.Fatal("startup reran against the same server identity")
-	}
-	again.process.done <- 0
-}
-
 func TestEOFStopsProcessGroupOnInjectedGrace(t *testing.T) {
 	r := newRig(t, "never", false, "")
 	r.start(t)
-	r.host.until(t, protocol.MethodStateSet, "attached")
+	r.host.until(t, protocol.MethodStateSet, "")
 	if reply := r.invoke(t, "demo.go"); reply.Error != nil {
 		t.Fatal(reply.Error)
 	}
@@ -201,42 +95,6 @@ func TestEOFStopsProcessGroupOnInjectedGrace(t *testing.T) {
 		t.Fatalf("second signal=%v", s)
 	}
 	// Cleanup consumes Run's result and checks that all workers join.
-}
-
-func TestProxyNotificationShapeAndTrims(t *testing.T) {
-	r := newRig(t, "never", true, "")
-	r.start(t)
-	r.host.until(t, protocol.MethodStateSet, "attached")
-	if reply := r.invoke(t, "demo.go"); reply.Error != nil {
-		t.Fatal(reply.Error)
-	}
-	p := take(t, r.spawns)
-	path := envMap(p.command.Env)["HERDR_SOCKET_PATH"]
-	result := proxyCall(t, path, "{\"id\":\"n\",\"method\":\"notification.show\",\"params\":{\"title\":\"Title\",\"body\":\"Body\"}}\n")
-	if err := shape(t, "success_response").Validate(result); err != nil {
-		t.Fatal(err)
-	}
-	answer := result["result"].(map[string]any)
-	if answer["type"] != "notification_show" || answer["shown"] != true || answer["reason"] != "shown" {
-		t.Fatal(result)
-	}
-	if raw := r.host.until(t, protocol.MethodToastShow, ""); !strings.Contains(string(raw), `Title\nBody`) {
-		t.Fatalf("notification=%s", raw)
-	}
-	request, _ := json.Marshal(map[string]any{"id": "trim", "method": "notification.show", "params": map[string]any{"title": strings.Repeat("界", 81), "body": strings.Repeat("é", 241)}})
-	_ = proxyCall(t, path, string(request)+"\n")
-	raw := r.host.until(t, protocol.MethodToastShow, "")
-	var trimmed struct{ Message string }
-	_ = json.Unmarshal(raw, &trimmed)
-	if trimmed.Message != strings.Repeat("界", 80)+"\n"+strings.Repeat("é", 240) {
-		t.Fatal("notification rune trims drifted")
-	}
-	for _, req := range r.server.Requests() {
-		if req.Method == "notification.show" {
-			t.Fatal("notification was forwarded upstream")
-		}
-	}
-	p.process.done <- 0
 }
 
 func TestRegistryRoutingAndNotFoundFallback(t *testing.T) {
@@ -286,7 +144,7 @@ func TestUnavailableAndTerminalAttachFailures(t *testing.T) {
 	r := newRig(t, "never", false, "")
 	r.server.Close()
 	r.start(t)
-	r.host.until(t, protocol.MethodStateSet, "absent")
+	r.host.until(t, protocol.MethodStateSet, "")
 	reply := r.invoke(t, "demo.go")
 	if reply.Error == nil || reply.Error.Code != protocol.CodeUnavailable || !strings.Contains(string(reply.Error.Data), "herdr_absent") {
 		t.Fatalf("absent=%+v", reply)
@@ -297,16 +155,9 @@ func TestSpawnFailureIsFailed(t *testing.T) {
 	r := newRig(t, "never", false, "")
 	r.o.Spawn = func(Command) (Process, error) { return nil, errors.New("spawn refused") }
 	r.start(t)
-	r.host.until(t, protocol.MethodStateSet, "attached")
+	r.host.until(t, protocol.MethodStateSet, "")
 	reply := r.invoke(t, "demo.go")
 	if reply.Error == nil || reply.Error.Code != protocol.CodeFailed || reply.Error.Message != "spawn refused" {
 		t.Fatalf("spawn=%+v", reply)
-	}
-}
-
-func TestPerPluginPolicyOverrides(t *testing.T) {
-	c := settings.Config{Hooks: "never", Plugins: map[string]settings.Plugin{"demo": {Hooks: "always"}}}
-	if c.HookOwner("demo", true) != "shim" || c.HookOwner("other", true) != "never" {
-		t.Fatal("per-plugin policy lost")
 	}
 }

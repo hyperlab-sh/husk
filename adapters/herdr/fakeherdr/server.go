@@ -4,11 +4,9 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"os"
-	"strings"
 	"sync"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -70,10 +68,8 @@ type Server struct {
 }
 
 type peer struct {
-	conn  net.Conn
-	mu    sync.Mutex
-	names map[string]bool // protected by Server.mu
-	id    string
+	conn net.Conn
+	mu   sync.Mutex
 }
 
 func (p *peer) write(v any) error {
@@ -254,28 +250,7 @@ func (s *Server) serve(p *peer) {
 				continue
 			}
 		}
-		if req.Method == "events.subscribe" {
-			// Serialize registration and ack with pushes, so Subscribe returning is a
-			// reliable barrier: no injected event can overtake its acknowledgement.
-			p.mu.Lock()
-			names := map[string]bool{}
-			if entries, ok := req.Params["subscriptions"].([]any); ok {
-				for _, entry := range entries {
-					if v, ok := entry.(map[string]any); ok {
-						name, _ := v["type"].(string)
-						names[name] = true
-					}
-				}
-			}
-			s.mu.Lock()
-			p.names = names
-			p.id = req.ID
-			s.mu.Unlock()
-			err = json.NewEncoder(p.conn).Encode(map[string]any{"id": req.ID, "result": result})
-			p.mu.Unlock()
-		} else {
-			err = p.write(map[string]any{"id": req.ID, "result": result})
-		}
+		err = p.write(map[string]any{"id": req.ID, "result": result})
 		if err != nil {
 			return
 		}
@@ -329,8 +304,6 @@ func (s *Server) respond(req Request) map[string]any {
 		r := s.catalog.result("tab_info")
 		r["tab"] = s.record("TabInfo", s.opts.Tab)
 		return r
-	case "events.subscribe":
-		return s.catalog.result("subscription_started")
 	case "notification.show":
 		r := s.catalog.result("notification_show")
 		r["shown"] = true
@@ -367,62 +340,4 @@ func (s *Server) Requests() []Request {
 		result[i] = cloneRequest(r)
 	}
 	return result
-}
-
-func (s *Server) subscribers() []*peer {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var peers []*peer
-	for p := range s.peers {
-		if p.names != nil {
-			peers = append(peers, p)
-		}
-	}
-	return peers
-}
-
-// Emit synchronously injects an event into matching subscriptions. Lifecycle
-// events use underscore envelope names and dotted subscription names; filtered
-// subscription events already carry dotted names. The payload stays opaque.
-// Callers must keep clients reading: injection is synchronous, and Close can
-// interrupt a blocked write. Every matching peer is attempted; errors are joined.
-func (s *Server) Emit(event string, data any) error {
-	var failures []error
-	for _, p := range s.subscribers() {
-		s.mu.Lock()
-		matches := p.names[event] || p.names[strings.Replace(event, "_", ".", 1)]
-		s.mu.Unlock()
-		if matches {
-			if err := p.write(map[string]any{"event": event, "data": data}); err != nil {
-				failures = append(failures, fmt.Errorf("emit: %w", err))
-			}
-		}
-	}
-	return errors.Join(failures...)
-}
-
-// DropSubscriptions simulates upstream EOF, without stopping the listener.
-func (s *Server) DropSubscriptions() {
-	for _, p := range s.subscribers() {
-		_ = p.conn.Close()
-	}
-}
-
-// FailSubscriptions injects schema-defined error replies when reply is true.
-// When false, it injects a defensive id-less error-body fixture, which is not
-// defined by the upstream schema. Both forms terminate a client's stream.
-// As with Emit, callers must keep clients reading or interrupt writes with Close.
-func (s *Server) FailSubscriptions(code, message string, reply bool) error {
-	for _, p := range s.subscribers() {
-		r := map[string]any{"error": map[string]string{"code": code, "message": message}}
-		if reply {
-			s.mu.Lock()
-			r["id"] = p.id
-			s.mu.Unlock()
-		}
-		if err := p.write(r); err != nil {
-			return err
-		}
-	}
-	return nil
 }

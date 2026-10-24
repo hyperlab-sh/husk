@@ -98,7 +98,7 @@ func TestExitedLeaderReleasesCommandCapWhileGroupIsTracked(t *testing.T) {
 		return original(c)
 	}
 	r.start(t)
-	r.host.until(t, protocol.MethodStateSet, "attached")
+	r.host.until(t, protocol.MethodStateSet, "")
 	for range 32 {
 		if reply := r.invoke(t, "demo.go"); reply.Error != nil {
 			t.Fatal(reply.Error)
@@ -106,7 +106,7 @@ func TestExitedLeaderReleasesCommandCapWhileGroupIsTracked(t *testing.T) {
 	}
 	for {
 		var s struct{ Value state }
-		_ = json.Unmarshal(r.host.until(t, protocol.MethodStateSet, "attached"), &s)
+		_ = json.Unmarshal(r.host.until(t, protocol.MethodStateSet, ""), &s)
 		if s.Value.Commands == 32 {
 			break
 		}
@@ -114,7 +114,7 @@ func TestExitedLeaderReleasesCommandCapWhileGroupIsTracked(t *testing.T) {
 	group.done <- 0
 	for {
 		var s struct{ Value state }
-		_ = json.Unmarshal(r.host.until(t, protocol.MethodStateSet, "attached"), &s)
+		_ = json.Unmarshal(r.host.until(t, protocol.MethodStateSet, ""), &s)
 		if s.Value.Commands == 31 {
 			break
 		}

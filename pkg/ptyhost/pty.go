@@ -11,6 +11,8 @@ import (
 type Options struct {
 	Width, Height int
 	Env           []string
+	// Dir selects the child's working directory; empty inherits the caller's.
+	Dir string
 	// StopGrace defaults to 500 ms. After is injectable for deterministic tests.
 	StopGrace time.Duration
 	After     func(time.Duration) <-chan time.Time

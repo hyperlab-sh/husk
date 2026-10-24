@@ -16,13 +16,10 @@ func (r *runner) intercept(ctx context.Context, req proxy.Request) (any, *proxy.
 	var p struct {
 		Plugin  string          `json:"plugin_id"`
 		Action  string          `json:"action_id"`
-		Pane    string          `json:"pane_id"`
-		Title   string          `json:"title"`
-		Body    string          `json:"body"`
 		Context json.RawMessage `json:"context"`
 	}
 	switch req.Method {
-	case "plugin.pane.open", "plugin.pane.focus", "plugin.pane.close", "popup.close", "notification.show", "plugin.action.invoke":
+	case "plugin.pane.open", "popup.close", "plugin.action.invoke":
 	default:
 		return nil, nil, false
 	}
@@ -30,28 +27,8 @@ func (r *runner) intercept(ctx context.Context, req proxy.Request) (any, *proxy.
 		return nil, &proxy.Error{Code: "invalid_params", Message: "invalid request params"}, true
 	}
 	switch req.Method {
-	case "plugin.pane.open", "plugin.pane.focus", "plugin.pane.close", "popup.close":
+	case "plugin.pane.open", "popup.close":
 		return r.interceptPane(ctx, req)
-	case "notification.show":
-		trim := func(s string, n int) string {
-			v := []rune(strings.TrimSpace(s))
-			if len(v) > n {
-				v = v[:n]
-			}
-			return string(v)
-		}
-		title, body := trim(p.Title, 80), trim(p.Body, 240)
-		message := title
-		if body != "" {
-			if message != "" {
-				message += "\n"
-			}
-			message += body
-		}
-		if err := r.o.Host.Notify(ctx, protocol.MethodToastShow, map[string]any{"message": message, "level": "info"}); err != nil {
-			return nil, &proxy.Error{Code: "unavailable", Message: err.Error()}, true
-		}
-		return map[string]any{"type": "notification_show", "shown": true, "reason": "shown"}, nil, true
 	case "plugin.action.invoke":
 		plugin, action := p.Plugin, p.Action
 		if plugin == "" {

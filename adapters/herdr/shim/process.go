@@ -30,7 +30,9 @@ func Spawn(c Command) (Process, error) {
 	}
 	cmd := exec.Command(c.Argv[0], c.Argv[1:]...)
 	cmd.Env, cmd.Dir = c.Env, c.Dir
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := configureProcessGroup(cmd); err != nil {
+		return nil, err
+	}
 	tail := &tailBuffer{}
 	cmd.Stderr = tail
 	// A descendant can retain stderr after its leader exits. Bound exec's copy
@@ -67,7 +69,7 @@ func (p *process) groupAlive() bool {
 		return false
 	}
 	if p.groupSignal == nil {
-		p.groupSignal = syscall.Kill
+		p.groupSignal = signalProcessGroup
 	}
 	if p.groupSignal(-p.PID(), 0) == syscall.ESRCH {
 		p.groupEmpty = true
