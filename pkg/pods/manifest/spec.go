@@ -3,6 +3,7 @@
 package manifest
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -41,6 +42,10 @@ type Spec struct {
 	// SubscriptionProblems records subscriptions dropped at conversion; they
 	// are served beside the binding problems in the declared keymap document.
 	SubscriptionProblems []BindingProblem `json:"subscription_problems,omitempty"`
+	// Vendor retains opaque x- objects for the declared catalog only.
+	Vendor map[string]json.RawMessage `json:"-"`
+	// Problems contains external converter diagnostics in the declared catalog.
+	Problems []Warning `json:"problems,omitempty"`
 	// Dir is the resolved plugin source directory, empty for command lines.
 	Dir string `json:"dir"`
 }

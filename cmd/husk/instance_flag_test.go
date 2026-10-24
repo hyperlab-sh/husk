@@ -12,6 +12,12 @@ import (
 // TestMain lets a test re-execute this binary as the husk command: with
 // HUSK_TEST_RUN_MAIN set it runs main() on the given arguments and exits.
 func TestMain(m *testing.M) {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "detect", "convert", "discover", "converter-action-list":
+			os.Exit(execConverterTestRole(os.Args[1:]))
+		}
+	}
 	if os.Getenv("HUSK_TEST_RUN_MAIN") == "1" {
 		main()
 		os.Exit(0)

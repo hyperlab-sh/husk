@@ -2,6 +2,7 @@ package manifest
 
 import (
 	"bytes"
+	"encoding/json"
 	"slices"
 )
 
@@ -13,6 +14,14 @@ func clonePtr[T any](p *T) *T {
 	return &v
 }
 func cloneSpec(s Spec) Spec {
+	if s.Vendor != nil {
+		vendor := make(map[string]json.RawMessage, len(s.Vendor))
+		for key, value := range s.Vendor {
+			vendor[key] = bytes.Clone(value)
+		}
+		s.Vendor = vendor
+	}
+	s.Problems = slices.Clone(s.Problems)
 	s.Command = slices.Clone(s.Command)
 	s.Actions = slices.Clone(s.Actions)
 	for i := range s.Actions {

@@ -23,6 +23,7 @@ type options struct {
 	factory         pods.Factory
 	modifiers       func() protocol.ModifierState
 	pluginAdditions map[string][]string
+	converters      []string
 
 	// Test seams.
 	catalogReader catalog.Reader
@@ -71,6 +72,11 @@ func WithPrompt(fn func(ctx context.Context, p secrets.Prompt) secrets.Answer) O
 // flags remain in the instance documents instead.
 func WithPluginAdditions(additions map[string][]string) Option {
 	return func(o *options) { o.pluginAdditions = additions }
+}
+
+// WithConverters registers executable converters in flag order, before settings.
+func WithConverters(paths []string) Option {
+	return func(o *options) { o.converters = append([]string(nil), paths...) }
 }
 
 // WithFactory replaces the process Wrapper factory (fake plugins in tests).

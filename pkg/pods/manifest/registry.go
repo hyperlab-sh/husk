@@ -22,8 +22,10 @@ type Source struct {
 
 // Warning is a nonfatal conversion diagnostic, with a zero-based entry index.
 type Warning struct {
-	Code, Field, Message string
-	Index                int
+	Code    string `json:"code"`
+	Field   string `json:"field,omitempty"`
+	Message string `json:"message"`
+	Index   int    `json:"index,omitempty"`
 }
 
 // Converter claims a directory and converts only its captured input.
