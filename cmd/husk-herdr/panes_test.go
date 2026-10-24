@@ -74,13 +74,7 @@ func TestPaneHostFrames(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer os.RemoveAll(sockets)
-			fake, err := fakeherdr.Start(filepath.Join(sockets, "u.sock"), fakeherdr.Options{})
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer fake.Close()
-			t.Setenv("HERDR_ENV", "1")
-			t.Setenv("HERDR_SOCKET_PATH", filepath.Join(sockets, "u.sock"))
+			fakeUpstream(t, filepath.Join(sockets, "u.sock"), fakeherdr.Options{})
 			exe, err := os.Executable()
 			if err != nil {
 				t.Fatal(err)

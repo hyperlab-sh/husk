@@ -232,14 +232,16 @@ func TestPaneExitHostCloseAndGrace(t *testing.T) {
 	for _, mode := range []string{"exit", "host_close", "write_refused"} {
 		t.Run(mode, func(t *testing.T) {
 			r, spawns := paneRig(t)
-			if mode == "write_refused" {
-				original := r.host.call
-				r.host.call = func(ctx context.Context, m string, p any) (json.RawMessage, error) {
-					if m == protocol.MethodTerminalWrite {
-						return nil, errors.New("surface gone")
-					}
-					return original(ctx, m, p)
+			checking := make(chan context.Context, 1)
+			original := r.host.call
+			r.host.call = func(ctx context.Context, m string, p any) (json.RawMessage, error) {
+				if mode == "host_close" && m == protocol.MethodStateGet {
+					checking <- ctx
 				}
+				if mode == "write_refused" && m == protocol.MethodTerminalWrite {
+					return nil, errors.New("surface gone")
+				}
+				return original(ctx, m, p)
 			}
 			r.start(t)
 			r.host.until(t, protocol.MethodStateSet, "attached")
@@ -266,6 +268,10 @@ func TestPaneExitHostCloseAndGrace(t *testing.T) {
 				t.Fatal("group not stopped")
 			}
 			if mode == "host_close" {
+				// Finish the lifetime check first: its deadline and the kill grace
+				// share a duration, but only the kill timer should still be active.
+				checkCtx := take(t, checking)
+				take(t, checkCtx.Done())
 				r.clock.fire(t, 2*time.Second)
 				if take(t, p.signals) != syscall.SIGKILL {
 					t.Fatal("grace did not kill group")
