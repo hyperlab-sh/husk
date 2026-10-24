@@ -19,7 +19,7 @@ func TestStartLockReprobesBeforeLaunchingOneServer(t *testing.T) {
 	o := r.o
 	o.Env = append(o.Env, "XDG_STATE_HOME="+t.TempDir())
 	o.Settings.Session = "named"
-	o.Client = upstream.New(upstream.Options{Socket: o.Socket, Clock: o.Clock})
+	o.Client = upstream.New(upstream.Options{Socket: o.Socket, Clock: o.Clock, Dial: guardedDial(t, o.Socket)})
 	entered, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once
 	defer once.Do(func() { close(release) })

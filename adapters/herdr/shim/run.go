@@ -74,6 +74,7 @@ type runner struct {
 	children    sync.WaitGroup
 	proxy       *proxy.Server
 	lastDrop    time.Time
+	dropLogged  bool
 	groupTimers map[Process]upstream.Timer
 	panes       map[protocol.SurfaceID]*pane
 	paneGate    chan struct{}
@@ -471,9 +472,10 @@ func (r *runner) launch(e manifest.Entry, action, event string, eventJSON json.R
 	}
 	if running >= 32 {
 		now := r.o.Now()
-		log := r.lastDrop.IsZero() || now.Sub(r.lastDrop) >= time.Second
+		log := !r.dropLogged || now.Sub(r.lastDrop) >= time.Second
 		if log {
 			r.lastDrop = now
+			r.dropLogged = true
 		}
 		r.mu.Unlock()
 		if log {
