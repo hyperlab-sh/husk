@@ -22,7 +22,7 @@ func TestRound3ActionArgsOnlyValidatePaneFields(t *testing.T) {
 				t.Run(tc.name, func(t *testing.T) {
 					r := newRig(t, "never", false, "")
 					r.start(t)
-					r.host.until(t, protocol.MethodStateSet, "attached")
+					r.host.until(t, protocol.MethodStateSet, "")
 					action := "demo.go"
 					if scope == "pane" {
 						action = "demo.pane-panel"
@@ -94,7 +94,7 @@ func TestRound3ProxyOpenHasOverallDeadline(t *testing.T) {
 				return original(ctx, method, params)
 			}
 			r.start(t)
-			r.host.until(t, protocol.MethodStateSet, "attached")
+			r.host.until(t, protocol.MethodStateSet, "")
 			if reply := r.invoke(t, "demo.go"); reply.Error != nil {
 				t.Fatal(reply.Error)
 			}

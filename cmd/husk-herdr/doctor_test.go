@@ -12,7 +12,7 @@ import (
 	"github.com/hyperlab-sh/husk/adapters/herdr/fakeherdr"
 )
 
-func TestDoctorUsesFakeServerAndReportsHookDecision(t *testing.T) {
+func TestDoctorUsesFakeServerAndReportsRegistry(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("HOME", root)
 	t.Setenv("XDG_CONFIG_HOME", root)
@@ -35,7 +35,7 @@ func TestDoctorUsesFakeServerAndReportsHookDecision(t *testing.T) {
 		t.Fatalf("doctor=%d: %s", code, &errout)
 	}
 	text := out.String()
-	for _, want := range []string{"version: 0.9.5", "registry_enabled=true server_enabled=true hooks=server", "manual check:", "instance: unavailable"} {
+	for _, want := range []string{"version: 0.9.5", "registry_enabled=true", "manual check:", "instance: unavailable"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %s in %s", want, text)
 		}

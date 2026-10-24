@@ -27,7 +27,7 @@ func doctor(args []string, out, diagnostics io.Writer, env environment) int {
 		return 1
 	}
 	fmt.Fprintf(out, "binary: %s\nsocket: %s\n", o.Binary, o.Socket)
-	session, err := upstream.New(upstream.Options{Socket: o.Socket, Dial: env.upstreamDial}).Attach(context.Background(), "0.9.0")
+	version, err := upstream.New(upstream.Options{Socket: o.Socket, Dial: env.upstreamDial}).Check(context.Background(), "0.9.0")
 	result := 0
 	if err != nil {
 		status := "absent"
@@ -37,20 +37,9 @@ func doctor(args []string, out, diagnostics io.Writer, env environment) int {
 		}
 		fmt.Fprintf(out, "server: %s (%v)\n", status, err)
 	} else {
-		fmt.Fprintf(out, "version: %s\n", session.Version)
+		fmt.Fprintf(out, "version: %s\n", version)
 	}
 	fmt.Fprintf(out, "registry: %s\n", env.registryPath)
-	enabled := map[string]bool{}
-	var plugins []struct {
-		ID      string `json:"plugin_id"`
-		Enabled bool   `json:"enabled"`
-	}
-	if session != nil {
-		_ = json.Unmarshal(session.Plugins, &plugins)
-	}
-	for _, p := range plugins {
-		enabled[p.ID] = p.Enabled
-	}
 	records, problems := registry.Read(env.registryPath)
 	for _, p := range problems {
 		fmt.Fprintln(out, p.Message)
@@ -66,15 +55,12 @@ func doctor(args []string, out, diagnostics io.Writer, env environment) int {
 		if !manifest.Supports(rec.Platforms, env.platform) {
 			continue
 		}
-		fmt.Fprintf(out, "plugin %s: registry_enabled=%t server_enabled=%t hooks=%s\n", rec.ID, rec.Enabled, enabled[rec.ID], o.Settings.HookOwner(rec.ID, enabled[rec.ID]))
+		fmt.Fprintf(out, "plugin %s: registry_enabled=%t\n", rec.ID, rec.Enabled)
 		fmt.Fprintf(out, "plugin %s root: %s\n", rec.ID, rec.Root)
 		id, _ := manifest.MapID(rec.ID)
 		if len(mapped[id]) > 1 {
 			fmt.Fprintf(out, "duplicate id %s: %s\n", id, strings.Join(mapped[id], ", "))
 		}
-	}
-	if o.Settings.Server == "start" && o.Settings.Session != "" {
-		fmt.Fprintln(out, "warning: a separate session runs enabled startup/event hooks again; daemon hooks can be duplicated")
 	}
 	root, _ := upstream.ConfigDir(env.platform, env.value, env.homeDir())
 	config := env.value("HERDR_CONFIG_PATH")
@@ -133,6 +119,6 @@ func doctor(args []string, out, diagnostics io.Writer, env environment) int {
 			}
 		}
 	}
-	fmt.Fprintln(out, "manual check: compare the attached session, hook owner and action bindings before invoking plugin commands")
+	fmt.Fprintln(out, "manual check: compare the selected session and action bindings before invoking plugin commands")
 	return result
 }

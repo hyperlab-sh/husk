@@ -16,7 +16,11 @@ func paneIOHelper() int {
 	if err != nil {
 		return 2
 	}
-	fmt.Printf("\x1b[31mready\x1b[0m size=%dx%d\n", size.Cols, size.Rows)
+	cwd, err := os.Getwd()
+	if err != nil {
+		return 5
+	}
+	fmt.Printf("\x1b[31mready\x1b[0m size=%dx%d cwd=%s\n", size.Cols, size.Rows, cwd)
 	input, err := bufio.NewReader(os.Stdin).ReadString('\n')
 	if err != nil {
 		return 3
@@ -34,13 +38,14 @@ func TestPaneRealPTYInputResizeAndExit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := SpawnTerminal(Command{Argv: []string{exe, "--pane-io"}, Env: []string{"GORACE=atexit_sleep_ms=0"}}, 41, 9)
+	dir := t.TempDir()
+	p, err := SpawnTerminal(Command{Argv: []string{exe, "--pane-io"}, Dir: dir, Env: []string{"GORACE=atexit_sleep_ms=0"}}, 41, 9)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer p.Close()
 	defer p.Signal(syscall.SIGKILL)
-	if pgid, err := syscall.Getpgid(p.PID()); err != nil || pgid != p.PID() {
+	if !groupAlive(p) {
 		t.Fatal("PTY leader has no independent process group")
 	}
 	chunks := make(chan string, 16)
@@ -67,6 +72,9 @@ func TestPaneRealPTYInputResizeAndExit(t *testing.T) {
 	}
 	if !strings.Contains(output, "\x1b[31mready\x1b[0m") {
 		t.Fatal("scripted ANSI bytes lost")
+	}
+	if !strings.Contains(output, "cwd="+dir+"\r\n") {
+		t.Fatalf("PTY cwd not preserved: %q", output)
 	}
 	if err = p.Resize(73, 19); err != nil {
 		t.Fatal(err)

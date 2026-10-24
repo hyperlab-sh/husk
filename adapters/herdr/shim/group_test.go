@@ -31,13 +31,13 @@ func TestEOFStopsDescendantsAfterLeaderExit(t *testing.T) {
 	group := &descendantGroup{testProcess: &testProcess{pid: 42, done: make(chan int, 1), signals: make(chan syscall.Signal, 4)}, alive: true}
 	r.o.Spawn = func(Command) (Process, error) { return group, nil }
 	r.start(t)
-	r.host.until(t, protocol.MethodStateSet, "attached")
+	r.host.until(t, protocol.MethodStateSet, "")
 	if reply := r.invoke(t, "demo.go"); reply.Error != nil {
 		t.Fatal(reply.Error)
 	}
 	group.done <- 0
 	for {
-		raw := r.host.until(t, protocol.MethodStateSet, "attached")
+		raw := r.host.until(t, protocol.MethodStateSet, "")
 		var v struct{ Value state }
 		_ = json.Unmarshal(raw, &v)
 		if v.Value.Commands == 0 {

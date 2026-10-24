@@ -134,7 +134,7 @@ func TestAdapterConfig(t *testing.T) {
 	for _, tc := range []struct {
 		name, data string
 		valid      bool
-	}{{"missing", "", true}, {"valid", "server='attach'\nhooks='auto'\n[plugins.'sample:tool']\nhooks='never'", true}, {"syntax", "server=[", false}, {"type", "hooks=1", false}, {"server", "server='stop'", false}, {"hooks", "hooks='sometimes'", false}, {"plugin", "[plugins.sample]\nhooks='sometimes'", false}, {"binary", "herdr_bin='relative'", false}} {
+	}{{"missing", "", true}, {"valid", "session='review'", true}, {"syntax", "session=[", false}, {"type", "session=1", false}, {"binary", "herdr_bin='relative'", false}} {
 		t.Run(tc.name, func(t *testing.T) {
 			env, dir := testEnv(t)
 			if tc.name != "missing" {

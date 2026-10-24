@@ -93,20 +93,6 @@
     "startup": [],
     "events": [
       "pane.focused"
-    ],
-    "link_handlers": [
-      {
-        "id": "issue",
-        "title": "Inspect issue",
-        "pattern": "^https://example\\.invalid/issues/[0-9]+$",
-        "action": "notify"
-      },
-      {
-        "id": "fallback",
-        "title": "Inspect other link",
-        "pattern": "^https?://",
-        "action": "notify"
-      }
     ]
   }
 }

@@ -21,7 +21,6 @@
     "actions": [],
     "panes": [],
     "startup": [],
-    "events": [],
-    "link_handlers": []
+    "events": []
   }
 }

@@ -18,7 +18,7 @@ import (
 )
 
 func TestTerminalAttachFailuresUseCoreExitReporting(t *testing.T) {
-	for _, mode := range []string{"binary", "start", "minimum", "floor", "ping", "plugin.list", "events.subscribe"} {
+	for _, mode := range []string{"binary"} {
 		t.Run(mode, func(t *testing.T) {
 			root := t.TempDir()
 			for k, part := range map[string]string{"HOME": "home", "XDG_CONFIG_HOME": "config", "XDG_STATE_HOME": "state", "XDG_DATA_HOME": "storage"} {
@@ -31,29 +31,9 @@ func TestTerminalAttachFailuresUseCoreExitReporting(t *testing.T) {
 			}
 			defer os.RemoveAll(sockets)
 			options := fakeherdr.Options{}
-			want := "herdr_protocol: " + mode
+			want := "herdr binary not found"
 			minimum := "0.9.0"
-			switch mode {
-			case "binary":
-				want = "herdr binary not found"
-			case "start":
-				want = "herdr server did not start"
-			case "minimum":
-				minimum, want = "0.10.0", "herdr_too_old: needs 0.10.0, server is 0.9.5"
-			case "floor":
-				minimum, options.Version, want = "0.8.0", "0.8.2", "herdr_too_old: needs 0.9.0, server is 0.8.2"
-			default:
-				options.Reply = func(req fakeherdr.Request, result map[string]any) *fakeherdr.ReplyError {
-					if req.Method == mode {
-						result["type"] = "malformed_fixture"
-					}
-					return nil
-				}
-			}
-			server := fakeUpstream(t, filepath.Join(sockets, "u.sock"), options)
-			if mode == "start" {
-				server.Close() // Absence at the allowlisted fixture socket only.
-			}
+			fakeUpstream(t, filepath.Join(sockets, "u.sock"), options)
 			exe, _ := os.Executable()
 			binary := exe
 			if mode == "binary" {
@@ -63,10 +43,7 @@ func TestTerminalAttachFailuresUseCoreExitReporting(t *testing.T) {
 			if err := os.MkdirAll(filepath.Dir(env.configPath), 0700); err != nil {
 				t.Fatal(err)
 			}
-			settings := fmt.Sprintf("herdr_bin=%q\nhooks='always'\n", binary)
-			if mode == "start" {
-				settings += "server='start'\n"
-			}
+			settings := fmt.Sprintf("herdr_bin=%q\n", binary)
 			if err := os.WriteFile(env.configPath, []byte(settings), 0600); err != nil {
 				t.Fatal(err)
 			}
@@ -85,9 +62,6 @@ func TestTerminalAttachFailuresUseCoreExitReporting(t *testing.T) {
 			var doc map[string]any
 			if err := json.Unmarshal(converted.Bytes(), &doc); err != nil {
 				t.Fatal(err)
-			}
-			if mode == "start" {
-				doc["command"] = []string{exe, "terminal-start-failure", plugin}
 			}
 			raw, _ := json.Marshal(doc)
 			native := filepath.Join(plugin, "husk-plugin.json")
