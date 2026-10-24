@@ -394,7 +394,9 @@ The host hard-codes no workbench key. The embedded file reproduces today's keys 
 }
 ```
 
-Host actions: `husk.quit`, `husk.home`, `husk.palette.open`, `husk.hotspots.toggle_stage`, `husk.hotspots.badges`, `husk.sidebar.toggle`, `husk.sidepanel.toggle`, `husk.docks.cycle`, `husk.layout.reset`, `husk.sidebar.narrower`, `husk.sidebar.wider`, `husk.focus.next`, `husk.modifiers.toggle_alt_latch`, `husk.modal.close`, `husk.capture.release`. The set is closed by this file; adding a host key means adding an entry here and a catalog entry in the frontend.
+Host actions: `husk.quit`, `husk.home`, `husk.palette.open`, `husk.hotspots.toggle_stage`, `husk.hotspots.badges`, `husk.sidebar.toggle`, `husk.sidepanel.toggle`, `husk.docks.cycle`, `husk.layout.reset`, `husk.sidebar.narrower`, `husk.sidebar.wider`, `husk.focus.next`, `husk.modifiers.toggle_alt_latch`, `husk.modal.close`, `husk.capture.release`, `husk.surfaces.restore`. The set is closed by this file; adding a host key means adding an entry here and a catalog entry in the frontend.
+
+With runtime surfaces, `husk.surfaces.restore` re-shows and focuses the top of the hidden runtime canvas stack ([State](state.md), "Runtime and terminal surfaces"). It has no default binding. Its palette row exists only while a hidden stack exists; otherwise the action is a no-op.
 
 Landed in 2.5: with "Capture modes" the file gains `{"key": "ctrl+]", "action": "husk.capture.release"}` after the `husk.modal.close` entry, and `husk.capture.release` joins the host actions. It is appended, not inserted, so `KeysFor` order for every existing action is unchanged.
 
