@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/hyperlab-sh/husk/internal/substrate/store"
+	"github.com/hyperlab-sh/husk/pkg/substrate/store"
 )
 
 // CleanLayers removes all spellings of duplicated settings from detached layer
