@@ -103,6 +103,7 @@ func TestSettingsProfileMouseScrolledRows(t *testing.T) {
 			for i := range 40 {
 				fe.ProfileRows = append(fe.ProfileRows, contracts.ProfileInfo{Name: fmt.Sprintf("profile%02d", i), Source: "user", Active: i == 0})
 			}
+			fe.ServiceRev++
 			m.settle()
 			m.openSettingsProfiles()
 			m.settle()
@@ -179,6 +180,7 @@ func TestSettingsProfileSelectRebuildsOnReload(t *testing.T) {
 				fe.ProfileRows = append(fe.ProfileRows, contracts.ProfileInfo{Name: "home", Source: "user"})
 				want, wantNames = "home", []string{"", "home", "new", "work"}
 			}
+			fe.ServiceRev++
 			m.settle()
 			if m.settings.profileForm == nil || m.settings.profileForm == oldForm || m.settings.profileChoice != want || !reflect.DeepEqual(m.settings.profileNames, wantNames) || !strings.Contains(ansi.Strip(m.settings.profileView), "new") {
 				t.Fatalf("reload did not rebuild and retain/fallback choice: %+v", m.settings)
@@ -211,13 +213,14 @@ func TestSettingsRefreshOncePerSettle(t *testing.T) {
 	m.fe = counter
 	m.attachSlices()
 	m.served = theme.Palette{} // force more than one stabilization pass
+	fe.ServiceRev++
 	m.settle()
 	if counter.themes != 1 || counter.profiles != 1 {
 		t.Fatalf("one settle read themes %d and profiles %d times", counter.themes, counter.profiles)
 	}
 	counter.themes, counter.profiles = 0, 0
 	m.Update(tea.MouseMotionMsg{X: 20, Y: 20})
-	if counter.themes != 1 || counter.profiles != 1 {
+	if counter.themes != 0 || counter.profiles != 0 {
 		t.Fatalf("mouse motion read themes %d and profiles %d times", counter.themes, counter.profiles)
 	}
 }

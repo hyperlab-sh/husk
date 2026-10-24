@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"image"
 	"maps"
-	"reflect"
 	"slices"
 	"strings"
 
@@ -43,6 +42,8 @@ type settingsCenter struct {
 	profileNames     []string
 	profileTop       int
 	profileView      string // huh rendering is cached on Update; View remains pure
+	profileSize      image.Point
+	profileDirty     bool
 	styled           protocol.Palette
 	indices          map[string]int
 	general          *settingsGeneral
@@ -150,45 +151,46 @@ func (m *WorkbenchModel) refreshSettings() {
 		m.closeSettings()
 		return
 	}
+	revision := s.servicesRevision
 	if m.fe != nil {
+		revision = m.fe.ServicesRevision()
+	}
+	reloaded := !s.sourcesRead || revision != s.servicesRevision
+	if m.fe != nil && reloaded {
 		themes := m.fe.Themes()
-		if !reflect.DeepEqual(themes, s.themes) {
-			name := ""
-			if s.cursor < len(s.themes) {
-				name = s.themes[s.cursor].Name
+		name := ""
+		if s.cursor < len(s.themes) {
+			name = s.themes[s.cursor].Name
+		}
+		s.themes = slices.Clone(themes)
+		s.cursor = 0
+		for i, entry := range themes {
+			if entry.Current {
+				s.cursor = i
 			}
-			s.themes = slices.Clone(themes)
-			s.cursor = 0
-			for i, entry := range themes {
-				if entry.Current {
-					s.cursor = i
-				}
-			}
-			for i, entry := range themes {
-				if entry.Name == name {
-					s.cursor = i
-					break
-				}
+		}
+		for i, entry := range themes {
+			if entry.Name == name {
+				s.cursor = i
+				break
 			}
 		}
 		profiles := slices.Clone(m.fe.Profiles())
 		slices.SortFunc(profiles, func(a, b contracts.ProfileInfo) int { return strings.Compare(a.Name, b.Name) })
-		if !reflect.DeepEqual(profiles, s.profiles) {
-			s.profiles = profiles
-			s.active = ""
-			for _, p := range profiles {
-				if p.Active {
-					s.active = p.Name
-					break
-				}
+		s.profiles = profiles
+		s.active = ""
+		for _, p := range profiles {
+			if p.Active {
+				s.active = p.Name
+				break
 			}
-			if s.profileForm != nil {
-				choice := s.profileChoice
-				if choice != "" && !slices.ContainsFunc(profiles, func(p contracts.ProfileInfo) bool { return p.Name == choice }) {
-					choice = s.active
-				}
-				m.buildSettingsProfiles(choice)
+		}
+		if s.profileForm != nil {
+			choice := s.profileChoice
+			if choice != "" && !slices.ContainsFunc(profiles, func(p contracts.ProfileInfo) bool { return p.Name == choice }) {
+				choice = s.active
 			}
+			m.buildSettingsProfiles(choice)
 		}
 	}
 	if s.profileForm != nil && (s.styled != protocol.Palette(m.served) || !maps.Equal(s.indices, m.ansi)) {
@@ -198,18 +200,19 @@ func (m *WorkbenchModel) refreshSettings() {
 	}
 	if s.profileForm != nil {
 		r := m.settingsProfileRect()
-		s.profileSelect.Height(r.Dy()) // also grow again after a terminal resize
-		s.profileForm.WithWidth(r.Dx()).WithHeight(r.Dy())
-		// huh caches the group's viewport. Theme/size setters alone do not
-		// rebuild its content; a non-input update refreshes it without a write.
-		s.profileForm.Update(nil)
-		s.profileView = s.profileForm.View()
-		s.profileTop = settingsListTop(s.profileTop, max(0, slices.Index(s.profileNames, s.profileChoice)), len(s.profileNames), r.Dy()-1)
+		if s.profileDirty || s.profileSize != r.Size() {
+			s.profileDirty, s.profileSize = false, r.Size()
+			s.profileSelect.Height(r.Dy()) // also grow again after a terminal resize
+			s.profileForm.WithWidth(r.Dx()).WithHeight(r.Dy())
+			// huh caches the group's viewport. Theme/size setters alone do not
+			// rebuild its content; a non-input update refreshes it without a write.
+			s.profileForm.Update(nil)
+			s.profileView = s.profileForm.View()
+			s.profileTop = settingsListTop(s.profileTop, max(0, slices.Index(s.profileNames, s.profileChoice)), len(s.profileNames), r.Dy()-1)
+		}
 	}
 	s.top = settingsListTop(s.top, s.cursor, len(s.themes), m.settingsContentRect().Dy()-4)
 	if m.fe != nil {
-		revision := m.fe.ServicesRevision()
-		reloaded := !s.sourcesRead || revision != s.servicesRevision
 		if reloaded {
 			m.refreshSettingsGeneral()
 			s.keysRead = false
@@ -290,7 +293,7 @@ func (m *WorkbenchModel) settingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			// Synchronize the accessor after Home/End too; huh's End path
 			// updates its cursor before it updates the bound value.
 			s.profileForm.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-			s.profileView = s.profileForm.View()
+			s.profileDirty = true
 			return m, cmd
 		}
 		return m, nil
@@ -382,6 +385,7 @@ func (m *WorkbenchModel) selectSettingsTheme() {
 			return
 		}
 		s.pending = false
+		s.sourcesRead = false // the reply may precede delivery of the reload event
 		m.refreshSettings()
 		if err != nil {
 			s.problem = settingsError(err)
@@ -461,6 +465,7 @@ func (m *WorkbenchModel) buildSettingsProfiles(choice string) {
 		}
 	}
 	s.profileChoice = choice
+	s.profileDirty = true
 	s.profileSelect = huh.NewSelect[string]().Title("Profile").Options(options...).Value(&s.profileChoice).Height(m.settingsProfileRect().Dy())
 	s.profileForm = huh.NewForm(huh.NewGroup(s.profileSelect)).WithShowHelp(false).WithShowErrors(false).WithTheme(settingsHuhTheme(m.palette)).WithWidth(m.settingsProfileRect().Dx())
 	s.styled, s.indices = protocol.Palette(m.served), maps.Clone(m.ansi)

@@ -309,14 +309,6 @@ func (m *WorkbenchModel) refreshSettingsGeneral() {
 			f := g.fields[entry.Key]
 			if f == nil || f.entry.Type != entry.Type {
 				f = &settingsField{entry: entry}
-				value, source, err := m.fe.Setting(entry.Key)
-				if err != nil {
-					value = entry.Default
-					f.problem = settingsError(err)
-				}
-				f.source = source
-				f.accept(value)
-				f.snapshot = value
 			}
 			f.entry = entry
 			fields[entry.Key] = f
@@ -332,7 +324,15 @@ func (m *WorkbenchModel) refreshSettingsGeneral() {
 	for _, entry := range schema {
 		f := g.fields[entry.Key]
 		value, source, err := m.fe.Setting(entry.Key)
-		if err == nil {
+		if f.widget == nil {
+			if err != nil {
+				value = entry.Default
+				f.problem = settingsError(err)
+			}
+			f.source = source
+			f.accept(value)
+			f.snapshot = value
+		} else if err == nil {
 			f.source = source
 			if !f.dirty() && !reflect.DeepEqual(value, f.snapshot) {
 				f.accept(value)
@@ -387,7 +387,27 @@ func (m *WorkbenchModel) settingsGeneralTab(back bool) bool {
 	return true
 }
 
+// settingsWidgetMessage keeps host worker traffic out of huh. Preserve the
+// widgets' private asynchronous messages (cursor initialization, blinking and
+// paste results) as well as their public input messages. Checking the defining
+// package avoids depending on unexported message names in the pinned widgets.
+func settingsWidgetMessage(msg tea.Msg) bool {
+	switch msg.(type) {
+	case tea.KeyPressMsg, tea.PasteMsg, tea.BackgroundColorMsg:
+		return true
+	}
+	t := reflect.TypeOf(msg)
+	if t == nil {
+		return false
+	}
+	path := t.PkgPath()
+	return path == "charm.land/huh/v2" || strings.HasPrefix(path, "charm.land/bubbles/v2/")
+}
+
 func (m *WorkbenchModel) settingsGeneralKey(msg tea.Msg) tea.Cmd {
+	if !settingsWidgetMessage(msg) {
+		return nil
+	}
 	s := m.settings
 	g := s.general
 	if g == nil {
