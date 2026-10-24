@@ -344,7 +344,7 @@ Status rows, per adapter unit and per core capability:
 | A3 and later units | not started |
 | Core: executable converters | Landed ([Pods](pods.md)) |
 | Core: live `plugin.add` | not yet specified; its own core spec |
-| Core: runtime surfaces | Level 1 ([Protocol](protocol.md), [State](state.md)) |
+| Core: runtime surfaces | landed in protocol 2.8 ([Protocol](protocol.md), [State](state.md)) |
 | Core: terminal surfaces | Level 1 ([Protocol](protocol.md), [Pods](pods.md) frontend seams) |
 | Core: capture modes, release key, mouse to terminals | Level 1 ([Keybindings](keybindings.md)) |
 | Core: `terminal.link`, runtime `stage`/`panel` | Level 1, after the above |
@@ -359,8 +359,8 @@ Work units, in order. Sizes: S under a day, M two to three days, L a week. Core 
 | A3 | **Shim without UI.** `husk-herdr run`: Husk stdio, attach sequence and backoff, hooks rule, actions, startup and event hooks, the proxy with passthrough and the `plugin.action.invoke` and `notification.show` interceptions, the warning log for forwarded management methods, the state directory rule, the slice, the log lines, `doctor`. End-to-end test with the host and C1. | L | C1, A1, A2 |
 | C6 | **Live `plugin.add`.** Core, for every plugin kind; specified in its own core spec and built before A4. | M | C1 |
 | A7 | **Registry sync.** `husk-herdr sync`, the `doctor` row for registry plugins absent from the instance, end-to-end test that installs a fixture plugin into a fake registry while the host runs. | S | A3, C6 |
-| C2 | **Runtime surfaces.** `surface.open` (`modal`, `canvas`), dynamic surface ids, `husk.surfaces.runtime`, modal singleton, frontend placement, close paths, golden frames. | L | — |
-| C3 | **Terminal surfaces.** Emulator package over `charmbracelet/x/vt`, `terminal.attach|write|detach|input`, frontend draw into the cell canvas, scrollback on wheel, cursor, title in the frame label, golden frames with a scripted byte stream. Attach works on claimed surfaces, so C3 shipped (minor 2.5) without C2; only runtime terminal surfaces wait for C2. | L | — |
+| C2 | **Runtime surfaces (landed in protocol 2.8).** `surface.open` (`modal`, `canvas`), dynamic surface ids, `husk.surfaces.runtime`, modal singleton, frontend placement, close paths, golden frames. | L | — |
+| C3 | **Terminal surfaces.** Emulator package over `charmbracelet/x/vt`, `terminal.attach|write|detach|input`, frontend draw into the cell canvas, scrollback on wheel, cursor, title in the frame label, golden frames with a scripted byte stream. Attach works on claimed surfaces, so C3 shipped (minor 2.5) without C2; runtime terminal surfaces are now covered by C2's minor 2.8 socket test. | L | — |
 | C4 | **Capture modes and the release key.** `capture` tri-state on the wire and in `husk.surfaces`, `all` filter, `husk.capture.release` and its one-shot, mouse and paste to terminal surfaces. | M | C3 |
 | A4 | **Panes and popups.** PTYs, placement mapping, `plugin.pane.open|focus|close` and `popup.close` interception, `husk:` ids, exit and close paths, limits. | M | A3, C2, C3, C4 |
 | C5 | **`terminal.link`** (OSC 8 and URL detection on modified click) and runtime `stage`/`panel` placements with the stack rule. | M | C3 |
