@@ -167,7 +167,7 @@ The shim is a Husk plugin ([Pods](pods.md)): it reads requests from stdin, repli
 | `HERDR_ENV` | `1` | Herdr sets it in every managed process |
 | `HERDR_PLUGIN_ID` | the original Herdr id | Herdr |
 | `HERDR_PLUGIN_ROOT` | the plugin directory | Herdr |
-| `HERDR_PLUGIN_CONFIG_DIR` | Herdr's own directory for this plugin, `<herdr config dir>/plugins/config/<id>` (what `herdr plugin config-dir` prints); created if absent | shared with Herdr on purpose: a plugin configured under Herdr is configured under Husk |
+| `HERDR_PLUGIN_CONFIG_DIR` | Herdr's own directory for this plugin, `<herdr config dir>/plugins/config/<component>` (what `herdr plugin config-dir` prints); created if absent; component encoding is pinned below | shared with Herdr on purpose: a plugin configured under Herdr is configured under Husk |
 | `HERDR_PLUGIN_STATE_DIR` | Herdr's own state directory for this plugin, resolved exactly the way Herdr resolves it (the rule is read from Herdr's source or schema in unit A3 and pinned by a test). If the rule cannot be determined for the installed version, `$XDG_STATE_HOME/herdr/plugins/<id>` (`~/.local/state` when the variable is unset), with one warning in the log | same reason |
 | `HERDR_PLUGIN_CONTEXT_JSON` | the invocation context, below | Herdr |
 | `HERDR_WORKSPACE_ID`, `HERDR_TAB_ID`, `HERDR_PANE_ID` | from the context when present | Herdr |
@@ -177,9 +177,11 @@ The shim is a Husk plugin ([Pods](pods.md)): it reads requests from stdin, repli
 | `HERDR_PLUGIN_CLICKED_URL`, `HERDR_PLUGIN_LINK_HANDLER_ID` | link-handler invocations | Herdr |
 | `TERM`, `COLORTERM`, `TERM_PROGRAM`, `TERM_PROGRAM_VERSION` | pane commands only: `xterm-256color`, `truecolor`, `husk`, Husk's version | Herdr sets `TERM_PROGRAM=herdr`; the adapter says `husk`, so a plugin that branches on it sees Husk honestly, and one that misbehaves is a bug report to that plugin |
 
+Directory resolution is pinned to upstream [`plugin_paths.rs`](https://github.com/herdrdev/herdr/blob/5608de0608918aba2f9d501e7793b984a0ca9cfa/src/plugin_paths.rs) and [`state_dir()` / `platform_state_dir()`](https://github.com/herdrdev/herdr/blob/5608de0608918aba2f9d501e7793b984a0ca9cfa/src/config/io.rs). The shared plugin component percent-encodes bytes outside lowercase ASCII letters, digits, dot, underscore and hyphen; it escapes a trailing dot and Windows reserved stems, and caps long components at 120 characters with a 12-hex SHA-256 suffix. State uses a present `XDG_STATE_HOME` plus `herdr`, even when set empty, otherwise Unix `HOME/.local/state/herdr`; Windows tries `LOCALAPPDATA/herdr`, then `USERPROFILE/AppData/Local/herdr`, then that home fallback. Without any such variable the upstream temporary `herdr-state` directory is used. Both plugin directories append `plugins/<component>` (configuration additionally inserts `config`). Tests pin the upstream rule rather than treating configuration-file overrides as state-directory overrides.
+
 The working directory is the plugin directory, as in Herdr. Commands run through `exec.Command` without a shell, in their own process group; the shim stops a command's group with SIGTERM then SIGKILL after 2 s when the shim itself is stopped (EOF on stdin), the same policy Husk applies to the shim ([Pods](pods.md), Shutdown). Exit status and the last stderr lines of every command are appended to the shim's log (which is the plugin's Husk log, `husk plugin log <id>`), one line per command, matching what `herdr plugin log list` records.
 
-**Invocation context** (`HERDR_PLUGIN_CONTEXT_JSON`) reproduces the object Herdr builds: `invocation_source`, `request_id`, `action_id` or `entrypoint_id`, `workspace_id`, `tab_id`, `pane_id`, the `workspace`, `tab` and `pane` records, `worktree` and `agent` when present, and for link clicks `clicked_url` and `link_handler_id`. The shim fills the ids and records from upstream at invocation time: `pane.current` without `caller_pane_id` (the server's focused pane, which is what Herdr uses for "missing context fields are filled from the active workspace, tab, focused pane"), then `workspace.get` and `tab.get`. The field names and the `invocation_source` vocabulary come from the server's own schema (`herdr api schema --json`, the plugin invocation context definition) and are pinned by a test against a committed copy of that schema; a field the shim cannot know (`selected_text`) is omitted. Husk-originated invocations use the schema's generic source value; invocations the proxy relays keep the source the caller gave.
+**Invocation context** (`HERDR_PLUGIN_CONTEXT_JSON`) follows `PluginInvocationContext` in the committed API schema (`adapters/herdr/fakeherdr/schema.json`), not a separate adapter-defined object. The pinned upstream [context builder](https://github.com/herdrdev/herdr/blob/5608de0608918aba2f9d501e7793b984a0ca9cfa/src/app/api/plugins/context.rs#L374) uses `invocation_source: "api"` for API/CLI actions; Husk-originated invocations use that same value for every Husk caller kind (`cli`, `plugin`, `input`, `host`). The stdin request id becomes `correlation_id`. Husk caller identity and Husk surface focus populate no upstream context field: server context is read at invocation time through `pane.current` without `caller_pane_id`, then `workspace.get` and `tab.get`. Proxy invocations relay the caller's schema-defined context through `args.context`; non-null provided fields override the server-derived context, as in upstream `merge_plugin_context`, including the caller's source and correlation id. Unknown fields are dropped, and fields the shim cannot know, such as selected text, are omitted unless explicitly provided. Startup and event hooks follow upstream's source and correlation conventions. Context goldens cover each source the shim produces or relays and are validated against the committed schema.
 
 **Actions.** `action.invoke` arrives on stdin with `args` and `caller` ([Message kinds](message-kinds.md)). The shim builds the context, spawns the command, and replies at once with `{"started": true, "pid": <pid>, "log": "<log path>"}`: that is Herdr's contract too (`plugin.action.invoke` "returns the Herdr-built invocation context plus the started command log record"), and a reply at exit would hit Husk's 10 s action timeout for every daemon-style action. A non-zero exit later produces one `toast.show` (`<name>: <action title> exited <status>`) and a log line. `args` are ignored except `placement`, `width`, `height`, `cwd`, `env`, `focus` and `target` on a `pane-*` action, which carry the `plugin.pane.open` parameters (below). An action whose `platforms` exclude this OS was dropped at conversion, so it is `not_found` in Husk, where Herdr would answer `platform_unsupported`.
 
@@ -314,7 +316,7 @@ Executable converters and discovery are landed, and runtime surfaces landed in p
 | Capability | Spec | Used for |
 |---|---|---|
 | Executable converters and discovery (`--converter`, `husk.plugins.converters`) | [Pods](pods.md), "Executable converters" | roles 1 and 2 |
-| Live `plugin.add` for every plugin kind (the companion of `plugin.remove`; its wire shape and the add/remove race are core's) | its own core spec (pending; it updates [Pods](pods.md) and [Instances](instances.md)) | `husk-herdr sync` |
+| Live `plugin.add` for every plugin kind (the companion of `plugin.remove`; its wire shape and the add/remove race are core's) | Landed in protocol 2.2 ([Pods](pods.md), [Instances](instances.md)) | `husk-herdr sync` |
 | Runtime surfaces: `surface.open` with `modal` and `canvas` placements | [Protocol](protocol.md) and [State](state.md), "Runtime and terminal surfaces" | popups, overlays, zoomed and tab panes |
 | Terminal surfaces: `terminal.attach|write|detach|input`, host-side emulator, scrollback | [Protocol](protocol.md) "Runtime and terminal surfaces"; [Pods](pods.md) Frontend seams | every pane |
 | Capture modes (`none|text|all`) and the release key | [Keybindings](keybindings.md), "Capture modes" | keys inside panes |
@@ -339,14 +341,15 @@ Status rows, per adapter unit and per core capability:
 
 | Area | Status |
 |---|---|
-| A1: `cmd/husk-herdr`, `adapters/herdr/manifest`, `adapters/herdr/registry` | implemented, with platform goldens, diagnostic tables and dependency guards |
-| A2: `adapters/herdr/upstream`, `adapters/herdr/fakeherdr` | implemented: schema-backed fake, injectable client, version checks, EOF/error stream recovery seams and attach backoff |
-| A3 and later units | not started |
+| A1: `cmd/husk-herdr`, `adapters/herdr/manifest`, `adapters/herdr/registry` | Landed, with platform goldens, diagnostic tables and dependency guards |
+| A2: `adapters/herdr/upstream`, `adapters/herdr/fakeherdr` | Landed: schema-backed fake, injectable client, version checks, EOF/error stream recovery seams and attach backoff |
+| A3: shim without UI | implemented: stdio actions, schema-backed context, attach/reconnect, hooks, private proxy, command lifecycle and doctor; pane requests explicitly refused pending A4 |
+| A4 and later adapter units | not started |
 | Core: executable converters | Landed ([Pods](pods.md)) |
-| Core: live `plugin.add` | not yet specified; its own core spec |
+| Core: live `plugin.add` (C6) | Landed in protocol 2.2 ([Pods](pods.md)); meets the sync dependency |
 | Core: runtime surfaces | landed in protocol 2.8 ([Protocol](protocol.md), [State](state.md)) |
-| Core: terminal surfaces | Level 1 ([Protocol](protocol.md), [Pods](pods.md) frontend seams) |
-| Core: capture modes, release key, mouse to terminals | Level 1 ([Keybindings](keybindings.md)) |
+| Core: terminal surfaces (C3) | Landed in protocol 2.5 on claimed surfaces ([Protocol](protocol.md), [Pods](pods.md) frontend seams) |
+| Core: capture modes, release key, mouse to terminals (C4) | Landed in protocol 2.5 ([Keybindings](keybindings.md)) |
 | Core: `terminal.link` | Landed ([Protocol](protocol.md)) |
 | Core: runtime `stage`/`panel` | Level 1, still open |
 
@@ -355,14 +358,14 @@ Work units, in order. Sizes: S under a day, M two to three days, L a week. Core 
 | # | Unit | Size | Depends on |
 |---|---|---|---|
 | C1 | **Landed: executable converters.** `manifest.ExecConverter` (`detect`, `convert`, `discover`), `--converter` flag, `husk.plugins.converters` setting (launch-only, like `plugins.paths`), converter problems into the plugin's declared `problems`, tests with a fake converter executable. | M | — |
-| A1 | **Conversion (implemented).** `adapters/herdr/manifest` and `registry`: TOML parsing, id mapping, platform filters, the entry table, golden fixtures, `husk-herdr detect|discover|convert`. | M | — |
-| A2 | **Fake server and upstream client.** `fakeherdr`, `upstream` (dial, ping, version compare, `events.subscribe` reader with EOF/error reconnect triggers), committed schema copy and the shape test. | M | — |
-| A3 | **Shim without UI.** `husk-herdr run`: Husk stdio, attach sequence and backoff, hooks rule, actions, startup and event hooks, the proxy with passthrough and the `plugin.action.invoke` and `notification.show` interceptions, the warning log for forwarded management methods, the state directory rule, the slice, the log lines, `doctor`. End-to-end test with the host and C1. | L | C1, A1, A2 |
-| C6 | **Live `plugin.add`.** Core, for every plugin kind; specified in its own core spec and built before A4. | M | C1 |
+| A1 | **Landed: conversion.** `adapters/herdr/manifest` and `registry`: TOML parsing, id mapping, platform filters, the entry table, golden fixtures, `husk-herdr detect|discover|convert`. | M | — |
+| A2 | **Landed: fake server and upstream client.** `fakeherdr`, `upstream` (dial, ping, version compare, `events.subscribe` reader with EOF/error reconnect triggers), committed schema copy and the shape test. | M | — |
+| A3 | **Landed: shim without UI.** `husk-herdr run`: Husk stdio, attach sequence and backoff, hooks rule, actions, startup and event hooks, the proxy with passthrough and the `plugin.action.invoke` and `notification.show` interceptions, the warning log for forwarded management methods, the state directory rule, the slice, the log lines, `doctor`. End-to-end test with the host and C1. | L | C1, A1, A2 |
+| C6 | **Landed in protocol 2.2: live `plugin.add`.** Core, for every plugin kind; specified in its own core spec and built before A4. | M | C1 |
 | A7 | **Registry sync.** `husk-herdr sync`, the `doctor` row for registry plugins absent from the instance, end-to-end test that installs a fixture plugin into a fake registry while the host runs. | S | A3, C6 |
 | C2 | **Runtime surfaces (landed in protocol 2.8).** `surface.open` (`modal`, `canvas`), dynamic surface ids, `husk.surfaces.runtime`, modal singleton, frontend placement, close paths, golden frames. | L | — |
-| C3 | **Terminal surfaces.** Emulator package over `charmbracelet/x/vt`, `terminal.attach|write|detach|input`, frontend draw into the cell canvas, scrollback on wheel, cursor, title in the frame label, golden frames with a scripted byte stream. Attach works on claimed surfaces, so C3 shipped (minor 2.5) without C2; runtime terminal surfaces are now covered by C2's minor 2.8 socket test. | L | — |
-| C4 | **Capture modes and the release key.** `capture` tri-state on the wire and in `husk.surfaces`, `all` filter, `husk.capture.release` and its one-shot, mouse and paste to terminal surfaces. | M | C3 |
+| C3 | **Landed in protocol 2.5: terminal surfaces.** Emulator package over `charmbracelet/x/vt`, `terminal.attach|write|detach|input`, frontend draw into the cell canvas, scrollback on wheel, cursor, title in the frame label, golden frames with a scripted byte stream. Attach works on claimed surfaces, so C3 shipped (minor 2.5) without C2; runtime terminal surfaces are now covered by C2's minor 2.8 socket test. | L | — |
+| C4 | **Landed in protocol 2.5: capture modes and the release key.** `capture` tri-state on the wire and in `husk.surfaces`, `all` filter, `husk.capture.release` and its one-shot, mouse and paste to terminal surfaces. | M | C3 |
 | A4 | **Panes and popups.** PTYs, placement mapping, `plugin.pane.open|focus|close` and `popup.close` interception, `husk:` ids, exit and close paths, limits. | M | A3, C2, C3, C4 |
 | C5 | **`terminal.link` (landed)**: OSC 8 and row-local URL detection on ctrl+left press, consumed input and bounded direct delivery. Runtime `stage`/`panel` placements with the stack rule remain open. | M | C3 |
 | A5 | **Link handlers and `split` → `panel`.** | S | A4, C5 |
