@@ -7,7 +7,7 @@ import (
 )
 
 // Version is the full wire protocol version.
-const Version = "2.9"
+const Version = "2.10"
 
 // Major is the only wire protocol major this package speaks.
 const Major = 2

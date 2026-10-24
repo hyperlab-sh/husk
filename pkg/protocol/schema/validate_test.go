@@ -34,6 +34,7 @@ func payloads() map[string]payload {
 		protocol.MethodProtocolError:     {protocol.ProtocolErrorParams{Code: protocol.CodeParseError, Message: "bad", Method: "a.b", Data: json.RawMessage(`{"line":1}`)}, nil},
 		protocol.MethodSurfaceOpen:       {protocol.SurfaceOpenParams{Placement: protocol.SurfacePlacementModal, Name: "picker", Title: "Pick one", Width: protocol.SurfaceDimension(`"60%"`), Height: protocol.SurfaceDimension(`20`), Frame: &protocol.FrameSpec{Border: true, Label: "Picker", Close: true}}, protocol.SurfaceOpenResult{Surface: "notes.picker"}},
 		protocol.MethodSurfaceUpdate:     {protocol.SurfaceUpdateParams{PluginID: "notes", Surface: protocol.SurfaceMainStage, Title: "t", Subtitle: "s", Badge: "b", Lines: []string{"x"}, HitTargets: hit, StatusMeta: map[string]any{"n": 1}, Capture: &yes}, nil},
+		protocol.MethodSurfaceFocus:      {protocol.SurfaceFocusParams{Surface: "notes.picker"}, protocol.EmptyResult{}},
 		protocol.MethodSurfaceClose:      {protocol.SurfaceCloseParams{Surface: protocol.SurfaceMainStage, Yield: true}, nil},
 		protocol.MethodTerminalAttach:    {protocol.TerminalAttachParams{Surface: protocol.SurfaceMainStage, Capture: protocol.CaptureValueAll.Ptr(), Scrollback: &history}, protocol.TerminalAttachResult{Width: 80, Height: 24}},
 		protocol.MethodTerminalWrite:     {protocol.TerminalWriteParams{Surface: protocol.SurfaceMainStage, Data: "eA=="}, protocol.EmptyResult{}},

@@ -21,6 +21,18 @@ func (h Surface) Serve(ctx context.Context, c contracts.Caller, req protocol.Mes
 		return *deny
 	}
 	switch req.Method {
+	case protocol.MethodSurfaceFocus:
+		var p protocol.SurfaceFocusParams
+		if bad := handlers.DecodeParams(req, &p); bad != nil {
+			return *bad
+		}
+		if bad := validSurface(req, p.Surface); bad != nil {
+			return *bad
+		}
+		if err := h.Port.SurfaceFocus(ctx, c, p); err != nil {
+			return handlers.ErrorReply(req, err)
+		}
+		return handlers.Reply(req, nil)
 	case protocol.MethodSurfaceOpen:
 		var p protocol.SurfaceOpenParams
 		if bad := handlers.DecodeParams(req, &p); bad != nil {

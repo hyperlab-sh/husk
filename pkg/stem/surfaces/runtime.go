@@ -68,6 +68,38 @@ func (e *Engine) SurfaceOpen(plugin string, p protocol.SurfaceOpenParams) (proto
 	return protocol.SurfaceOpenResult{Surface: id}, nil
 }
 
+// SurfaceFocus serves surface.focus without changing a surface's lifetime.
+// Moving the declaration to the end promotes a canvas in the frontend stack.
+func (e *Engine) SurfaceFocus(plugin string, p protocol.SurfaceFocusParams) error {
+	if plugin == "" || !e.live.Live(plugin) {
+		return errf(protocol.CodeDenied, "surface.focus requires a live plugin")
+	}
+	if !p.Surface.Valid() {
+		return errf(protocol.CodeInvalidParams, "invalid surface")
+	}
+	for i, r := range e.runtime {
+		if r.Surface != p.Surface {
+			continue
+		}
+		if r.Plugin != plugin {
+			return errf(protocol.CodeDenied, "surface belongs to another plugin")
+		}
+		if r.Placement == protocol.SurfacePlacementModal {
+			o := e.slice.Get().Overlays
+			if o.SettingsCenter != "" || o.Modal.Plugin != "" && o.Modal.Surface != p.Surface {
+				return &Error{Code: protocol.CodeBusy, Message: "a modal is open", Data: map[string]any{"reason": "modal_open"}}
+			}
+		}
+		r.FocusRevision++
+		e.runtime = append(slices.Delete(e.runtime, i, i+1), r)
+		return nil
+	}
+	if occ := e.slice.Get().Occupants[p.Surface]; occ.Plugin != "" && occ.Plugin != plugin {
+		return errf(protocol.CodeDenied, "surface belongs to another plugin")
+	}
+	return errf(protocol.CodeNotFound, "runtime surface not found")
+}
+
 // RuntimeSurfaces returns detached runtime declarations in opening order.
 // Geometry, visibility and focus remain the frontend's responsibility. Loop-only.
 func (e *Engine) RuntimeSurfaces() []contracts.RuntimeSurface {

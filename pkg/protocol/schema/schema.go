@@ -88,6 +88,8 @@ func payloadTypes(method string) (reflect.Type, reflect.Type) {
 		return reflect.TypeFor[protocol.SessionPingParams](), reflect.TypeFor[protocol.SessionPingResult]()
 	case protocol.MethodProtocolError:
 		return reflect.TypeFor[protocol.ProtocolErrorParams](), nil
+	case protocol.MethodSurfaceFocus:
+		return reflect.TypeFor[protocol.SurfaceFocusParams](), reflect.TypeFor[protocol.EmptyResult]()
 	case protocol.MethodSurfaceOpen:
 		return reflect.TypeFor[protocol.SurfaceOpenParams](), reflect.TypeFor[protocol.SurfaceOpenResult]()
 	case protocol.MethodSurfaceUpdate:

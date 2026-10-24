@@ -47,7 +47,9 @@ func (m *workbenchModel) syncRuntime() bool {
 	newTop := topCanvas(next)
 	opened := false
 	for _, r := range next {
-		if _, had := m.runtimeSurface(r.Surface); !had {
+		previous, had := m.runtimeSurface(r.Surface)
+		activated := had && r.FocusRevision != previous.FocusRevision
+		if !had || activated {
 			if r.Placement == protocol.SurfacePlacementCanvas {
 				opened = true
 			}

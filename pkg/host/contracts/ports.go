@@ -468,6 +468,8 @@ type PluginPort interface {
 // invalid fields are invalid_params) still comes back as a CodedError so a
 // request-shaped method (slot.contribute) can reply with it.
 type SurfacePort interface {
+	// SurfaceFocus selects a runtime surface opened by the caller.
+	SurfaceFocus(ctx context.Context, c Caller, p protocol.SurfaceFocusParams) error
 	// SurfaceOpen creates a runtime surface occupied by the caller.
 	SurfaceOpen(ctx context.Context, c Caller, p protocol.SurfaceOpenParams) (protocol.SurfaceOpenResult, error)
 	// SurfaceUpdate serves surface.update. The plugin is c.PluginID; any

@@ -172,7 +172,7 @@ func TestVersionMatrix(t *testing.T) {
 			}
 		})
 	}
-	if Version != "2.9" || Major != 2 {
+	if Version != "2.10" || Major != 2 {
 		t.Fatal("unexpected version")
 	}
 }
