@@ -253,6 +253,8 @@ unknown fields are retained by Store and ignored by Services for forward growth.
 | `slice` | Optional SliceDecl object; opaque to Services. |
 | `secret_requests` | Array of SecretRequest objects: `name` (string), `purpose` (string), `required` (bool, default false). Name/purpose form the grant digest; required does not. |
 | `settings_declared` | Array of SettingDecl objects: `key`, `type`, `default`, optional `enum`, `min`, `max`, `doc`, `apply`. `default` must be present, including false/zero/empty defaults; null is invalid for the supported types. Types and limits follow [Services](services.md). |
+| `problems` | Optional array of `{code,message,field?}` objects: an executable converter's problems, codes prefixed `converter:` ([Pods](pods.md), "Executable converters"); opaque to Services. |
+| `x-<name>` | At most one vendor object a v2 manifest carried, retained verbatim; the host ignores it ([Pods](pods.md), "Executable converters"). |
 
 Setting keys at this boundary are **fully qualified**: Pods prefix a manifest's
 local key with `plugins.<exact-source>.` once. The plugin-id segment is opaque,
