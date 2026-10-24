@@ -17,7 +17,7 @@ func TestMain(m *testing.M) {
 	flag.Parse()
 	if *update {
 		err := eachGolden(func(path string, data []byte, platform string) error {
-			doc, _, _ := manifest.Convert(data, manifest.Options{Dir: "/plugins/" + filepath.Base(filepath.Dir(path)), Executable: "/opt/husk-herdr", Platform: platform})
+			doc, problems, notes := manifest.Convert(data, manifest.Options{Dir: "/plugins/" + filepath.Base(filepath.Dir(path)), Executable: "/opt/husk-herdr", Platform: platform})
 			if doc == nil {
 				return fmt.Errorf("%s: conversion failed", path)
 			}
@@ -25,7 +25,14 @@ func TestMain(m *testing.M) {
 			if err != nil {
 				return err
 			}
-			return os.WriteFile(filepath.Join(filepath.Dir(path), platform+".golden.json"), append(output, '\n'), 0600)
+			if err := os.WriteFile(filepath.Join(filepath.Dir(path), platform+".golden.json"), append(output, '\n'), 0600); err != nil {
+				return err
+			}
+			var diagnostics bytes.Buffer
+			if err := manifest.WriteDiagnostics(&diagnostics, problems, notes); err != nil {
+				return err
+			}
+			return os.WriteFile(filepath.Join(filepath.Dir(path), platform+".problems.golden"), diagnostics.Bytes(), 0600)
 		})
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -76,15 +83,16 @@ func TestConversionGoldens(t *testing.T) {
 			if !bytes.Equal(append(output, '\n'), expected) {
 				t.Fatalf("conversion differs from %s golden\ngot:\n%s", platform, output)
 			}
-			wantProblems, wantNotes := 0, 0
-			if filepath.Base(filepath.Dir(path)) == "toolbox" {
-				wantNotes = 1
-				if platform != "windows" {
-					wantProblems = 2
-				}
+			var diagnostics bytes.Buffer
+			if err := manifest.WriteDiagnostics(&diagnostics, problems, notes); err != nil {
+				t.Fatal(err)
 			}
-			if len(problems) != wantProblems || len(notes) != wantNotes {
-				t.Fatalf("problems=%+v notes=%v", problems, notes)
+			expectedDiagnostics, err := os.ReadFile(filepath.Join(filepath.Dir(path), platform+".problems.golden"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(diagnostics.Bytes(), expectedDiagnostics) {
+				t.Fatalf("stderr differs from %s golden\ngot:\n%s", platform, &diagnostics)
 			}
 			if !bytes.Equal(data, original) {
 				t.Fatal("conversion mutated input")

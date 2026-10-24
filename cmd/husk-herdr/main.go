@@ -21,21 +21,12 @@ type environment struct {
 }
 
 func main() {
-	home, _ := os.UserHomeDir()
-	configHome := os.Getenv("XDG_CONFIG_HOME")
-	if configHome == "" {
-		configHome = filepath.Join(home, ".config")
-	}
-	appConfigHome := configHome
-	if runtime.GOOS == "windows" && os.Getenv("XDG_CONFIG_HOME") == "" && os.Getenv("APPDATA") != "" {
-		appConfigHome = os.Getenv("APPDATA")
-	}
 	exe, err := os.Executable()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	os.Exit(execute(os.Args[1:], os.Stdout, os.Stderr, environment{exe, runtime.GOOS, filepath.Join(configHome, "husk-herdr", "config.toml"), filepath.Join(appConfigHome, "herdr", "plugins.json")}))
+	os.Exit(execute(os.Args[1:], os.Stdout, os.Stderr, captureEnvironment(exe, runtime.GOOS, os.Getenv, os.UserHomeDir)))
 }
 
 func execute(args []string, out, diagnostics io.Writer, env environment) int {
@@ -66,22 +57,15 @@ func execute(args []string, out, diagnostics io.Writer, env environment) int {
 		return 0
 	}
 	emit := func(problems []manifest.Problem) bool {
-		for _, p := range problems {
-			if err := json.NewEncoder(diagnostics).Encode(p); err != nil {
-				return false
-			}
-		}
-		return true
-	}
-	if err := checkConfig(env.configPath); err != nil {
-		emit([]manifest.Problem{{Code: "adapter_config_invalid", Message: err.Error(), Field: env.configPath}})
-		return 1
-	}
-	records, problems := registry.Read(env.registryPath)
-	if !emit(problems) {
-		return 1
+		return manifest.WriteDiagnostics(diagnostics, problems, nil) == nil
 	}
 	if args[0] == "discover" {
+		// Discovery must remain available so invalid adapter settings can be
+		// reported as per-plugin conversion refusals in the host catalog.
+		records, problems := registry.Read(env.registryPath)
+		if !emit(problems) {
+			return 1
+		}
 		dirs, problems := registry.Discover(records, env.platform)
 		if !emit(problems) {
 			return 1
@@ -93,6 +77,15 @@ func execute(args []string, out, diagnostics io.Writer, env environment) int {
 		}
 		return 0
 	}
+	if env.configPath != "" {
+		if err := checkConfig(env.configPath); err != nil {
+			emit([]manifest.Problem{{Code: "adapter_config_invalid", Message: err.Error(), Field: env.configPath}})
+			return 1
+		}
+	}
+	// Missing or invalid registries affect discovery only. A directly loaded
+	// directory remains convertible without registry-local collision scope.
+	records, _ := registry.Read(env.registryPath)
 	dir, err := filepath.Abs(args[1])
 	if err != nil {
 		emit([]manifest.Problem{{Code: "manifest_invalid", Message: err.Error(), Field: "manifest"}})
@@ -104,17 +97,10 @@ func execute(args []string, out, diagnostics io.Writer, env environment) int {
 		return 1
 	}
 	doc, problems, notes := manifest.Convert(data, manifest.Options{Dir: dir, Executable: env.executable, Platform: env.platform, RegistryIDs: registry.IDsFor(records, dir)})
-	if !emit(problems) {
+	// Fatal conversion problems come first; the host keeps only the first
+	// stderr line on refusal. The manifest converter drops earlier warnings.
+	if err := manifest.WriteDiagnostics(diagnostics, problems, notes); err != nil {
 		return 1
-	}
-	// Structured log notes have no problem code: builds are not a refusal.
-	for _, note := range notes {
-		if err := json.NewEncoder(diagnostics).Encode(struct {
-			Level   string `json:"level"`
-			Message string `json:"message"`
-		}{"info", note}); err != nil {
-			return 1
-		}
 	}
 	if doc == nil {
 		return 1
