@@ -113,8 +113,8 @@ func TestEventAndErrorShapes(t *testing.T) {
 	if err := validator(t, "error_response").Validate(jsonValue(t, map[string]any{"id": "1", "error": body})); err != nil {
 		t.Fatal(err)
 	}
-	// Notification framing is the id-less variant of this body;
-	// it is not advertised as an error_response, whose id is required.
+	// The defensive id-less fixture reuses this body, but the schema does
+	// not define its framing: error_response itself requires an id.
 	if err := validator(t, "error_response/$defs/ErrorBody").Validate(jsonValue(t, body)); err != nil {
 		t.Fatal(err)
 	}

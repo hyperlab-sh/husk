@@ -11,11 +11,17 @@ type version struct {
 	pre  []string
 }
 
+// Immutable parsing constants are shared; no per-call regexp compilation.
+var semverRE = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$`)
+
+const adapterMinimum = "0.9.0"
+
+var adapterFloor = version{core: [3]string{"0", "9", "0"}}
+
 func parseVersion(text string) (version, error) {
 	// SemVer 2.0: no leading zeroes in numeric identifiers; build metadata does
 	// not affect ordering. Keep numeric components as strings to avoid overflow.
-	re := regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$`)
-	m := re.FindStringSubmatch(text)
+	m := semverRE.FindStringSubmatch(text)
 	if m == nil {
 		return version{}, fmt.Errorf("invalid semantic version %q", text)
 	}
@@ -94,14 +100,13 @@ func CheckVersion(server, minimum string) error {
 	if err != nil {
 		return err
 	}
-	floor, _ := parseVersion("0.9.0")
 	required, err := parseVersion(minimum)
 	if err != nil {
 		return err
 	}
-	if compare(required, floor) < 0 {
-		required = floor
-		minimum = "0.9.0"
+	if compare(required, adapterFloor) < 0 {
+		required = adapterFloor
+		minimum = adapterMinimum
 	}
 	if compare(actual, required) < 0 {
 		return &Error{Code: "herdr_too_old", Message: fmt.Sprintf("needs %s, server is %s", minimum, server)}
