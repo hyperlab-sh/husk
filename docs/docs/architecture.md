@@ -167,7 +167,7 @@ Fields with a closed vocabulary use named Go string types in `pkg/protocol`, and
 
 ### Versioning
 
-`protocol.Version` is `"MAJOR.MINOR"` (currently `2.7`). A minor release only adds optional fields, methods, error codes and enum values, which both sides ignore when they do not know them; a major release is a breaking change. Husk speaks one major at a time and accepts any minor of its own.
+`protocol.Version` is `"MAJOR.MINOR"` (currently `2.8`). A minor release only adds optional fields, methods, error codes and enum values, which both sides ignore when they do not know them; a major release is a breaking change. Husk speaks one major at a time and accepts any minor of its own.
 
 There is no handshake, so the check happens where the plugin is introduced: its manifest's integer `protocol` must equal `protocol.Major` (checked by `Spec.Validate` at conversion; a mismatched plugin is not launched). A plugin that still sends a v1 `hello` gets one v1-shaped `protocol_error` line, and its Pod fails with `version_mismatch`. The host's full version is in the plugin's `HUSK_PROTOCOL_VERSION` environment variable and in the `session.ping` result. `protocol.CheckVersion` validates a "MAJOR.MINOR" string for Go plugins.
 
