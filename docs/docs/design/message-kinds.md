@@ -668,8 +668,8 @@ introspection; the shapes are in [Hooks](hooks.md).
    distributions ship host-side extensions, `husk.*` handlers may need a
    registry outside `cmd/husk`. Recommended: defer; `RegisterHost` already
    covers it.
-6. **Terminal deliveries (protocol minor 2.5).** `terminal.input` (landed)
-   and `terminal.link` (deferred) are host-to-plugin deliveries like
+6. **Terminal deliveries.** `terminal.input` (landed in protocol minor 2.5)
+   and `terminal.link` (landed) are host-to-plugin deliveries like
    `input.key`: direct, never on the Event bus, never coalesced (a byte
    stream must arrive in order), sent only to the Pod occupying the attached
    surface through its bounded queue, which drops and logs when full rather
