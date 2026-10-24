@@ -1,9 +1,50 @@
 package surfaces
 
 import (
+	"github.com/hyperlab-sh/husk/pkg/host/contracts"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 	"testing"
 )
+
+func TestRuntimeModalFocusAdmission(t *testing.T) {
+	for _, mode := range []string{"own", "settings", "other_modal"} {
+		t.Run(mode, func(t *testing.T) {
+			_, e, _ := newEngine(t, Options{})
+			opened, err := e.SurfaceOpen("p", protocol.SurfaceOpenParams{Placement: protocol.SurfacePlacementModal, Name: "dialog"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = e.UpdateView(func(v *contracts.SurfaceView) {
+				switch mode {
+				case "own":
+					v.Overlays.Modal.Plugin = "p"
+					v.Overlays.Modal.Surface = opened.Surface
+				case "settings":
+					v.Overlays.SettingsCenter = "general"
+				case "other_modal":
+					v.Overlays.Modal.Plugin = "other"
+					v.Overlays.Modal.Surface = protocol.SurfaceModal
+				}
+			}); err != nil {
+				t.Fatal(err)
+			}
+			err = e.SurfaceFocus("p", protocol.SurfaceFocusParams{Surface: opened.Surface})
+			rows := e.RuntimeSurfaces()
+			if len(rows) != 1 || rows[0].Surface != opened.Surface {
+				t.Fatal("modal focus changed lifetime")
+			}
+			if mode == "own" {
+				if err != nil || rows[0].FocusRevision != 1 {
+					t.Fatalf("own modal focus: %+v %v", rows, err)
+				}
+			} else {
+				if codeOf(t, err) != protocol.CodeBusy || err.(*Error).Data["reason"] != "modal_open" || rows[0].FocusRevision != 0 {
+					t.Fatalf("modal admission: %+v %v", rows, err)
+				}
+			}
+		})
+	}
+}
 
 func TestRuntimeFocus(t *testing.T) {
 	_, e, _ := newEngine(t, Options{})
