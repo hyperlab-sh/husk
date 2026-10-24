@@ -332,7 +332,7 @@ Status rows, per adapter unit and per core capability:
 
 | Area | Status |
 |---|---|
-| A1: `cmd/husk-herdr`, `adapters/herdr/manifest`, `adapters/herdr/registry` | in progress |
+| A1: `cmd/husk-herdr`, `adapters/herdr/manifest`, `adapters/herdr/registry` | implemented, with platform goldens, diagnostic tables and dependency guards |
 | A2: `adapters/herdr/upstream`, `adapters/herdr/fakeherdr` | implemented: schema-backed fake, injectable client, version checks, EOF/error stream recovery seams and attach backoff |
 | A3 and later units | not started |
 | Core: executable converters | Landed ([Pods](pods.md)) |
@@ -347,7 +347,7 @@ Work units, in order. Sizes: S under a day, M two to three days, L a week. Core 
 | # | Unit | Size | Depends on |
 |---|---|---|---|
 | C1 | **Landed: executable converters.** `manifest.ExecConverter` (`detect`, `convert`, `discover`), `--converter` flag, `husk.plugins.converters` setting (launch-only, like `plugins.paths`), converter problems into the plugin's declared `problems`, tests with a fake converter executable. | M | — |
-| A1 | **Conversion.** `adapters/herdr/manifest` and `registry`: TOML parsing, id mapping, platform filters, the entry table, golden fixtures, `husk-herdr detect|discover|convert`. | M | — |
+| A1 | **Conversion (implemented).** `adapters/herdr/manifest` and `registry`: TOML parsing, id mapping, platform filters, the entry table, golden fixtures, `husk-herdr detect|discover|convert`. | M | — |
 | A2 | **Fake server and upstream client.** `fakeherdr`, `upstream` (dial, ping, version compare, `events.subscribe` reader with EOF/error reconnect triggers), committed schema copy and the shape test. | M | — |
 | A3 | **Shim without UI.** `husk-herdr run`: Husk stdio, attach sequence and backoff, hooks rule, actions, startup and event hooks, the proxy with passthrough and the `plugin.action.invoke` and `notification.show` interceptions, the warning log for forwarded management methods, the state directory rule, the slice, the log lines, `doctor`. End-to-end test with the host and C1. | L | C1, A1, A2 |
 | C6 | **Live `plugin.add`.** Core, for every plugin kind; specified in its own core spec and built before A4. | M | C1 |
