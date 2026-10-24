@@ -10,8 +10,8 @@ import (
 	"testing/fstest"
 	"time"
 
-	c "github.com/hyperlab-sh/husk/internal/services/contracts"
-	"github.com/hyperlab-sh/husk/internal/substrate/store"
+	c "github.com/hyperlab-sh/husk/pkg/services/contracts"
+	"github.com/hyperlab-sh/husk/pkg/substrate/store"
 )
 
 type spellingClock struct{}

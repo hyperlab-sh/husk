@@ -3,8 +3,8 @@ package settings
 import (
 	"strings"
 
-	c "github.com/hyperlab-sh/husk/internal/services/contracts"
-	"github.com/hyperlab-sh/husk/internal/substrate/store"
+	c "github.com/hyperlab-sh/husk/pkg/services/contracts"
+	"github.com/hyperlab-sh/husk/pkg/substrate/store"
 )
 
 // resolveSpellings diagnoses collisions before the merged document can hide
