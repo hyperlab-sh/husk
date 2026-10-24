@@ -101,7 +101,7 @@ func doctor(args []string, out, diagnostics io.Writer, env environment) int {
 	cmd := exec.Command(binary, cliArgs...)
 	for _, v := range os.Environ() {
 		k, _, _ := strings.Cut(v, "=")
-		if !strings.HasPrefix(k, "HUSK_") {
+		if !strings.HasPrefix(k, "HUSK_") || k == "HUSK_SOCKET_PATH" || k == "HUSK_INSTANCE" || k == "HUSK_BIN_PATH" {
 			cmd.Env = append(cmd.Env, v)
 		}
 	}

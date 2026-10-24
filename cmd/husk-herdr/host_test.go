@@ -30,6 +30,12 @@ func TestMain(m *testing.M) {
 	}
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "plugin":
+			if os.Getenv("HUSK_PLUGIN_TOKEN") != "" || os.Getenv("HUSK_INSTANCE") != "inherited-instance" {
+				os.Exit(7)
+			}
+			fmt.Fprintln(os.Stdout, `{"plugins":[{"id":"example"}]}`)
+			os.Exit(0)
 		case "detect", "discover", "convert", "run":
 			exe, _ := os.Executable()
 			os.Exit(execute(os.Args[1:], os.Stdout, os.Stderr, captureEnvironment(exe, runtime.GOOS, os.Getenv, os.UserHomeDir)))

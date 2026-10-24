@@ -45,6 +45,14 @@ func TestDoctorUsesFakeServerAndReportsHookDecision(t *testing.T) {
 			t.Fatalf("missing %s in %s", want, text)
 		}
 	}
+	t.Setenv("HUSK_BIN_PATH", exe)
+	t.Setenv("HUSK_INSTANCE", "inherited-instance")
+	t.Setenv("HUSK_PLUGIN_TOKEN", "private-fixture")
+	out.Reset()
+	errout.Reset()
+	if code := execute([]string{"doctor"}, &out, &errout, env); code != 0 || strings.Contains(out.String(), "instance: unavailable") || strings.Contains(out.String(), "absent from instance") {
+		t.Fatalf("doctor did not preserve user targeting while dropping credentials: %d %s %s", code, &out, &errout)
+	}
 	for _, args := range [][]string{{"run"}, {"run", "--bad"}, {"run", "dir", "--instance", "unit"}, {"doctor", "--bad"}} {
 		out.Reset()
 		errout.Reset()
