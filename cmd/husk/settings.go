@@ -98,7 +98,7 @@ func (m *WorkbenchModel) openSettings(args map[string]any) (map[string]any, erro
 			return nil, contracts.NewError(protocol.CodeInvalidParams, fmt.Sprintf("unknown settings tab %v", value), nil)
 		}
 	}
-	if m.layoutFrozen() || m.modalOwner().Open() || m.secretPrompt != nil || m.showPalette {
+	if m.layoutFrozen() || m.secretPrompt != nil || m.showPalette {
 		return nil, contracts.ErrDeclined
 	}
 	if m.settings != nil {
@@ -120,7 +120,7 @@ func (m *WorkbenchModel) openSettings(args map[string]any) (map[string]any, erro
 	if tab == "" {
 		tab = "general"
 	}
-	m.clearPending()
+	m.closeModal()
 	m.activeDrag, m.hoverDivider = "", ""
 	m.settings = &settingsCenter{tab: tab}
 	if tab == "theme" {

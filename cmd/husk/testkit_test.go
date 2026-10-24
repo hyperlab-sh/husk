@@ -34,6 +34,7 @@ type fakeFE struct {
 	KeyStates       []keyStateSent
 	Invoked         []invoked
 	Registers       []string
+	Handlers        map[string]contracts.HostActionHandler
 	// Writer calls retain their callbacks until a test explicitly delivers a reply.
 	ServiceRev                                 uint64
 	SchemaReads, SettingReads, KeyListingReads int
@@ -308,10 +309,14 @@ func (f *fakeFE) InvokeAction(action string, args map[string]any, kind protocol.
 		reply(nil, errors.Is(err, contracts.ErrDeclined), nil)
 	}
 }
-func (f *fakeFE) RegisterHostAction(id string, _ contracts.HostActionHandler) error {
+func (f *fakeFE) RegisterHostAction(id string, h contracts.HostActionHandler) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.Registers = append(f.Registers, id)
+	if f.Handlers == nil {
+		f.Handlers = map[string]contracts.HostActionHandler{}
+	}
+	f.Handlers[id] = h
 	return nil
 }
 func (f *fakeFE) SendKey(plugin string, p protocol.SurfaceKeyParams) error {
