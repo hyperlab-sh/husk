@@ -239,7 +239,7 @@ Minor 2.3 ([Services](services.md), "Theme" and "Settings"; [Settings center](se
 
 Minor 2.4 ([Built-in themes](themes.md), "Role values"; [Services](services.md), "Theme"): the optional `ansi` object beside `palette` in the `theme.get` result and the `theme.changed` params, mapping each palette role a theme set as an ANSI index to that index (`0`–`15`). No method is added and no existing field changes: `palette` values stay `#rrggbb`. **Landed in 2.4:** the host serves `ansi` and minor 2.3 is also landed (rule 5). The field's type is `protocol.ANSIRoles`, used by `ThemeChangedParams` and by the `theme.get` result; the generated schema constrains it on `theme.changed` (role-name keys, integers `0`–`15`), while the `theme.get` result stays an open object there because [Services](services.md) owns it. The shape is under "ANSI palette roles (minor 2.4)" below.
 
-Minor 2.5 serves terminal attachment, output, detachment and encoded input on already claimed surfaces, with full-key capture and its release action. It landed as protocol `2.5`; all earlier minors remain served. Runtime surfaces follow in minor 2.8; terminal links landed later, in minor 2.9 (below). The Go API changes `SurfaceUpdateParams.Capture` from `*bool` to `*CaptureValue`; migrate boolean callers to `protocol.CaptureBool(true)` / `protocol.CaptureBool(false)` and string-mode callers to `protocol.CaptureValueAll.Ptr()` / `protocol.CaptureValueText.Ptr()`. `TerminalAttachParams.Capture` uses the same optional value type; wire booleans remain compatible.
+Minor 2.5 serves terminal attachment, output, detachment and encoded input on already claimed surfaces, with full-key capture and its release action. It landed as protocol `2.5`; all earlier minors remain served. Runtime surfaces follow in minor 2.8; terminal links followed in minor 2.9 and were removed in 2.11 (below). The Go API changes `SurfaceUpdateParams.Capture` from `*bool` to `*CaptureValue`; migrate boolean callers to `protocol.CaptureBool(true)` / `protocol.CaptureBool(false)` and string-mode callers to `protocol.CaptureValueAll.Ptr()` / `protocol.CaptureValueText.Ptr()`. `TerminalAttachParams.Capture` uses the same optional value type; wire booleans remain compatible.
 
 Minor 2.6 (**landed**) adds the optional boolean `yield` to `surface.close`: a live occupant can keep its layout claim behind ordinary live claims while releasing occupancy. All earlier minors remain served; no method, slice or event is added.
 
@@ -251,7 +251,7 @@ Minor 2.9 (**removed in 2.11**) introduced terminal-link delivery.
 
 Minor 2.10 (**removed in 2.11**) introduced runtime-surface focusing.
 
-Minor 2.11 (**landed**) removes `terminal.link` and `surface.focus`, which have no remaining consumers. The remaining terminal and runtime-surface methods are unchanged; `protocol.Version` is `2.11`.
+Minor 2.11 (**landed**) removes `terminal.link` and `surface.focus`, which have no remaining consumers. The removal is the one exception to rule 2: it tightens 2.10 without a major bump because no plugin uses either method, as minor 2.1 tightened 2.0. A request for `surface.focus` now gets `unknown_method`. The remaining terminal and runtime-surface methods are unchanged; `protocol.Version` is `2.11`.
 
 Version history:
 
