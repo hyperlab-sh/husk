@@ -15,12 +15,14 @@ import (
 // Spec is the converted process configuration and plugin declaration catalog.
 // Command is resolved argv; WorkDir is the absolute manifest directory.
 type Spec struct {
-	ID                string             `json:"id"`
-	Name              string             `json:"name"`
-	Version           string             `json:"version"`
-	Description       string             `json:"description"`
-	Protocol          int                `json:"protocol"`
-	Command           []string           `json:"command"`
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Version     string   `json:"version"`
+	Description string   `json:"description"`
+	Protocol    int      `json:"protocol"`
+	Command     []string `json:"command"`
+	// CommandName preserves the manifest's executable spelling for diagnostics.
+	CommandName       string             `json:"-"`
 	WorkDir           string             `json:"work_dir"`
 	Actions           []ActionDecl       `json:"actions,omitempty"`
 	Surfaces          []SurfaceDecl      `json:"surfaces,omitempty"`

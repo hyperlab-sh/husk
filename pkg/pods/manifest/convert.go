@@ -260,6 +260,7 @@ func convert(src Source, modern bool) (*Spec, []Warning, error) {
 	if err := validateDeclarations(s); err != nil {
 		return nil, warnings, err
 	}
+	s.CommandName = s.Command[0]
 	s.Command = s.Argv()
 	return s, warnings, nil
 }
