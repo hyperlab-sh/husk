@@ -36,9 +36,6 @@ func (*Child) Wait() error { return unsupported() }
 // PID returns no process on an unavailable backend.
 func (*Child) PID() int { return 0 }
 
-// Read is unavailable without a supported PTY backend.
-func (*Child) Read([]byte) (int, error) { return 0, unsupported() }
-
 // Write is unavailable without a supported PTY backend.
 func (*Child) Write([]byte) (int, error) { return 0, unsupported() }
 
