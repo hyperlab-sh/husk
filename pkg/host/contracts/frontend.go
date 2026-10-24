@@ -91,8 +91,11 @@ type Frontend interface {
 
 	// WatchEvents subscribes fn to events matching pattern (an exact name or
 	// "<prefix>.*", the event.watch rules) through EventPort.Watch with a host
-	// caller. fn runs on the loop, in bus order, with the params exactly as
-	// event.deliver carries them, source as stamped by the host. A refused
+	// caller. fn runs on the loop during the host's end-of-Update event flush
+	// (after State flushes), in bus order, with the params exactly as
+	// event.deliver carries them (numbers as json.Number), source as stamped
+	// by the host. State writes fn makes flush with the next Update; fn must
+	// not call Looped.Tick. A refused
 	// pattern returns its CodedError (invalid_params) and registers nothing.
 	// cancel removes the subscription, is idempotent and safe from any
 	// goroutine; once it has returned fn is not called again. Host shutdown

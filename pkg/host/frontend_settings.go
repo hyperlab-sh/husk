@@ -1,9 +1,9 @@
 package host
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
-	"sync/atomic"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/hyperlab-sh/husk/pkg/host/contracts"
@@ -113,20 +113,23 @@ func (r *Root) AddPlugin(source contracts.PluginSource, reply func(contracts.Plu
 }
 
 // hostWatcher is the Notifier of a WatchEvents subscription. The bus calls it
-// on the loop at the end of an Update.
+// on the loop inside the host's end-of-Update flush, so fn runs there, not in
+// a separate loop message.
 type hostWatcher struct {
-	r         *Root
-	fn        func(protocol.EventDeliverParams)
-	cancelled atomic.Bool
+	r   *Root
+	fn  func(protocol.EventDeliverParams)
+	ctx context.Context // ends on cancel and on host shutdown
 }
 
 func (w *hostWatcher) Notify(m protocol.Message) error {
 	var p protocol.EventDeliverParams
-	if err := json.Unmarshal(m.Params, &p); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(m.Params))
+	dec.UseNumber() // verbatim numbers, as the bus and a wire watcher see them
+	if err := dec.Decode(&p); err != nil {
 		return err
 	}
 	run := func() {
-		if !w.cancelled.Load() {
+		if w.ctx.Err() == nil {
 			w.fn(p)
 		}
 	}
@@ -134,6 +137,7 @@ func (w *hostWatcher) Notify(m protocol.Message) error {
 		run()
 		return nil
 	}
+	// Defensive: the bus only flushes on the loop, so this is not expected.
 	if !w.r.post(run) {
 		return errLoopGone
 	}
@@ -143,14 +147,11 @@ func (w *hostWatcher) Notify(m protocol.Message) error {
 // WatchEvents implements contracts.Frontend. Loop only; cancel is idempotent
 // and any-goroutine.
 func (r *Root) WatchEvents(pattern string, fn func(protocol.EventDeliverParams)) (func(), error) {
-	w := &hostWatcher{r: r, fn: fn}
 	ctx, stop := context.WithCancel(r.closingCtx)
+	w := &hostWatcher{r: r, fn: fn, ctx: ctx}
 	if err := portsstem.NewEvents(r.bus, r.loopSeam).Watch(ctx, contracts.Caller{Kind: protocol.CallerHost}, pattern, w); err != nil {
 		stop()
 		return nil, err
 	}
-	return func() {
-		w.cancelled.Store(true)
-		stop()
-	}, nil
+	return stop, nil
 }

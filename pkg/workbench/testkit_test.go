@@ -49,6 +49,8 @@ type fakeFE struct {
 	SettingWrites  []settingWrite
 	ProfileUses    []profileUse
 	PluginRemovals []pluginRemoval
+	PluginAdds     []pluginAdd
+	EventWatches   []eventWatch
 	// Views is every surface view the model committed.
 	Views []contracts.SurfaceView
 	st    *state.State
@@ -235,6 +237,16 @@ type profileUse struct {
 	Name  string
 	Reply func(contracts.ProfileUseResult, error)
 }
+type pluginAdd struct {
+	Source contracts.PluginSource
+	Reply  func(contracts.PluginAddition, error)
+}
+
+type eventWatch struct {
+	Pattern string
+	Fn      func(protocol.EventDeliverParams)
+}
+
 type pluginRemoval struct {
 	ID    string
 	Reply func(contracts.PluginRemoval, error)
@@ -251,8 +263,14 @@ func (f *fakeFE) UseProfile(name string, reply func(contracts.ProfileUseResult, 
 	f.ProfileUses = append(f.ProfileUses, profileUse{name, reply})
 }
 func (f *fakeFE) AddPlugin(source contracts.PluginSource, reply func(contracts.PluginAddition, error)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.PluginAdds = append(f.PluginAdds, pluginAdd{source, reply})
 }
 func (f *fakeFE) WatchEvents(pattern string, fn func(protocol.EventDeliverParams)) (func(), error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.EventWatches = append(f.EventWatches, eventWatch{pattern, fn})
 	return func() {}, nil
 }
 func (f *fakeFE) RemovePlugin(id string, reply func(contracts.PluginRemoval, error)) {
