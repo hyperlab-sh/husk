@@ -15,7 +15,9 @@ Early. The workbench core, wire protocol, activity rail, command palette, mouse-
 ```bash
 go build -o bin/husk ./cmd/husk
 ./bin/husk                                # empty workbench, no plugins
-go build -o plugins/reference/reference ./plugins/reference   # the reference plugins run this binary
+go build -o plugins/reference/reference ./plugins/reference   # shared by the reference pair
+go build -o plugins/terminal/terminal ./plugins/terminal
+go build -o plugins/guide/guide ./plugins/guide/cmd/guide
 ./bin/husk --plugin-dir ./plugins         # load every bundled plugin
 ./bin/husk --plugin ./plugins/reference   # load one plugin (dir, manifest, or executable)
 ./bin/husk --instance notes               # a named instance: husk ping --instance notes reaches it
