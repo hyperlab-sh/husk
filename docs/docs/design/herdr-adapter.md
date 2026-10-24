@@ -309,7 +309,7 @@ Each shim keeps `<id>.state` (instance scope, not persistent, 256 KiB cap) as it
 
 ### Core capabilities it needs
 
-Executable converters and discovery are landed; the remaining capabilities have the status recorded in their core specs. Actions, startup and event hooks need no further core capability; the UI and sync dependencies are listed below.
+Executable converters and discovery are landed, and runtime surfaces landed in protocol 2.8; the remaining capabilities have the status recorded in their core specs. Actions, startup and event hooks need no further core capability; the UI and sync dependencies are listed below.
 
 | Capability | Spec | Used for |
 |---|---|---|
