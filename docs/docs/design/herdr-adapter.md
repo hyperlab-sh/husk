@@ -351,7 +351,8 @@ Status rows, per adapter unit and per core capability:
 | A1: `cmd/husk-herdr`, `adapters/herdr/manifest`, `adapters/herdr/registry` | Landed, with platform goldens, diagnostic tables and dependency guards |
 | A2: `adapters/herdr/upstream`, `adapters/herdr/fakeherdr` | Landed: schema-backed fake, injectable client, version checks, EOF/error stream recovery seams and attach backoff |
 | A3: shim without UI | Landed: stdio actions, schema-backed context, attach/reconnect, hooks, private proxy, command lifecycle and doctor; pane requests explicitly refused pending A4 |
-| A4 and later adapter units | not started |
+| A4–A6: panes and later adapter units | not started |
+| A7: registry sync | Landed: manual user-CLI additions, per-plugin outcomes, absent-plugin doctor rows and live-host coverage |
 | Core: executable converters | Landed ([Pods](pods.md)) |
 | Core: live `plugin.add` (C6) | Landed in protocol 2.2 ([Pods](pods.md)); meets the sync dependency |
 | Core: runtime surfaces | landed in protocol 2.8 ([Protocol](protocol.md), [State](state.md)) |
@@ -369,7 +370,7 @@ Work units, in order. Sizes: S under a day, M two to three days, L a week. Core 
 | A2 | **Landed: fake server and upstream client.** `fakeherdr`, `upstream` (dial, ping, version compare, `events.subscribe` reader with EOF/error reconnect triggers), committed schema copy and the shape test. | M | — |
 | A3 | **Landed: shim without UI.** `husk-herdr run`: Husk stdio, attach sequence and backoff, hooks rule, actions, startup and event hooks, the proxy with passthrough and the `plugin.action.invoke` and `notification.show` interceptions, the warning log for forwarded management methods, the state directory rule, the slice, the log lines, `doctor`. End-to-end test with the host and C1. | L | C1, A1, A2 |
 | C6 | **Landed in protocol 2.2: live `plugin.add`.** Core, for every plugin kind; specified in [Pods](pods.md), "Adding a plugin", and built before A4. | M | C1 |
-| A7 | **Registry sync.** `husk-herdr sync`, the `doctor` row for registry plugins absent from the instance, end-to-end test that installs a fixture plugin into a fake registry while the host runs. | S | A3, C6 |
+| A7 | **Landed: registry sync.** `husk-herdr sync [--instance <name>]` discovers enabled platform-compatible plugins and uses the user-facing Husk CLI to list and add missing converted ids. Reports `added`, `present` or `refused` with the conversion or launch problem; never removes. `doctor` reports absent plugins with the sync remedy. A live-host test installs a fixture while the host runs and checks the action catalog, repeated sync, refusal, disabled filtering and doctor before/after; discovery warnings remain skipped diagnostics, not refused additions. Runtime tests allowlist only their fake upstream socket, including re-executed shims. | S | A3, C6 |
 | C2 | **Runtime surfaces (landed in protocol 2.8).** `surface.open` (`modal`, `canvas`), dynamic surface ids, `husk.surfaces.runtime`, modal singleton, frontend placement, close paths, golden frames. | L | — |
 | C3 | **Landed in protocol 2.5: terminal surfaces.** Emulator package over `charmbracelet/x/vt`, `terminal.attach|write|detach|input`, frontend draw into the cell canvas, scrollback on wheel, cursor, title in the frame label, golden frames with a scripted byte stream. Attach works on claimed surfaces, so C3 shipped (minor 2.5) without C2; runtime terminal surfaces are now covered by C2's minor 2.8 socket test. | L | — |
 | C4 | **Landed in protocol 2.5: capture modes and the release key.** `capture` tri-state on the wire and in `husk.surfaces`, `all` filter, `husk.capture.release` and its one-shot, mouse and paste to terminal surfaces. | M | C3 |
