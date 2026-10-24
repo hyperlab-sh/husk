@@ -102,7 +102,7 @@ func (c *Child) Input(p protocol.TerminalInputParams) error {
 	if err != nil {
 		return err
 	}
-	_, err = c.file.Write(b)
+	_, err = c.Write(b)
 	return err
 }
 
@@ -116,9 +116,6 @@ func (c *Child) Resize(w, h int) error {
 
 // PID returns the session leader's process id.
 func (c *Child) PID() int { return c.cmd.Process.Pid }
-
-// Read reads opaque terminal output from the interruptible master.
-func (c *Child) Read(b []byte) (int, error) { return c.file.Read(b) }
 
 // Write writes opaque encoded input to the terminal master.
 func (c *Child) Write(b []byte) (int, error) { return c.file.Write(b) }
