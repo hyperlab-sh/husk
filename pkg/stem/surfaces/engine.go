@@ -791,6 +791,11 @@ func (e *Engine) SurfaceUpdate(plugin string, p protocol.SurfaceUpdateParams) er
 	if _, ok := e.terminals[p.Surface]; ok {
 		return &Error{Code: protocol.CodeInvalidParams, Message: "surface has a terminal attached", Data: map[string]any{"reason": "terminal_attached"}}
 	}
+	for i, hit := range p.HitTargets {
+		if err := hit.Validate(); err != nil {
+			return errf(protocol.CodeInvalidParams, "hit_targets[%d]: %v", i, err)
+		}
+	}
 	if p.Capture != nil && !p.Capture.Valid() {
 		return errf(protocol.CodeInvalidParams, "invalid capture value")
 	}

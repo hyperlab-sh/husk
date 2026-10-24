@@ -345,9 +345,13 @@ func TestContentSinkReceivesAcceptedUpdatesOnly(t *testing.T) {
 	owner := contracts.Caller{Kind: contracts.CallerPlugin, PluginID: "alpha.files"}
 	other := contracts.Caller{Kind: contracts.CallerPlugin, PluginID: "beta.notes"}
 
+	var hits []protocol.RowHitTarget
+	if err := json.Unmarshal([]byte(`[{"line":0,"id":"button","col_start":0,"col_end":4}]`), &hits); err != nil {
+		t.Fatal(err)
+	}
 	params := protocol.SurfaceUpdateParams{
 		Surface: protocol.SurfaceMainStage, Title: "T", Subtitle: "S", Badge: "3", Lines: []string{"one", "two"},
-		HitTargets: []protocol.RowHitTarget{{}}, StatusMeta: map[string]any{"k": "v"},
+		HitTargets: hits, StatusMeta: map[string]any{"k": "v"},
 	}
 	if err := port.SurfaceUpdate(ctx, owner, params); err != nil {
 		t.Fatalf("accepted update: %v", err)
@@ -362,6 +366,10 @@ func TestContentSinkReceivesAcceptedUpdatesOnly(t *testing.T) {
 		t.Error("the sink ran off the loop")
 	}
 
+	var invalidRange protocol.SurfaceUpdateParams
+	if err := json.Unmarshal([]byte(`{"surface":"main-stage","lines":["bad"],"hit_targets":[{"col_start":0}]}`), &invalidRange); err != nil {
+		t.Fatal(err)
+	}
 	// Denied: another plugin's surface. Unoccupied: a surface nobody claimed.
 	// Invalid: not a host layout surface. Wrong caller kinds never reach the
 	// engine at all.
@@ -373,6 +381,7 @@ func TestContentSinkReceivesAcceptedUpdatesOnly(t *testing.T) {
 		"occupied by another": {other, protocol.SurfaceUpdateParams{Surface: protocol.SurfaceMainStage, Lines: []string{"x"}}, "denied"},
 		"unoccupied":          {owner, protocol.SurfaceUpdateParams{Surface: protocol.SurfaceSidebarList, Lines: []string{"x"}}, "denied"},
 		"invalid surface":     {owner, protocol.SurfaceUpdateParams{Surface: "nope", Lines: []string{"x"}}, "invalid_params"},
+		"invalid hit range":   {owner, invalidRange, "invalid_params"},
 		"cli":                 {contracts.Caller{Kind: contracts.CallerCLI}, protocol.SurfaceUpdateParams{Surface: protocol.SurfaceMainStage}, "denied"},
 		"unauthenticated":     {contracts.Caller{Kind: contracts.CallerPlugin}, protocol.SurfaceUpdateParams{Surface: protocol.SurfaceMainStage}, "denied"},
 	} {

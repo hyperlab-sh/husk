@@ -109,6 +109,21 @@ type RowHitTarget struct {
 	Kind    string            `json:"kind"`
 	Action  string            `json:"action"`
 	Payload map[string]string `json:"payload,omitempty"`
+	// ColStart and ColEnd optionally restrict the target to surface-relative
+	// cells in [ColStart, ColEnd). Both must be present or both absent.
+	ColStart *int `json:"col_start,omitempty"`
+	ColEnd   *int `json:"col_end,omitempty"`
+}
+
+// Validate checks the optional column range without restricting legacy rows.
+func (h RowHitTarget) Validate() error {
+	if h.ColStart == nil && h.ColEnd == nil {
+		return nil
+	}
+	if h.ColStart == nil || h.ColEnd == nil || *h.ColStart < 0 || *h.ColEnd <= *h.ColStart {
+		return &Error{Code: CodeInvalidParams, Message: "hit target requires both col_start and col_end with col_end > col_start >= 0"}
+	}
+	return nil
 }
 
 // SurfaceUpdateParams replaces a surface's content. The host ignores PluginID

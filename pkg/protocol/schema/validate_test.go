@@ -23,7 +23,8 @@ type payload struct{ params, result any }
 // whose payloads belong to other specs, so the schema is an open object or
 // anything) carry a plain object and are checked for the envelope only.
 func payloads() map[string]payload {
-	hit := []protocol.RowHitTarget{{Line: 3, ID: "r1", Kind: "row", Action: "notes.open", Payload: map[string]string{"k": "v"}}}
+	start, end := 1, 4
+	hit := []protocol.RowHitTarget{{Line: 3, ID: "r1", Kind: "row", Action: "notes.open", Payload: map[string]string{"k": "v"}, ColStart: &start, ColEnd: &end}}
 	mods := protocol.ModifierState{Alt: true, Ctrl: true, Shift: true, Super: true}
 	obj := map[string]any{"future": 1}
 	yes := protocol.CaptureTrue

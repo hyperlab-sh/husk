@@ -386,9 +386,26 @@
       "type": "object"
     },
     "RowHitTarget": {
+      "dependentRequired": {
+        "col_end": [
+          "col_start"
+        ],
+        "col_start": [
+          "col_end"
+        ]
+      },
+      "description": "Optional surface-relative cell range [col_start, col_end); both or neither, with col_end \u003e col_start \u003e= 0. The host validates the relative bound.",
       "properties": {
         "action": {
           "type": "string"
+        },
+        "col_end": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "col_start": {
+          "minimum": 0,
+          "type": "integer"
         },
         "id": {
           "type": "string"
