@@ -71,7 +71,7 @@ func start(t *testing.T, l layout, failDials ...int) *harness {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
-	}, retry: func(ctx context.Context) error { return ctx.Err() }}
+	}, retry: func(ctx context.Context, _ time.Duration) error { return ctx.Err() }}
 	go func() { err := run(ctx, cfg, inR, outW, h.logs); _ = outW.Close(); h.done <- err }()
 	t.Cleanup(func() {
 		cancel()
