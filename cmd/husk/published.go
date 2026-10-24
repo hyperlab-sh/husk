@@ -86,7 +86,7 @@ func (m *WorkbenchModel) publisherMousePayload(surface protocol.SurfaceID, x, y 
 	payload := protocol.SurfaceMouseParams{Surface: surface, X: x, Y: y, Button: button}
 	if su := m.slotUpdates[surface]; su != nil {
 		for _, hit := range su.HitTargets {
-			if hit.Line == y {
+			if hit.Line == y && (hit.ColStart == nil || x >= *hit.ColStart && x < *hit.ColEnd) {
 				payload.HitID, payload.HitKind, payload.HitAction, payload.HitPayload = hit.ID, hit.Kind, hit.Action, hit.Payload
 				break
 			}

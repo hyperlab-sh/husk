@@ -172,6 +172,17 @@ func (g *generator) define(t reflect.Type) string {
 			variant([]string{"id", "error"}, "method", "params", "result", "token"),
 		}
 	}
+	if t == reflect.TypeFor[protocol.RowHitTarget]() {
+		props["col_start"].(map[string]any)["minimum"] = 0
+		props["col_end"].(map[string]any)["minimum"] = 1
+		obj["dependentRequired"] = map[string]any{
+			"col_start": []string{"col_end"},
+			"col_end":   []string{"col_start"},
+		}
+		// Standard JSON Schema cannot compare sibling numeric properties.
+		// RowHitTarget.Validate enforces the relative bound at ingestion.
+		obj["description"] = "Optional surface-relative cell range [col_start, col_end); both or neither, with col_end > col_start >= 0. The host validates the relative bound."
+	}
 	if t == reflect.TypeFor[protocol.SurfaceResizedParams]() {
 		// The v2 snapshot contract explicitly requires an array, not null.
 		props["surfaces"].(map[string]any)["type"] = "array"
