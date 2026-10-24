@@ -54,7 +54,7 @@ func TestConverterRoles(t *testing.T) {
 	if diagnostics.Len() != 0 {
 		t.Fatalf("unexpected problems: %s", &diagnostics)
 	}
-	// Missing registries are warnings, not a conversion or discovery failure.
+	// Missing registries warn on discovery only, not direct conversion.
 	env.registryPath = filepath.Join(dir, "absent.json")
 	out.Reset()
 	diagnostics.Reset()
@@ -63,8 +63,8 @@ func TestConverterRoles(t *testing.T) {
 	}
 	out.Reset()
 	diagnostics.Reset()
-	if code := execute([]string{"convert", dir}, &out, &diagnostics, env); code != 0 || out.Len() == 0 {
-		t.Fatalf("direct conversion needs no registry: code=%d err=%s", code, &diagnostics)
+	if code := execute([]string{"convert", dir}, &out, &diagnostics, env); code != 0 || out.Len() == 0 || diagnostics.Len() != 0 {
+		t.Fatalf("direct conversion needs no registry or registry warning: code=%d err=%s", code, &diagnostics)
 	}
 }
 

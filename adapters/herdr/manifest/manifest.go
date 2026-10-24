@@ -111,6 +111,11 @@ func Parse(data []byte) (Manifest, error) {
 	if !validPlatforms(m.Platforms) {
 		return m, fmt.Errorf("invalid platforms")
 	}
+	for _, build := range m.Build {
+		if !validPlatforms(build.Platforms) {
+			return m, fmt.Errorf("invalid build platforms")
+		}
+	}
 	return m, nil
 }
 
@@ -142,6 +147,9 @@ func Supports(platforms []string, platform string) bool {
 }
 
 func validPlatforms(platforms []string) bool {
+	if platforms != nil && len(platforms) == 0 {
+		return false
+	}
 	for _, p := range platforms {
 		if p != "linux" && p != "macos" && p != "windows" {
 			return false
@@ -151,10 +159,17 @@ func validPlatforms(platforms []string) bool {
 }
 
 func entryID(id string) (string, error) {
-	if strings.Contains(id, ".") {
-		return "", fmt.Errorf("entry id must be dot-free")
+	mapped := strings.ReplaceAll(id, ":", "-")
+	if mapped == "" {
+		return "", fmt.Errorf("entry id must be nonempty")
 	}
-	return MapID(id)
+	for _, c := range []byte(mapped) {
+		alpha := c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9'
+		if !alpha && c != '_' && c != '-' {
+			return "", fmt.Errorf("entry id must match [A-Za-z0-9_-]+ after mapping")
+		}
+	}
+	return mapped, nil
 }
 
 func validSize(v any) bool {
@@ -180,7 +195,9 @@ func validSize(v any) bool {
 func Convert(data []byte, opts Options) (*Document, []Problem, []string) {
 	var problems []Problem
 	fail := func(code, field string, err error) (*Document, []Problem, []string) {
-		return nil, append(problems, Problem{code, err.Error(), field}), nil
+		// The host reports only the first stderr line on nonzero exit.
+		// Earlier warnings must never hide the refusal's fatal cause.
+		return nil, []Problem{{code, err.Error(), field}}, nil
 	}
 	m, err := Parse(data)
 	if err != nil {

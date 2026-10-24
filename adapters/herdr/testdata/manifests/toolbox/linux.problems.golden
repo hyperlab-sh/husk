@@ -1,0 +1,3 @@
+{"code":"suggestion_ignored","message":"key suggestions are not imported","field":"actions[0].default_key"}
+{"code":"suggestion_ignored","message":"key suggestions are not imported","field":"actions[0].shortcut"}
+{"level":"info","message":"build_not_run: install-time commands are not executed"}

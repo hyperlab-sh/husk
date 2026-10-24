@@ -16,6 +16,7 @@ require (
 	github.com/godbus/dbus/v5 v5.1.0
 	github.com/gofrs/flock v0.12.1
 	github.com/mattn/go-runewidth v0.0.30
+	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/tailscale/hujson v0.0.0-20260727124030-b80ff77dac4f
 	github.com/zalando/go-keyring v0.2.6
@@ -34,7 +35,6 @@ require (
 	github.com/danieljoos/wincred v1.2.2 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/mitchellh/hashstructure/v2 v2.0.2 // indirect
-	github.com/pelletier/go-toml/v2 v2.2.4
 	golang.org/x/crypto v0.24.0 // indirect
 	golang.org/x/text v0.16.0 // indirect
 )

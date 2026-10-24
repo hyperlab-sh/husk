@@ -41,9 +41,10 @@ func Read(path string) ([]Record, []manifest.Problem) {
 // IDsFor returns all enabled original ids when dir is a registered directory.
 // Disabled entries do not reserve IDs; platform filters do not narrow collisions.
 func IDsFor(records []Record, dir string) []string {
+	dir = resolvedRoot(dir)
 	registered := false
 	for _, r := range records {
-		if filepath.Clean(r.Root) == filepath.Clean(dir) {
+		if resolvedRoot(r.Root) == dir {
 			registered = true
 		}
 	}
@@ -57,6 +58,13 @@ func IDsFor(records []Record, dir string) []string {
 		}
 	}
 	return ids
+}
+
+func resolvedRoot(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return filepath.Clean(resolved)
+	}
+	return filepath.Clean(path)
 }
 
 // Discover filters in registry order, checking each remaining manifest from disk.
