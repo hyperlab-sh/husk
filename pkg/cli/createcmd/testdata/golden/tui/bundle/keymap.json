@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  // "builtin": false, // Drop the built-in host keymap; provide your own bindings.
+  "bind": [
+    {"key": "f2", "action": "guide.toggle", "hint": "guide"}
+  ]
+}
