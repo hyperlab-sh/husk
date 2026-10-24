@@ -148,19 +148,34 @@ func (c *Client) Call(ctx context.Context, method string, params any) (json.RawM
 	}
 	defer closeConn()
 	if err = send(conn, method, params); err != nil {
-		return nil, callError(ctx, err)
+		return nil, callError(ctx, method, err)
 	}
 	r, err := receive(reader(conn))
 	if err != nil {
-		return nil, callError(ctx, err)
+		return nil, callError(ctx, method, err)
 	}
 	if err = reply(r); err != nil {
-		return nil, err
+		return nil, protocolError(method, err)
 	}
 	return r.Result, nil
 }
 
-func callError(ctx context.Context, err error) error {
+func protocolError(method string, err error) *Error {
+	return &Error{Code: "herdr_protocol", Message: fmt.Sprintf("%s: %v", method, err)}
+}
+
+func attachError(method string, err error) error {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return err
+	}
+	var named *Error
+	if errors.As(err, &named) && (named.Code == "unavailable" || named.Code == "herdr_too_old" || named.Code == "herdr_protocol") {
+		return err
+	}
+	return protocolError(method, err)
+}
+
+func callError(ctx context.Context, method string, err error) error {
 	if ctx.Err() != nil {
 		return context.Cause(ctx)
 	}
@@ -168,31 +183,40 @@ func callError(ctx context.Context, err error) error {
 	if errors.As(err, &remote) {
 		return remote
 	}
+	var syntax *json.SyntaxError
+	var shape *json.UnmarshalTypeError
+	if errors.As(err, &syntax) || errors.As(err, &shape) || errors.Is(err, bufio.ErrTooLong) {
+		return protocolError(method, err)
+	}
 	return Unavailable()
+}
+
+func (c *Client) bounded(ctx context.Context, d time.Duration) (context.Context, func()) {
+	ctx, cancel := context.WithCancelCause(ctx)
+	timer := c.opts.Clock.AfterFunc(d, func() { cancel(context.DeadlineExceeded) })
+	return ctx, func() { timer.Stop(); cancel(context.Canceled) }
 }
 
 // Ping bounds both dialing and reading to two seconds on the injected clock.
 func (c *Client) Ping(ctx context.Context) (string, error) {
-	ctx, cancel := context.WithCancelCause(ctx)
-	timer := c.opts.Clock.AfterFunc(2*time.Second, func() { cancel(context.DeadlineExceeded) })
-	defer timer.Stop()
-	defer cancel(context.Canceled)
+	ctx, done := c.bounded(ctx, 2*time.Second)
+	defer done()
 	raw, err := c.Call(ctx, "ping", nil)
 	if err != nil {
-		return "", err
+		return "", attachError("ping", err)
 	}
 	var pong struct {
 		Type    string `json:"type"`
 		Version string `json:"version"`
 	}
 	if err = json.Unmarshal(raw, &pong); err != nil {
-		return "", err
+		return "", protocolError("ping", err)
 	}
 	if pong.Type != "pong" {
-		return "", fmt.Errorf("invalid ping result")
+		return "", protocolError("ping", fmt.Errorf("invalid ping result"))
 	}
 	if _, err = parseVersion(pong.Version); err != nil {
-		return "", err
+		return "", protocolError("ping", err)
 	}
 	return pong.Version, nil
 }
@@ -204,6 +228,7 @@ type Session struct {
 }
 
 // Attach performs ping, the version check, and one plugin.list, in that order.
+// Ping and plugin.list each have an independent two-second injected deadline.
 // It never starts a process or sends a management request.
 func (c *Client) Attach(ctx context.Context, minVersion string) (*Session, error) {
 	version, err := c.Ping(ctx)
@@ -211,18 +236,20 @@ func (c *Client) Attach(ctx context.Context, minVersion string) (*Session, error
 		return nil, err
 	}
 	if err = CheckVersion(version, minVersion); err != nil {
-		return nil, err
+		return nil, attachError("ping version check", err)
 	}
+	ctx, done := c.bounded(ctx, 2*time.Second)
+	defer done()
 	plugins, err := c.Call(ctx, "plugin.list", nil)
 	if err != nil {
-		return nil, err
+		return nil, attachError("plugin.list", err)
 	}
 	var list struct {
 		Type    string          `json:"type"`
 		Plugins json.RawMessage `json:"plugins"`
 	}
 	if json.Unmarshal(plugins, &list) != nil || list.Type != "plugin_list" || len(list.Plugins) == 0 || list.Plugins[0] != '[' {
-		return nil, fmt.Errorf("invalid plugin.list result")
+		return nil, protocolError("plugin.list", fmt.Errorf("invalid result"))
 	}
 	return &Session{Version: version, Plugins: list.Plugins}, nil
 }
@@ -245,8 +272,12 @@ func (b *Backoff) Next() time.Duration {
 }
 
 // WaitAttach retries absent servers with the specified backoff. notify runs
-// synchronously with absent, attached, or too_old. Cancellation stops the wait;
-// version errors are terminal. A stream owner calls it again after EOF/error.
+// synchronously with absent, attached, or too_old. Both attach deadlines retry
+// as absent. Cancellation stops the wait; version refusal is terminal. Malformed
+// replies, invalid versions/results and remote errors other than unavailable are
+// terminal *Error values with code herdr_protocol and the method in Message, so
+// the shim can publish failed/last_error without matching prose. A stream owner
+// calls it again after EOF/error.
 func (c *Client) WaitAttach(ctx context.Context, minVersion string, notify func(string)) (*Session, error) {
 	var backoff Backoff
 	for {
@@ -304,43 +335,50 @@ type Stream struct {
 }
 
 // Subscribe deduplicates hook names and sends one subscription entry per name.
-// The supplied context owns the entire stream, not only its opening handshake.
+// Names requiring pane-specific parameters in the committed schema are refused
+// with invalid_subscription before dialing. The supplied context owns the entire
+// stream, not only its opening handshake.
 func (c *Client) Subscribe(ctx context.Context, names []string) (*Stream, error) {
-	conn, closeConn, err := c.open(ctx)
-	if err != nil {
-		return nil, err
-	}
 	entries := make([]map[string]string, 0, len(names))
 	seen := map[string]bool{}
 	for _, name := range names {
+		switch name {
+		case "pane.agent_status_changed", "pane.output_matched", "pane.scroll_changed":
+			return nil, &Error{Code: "invalid_subscription", Message: fmt.Sprintf("events.subscribe: %s requires pane-specific parameters", name)}
+		}
 		if !seen[name] {
 			entries = append(entries, map[string]string{"type": name})
 			seen[name] = true
 		}
 	}
+	conn, closeConn, err := c.open(ctx)
+	if err != nil {
+		return nil, err
+	}
 	s := &Stream{scan: reader(conn), close: closeConn, ctx: ctx}
 	if err = send(conn, "events.subscribe", map[string]any{"subscriptions": entries}); err != nil {
 		s.Close()
-		return nil, callError(ctx, err)
+		return nil, callError(ctx, "events.subscribe", err)
 	}
 	r, err := receive(s.scan)
 	if err != nil {
 		s.Close()
-		return nil, callError(ctx, err)
+		return nil, callError(ctx, "events.subscribe", err)
 	}
 	var ack struct {
 		Type string `json:"type"`
 	}
 	if reply(r) != nil || json.Unmarshal(r.Result, &ack) != nil || ack.Type != "subscription_started" {
 		s.Close()
-		return nil, fmt.Errorf("invalid subscription acknowledgement")
+		return nil, protocolError("events.subscribe", fmt.Errorf("invalid acknowledgement"))
 	}
 	return s, nil
 }
 
 // Next returns a pushed event. EOF or any remote error is terminal and closes
-// the stream; the shim marks the server lost and reattaches. Error notifications
-// use the same error body as replies but may omit the request id.
+// the stream; the shim marks the server lost and reattaches. Schema-defined
+// errors carry a request id. An id-less error body is also terminal defensively;
+// the upstream schema does not define that framing.
 func (s *Stream) Next() (Event, error) {
 	r, err := receive(s.scan)
 	if err == nil && (r.Event == "" || r.Data == nil || r.Result != nil) {

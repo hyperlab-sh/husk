@@ -4,11 +4,14 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"strings"
 	"sync"
+
+	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 // Request records both parsed fields and the exact original line (including
@@ -20,29 +23,37 @@ type Request struct {
 	Raw    []byte         `json:"-"`
 }
 
-// Options configures immutable fixtures. PingGate delays ping until closed;
+// Options configures immutable fixtures. Gates delays each named method until
+// its channel closes; PingGate is a shorthand when Gates has no ping entry.
 // OnRequest runs outside locks and can signal deterministic test barriers.
-// Fixture maps are copied by Start. Omitted records are generated from schema.
+// Passthrough explicitly allows non-schema methods only; schema-known methods
+// always validate. Fixture maps are copied by Start. Omitted records are
+// generated from schema.
 type Options struct {
 	Version              string
 	Plugins              []map[string]any
 	Pane, Workspace, Tab map[string]any
 	PingGate             <-chan struct{}
+	Gates                map[string]<-chan struct{}
+	Passthrough          []string
 	OnRequest            func(Request)
 }
 
 // Server owns a private test socket, its connections, and all serving workers.
 type Server struct {
-	listener net.Listener
-	ctx      context.Context
-	cancel   context.CancelFunc
-	opts     Options
-	catalog  catalog
-	mu       sync.Mutex
-	peers    map[*peer]bool
-	records  []Request
-	wg       sync.WaitGroup
-	once     sync.Once
+	listener      net.Listener
+	ctx           context.Context
+	cancel        context.CancelFunc
+	opts          Options
+	catalog       catalog
+	requestSchema *jsonschema.Schema
+	knownMethods  map[string]bool
+	passthrough   map[string]bool
+	mu            sync.Mutex
+	peers         map[*peer]bool
+	records       []Request
+	wg            sync.WaitGroup
+	once          sync.Once
 }
 
 type peer struct {
@@ -61,6 +72,29 @@ func (p *peer) write(v any) error {
 // Start binds path in a caller-owned private temporary directory. An absent
 // server is simulated by delaying Start, not by touching any live socket.
 func Start(path string, opts Options) (*Server, error) {
+	catalog := loadCatalog()
+	compiler := jsonschema.NewCompiler()
+	if err := compiler.AddResource("https://adapter.test/schema.json", catalog.root); err != nil {
+		return nil, err
+	}
+	requestSchema, err := compiler.Compile("https://adapter.test/schema.json#/schemas/request")
+	if err != nil {
+		return nil, fmt.Errorf("compile request schema: %w", err)
+	}
+	knownMethods := map[string]bool{}
+	for _, branch := range catalog.ref("#/schemas/request")["oneOf"].([]any) {
+		properties := branch.(map[string]any)["properties"].(map[string]any)
+		knownMethods[properties["method"].(map[string]any)["const"].(string)] = true
+	}
+	passthrough := map[string]bool{}
+	for _, method := range opts.Passthrough {
+		passthrough[method] = true
+	}
+	gates := map[string]<-chan struct{}{}
+	for method, gate := range opts.Gates {
+		gates[method] = gate
+	}
+	opts.Gates = gates
 	listener, err := net.Listen("unix", path)
 	if err != nil {
 		return nil, err
@@ -91,7 +125,7 @@ func Start(path string, opts Options) (*Server, error) {
 		opts.Version = "0.9.5"
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Server{listener: listener, ctx: ctx, cancel: cancel, opts: opts, catalog: loadCatalog(), peers: map[*peer]bool{}}
+	s := &Server{listener: listener, ctx: ctx, cancel: cancel, opts: opts, catalog: catalog, requestSchema: requestSchema, knownMethods: knownMethods, passthrough: passthrough, peers: map[*peer]bool{}}
 	s.wg.Add(1)
 	go s.accept()
 	return s, nil
@@ -142,10 +176,12 @@ func (s *Server) serve(p *peer) {
 		if err != nil {
 			return
 		}
-		var req Request
-		if json.Unmarshal(line, &req) != nil {
+		var document any
+		if json.Unmarshal(line, &document) != nil {
 			return
 		}
+		var req Request
+		_ = json.Unmarshal(line, &req) // schema validation below handles mistyped fields.
 		req.Raw = append([]byte(nil), line...)
 		s.mu.Lock()
 		s.records = append(s.records, cloneRequest(req))
@@ -153,9 +189,21 @@ func (s *Server) serve(p *peer) {
 		if s.opts.OnRequest != nil {
 			s.opts.OnRequest(cloneRequest(req))
 		}
-		if req.Method == "ping" && s.opts.PingGate != nil {
+		if s.knownMethods[req.Method] || !s.passthrough[req.Method] {
+			if err := s.requestSchema.Validate(document); err != nil {
+				if err = p.write(map[string]any{"id": req.ID, "error": map[string]string{"code": "invalid_params", "message": err.Error()}}); err != nil {
+					return
+				}
+				continue
+			}
+		}
+		gate := s.opts.Gates[req.Method]
+		if gate == nil && req.Method == "ping" {
+			gate = s.opts.PingGate
+		}
+		if gate != nil {
 			select {
-			case <-s.opts.PingGate:
+			case <-gate:
 			case <-s.ctx.Done():
 				return
 			}
@@ -291,18 +339,21 @@ func (s *Server) subscribers() []*peer {
 // Emit synchronously injects an event into matching subscriptions. Lifecycle
 // events use underscore envelope names and dotted subscription names; filtered
 // subscription events already carry dotted names. The payload stays opaque.
+// Callers must keep clients reading: injection is synchronous, and Close can
+// interrupt a blocked write. Every matching peer is attempted; errors are joined.
 func (s *Server) Emit(event string, data any) error {
+	var failures []error
 	for _, p := range s.subscribers() {
 		s.mu.Lock()
 		matches := p.names[event] || p.names[strings.Replace(event, "_", ".", 1)]
 		s.mu.Unlock()
 		if matches {
 			if err := p.write(map[string]any{"event": event, "data": data}); err != nil {
-				return fmt.Errorf("emit: %w", err)
+				failures = append(failures, fmt.Errorf("emit: %w", err))
 			}
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }
 
 // DropSubscriptions simulates upstream EOF, without stopping the listener.
@@ -312,8 +363,10 @@ func (s *Server) DropSubscriptions() {
 	}
 }
 
-// FailSubscriptions injects the schema's error body. Replies echo the original
-// request id; notifications omit id. Either form terminates a client's stream.
+// FailSubscriptions injects schema-defined error replies when reply is true.
+// When false, it injects a defensive id-less error-body fixture, which is not
+// defined by the upstream schema. Both forms terminate a client's stream.
+// As with Emit, callers must keep clients reading or interrupt writes with Close.
 func (s *Server) FailSubscriptions(code, message string, reply bool) error {
 	for _, p := range s.subscribers() {
 		r := map[string]any{"error": map[string]string{"code": code, "message": message}}

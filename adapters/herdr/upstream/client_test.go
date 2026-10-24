@@ -131,23 +131,23 @@ func TestResolveSocket(t *testing.T) {
 
 func TestVersions(t *testing.T) {
 	for _, tt := range []struct {
-		server, min string
-		old, bad    bool
+		server, min, want string
+		bad               bool
 	}{
-		{"0.9.5", "0.9.0", false, false}, {"0.9.5", "0.9.5+build", false, false},
-		{"0.8.2", "0.8.0", true, false}, {"0.9.5", "0.10.0", true, false},
-		{"0.9.0-rc.1", "0.9.0", true, false}, {"0.9.5-beta.2", "0.9.5-beta.10", true, false},
-		{"0.9.5-beta.10", "0.9.5-beta.2", false, false}, {"0.9.5-1", "0.9.5-alpha", true, false},
-		{"0.9.5-alpha", "0.9.5-1", false, false}, {"1.0.0", "0.99.0", false, false},
-		{"0.9.5", "garbage", false, true}, {"0.09.5", "0.9.0", false, true},
-		{"0.9.5-01", "0.9.0", false, true}, {"0.9.5", "0.9", false, true},
+		{"0.9.5", "0.9.0", "", false}, {"0.9.5", "0.9.5+build", "", false},
+		{"0.8.2", "0.8.0", "needs 0.9.0, server is 0.8.2", false}, {"0.9.5", "0.10.0", "needs 0.10.0, server is 0.9.5", false},
+		{"0.9.0-rc.1", "0.9.0", "needs 0.9.0, server is 0.9.0-rc.1", false}, {"0.9.5-beta.2", "0.9.5-beta.10", "needs 0.9.5-beta.10, server is 0.9.5-beta.2", false},
+		{"0.9.5-beta.10", "0.9.5-beta.2", "", false}, {"0.9.5-1", "0.9.5-alpha", "needs 0.9.5-alpha, server is 0.9.5-1", false},
+		{"0.9.5-alpha", "0.9.5-1", "", false}, {"1.0.0", "0.99.0", "", false},
+		{"0.9.5", "garbage", "", true}, {"0.09.5", "0.9.0", "", true},
+		{"0.9.5-01", "0.9.0", "", true}, {"0.9.5", "0.9", "", true},
 	} {
 		t.Run(tt.server+"_"+tt.min, func(t *testing.T) {
 			err := upstream.CheckVersion(tt.server, tt.min)
-			if tt.old {
+			if tt.want != "" {
 				e := named(t, err, "herdr_too_old")
-				if !strings.Contains(e.Message, "needs ") || !strings.Contains(e.Message, "server is "+tt.server) {
-					t.Fatal(e)
+				if e.Message != tt.want {
+					t.Fatalf("message = %q, want %q", e.Message, tt.want)
 				}
 			} else if (err != nil) != tt.bad {
 				t.Fatalf("error = %v, bad=%v", err, tt.bad)
@@ -338,7 +338,7 @@ func TestWaitCancellationAndTerminalVersion(t *testing.T) {
 }
 
 func TestEventsAndStreamErrors(t *testing.T) {
-	for _, mode := range []string{"eof", "error reply", "error notification", "cancel"} {
+	for _, mode := range []string{"eof", "error reply", "defensive id-less error", "cancel"} {
 		t.Run(mode, func(t *testing.T) {
 			path := socket(t)
 			s := server(t, path, fakeherdr.Options{})
@@ -392,7 +392,7 @@ func TestEventsAndStreamErrors(t *testing.T) {
 
 func TestPassthroughAndContextRecords(t *testing.T) {
 	path := socket(t)
-	s := server(t, path, fakeherdr.Options{})
+	s := server(t, path, fakeherdr.Options{Passthrough: []string{"custom.method"}})
 	c := client(path, newClock())
 	for _, tt := range []struct {
 		method string
