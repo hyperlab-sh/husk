@@ -1,6 +1,7 @@
 package host
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -39,7 +40,42 @@ func (r *Root) Palette() protocol.Palette { return r.rt.Theme.Wire() }
 // PaletteANSI implements contracts.Frontend.
 func (r *Root) PaletteANSI() (protocol.Palette, map[string]int) { return r.rt.Theme.WireANSI() }
 
-func (r *Root) keys() portsservices.Keys { return portsservices.Keys{Svc: r.rt.Keybinding} }
+func (r *Root) keys() portsservices.Keys {
+	return portsservices.Keys{Svc: r.rt.Keybinding, View: r.keyView}
+}
+
+// keyView captures loop-confined host actions alongside plugin declarations
+// and liveness. The frontend can call on-loop; socket callers post and wait.
+func (r *Root) keyView(ctx context.Context) (portsservices.KeyView, error) {
+	view := portsservices.KeyView{Actions: map[string]bool{}, Surfaces: map[string]map[string]bool{}}
+	capture := func() {
+		for _, action := range r.disp.List(protocol.Caller{Kind: protocol.CallerCLI}) {
+			view.Actions[action.ID] = action.Live
+		}
+		live := dispatcher.StateLiveness(r.st)
+		for plugin, doc := range r.store.Declared(store.DeclaredPlugins) {
+			if !live.Live(plugin) {
+				continue
+			}
+			raw, err := json.Marshal(doc)
+			var declared declaredPlugin
+			if err != nil || json.Unmarshal(raw, &declared) != nil {
+				continue
+			}
+			surfaces := map[string]bool{}
+			for _, surface := range declared.Surfaces {
+				surfaces[string(surface.ID)] = true
+			}
+			view.Surfaces[plugin] = surfaces
+		}
+	}
+	if r.onLoop() {
+		capture()
+		return view, nil
+	}
+	err := r.do(ctx, capture)
+	return view, err
+}
 
 // Resolve implements contracts.Frontend.
 func (r *Root) Resolve(ctx contracts.KeyContext, keys []string) contracts.KeyResolution {
