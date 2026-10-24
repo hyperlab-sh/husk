@@ -241,7 +241,9 @@ Minor 2.4 ([Built-in themes](themes.md), "Role values"; [Services](services.md),
 
 Minor 2.5 serves terminal attachment, output, detachment and encoded input on already claimed surfaces, with full-key capture and its release action. It landed as protocol `2.5`; all earlier minors remain served. Runtime surfaces and terminal links are deferred. The Go API changes `SurfaceUpdateParams.Capture` from `*bool` to `*CaptureValue`; migrate boolean callers to `protocol.CaptureBool(true)` / `protocol.CaptureBool(false)` and string-mode callers to `protocol.CaptureValueAll.Ptr()` / `protocol.CaptureValueText.Ptr()`. `TerminalAttachParams.Capture` uses the same optional value type; wire booleans remain compatible.
 
-Minor 2.6 (**landed**, `protocol.Version` is `2.6`) adds the optional boolean `yield` to `surface.close`: a live occupant can keep its layout claim behind ordinary live claims while releasing occupancy. All earlier minors remain served; no method, slice or event is added.
+Minor 2.6 (**landed**) adds the optional boolean `yield` to `surface.close`: a live occupant can keep its layout claim behind ordinary live claims while releasing occupancy. All earlier minors remain served; no method, slice or event is added.
+
+Minor 2.7 (**landed**, `protocol.Version` is `2.7`) adds optional paired `col_start` and `col_end` cell bounds to `RowHitTarget` in `surface.update`. Whole-row targets remain unchanged; ranged targets match a half-open column interval as well as their row. All earlier minors remain served.
 
 Version history:
 
@@ -254,6 +256,7 @@ Version history:
 | 2.4 | Optional ANSI palette roles. |
 | 2.5 | Terminal attachment, output, detachment and encoded input; full-key capture. |
 | 2.6 | Optional `surface.close.yield` retains an occupied layout claim as a fallback. |
+| 2.7 | Optional `RowHitTarget.col_start` and `col_end` restrict row hits to a half-open cell range. |
 
 Where the version is checked, since there is no handshake:
 
