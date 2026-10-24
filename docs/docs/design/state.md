@@ -507,6 +507,10 @@ first live claim wins among the claims that arrive after the re-registration.
 - `terminals`, a map from surface id to `{"title", "alt_screen", "mouse", "scrollback"}` for every attached surface: the title the application set (OSC 0/2), whether it is on the alternate screen, whether it enabled mouse reporting (so Input knows whether a wheel scrolls the application or the host's scrollback) and the scrollback line count. The engine updates it from the emulator's callbacks, coalesced per tick; the screen contents themselves are not State (see "What is not State"), exactly as `surface.update` lines are not.
 - `capture` values become `"text"` or `"all"` instead of `true` (`true` on the wire is recorded as `"text"`); `terminal.attach` records `"all"` unless the request said `true` or `"text"` (recorded as `"text"`) or `false` (no entry). A 2.1 reader that tests the entry for presence is unchanged.
 
+Runtime canvases form one instance-wide stack across plugins, ordered by open time, newest first. Opening a canvas shows and focuses the new top. Older runtime canvases stay open and occupied but hidden; the limit remains eight runtime surfaces per plugin. Closing a hidden canvas removes only that entry and does not change visibility or focus. Closing the top through any close path shows the next-newest still-open runtime canvas. When the last canvas closes, the frontend restores the rail selection or Home placement shown before the first runtime canvas opened.
+
+Activating Home or any rail item hides the runtime canvas stack without closing any entry: occupancy, `runtime` and plugin lifetimes are unchanged. The host action `husk.surfaces.restore` re-shows the hidden stack, newest first, and focuses its top. It has no default binding, appears in the palette only while a hidden stack exists, and is a no-op otherwise. Opening a new runtime canvas shows and focuses the new top even when the existing stack was hidden.
+
 With runtime surfaces (not landed), `overlays.modal` gains `surface`: the id of the modal's surface, `modal-surface` for a rail item and the dynamic id for a runtime modal, so the frontend's `FocusSurface` while a modal is open is whichever of the two it is. The example value above becomes `"overlays":{"modal":{"plugin":"","rail_item":"","surface":""},...}` and `"runtime":{}` is always present, `{}` when empty, like `capture` and the landed `terminals`.
 
 `overlays` carries the landed `settings_center` (string, with the Settings center of [Settings center](settings-center.md), whose Theme tab is the theme selector of [Services](services.md), "The theme selector"): the id of the active tab (`general`, `keys`, `theme`, `store`, `installed`) while the frontend's Settings center modal is open, `""` while it is closed. It is written by the frontend through `UpdateSurfaceView` like `palette` and `slot_explorer`, rewritten on every tab switch, read by Input (the center consumes every key while open, [Keybindings](keybindings.md) context filters) and by `husk state get husk.surfaces`, and is `""` whenever the center is closed by any path. There is no separate `theme_selector` flag: the selector is a tab, as shown in the `husk.surfaces` example above.
@@ -793,8 +797,10 @@ With one:
 6. **Runtime `stage` and `panel` placements.** `surface.open` (Level 1) offers
    `modal` and `canvas`; a plugin that wants to sit in the main stage or the
    side panel beside the layout occupant has no placement yet. Recommendation:
-   add both in a later minor with one stack rule: the newest runtime surface
-   in a slot shows, the layout occupant and older runtime surfaces are hidden
+   add both in a later minor with a stack rule matching runtime canvases:
+   newest-first, with hidden entries kept open and the previous placement
+   restored when the stack empties. The newest runtime surface in a slot
+   shows, the layout occupant and older runtime surfaces are hidden
    (told `visible: false`) and return when it closes, and `husk.surfaces.runtime`
    gains a `slot` field. A split that resizes the occupant is not offered: the
    frontend's layout is fixed slots, not a tree.
