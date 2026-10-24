@@ -105,6 +105,19 @@ func convert(src Source, modern bool) (*Spec, []Warning, error) {
 		s.Surfaces = append(s.Surfaces, SurfaceDecl{ID: protocol.SurfaceID(slot)})
 	}
 	if modern {
+		for key, value := range fields {
+			if !strings.HasPrefix(key, "x-") {
+				continue
+			}
+			var object map[string]json.RawMessage
+			if json.Unmarshal(value, &object) != nil || object == nil {
+				return nil, nil, fmt.Errorf("%s must be an object", key)
+			}
+			if len(s.Vendor) != 0 {
+				return nil, nil, errors.New("manifest permits one x- vendor object")
+			}
+			s.Vendor = map[string]json.RawMessage{key: bytes.Clone(value)}
+		}
 		var version int
 		if err := decodeField(fields, "manifest_version", &version); err != nil || version != 2 {
 			return nil, nil, errors.New("v2 manifest requires manifest_version 2")

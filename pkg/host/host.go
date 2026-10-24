@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -255,7 +256,19 @@ func (r *Root) loadSpecs() error {
 	}
 	r.converter = manifest.NewRegistry()
 	reg := r.converter
+	snap := r.rt.Settings.Snapshot()
+	var converters []*manifest.ExecConverter
+	for _, path := range append(append([]string(nil), r.opts.converters...), snap.Strings("husk.plugins.converters")...) {
+		converter, err := manifest.NewExecConverter(path, manifest.ExecOptions{Clock: r.cfg.Clock})
+		if err != nil {
+			r.log(pods.LogMsg{Level: "warn", Message: err.Error()})
+			continue
+		}
+		reg.Register(converter)
+		converters = append(converters, converter)
+	}
 	seen := map[string]bool{}
+	loadedDirs := map[string]bool{}
 	add := func(spec *manifest.Spec, warns []manifest.Warning) {
 		for _, w := range warns {
 			r.log(pods.LogMsg{PluginID: specID(spec), Level: "warn", Message: fmt.Sprintf("manifest %s: %s", w.Field, w.Message)})
@@ -268,12 +281,20 @@ func (r *Root) loadSpecs() error {
 			return
 		}
 		seen[spec.ID] = true
+		if spec.Dir != "" {
+			loadedDirs[filepath.Clean(spec.Dir)] = true
+		}
 		r.specs = append(r.specs, *spec)
 	}
-	snap := r.rt.Settings.Snapshot()
 	for i, arg := range snap.Strings("husk.plugins.paths") {
 		spec, warns, err := reg.Load(arg)
 		if err != nil {
+			var failure *manifest.ConverterError
+			if errors.As(err, &failure) {
+				r.log(pods.LogMsg{Level: "warn", Message: err.Error()})
+				r.refuse("", err.Error())
+				continue
+			}
 			return fmt.Errorf("husk.plugins.paths[%d] %q (layer %s): %w", i, arg, snap.Source("husk.plugins.paths"), err)
 		}
 		add(spec, warns)
@@ -294,6 +315,25 @@ func (r *Root) loadSpecs() error {
 				continue
 			}
 			add(res.Spec, res.Warnings)
+		}
+	}
+	for _, converter := range converters {
+		discovered, err := converter.Discover()
+		if err != nil {
+			r.log(pods.LogMsg{Level: "warn", Message: err.Error()})
+			continue
+		}
+		for _, dir := range discovered {
+			if loadedDirs[dir] {
+				continue
+			}
+			spec, warnings, err := reg.LoadPath(dir)
+			if err != nil {
+				r.log(pods.LogMsg{Level: "warn", Message: err.Error()})
+				r.refuse("", err.Error())
+				continue
+			}
+			add(spec, warnings)
 		}
 	}
 	return nil

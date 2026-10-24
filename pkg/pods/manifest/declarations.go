@@ -220,6 +220,9 @@ func (s Spec) CatalogJSON() ([]byte, error) {
 	for _, key := range []string{"protocol", "command", "work_dir", "dir", "binding_problems", "subscription_problems", "suggestions"} {
 		delete(doc, key)
 	}
+	for key, value := range s.Vendor {
+		doc[key] = value
+	}
 	return json.Marshal(doc)
 }
 

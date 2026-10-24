@@ -175,6 +175,7 @@ func main() {
 	demoFrame := flag.Bool("demo-frame", false, "Render one frame from a built-in demo plugin that declares a border+label+close frame and exit")
 	railMode := flag.String("rail", "", "Activate rail mode on startup: modal | full-canvas | stage")
 	holdAlt := flag.Bool("hold-alt", false, "Simulate holding Alt/Option key on startup")
+	converters := repeatable("converter", "Executable manifest converter, absolute path or PATH name (repeatable)")
 	repeatable("plugin", "Plugin: executable, plugin directory, or husk-plugin.json path (repeatable)")
 	repeatable("plugin-dir", "Load every immediate subdirectory containing a husk-plugin.json (repeatable)")
 	repeatable("add-plugin", "Append a plugin path to configured plugins, deduplicating paths (repeatable)")
@@ -232,7 +233,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "husk: runtime directory: %v\n", err)
 		os.Exit(1)
 	}
-	opt.NewHost = hostFactory(id, runtimeDir, instanceDocs, profileFlag, additions)
+	opt.NewHost = hostFactory(id, runtimeDir, instanceDocs, profileFlag, additions, (*converters)...)
 	if *dumpFrame {
 		os.Exit(dumpFrameMain(context.Background(), opt, os.Stdout, os.Stderr))
 	}
@@ -266,10 +267,10 @@ func printDumpFrame(frame string, err error, stdout, stderr io.Writer) int {
 
 // hostFactory supplies the binary's launch defaults before workbench options.
 // Both interactive and frame-dump runners use this same constructor seam.
-func hostFactory(id, dir string, docs map[string]map[string]any, profile *string, additions map[string][]string) func(contracts.Config, ...host.Option) (host.Looped, error) {
+func hostFactory(id, dir string, docs map[string]map[string]any, profile *string, additions map[string][]string, converters ...string) func(contracts.Config, ...host.Option) (host.Looped, error) {
 	return func(loop contracts.Config, opts ...host.Option) (host.Looped, error) {
 		return newHost(loop, id, dir, docs, profile,
-			append([]host.Option{host.WithVersion(buildVersion()), host.WithPluginAdditions(additions)}, opts...)...)
+			append([]host.Option{host.WithVersion(buildVersion()), host.WithPluginAdditions(additions), host.WithConverters(converters)}, opts...)...)
 	}
 }
 

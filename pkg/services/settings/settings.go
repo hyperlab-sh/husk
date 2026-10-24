@@ -99,10 +99,11 @@ func Builtins() []Entry {
 
 // startConsumedEntries is the single catalog of keys whose values startup
 // consumes before any successful Settings load is guaranteed. Future start-time
-// keys, including husk.plugins.converters when it lands, must join this catalog.
+// keys must join this catalog.
 func startConsumedEntries() []Entry {
 	return []Entry{
 		{Key: "husk.bundle", Type: TypeString, Default: "", Owner: "husk", Apply: "restart", Public: true, Doc: "Bundle directory loaded once at start, from user and instance layers only."},
+		{Key: "husk.plugins.converters", Type: TypeStrings, Default: []string{}, Owner: "husk", Apply: "restart", Doc: "Executable manifest converters registered once at start, after --converter flags and built-in converters; absolute paths or PATH names."},
 		{Key: "husk.plugins.paths", Type: TypeStrings, Default: []string{}, Owner: "husk", Apply: "restart", Doc: "Plugin arguments loaded once at start, interpreted like --plugin; --plugin documents are the instance layer on top, and --add-plugin appends to the effective value (named-instance file included), deduplicated by cleaned absolute path."},
 		{Key: "husk.plugins.dirs", Type: TypeStrings, Default: []string{}, Owner: "husk", Apply: "restart", Doc: "Plugin directories loaded once at start, interpreted like --plugin-dir; --plugin-dir documents are the instance layer on top, and --add-plugin-dir appends to the effective value (named-instance file included), deduplicated by cleaned absolute path."},
 	}
