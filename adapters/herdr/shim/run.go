@@ -79,6 +79,7 @@ type runner struct {
 	paneGate    chan struct{}
 	paneCounter uint64
 	paneTimers  map[Process]upstream.Timer
+	links       []compiledLinkHandler
 }
 
 // Run serves Husk requests until stdin EOF or a terminal attach failure. Attach
@@ -129,6 +130,7 @@ func Run(ctx context.Context, o Options, in io.Reader, out, log io.Writer) error
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	r := &runner{panes: map[protocol.SurfaceID]*pane{}, paneGate: make(chan struct{}, 1), o: o, m: m, id: id, ctx: ctx, cancel: cancel, log: log, processes: map[Process]bool{}, state: state{Server: "absent", Socket: o.Socket, Startup: []map[string]any{}, Surfaces: map[string]any{}}}
+	r.links = compileLinkHandlers(m, o.Platform)
 	p, err := proxy.Start(ctx, proxy.Options{Dial: o.Client.Dial, Clock: o.Clock, Intercept: r.intercept, Warn: func(m string) { r.logLine(map[string]any{"level": "warning", "plugin": r.m.ID, "method": m}) }})
 	if err != nil {
 		return err

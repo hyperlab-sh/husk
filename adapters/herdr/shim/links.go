@@ -2,8 +2,8 @@ package shim
 
 import (
 	"encoding/json"
-	"net/url"
 	"regexp"
+	"strings"
 
 	"github.com/hyperlab-sh/husk/adapters/herdr/manifest"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
@@ -35,36 +35,53 @@ func (r *runner) linkNotification(raw json.RawMessage) {
 	}()
 }
 
-// Matching follows find_plugin_link_handler in upstream plugins/mod.rs at
-// 5608de0608918aba2f9d501e7793b984a0ca9cfa: manifest order, regex is_match
-// (substring unless anchored), case-sensitive unless the pattern opts in, and
-// both handler and action must support this platform. Unsupported RE2 patterns
-// and missing actions are skipped just as at conversion.
-func (r *runner) handleLink(target string) {
-	for _, handler := range r.m.LinkHandlers {
-		if !manifest.Supports(handler.Platforms, r.o.Platform) {
+type compiledLinkHandler struct {
+	entry   manifest.Entry
+	action  manifest.Entry
+	pattern *regexp.Regexp
+}
+
+// compileLinkHandlers follows find_plugin_link_handler in upstream
+// plugins/mod.rs at 5608de0608918aba2f9d501e7793b984a0ca9cfa: retain manifest
+// order, require handler/action platform eligibility, and skip invalid patterns
+// or missing actions. Compile once for the runner's immutable manifest.
+func compileLinkHandlers(m manifest.Manifest, platform string) []compiledLinkHandler {
+	var handlers []compiledLinkHandler
+	for _, handler := range m.LinkHandlers {
+		if !manifest.Supports(handler.Platforms, platform) {
 			continue
 		}
 		pattern, err := regexp.Compile(handler.Pattern)
 		if err != nil {
 			continue
 		}
-		for _, action := range r.m.Actions {
-			if action.ID != handler.Action || !manifest.Supports(action.Platforms, r.o.Platform) {
-				continue
-			}
-			if !pattern.MatchString(target) {
+		for _, action := range m.Actions {
+			if action.ID == handler.Action && manifest.Supports(action.Platforms, platform) {
+				handlers = append(handlers, compiledLinkHandler{entry: handler, action: action, pattern: pattern})
 				break
 			}
-			context, _ := json.Marshal(InvocationContext{ClickedURL: target, LinkHandlerID: handler.ID})
-			if _, err := r.launch(action, action.ID, "", nil, "link_click", "link_click", context); err != nil {
-				r.logLine(map[string]any{"level": "warning", "link_handler_id": handler.ID, "error": err.Error()})
-			}
-			return
 		}
 	}
-	u, err := url.Parse(target)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+	return handlers
+}
+
+// Matching is a substring search unless anchored and case-sensitive unless the
+// pattern opts in. Go's Perl classes and word boundaries are ASCII, unlike
+// upstream Rust's Unicode defaults; this divergence is documented in Limits.
+func (r *runner) handleLink(target string) {
+	for _, handler := range r.links {
+		if !handler.pattern.MatchString(target) {
+			continue
+		}
+		context, _ := json.Marshal(InvocationContext{ClickedURL: target, LinkHandlerID: handler.entry.ID})
+		if _, err := r.launch(handler.action, handler.action.ID, "", nil, "link_click", "link_click", context); err != nil {
+			r.logLine(map[string]any{"level": "warning", "link_handler_id": handler.entry.ID, "error": err.Error()})
+		}
+		return
+	}
+	// Match safe_web_url in upstream src/app/actions.rs at the pinned revision:
+	// lowercase literal prefixes only, not normalized schemes or opaque URLs.
+	if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
 		r.logLine(map[string]any{"level": "debug", "message": "unmatched terminal link ignored", "url": target})
 		return
 	}
@@ -72,7 +89,7 @@ func (r *runner) handleLink(target string) {
 	if r.o.Platform == "darwin" {
 		opener = "open"
 	}
-	command := Command{Argv: []string{opener, target}, Env: CommandEnvironment(r.o.Env, r.o.Dir, r.o.Binary, r.proxy.Path(), r.o.ConfigDir, r.o.StateDir, r.m.ID, "", "", nil, InvocationContext{}), Dir: r.o.Dir}
+	command := Command{Argv: []string{opener, target}, Env: openerEnvironment(r.o.Env), Dir: r.o.Dir}
 	process, err := r.o.SpawnOpener(command)
 	if err != nil {
 		r.logLine(map[string]any{"command": command.Argv, "error": err.Error()})
