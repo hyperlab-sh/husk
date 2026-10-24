@@ -215,11 +215,18 @@ func (r *runner) wait(d time.Duration) bool {
 }
 func (r *runner) attach() error {
 	var backoff upstream.Backoff
+	var startupServer *serverIdentity
 	for {
+		var identity serverIdentity
+		observe := func(pong upstream.Pong) error {
+			var err error
+			identity, err = identifyServer(r.o.Socket, pong)
+			return err
+		}
 		var session *upstream.Session
 		var err error
 		if r.o.Settings.Server == "start" {
-			session, err = r.o.Client.Attach(r.ctx, r.m.MinVersion)
+			session, err = r.o.Client.Attach(r.ctx, r.m.MinVersion, observe)
 			if retryable(err) && r.ctx.Err() == nil {
 				start := r.o.StartServer
 				if start == nil {
@@ -228,10 +235,10 @@ func (r *runner) attach() error {
 				if err = start(r.ctx); err != nil {
 					return fmt.Errorf("herdr server did not start: %w", err)
 				}
-				session, err = r.o.Client.Attach(r.ctx, r.m.MinVersion)
+				session, err = r.o.Client.Attach(r.ctx, r.m.MinVersion, observe)
 			}
 		} else {
-			session, err = r.o.Client.Attach(r.ctx, r.m.MinVersion)
+			session, err = r.o.Client.Attach(r.ctx, r.m.MinVersion, observe)
 		}
 		if err != nil {
 			var named *upstream.Error
@@ -283,7 +290,7 @@ func (r *runner) attach() error {
 				if r.ctx.Err() != nil {
 					return nil
 				}
-				if retryable(err) {
+				if retryable(err) && !upstream.IsRemote(err) {
 					r.change(func(s *state) { s.Server = "lost" })
 					if !r.wait(backoff.Next()) {
 						return nil
@@ -291,7 +298,7 @@ func (r *runner) attach() error {
 					continue
 				}
 				var remote *upstream.Error
-				if errors.As(err, &remote) && remote.Code == "herdr_protocol" {
+				if errors.As(err, &remote) && remote.Code == "herdr_protocol" && !upstream.IsRemote(err) {
 					return err
 				}
 				// An explicit subscription refusal suspends event hooks only.
@@ -300,7 +307,12 @@ func (r *runner) attach() error {
 		}
 		backoff = upstream.Backoff{}
 		r.change(func(s *state) { s.Server = "attached"; s.Version = session.Version; s.Hooks = owner; s.LastError = "" })
-		if owner == "shim" {
+		if owner == "server" {
+			startupServer = nil
+		}
+		if owner == "shim" && (startupServer == nil || *startupServer != identity) {
+			completed := identity
+			startupServer = &completed
 			for _, e := range r.m.Startup {
 				if manifest.Supports(e.Platforms, r.o.Platform) {
 					if _, err := r.launch(e, "", "startup", nil, "plugin.startup", "startup", nil); err != nil {
@@ -323,19 +335,16 @@ func (r *runner) attach() error {
 					if manifest.Supports(hook.Platforms, r.o.Platform) && (hook.On == event.Event || strings.Replace(hook.On, ".", "_", 1) == event.Event) {
 						raw, _ := json.Marshal(event)
 						if _, err := r.launch(hook, "", hook.On, raw, hook.On, "api", nil); err != nil {
-							r.logLine(map[string]any{"event": hook.On, "error": err.Error()})
+							var refusal *protocol.Error
+							if !errors.As(err, &refusal) || refusal.Code != protocol.CodeBusy {
+								r.logLine(map[string]any{"event": hook.On, "error": err.Error()})
+							}
 						}
 					}
 				}
 			}
 		} else {
-			// Without a subscription there is no stream EOF to observe. A read-only
-			// ping keeps the same reconnect/hook rule for action-only plugins.
-			for r.wait(5 * time.Second) {
-				if _, err = r.o.Client.Ping(r.ctx); err != nil {
-					break
-				}
-			}
+			r.probe(identity)
 			if r.ctx.Err() != nil {
 				return nil
 			}

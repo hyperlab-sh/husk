@@ -74,6 +74,12 @@ func runPlugin(dir string, out, log io.Writer, env environment) int {
 			err = shim.Run(context.Background(), o, os.Stdin, out, log)
 		}
 	}
+	return reportRun(err, log)
+}
+
+// reportRun leaves the terminal diagnostic as the final stderr line. Pod failure
+// reasons and failure toasts are the host's exit-reporting policy, not ours.
+func reportRun(err error, log io.Writer) int {
 	if err != nil {
 		fmt.Fprintln(log, err)
 		return 1

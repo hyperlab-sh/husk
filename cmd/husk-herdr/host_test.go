@@ -39,6 +39,14 @@ func TestMain(m *testing.M) {
 		case "detect", "discover", "convert", "run":
 			exe, _ := os.Executable()
 			os.Exit(execute(os.Args[1:], os.Stdout, os.Stderr, captureEnvironment(exe, runtime.GOOS, os.Getenv, os.UserHomeDir, os.LookupEnv)))
+		case "terminal-start-failure":
+			exe, _ := os.Executable()
+			o, err := runtimeOptions(os.Args[2], captureEnvironment(exe, runtime.GOOS, os.Getenv, os.UserHomeDir, os.LookupEnv))
+			if err == nil {
+				o.StartServer = func(context.Context) error { return os.ErrPermission }
+				err = shim.Run(context.Background(), o, os.Stdin, os.Stdout, os.Stderr)
+			}
+			os.Exit(reportRun(err, os.Stderr))
 		case "capture":
 			os.Exit(captureCommand())
 		}

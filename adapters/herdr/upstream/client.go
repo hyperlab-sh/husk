@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -21,6 +22,24 @@ type Error struct {
 	Code    string            `json:"code"`
 	Message string            `json:"message"`
 	Data    map[string]string `json:"data,omitempty"`
+	cause   error
+	remote  bool
+}
+
+// IsRemote reports whether the error body came from a decoded server reply.
+func IsRemote(err error) bool {
+	var e *Error
+	return errors.As(err, &e) && e.remote
+}
+
+// Unwrap retains transport causes without adding them to upstream envelopes.
+func (e *Error) Unwrap() error { return e.cause }
+
+// NothingListening distinguishes a missing/refused dial from a failed read,
+// timeout or remote error. Only the former is immediate loss during probes.
+func NothingListening(err error) bool {
+	var op *net.OpError
+	return errors.As(err, &op) && op.Op == "dial" && (errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ECONNREFUSED))
 }
 
 // Error formats the stable code and human-readable message.
@@ -93,6 +112,7 @@ func receive(s *bufio.Scanner) (response, error) {
 		return r, err
 	}
 	if r.Error != nil {
+		r.Error.remote = true
 		return r, r.Error
 	}
 	return r, nil
@@ -106,7 +126,9 @@ func (c *Client) Dial(ctx context.Context) (net.Conn, error) {
 		if ctx.Err() != nil {
 			return nil, context.Cause(ctx)
 		}
-		return nil, Unavailable()
+		failure := Unavailable()
+		failure.cause = err
+		return nil, failure
 	}
 	return conn, nil
 }
@@ -208,45 +230,66 @@ func (c *Client) bounded(ctx context.Context, d time.Duration) (context.Context,
 	return ctx, func() { timer.Stop(); cancel(context.Canceled) }
 }
 
+// Pong retains both server fields used to distinguish server identities.
+type Pong struct {
+	Version  string
+	Protocol int
+}
+
 // Ping bounds both dialing and reading to two seconds on the injected clock.
 func (c *Client) Ping(ctx context.Context) (string, error) {
+	pong, err := c.PingInfo(ctx)
+	return pong.Version, err
+}
+
+// PingInfo is Ping with the protocol number retained for identity comparison.
+func (c *Client) PingInfo(ctx context.Context) (Pong, error) {
 	ctx, done := c.bounded(ctx, 2*time.Second)
 	defer done()
 	raw, err := c.Call(ctx, "ping", nil)
 	if err != nil {
-		return "", attachError("ping", err)
+		return Pong{}, attachError("ping", err)
 	}
 	var pong struct {
-		Type    string `json:"type"`
-		Version string `json:"version"`
+		Type     string `json:"type"`
+		Version  string `json:"version"`
+		Protocol *int   `json:"protocol"`
 	}
 	if err = json.Unmarshal(raw, &pong); err != nil {
-		return "", protocolError("ping", err)
+		return Pong{}, protocolError("ping", err)
 	}
-	if pong.Type != "pong" {
-		return "", protocolError("ping", fmt.Errorf("invalid ping result"))
+	if pong.Type != "pong" || pong.Protocol == nil {
+		return Pong{}, protocolError("ping", fmt.Errorf("invalid ping result"))
 	}
 	if _, err = parseVersion(pong.Version); err != nil {
-		return "", protocolError("ping", err)
+		return Pong{}, protocolError("ping", err)
 	}
-	return pong.Version, nil
+	return Pong{Version: pong.Version, Protocol: *pong.Protocol}, nil
 }
 
 // Session is a validated attach. Plugins is re-read on every successful attach.
 type Session struct {
-	Version string
-	Plugins json.RawMessage
+	Version  string
+	Protocol int
+	Plugins  json.RawMessage
 }
 
 // Attach performs ping, the version check, and one plugin.list, in that order.
 // Ping and plugin.list each have an independent two-second injected deadline.
-// It never starts a process or sends a management request.
-func (c *Client) Attach(ctx context.Context, minVersion string) (*Session, error) {
-	version, err := c.Ping(ctx)
+// It never starts a process or sends a management request. Optional observers
+// run immediately after the successful ping, before any subsequent request;
+// the shim uses one to lstat the socket at precisely this boundary.
+func (c *Client) Attach(ctx context.Context, minVersion string, observers ...func(Pong) error) (*Session, error) {
+	pong, err := c.PingInfo(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if err = CheckVersion(version, minVersion); err != nil {
+	for _, observe := range observers {
+		if err = observe(pong); err != nil {
+			return nil, err
+		}
+	}
+	if err = CheckVersion(pong.Version, minVersion); err != nil {
 		return nil, attachError("ping version check", err)
 	}
 	ctx, done := c.bounded(ctx, 2*time.Second)
@@ -262,7 +305,7 @@ func (c *Client) Attach(ctx context.Context, minVersion string) (*Session, error
 	if json.Unmarshal(plugins, &list) != nil || list.Type != "plugin_list" || len(list.Plugins) == 0 || list.Plugins[0] != '[' {
 		return nil, protocolError("plugin.list", fmt.Errorf("invalid result"))
 	}
-	return &Session{Version: version, Plugins: list.Plugins}, nil
+	return &Session{Version: pong.Version, Protocol: pong.Protocol, Plugins: list.Plugins}, nil
 }
 
 // Backoff is a caller-owned exponential retry sequence: 5, 10, 20, then 30s.
@@ -287,8 +330,8 @@ func (b *Backoff) Next() time.Duration {
 // as absent. Cancellation stops the wait; version refusal is terminal. Malformed
 // replies, invalid versions/results and remote errors other than unavailable are
 // terminal *Error values with code herdr_protocol and the method in Message, so
-// the shim can publish failed/last_error without matching prose. A stream owner
-// calls it again after EOF/error.
+// the shim can exit with a named stderr diagnostic without matching prose.
+// A stream owner calls it again after EOF/error.
 func (c *Client) WaitAttach(ctx context.Context, minVersion string, notify func(string)) (*Session, error) {
 	var backoff Backoff
 	for {
