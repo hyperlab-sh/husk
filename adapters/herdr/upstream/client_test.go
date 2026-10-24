@@ -112,20 +112,20 @@ func TestResolveSocket(t *testing.T) {
 		bad    bool
 	}{
 		{"default", upstream.SocketOptions{Home: "/home/test"}, nil, "/home/test/.config/herdr/herdr.sock", false},
-		{"config file ignored", upstream.SocketOptions{Home: "/home/test", ConfigPath: "/tmp/config/custom.toml"}, map[string]string{"HERDR_CONFIG_PATH": "/tmp/config/custom.toml"}, "/home/test/.config/herdr/herdr.sock", false},
+		{"config file ignored", upstream.SocketOptions{Home: "/home/test"}, map[string]string{"HERDR_CONFIG_PATH": "/tmp/config/custom.toml"}, "/home/test/.config/herdr/herdr.sock", false},
 		{"xdg", upstream.SocketOptions{Home: "/home/test"}, map[string]string{"XDG_CONFIG_HOME": "/config"}, "/config/herdr/herdr.sock", false},
 		{"xdg without home", upstream.SocketOptions{}, map[string]string{"XDG_CONFIG_HOME": "/config"}, "/config/herdr/herdr.sock", false},
 		{"windows appdata", upstream.SocketOptions{Platform: "windows", Home: "/home/test"}, map[string]string{"APPDATA": "/roaming"}, "/roaming/herdr/herdr.sock", false},
 		{"windows profile", upstream.SocketOptions{Platform: "windows", Home: "/home/test"}, map[string]string{"USERPROFILE": "/profile"}, "/profile/AppData/Roaming/herdr/herdr.sock", false},
 		{"windows home environment", upstream.SocketOptions{Platform: "windows"}, map[string]string{"HOME": "/home/env"}, "/home/env/.config/herdr/herdr.sock", false},
 		{"inherited", upstream.SocketOptions{SocketPath: "/tmp/inherited.sock"}, nil, "/tmp/inherited.sock", false},
-		{"session wins", upstream.SocketOptions{Session: "review", SocketPath: "/tmp/ignored", ConfigPath: "/tmp/config/custom.toml", Home: "/home/test"}, map[string]string{"XDG_CONFIG_HOME": "/config", "HERDR_CONFIG_PATH": "/tmp/config/custom.toml"}, "/config/herdr/sessions/review/herdr.sock", false},
+		{"session wins", upstream.SocketOptions{Session: "review", SocketPath: "/tmp/ignored", Home: "/home/test"}, map[string]string{"XDG_CONFIG_HOME": "/config", "HERDR_CONFIG_PATH": "/tmp/config/custom.toml"}, "/config/herdr/sessions/review/herdr.sock", false},
 		{"default session", upstream.SocketOptions{Session: "default", Home: "/home/test"}, nil, "/home/test/.config/herdr/herdr.sock", false},
 		{"dot", upstream.SocketOptions{Session: "..", Home: "/home/test"}, nil, "", true},
 		{"slash", upstream.SocketOptions{Session: "a/b", Home: "/home/test"}, nil, "", true},
 		{"unicode", upstream.SocketOptions{Session: "é", Home: "/home/test"}, nil, "", true},
 		{"no home", upstream.SocketOptions{}, nil, "", true},
-		{"config file without home", upstream.SocketOptions{ConfigPath: "/tmp/config/custom.toml"}, map[string]string{"HERDR_CONFIG_PATH": "/tmp/config/custom.toml"}, "", true},
+		{"config file without home", upstream.SocketOptions{}, map[string]string{"HERDR_CONFIG_PATH": "/tmp/config/custom.toml"}, "", true},
 		{"relative xdg", upstream.SocketOptions{Home: "/home/test"}, map[string]string{"XDG_CONFIG_HOME": "relative"}, "", true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
