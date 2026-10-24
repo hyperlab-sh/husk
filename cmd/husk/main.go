@@ -18,7 +18,6 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/host"
 	"github.com/hyperlab-sh/husk/pkg/host/contracts"
 	"github.com/hyperlab-sh/husk/pkg/instance"
-	"github.com/hyperlab-sh/husk/pkg/protocol"
 	"github.com/hyperlab-sh/husk/pkg/substrate/store"
 	"github.com/hyperlab-sh/husk/pkg/workbench"
 )
@@ -277,17 +276,6 @@ func hostFactory(id, dir string, docs map[string]map[string]any, profile *string
 // newHost fills the binary's launch configuration around the UI callbacks.
 func newHost(config contracts.Config, id, dir string, instanceDocs map[string]map[string]any, profileFlag *string, opts ...host.Option) (host.Looped, error) {
 	config.InstanceID, config.RuntimeDir = id, dir
-	config.Entry = instance.Entry{
-		ID: id, PID: os.Getpid(), Socket: instance.SocketPath(dir, id), ProtocolVersion: protocol.Version,
-	}
 	config.InstanceDocs, config.ProfileFlag = instanceDocs, profileFlag
-	h, err := host.New(config, opts...)
-	if err != nil {
-		return nil, err
-	}
-	looped, ok := h.(host.Looped)
-	if !ok {
-		return nil, fmt.Errorf("host does not run on a loop")
-	}
-	return looped, nil
+	return host.NewInstance(config, opts...)
 }
