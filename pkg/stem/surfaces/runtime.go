@@ -100,7 +100,8 @@ func (e *Engine) SurfaceFocus(plugin string, p protocol.SurfaceFocusParams) erro
 	return errf(protocol.CodeNotFound, "runtime surface not found")
 }
 
-// RuntimeSurfaces returns detached runtime declarations in opening order.
+// RuntimeSurfaces returns detached declarations ordered by last open or focus,
+// oldest first. The final canvas is the frontend's most recently selected top.
 // Geometry, visibility and focus remain the frontend's responsibility. Loop-only.
 func (e *Engine) RuntimeSurfaces() []contracts.RuntimeSurface {
 	out := slices.Clone(e.runtime)
