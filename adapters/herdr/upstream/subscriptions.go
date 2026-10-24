@@ -14,7 +14,8 @@ type SubscriptionRefusal struct {
 // pass through unchecked and in their original order. Each refused name appears
 // once, so the shim can log its Err once per attach without dropping other hooks.
 // Call this afresh on each attach. It performs no I/O, logging or lifecycle work;
-// the shim owns those policies. Subscribe still rejects unfiltered input.
+// the shim owns those policies. If allowed is empty, skip Subscribe: there are
+// no event hooks to run. Subscribe also rejects empty or unfiltered input.
 func FilterHookSubscriptions(names []string) (allowed []string, refused []SubscriptionRefusal) {
 	seen := map[string]bool{}
 	for _, name := range names {

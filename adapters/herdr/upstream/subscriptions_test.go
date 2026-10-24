@@ -207,6 +207,8 @@ func TestSubscribeMalformedAcknowledgementIsProtocol(t *testing.T) {
 	for _, tt := range []struct{ name, line string }{
 		{"wrong type", `{"id":"1","result":{"type":"ok"}}`},
 		{"wrong id", `{"id":"wrong","result":{"type":"subscription_started"}}`},
+		{"error with wrong id", `{"id":"wrong","error":{"code":"x","message":"y"}}`},
+		{"id-less error", `{"error":{"code":"x","message":"y"}}`},
 		{"event before ack", `{"event":"pane_focused","data":{}}`},
 		{"bad JSON", `not-json`},
 		{"mistyped error", `{"id":"1","error":{"code":7,"message":"bad"}}`},
