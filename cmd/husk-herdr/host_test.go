@@ -50,6 +50,12 @@ func TestMain(m *testing.M) {
 			os.Exit(captureCommand())
 		case "pane-open":
 			os.Exit(openPaneFixture())
+		case "link-shim":
+			os.Exit(runLinkShim())
+		case "link-output":
+			fmt.Fprint(os.Stdout, "\x1b]8;;custom://handled\x1b\\LINK\x1b]8;;\x1b\\\r\nhttps://handled.test\r\nhttps://external.test\x1b]2;LinksReady\x07")
+			_, _ = io.Copy(io.Discard, os.Stdin)
+			os.Exit(0)
 		case "pane-output":
 			fmt.Fprint(os.Stdout, "\x1b[32mPANE OUTPUT\x1b[0m\x1b]2;Ready\x07")
 			_, _ = io.Copy(io.Discard, os.Stdin)
