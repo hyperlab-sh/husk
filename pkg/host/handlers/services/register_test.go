@@ -102,6 +102,15 @@ func TestRegisterDeniesPluginsTheCLIMethods(t *testing.T) {
 		if reply.Error == nil || reply.Error.Code != protocol.CodeDenied {
 			t.Fatalf("%s: %+v, want denied", method, reply.Error)
 		}
+		var data struct {
+			Reason string `json:"reason"`
+		}
+		if err := json.Unmarshal(reply.Error.Data, &data); err != nil {
+			t.Fatalf("%s: decoding denial data: %v", method, err)
+		}
+		if data.Reason != "user_only" {
+			t.Fatalf("%s: reason = %q, want user_only", method, data.Reason)
+		}
 		if calls := rec.Methods(); len(calls) != 0 {
 			t.Fatalf("%s: port touched before denial: %v", method, calls)
 		}

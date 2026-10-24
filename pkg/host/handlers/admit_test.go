@@ -62,6 +62,38 @@ func TestAdmit(t *testing.T) {
 	}
 }
 
+func TestAdmitUserOnlyMethods(t *testing.T) {
+	for method, home := range contracts.MethodHomes() {
+		if len(home.Kinds) != 1 || home.Kinds[0] != contracts.CallerCLI {
+			continue
+		}
+		t.Run(method, func(t *testing.T) {
+			req := admitReq(method)
+			// Admission precedes decoding, even for malformed params.
+			req.Params = json.RawMessage(`[]`)
+			reply := Admit(req, contracts.Caller{Kind: contracts.CallerPlugin, PluginID: "files"})
+			if reply == nil || reply.Error == nil || reply.Error.Code != protocol.CodeDenied {
+				t.Fatalf("reply = %+v, want denied", reply)
+			}
+			var data struct {
+				Reason string `json:"reason"`
+			}
+			if err := json.Unmarshal(reply.Error.Data, &data); err != nil {
+				t.Fatalf("decoding denial data: %v", err)
+			}
+			if data.Reason != "user_only" {
+				t.Fatalf("reason = %q, want user_only", data.Reason)
+			}
+			if idOf(*reply) != `"7"` {
+				t.Fatalf("reply id = %s, want request id", idOf(*reply))
+			}
+			if deny := Admit(req, contracts.Caller{Kind: contracts.CallerCLI}); deny != nil {
+				t.Fatalf("CLI caller refused: %+v", deny.Error)
+			}
+		})
+	}
+}
+
 func TestAdmitNamesCallerKind(t *testing.T) {
 	reply := Admit(admitReq(protocol.MethodStateSet), contracts.Caller{Kind: contracts.CallerCLI})
 	if reply == nil || reply.Error == nil || reply.Error.Code != protocol.CodeDenied {
