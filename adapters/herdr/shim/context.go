@@ -4,10 +4,12 @@ package shim
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 
 	"github.com/hyperlab-sh/husk/adapters/herdr/upstream"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
 // InvocationContext follows PluginInvocationContext in the committed schema.
@@ -30,6 +32,16 @@ type InvocationContext struct {
 	ClickedURL        string          `json:"clicked_url,omitempty"`
 	LinkHandlerID     string          `json:"link_handler_id,omitempty"`
 	SelectedText      *string         `json:"selected_text,omitempty"`
+}
+
+// contextFailure gives action and pane context reads the same absence contract,
+// including a server lost after the successful pre-spawn ping.
+func contextFailure(err error) *protocol.Error {
+	var remote *upstream.Error
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.As(err, &remote) && remote.Code == "unavailable" {
+		return &protocol.Error{Code: protocol.CodeUnavailable, Message: err.Error(), Data: json.RawMessage(`{"reason":"herdr_absent"}`)}
+	}
+	return wireFailure(err)
 }
 
 // BuildContext reads server focus, not Husk focus. Non-null caller-supplied

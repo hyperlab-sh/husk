@@ -276,11 +276,7 @@ func (r *runner) launch(e manifest.Entry, action, correlation string, provided j
 	}
 	c, err := BuildContext(ctx, r.o.Client, correlation, "api", provided)
 	if err != nil {
-		var remote *upstream.Error
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.As(err, &remote) && remote.Code == "unavailable" {
-			return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: err.Error(), Data: json.RawMessage(`{"reason":"herdr_absent"}`)}
-		}
-		return nil, err
+		return nil, contextFailure(err)
 	}
 	env := CommandEnvironment(r.o.Env, r.o.Dir, r.o.Binary, r.proxy.Path(), r.o.ConfigDir, r.o.StateDir, r.m.ID, action, c)
 	r.mu.Lock()
