@@ -28,7 +28,7 @@ func testEnv(t *testing.T) (environment, string) {
 
 func TestConverterRoles(t *testing.T) {
 	env, dir := testEnv(t)
-	for _, args := range [][]string{nil, {"run", dir}, {"sync"}, {"doctor"}, {"detect"}, {"discover", "--instance", "x"}, {"convert", "--bad"}} {
+	for _, args := range [][]string{nil, {"run"}, {"sync"}, {"run", dir, "--bad"}, {"detect"}, {"discover", "--instance", "x"}, {"convert", "--bad"}} {
 		var out, err bytes.Buffer
 		if code := execute(args, &out, &err, env); code != 2 || out.Len() != 0 || !strings.Contains(err.String(), "usage:") {
 			t.Fatalf("args=%v code=%d out=%s err=%s", args, code, &out, &err)

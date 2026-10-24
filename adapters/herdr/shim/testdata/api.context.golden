@@ -1,0 +1,13 @@
+{
+  "correlation_id": "request-1",
+  "focused_pane_agent": "worker",
+  "focused_pane_cwd": "/project",
+  "focused_pane_id": "p",
+  "focused_pane_status": "working",
+  "invocation_source": "api",
+  "tab_id": "t",
+  "tab_label": "Main",
+  "workspace_cwd": "/project",
+  "workspace_id": "w",
+  "workspace_label": "Project"
+}

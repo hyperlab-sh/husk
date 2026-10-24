@@ -1,4 +1,4 @@
-// Command husk-herdr implements the executable manifest-converter roles.
+// Command husk-herdr converts declarations, runs plugin shims and diagnoses attachments.
 package main
 
 import (
@@ -31,14 +31,14 @@ func main() {
 
 func execute(args []string, out, diagnostics io.Writer, env environment) int {
 	usage := func() int {
-		fmt.Fprintln(diagnostics, "usage: husk-herdr detect <dir> | discover | convert <dir>")
+		fmt.Fprintln(diagnostics, "usage: husk-herdr detect <dir> | discover | convert <dir> | run <dir> | doctor [--instance name]")
 		return 2
 	}
 	if len(args) == 0 {
 		return usage()
 	}
 	switch args[0] {
-	case "detect", "convert":
+	case "detect", "convert", "run":
 		if len(args) != 2 || args[1] == "" || args[1][0] == '-' {
 			return usage()
 		}
@@ -46,8 +46,13 @@ func execute(args []string, out, diagnostics io.Writer, env environment) int {
 		if len(args) != 1 {
 			return usage()
 		}
+	case "doctor":
+		return doctor(args[1:], out, diagnostics, env)
 	default:
 		return usage()
+	}
+	if args[0] == "run" {
+		return runPlugin(args[1], out, diagnostics, env)
 	}
 	if args[0] == "detect" {
 		info, err := os.Stat(filepath.Join(args[1], "herdr-plugin.toml"))
