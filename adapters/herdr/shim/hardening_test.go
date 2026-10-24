@@ -93,7 +93,7 @@ func TestHardeningReconnectUnderLoad(t *testing.T) {
 	assertUnsignalled(t, active)
 	unblock()
 	reply := take(t, action)
-	if reply.Error != nil && (reply.Error.Code != protocol.CodeUnavailable || !strings.Contains(string(reply.Error.Data), "herdr_absent")) {
+	if reply.Error != nil {
 		t.Fatalf("gated action: %+v", reply)
 	}
 	r.host.until(t, protocol.MethodStateSet, "lost") // EOF fences buffered dispatch.
@@ -116,10 +116,15 @@ func TestHardeningReconnectUnderLoad(t *testing.T) {
 			t.Fatalf("unexpected spawn during EOF: %v", p.command.Argv)
 		}
 	}
-	if events < 1 || events > burst {
+	if events != burst {
 		t.Fatalf("event spawns=%d burst=%d", events, burst)
 	}
-	if (reply.Error == nil && actions != 1) || (reply.Error != nil && actions != 0) {
+	for i := 0; i < burst; i++ {
+		if id := fmt.Sprintf("before-%d", i); !seen[id] {
+			t.Fatalf("missing buffered event %q", id)
+		}
+	}
+	if actions != 1 {
 		t.Fatalf("action spawns=%d reply=%+v", actions, reply)
 	}
 	assertUnsignalled(t, active)

@@ -171,6 +171,10 @@ func TestHardeningRealPTYTeardownRaces(t *testing.T) {
 				_ = r.in.Close()
 				take(t, requestCtx.Done())
 				unblock()
+				reply := take(t, replies)
+				if reply.Error == nil || reply.Error.Code != protocol.CodeTimeout || len(reply.Result) != 0 {
+					t.Fatalf("cancelled pending open: %+v", reply)
+				}
 			} else {
 				p = take(t, spawned)
 				// On an assertion failure release both control connections so even a
@@ -231,6 +235,11 @@ func TestHardeningRealPTYTeardownRaces(t *testing.T) {
 					_ = r.in.Close()
 					take(t, requestCtx.Done())
 					unblock()
+					// Spawn admission already succeeded. There is no cancellation
+					// check after SpawnTerminal; EOF tears down that admitted lifetime.
+					if reply := take(t, replies); reply.Error != nil || len(reply.Result) == 0 {
+						t.Fatalf("admitted open during EOF: %+v", reply)
+					}
 					waitStop()
 					stopLeader()
 				} else {

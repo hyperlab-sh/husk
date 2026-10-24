@@ -165,7 +165,7 @@ func TestNoStreamProbeFailurePolicy(t *testing.T) {
 						dialed <- struct{}{}
 						return nil, err
 					default:
-						return (&net.Dialer{}).DialContext(ctx, network, path)
+						return guardedDial(t, r.o.Socket)(ctx, network, path)
 					}
 				}})
 				r.start(t)
