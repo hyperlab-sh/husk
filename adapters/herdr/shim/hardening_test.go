@@ -1,6 +1,7 @@
 package shim
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -198,6 +199,50 @@ func TestHardeningEventCapAtClockEpoch(t *testing.T) {
 	}
 }
 
+func TestHardeningInputQueueInFlightAllowance(t *testing.T) {
+	q := newPaneInput()
+	now := time.Time{}
+	first := bytes.Repeat([]byte("a"), protocol.MaxTerminalBytes)
+	if q.append(first, now) {
+		t.Fatal("first chunk refused")
+	}
+	inFlight, ok := q.next(t.Context())
+	if !ok || !bytes.Equal(inFlight, first) {
+		t.Fatal("in-flight chunk changed")
+	}
+	queued := bytes.Repeat([]byte("b"), maxPaneInputBytes)
+	if q.append(queued, now) {
+		t.Fatal("in-flight bytes counted against the queue cap")
+	}
+	if !q.append([]byte("newest"), now) || q.append([]byte("newest"), now) || !q.append([]byte("newest"), now.Add(time.Second)) {
+		t.Fatal("overflow warning cadence changed")
+	}
+	for remaining := maxPaneInputBytes; remaining > 0; {
+		chunk, ok := q.next(t.Context())
+		if !ok || len(chunk) == 0 || len(chunk) > protocol.MaxTerminalBytes || !bytes.Equal(chunk, bytes.Repeat([]byte("b"), len(chunk))) {
+			t.Fatal("queued input reordered, oversized or displaced by overflow")
+		}
+		remaining -= len(chunk)
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if len(q.data) != 0 {
+		t.Fatal("newest overflow chunk retained")
+	}
+}
+
+type countedHost struct {
+	*testHost
+	closes atomic.Int32
+}
+
+func (h *countedHost) Notify(ctx context.Context, method string, params any) error {
+	if method == protocol.MethodSurfaceClose {
+		h.closes.Add(1)
+	}
+	return h.testHost.Notify(ctx, method, params)
+}
+
 type countedTerminal struct {
 	TerminalProcess
 	closes atomic.Int32
@@ -209,6 +254,8 @@ func TestHardeningRealPTYTeardownRaces(t *testing.T) {
 	for _, mode := range []string{"exit_close", "exit_open", "eof_pending_open"} {
 		t.Run(mode, func(t *testing.T) {
 			r, _ := paneRig(t)
+			host := &countedHost{testHost: r.host}
+			r.o.Host = host
 			exe, err := os.Executable()
 			if err != nil {
 				t.Fatal(err)
@@ -302,14 +349,9 @@ func TestHardeningRealPTYTeardownRaces(t *testing.T) {
 					t.Fatalf("process group %d leaked: %v", p.PID(), err)
 				}
 			}
-			closes := 0
-			for len(r.host.events) > 0 {
-				if (<-r.host.events).method == protocol.MethodSurfaceClose {
-					closes++
-				}
-			}
-			if closes > 1 {
-				t.Fatalf("duplicate surface.close: %d", closes)
+			closes := host.closes.Load()
+			if closes > 1 || (mode != "exit_close" && closes != 1) {
+				t.Fatalf("surface release count=%d mode=%s", closes, mode)
 			}
 		})
 	}
