@@ -232,6 +232,9 @@ The scaffolded application therefore has exactly two configuration inputs, both 
 | Bundle `config.json` fails to parse | Store, at resolve | The distribution layer is skipped for that document, as for any bad layer file; the start proceeds | Reload problem naming the file; startup toast |
 | Bundle config over 1 MiB or depth over 64 | Store | Same as a parse failure | Same |
 | `husk create` with an invalid name | create command | Nothing written | `husk: invalid name "My App": use [a-z0-9][a-z0-9._-]{0,63}`, exit 2 |
+| `husk create tui` with an invalid explicit `<module>` | create command | Nothing written | `husk: invalid module path "<module>"`, exit 2 |
+| `husk create tui` whose defaulted module (`<name>`) is not a valid module path | create command | Nothing written | `husk: invalid name "<name>": not a valid Go module path; pass <module> explicitly`, exit 2 |
+| `husk create tui` from a build whose Go language version cannot be read | create command | Nothing written | `husk: cannot determine Go language version from "<version>"`, exit 1, code `create` |
 | `husk create` target exists and is not empty | create command | Nothing written | `husk: <dir> exists and is not empty`, exit 1, code `create` |
 | `husk create` write fails midway | create command | Stops at the failed file; written files stay | `husk: write <file>: <err>`, exit 1, code `create` |
 
