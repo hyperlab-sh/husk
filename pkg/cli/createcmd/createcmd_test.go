@@ -47,7 +47,7 @@ func TestNamesAndArgumentsBeforeFilesystem(t *testing.T) {
 			}
 		})
 	}
-	for _, args := range [][]string{nil, {"bundle"}, {"tui", "app"}, {"bundle", "app", "extra"}} {
+	for _, args := range [][]string{nil, {"bundle"}, {"tui"}, {"tui", "app", "module", "extra"}, {"bundle", "app", "extra"}} {
 		_, err := invoke(t, t.TempDir(), args, output.JSON, writeFile)
 		if output.AsError(err).Exit != 2 {
 			t.Fatalf("args %q: %v", args, err)
@@ -245,7 +245,7 @@ func assertWrittenModes(t *testing.T, root string) {
 			return err
 		}
 		want := fs.FileMode(0644)
-		if d.IsDir() || filepath.ToSlash(rel) == "plugins/hello/hello" || filepath.ToSlash(rel) == "plugins/guide/guide" {
+		if d.IsDir() || strings.HasSuffix(filepath.ToSlash(rel), "plugins/hello/hello") || strings.HasSuffix(filepath.ToSlash(rel), "plugins/guide/guide") {
 			want = 0755
 		}
 		info, err := d.Info()
