@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/hyperlab-sh/husk/adapters/herdr/upstream"
 )
 
 func TestCapturedRegistryLocations(t *testing.T) {
@@ -20,6 +22,7 @@ func TestCapturedRegistryLocations(t *testing.T) {
 		{"config_override_does_not_move_registry", "linux", map[string]string{"HERDR_CONFIG_PATH": "alternate/config.toml"}, false, "home/.config/herdr/plugins.json"},
 		{"windows_appdata", "windows", map[string]string{"APPDATA": "roaming", "HERDR_CONFIG_PATH": "alternate/config.toml"}, false, "roaming/herdr/plugins.json"},
 		{"windows_profile", "windows", map[string]string{"USERPROFILE": "profile"}, false, "profile/AppData/Roaming/herdr/plugins.json"},
+		{"windows_home_environment", "windows", map[string]string{"HOME": "homeenv"}, true, "homeenv/.config/herdr/plugins.json"},
 		{"no_home", "linux", nil, true, ""},
 		{"no_home_with_xdg", "linux", map[string]string{"XDG_CONFIG_HOME": "xdg"}, true, "xdg/herdr/plugins.json"},
 		{"relative_xdg", "linux", map[string]string{"XDG_CONFIG_HOME": "relative"}, false, ""},
@@ -47,6 +50,21 @@ func TestCapturedRegistryLocations(t *testing.T) {
 			}
 			if env.registryPath != want {
 				t.Fatalf("registry=%q want %q", env.registryPath, want)
+			}
+			socketHome, homeErr := home()
+			if homeErr != nil {
+				socketHome = ""
+			}
+			socketPath, socketErr := upstream.ResolveSocket(upstream.SocketOptions{
+				Platform: tc.platform, Getenv: lookup, Home: socketHome,
+				ConfigPath: lookup("HERDR_CONFIG_PATH"),
+			})
+			if want == "" {
+				if socketErr == nil {
+					t.Fatalf("socket resolved without an absolute config directory: %q", socketPath)
+				}
+			} else if socketErr != nil || filepath.Dir(socketPath) != filepath.Dir(env.registryPath) {
+				t.Fatalf("registry and socket disagree: registry=%q socket=%q err=%v", env.registryPath, socketPath, socketErr)
 			}
 			if env.configPath != "" && !filepath.IsAbs(env.configPath) {
 				t.Fatalf("relative adapter config: %q", env.configPath)

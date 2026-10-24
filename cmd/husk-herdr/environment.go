@@ -1,6 +1,10 @@
 package main
 
-import "path/filepath"
+import (
+	"path/filepath"
+
+	"github.com/hyperlab-sh/husk/adapters/herdr/upstream"
+)
 
 // captureEnvironment keeps filesystem locations explicit and injectable. The
 // source registry uses config_dir(), not config_path(): HERDR_CONFIG_PATH
@@ -18,23 +22,7 @@ func captureEnvironment(executable, platform string, getenv func(string) string,
 	if filepath.IsAbs(configHome) {
 		env.configPath = filepath.Join(configHome, "husk-herdr", "config.toml")
 	}
-	var registryDir string
-	if xdg := getenv("XDG_CONFIG_HOME"); xdg != "" {
-		if filepath.IsAbs(xdg) {
-			registryDir = filepath.Join(xdg, "herdr")
-		}
-	} else if platform == "windows" {
-		if appData := getenv("APPDATA"); filepath.IsAbs(appData) {
-			registryDir = filepath.Join(appData, "herdr")
-		} else if profile := getenv("USERPROFILE"); filepath.IsAbs(profile) {
-			registryDir = filepath.Join(profile, "AppData", "Roaming", "herdr")
-		} else if home != "" {
-			registryDir = filepath.Join(home, ".config", "herdr")
-		}
-	} else if home != "" {
-		registryDir = filepath.Join(home, ".config", "herdr")
-	}
-	if registryDir != "" {
+	if registryDir, ok := upstream.ConfigDir(platform, getenv, home); ok {
 		env.registryPath = filepath.Join(registryDir, "plugins.json")
 	}
 	// With no resolvable absolute location discovery sees a missing registry,
