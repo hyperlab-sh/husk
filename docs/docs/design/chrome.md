@@ -456,7 +456,8 @@ regenerated for these moves ("Tests and goldens").
 | Occupant leaves `live` | Engine vacates; the surface shows its name from that tick |
 | Occupant claimed, no content yet | Blank canvas (slot background), not the name |
 | Palette name empty | Theme slot shows `theme` |
-| Theme name clicked while a plugin's modal or a runtime modal is open, or the terminal is frozen | Click consumed; the action declines, nothing opens |
+| Theme name clicked while a plugin's modal or a runtime modal is open | Closes the modal, opens Settings on Theme ([Settings center](settings-center.md), modals replace one another) |
+| Theme name clicked while the terminal is frozen | Click consumed; nothing opens (the action would decline) |
 | Theme name clicked while the palette or the secret prompt is up | The palette or prompt takes the click first; the action is not run, nothing opens |
 | Theme name longer than 24 cells | Clipped with `…`; the label and the hints are unaffected |
 | Bottom bar too narrow for every hint group | Groups dropped from the end until the rest fits; the label and the theme name stay |
