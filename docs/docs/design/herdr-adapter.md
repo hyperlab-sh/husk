@@ -348,7 +348,28 @@ Executable converters and discovery are landed, and runtime surfaces landed in p
 - **Proxy tests**: a client that is the real `herdr` CLI when present on the machine (skipped in CI) and a scripted NDJSON client otherwise; interception table rows each have a case; passthrough is byte-exact; a dropped upstream yields the documented error shape.
 - **PTY tests** re-execute a Go test helper binary, not a shell, to print a known escape sequence, read encoded input and query the terminal dimensions before and after resize. Fake terminals and an injected clock cover opaque traffic, the 64 KiB chunk cap, acknowledgement backpressure, exits, host close, the 2 s kill grace and limits.
 - **Host end-to-end** (`pkg/host/cli_e2e_test.go` style, in `adapters/herdr`): a real `husk` host with `--converter husk-herdr`, the fake server, two fixture plugins; `husk action list` shows their actions, invoking one spawns the command with the right environment, `husk plugin remove` stops everything. Five placement fixtures also drive the real host and workbench with scripted PTY output: modal and canvas frames are committed as ANSI goldens, and their runtime declarations assert the requested dimensions and chrome. The headless frame harness signals readiness only after the real emulator ingests the helper's final OSC title. Core additionally pins the frame after targeted canvas reordering.
+- **Hardening.** `adapters/herdr/shim/hardening_test.go` keeps startup, action and event commands alive through a dropped subscription, fences event dispatch and checks no replay or duplicate startup on the same server identity. Two independent shims share one fake server for `auto` and `always`. Flood tests pin exactly 32 leaders and once-per-second drop diagnostics even at the injected clock's zero instant; input tests retain 64 KiB in flight beside a full 4 MiB queue. Barrier-driven real-PTY tests race process exit with host close, shim EOF with spawn admission, and EOF with a pending `surface.open`; they join shutdown, check process-group disappearance and count terminal closes and cleanup notifications. These tests run under the race detector and their assertions are mutation-proved.
 - **Manual check** against the real server, documented in `husk-herdr doctor` output: attached socket, version, the registry's plugins with their enabled state and whether each is in the instance, which hooks the shim would run, duplicates, the Herdr `[[keys.command]]` bindings that name plugin actions. An absent server prints `server: absent (<error>)` and is not fatal: the registry, plugin root, instance and binding checks still run; a configuration failure, or a server reply that fails the protocol (`server: failed (<error>)`), exits nonzero. A binding is listed when its `type` is `plugin_action` and its `command` starts with an enabled registry plugin's original or converted id followed by a dot, not on any mention of "plugin".
+
+### Operator-only installed-plugin checklist
+
+The installed-plugin check is an operator task, not an automated test or an agent-run gate. Automated hardening uses only a schema-backed fake server and fixture-allowlisted upstream dials. Never point those tests at the installed server.
+
+1. With the intended existing Herdr session and Husk instance running, run `husk-herdr doctor --instance <name>`. Save **verbatim stdout, stderr and the exit status**, not a paraphrase. Record the installed plugins and their versions beside this output. The exact doctor output fields to retain are:
+   ```text
+   binary: <resolved executable>
+   socket: <attached session socket>
+   version: <server version>
+   registry: <registry file>
+   plugin <id>: registry_enabled=<true|false> server_enabled=<true|false> hooks=<server|shim|never>
+   plugin <id> root: <plugin directory>
+   ```
+   Retain every per-plugin row, every `duplicate id <id>: <original ids>` row, every `binding (copy into a Husk keymap): <JSON>` row, and any discovery or conversion diagnostic. Retain any `plugin <id> absent from instance; run husk-herdr sync` or `instance: unavailable (<error>)` line. The final line is exactly `manual check: compare the attached session, hook owner and action bindings before invoking plugin commands`. If attachment fails, doctor prints `server: absent (<error>)` or `server: failed (<error>)` instead of `version: <server version>`; keep that output too, but it is not a passing installed-server check.
+2. Confirm the socket is the intended session, version is at least 0.9 and meets every plugin minimum, all intended enabled compatible plugins are present, and no unresolved duplicate, conversion or instance diagnostic remains. With `hooks = "auto"`, every server-enabled plugin must show `hooks=server`. Resolve missing plugins with the user-run `husk-herdr sync --instance <name>`, then record doctor again; do not change the server's plugin registry as part of the check.
+3. For each recorded plugin, invoke an ordinary action and each available pane placement. Check opaque terminal output, typing, paste, resize, duplicate-open focus, close and process exit. Confirm a second modal is refused without starting a process. Record plugin/action/placement, expected result, observed result and pass/fail. Copy any desired reported bindings into the Husk keymap explicitly, never import them automatically.
+4. With two Husk instances attached to the same session, record doctor for both. Check automatic hooks remain server-owned; in an explicitly selected `hooks = "always"` configuration, expect both shims to run hooks. Restore the operator's original settings afterward. Remove a plugin from one instance and verify its panes and commands stop while the other instance and the upstream session continue. Record logs and any discrepancies.
+
+Passing means doctor exits 0 with the expected attached session and complete plugin inventory, every exercised action/pane behaves as specified, automatic hooks are not duplicated, and removal leaves no plugin process group or surface behind. Record unexercised plugin capabilities explicitly rather than treating them as passed. This checklist has **not been run** by the automated hardening work.
 
 ## Level 2: Status and work units
 
@@ -361,7 +382,7 @@ Status rows, per adapter unit and per core capability:
 | A3: shim without UI | Landed: stdio actions, schema-backed context, attach/reconnect, hooks, private proxy, command lifecycle and doctor |
 | A4: panes and popups | Landed: PTYs, all five placement mappings, full capture, acknowledged output, input/resize, pane proxy routing, duplicate focus, exit/close paths, limits and real-host frame goldens; generic targeted focus landed in protocol 2.10 |
 | A5: link handlers | Landed: ordered regexp matching, click context and environment, detached injected opener fallback, and real-host workbench ctrl-click coverage. `split` → `panel` remains blocked on the open half of C5 (runtime `stage`/`panel`). |
-| A6: hardening | not started |
+| A6: hardening | Landed: reconnect under active commands, two independent shims, exact command cap and injected-clock drop cadence, input queue/in-flight bounds, and real-PTY teardown races with process-group checks; operator-only installed-plugin checklist run remains outstanding |
 | A7: registry sync | Landed: manual user-CLI additions, per-plugin outcomes, absent-plugin doctor rows and live-host coverage |
 | Core: executable converters | Landed ([Pods](pods.md)) |
 | Core: live `plugin.add` (C6) | Landed in protocol 2.2 ([Pods](pods.md)); meets the sync dependency |
@@ -387,7 +408,7 @@ Work units, in order. Sizes: S under a day, M two to three days, L a week. Core 
 | A4 | **Landed: panes and popups.** PTYs, placement mapping, `plugin.pane.open|focus|close` and `popup.close` interception, `husk:` ids, exit and close paths, limits. | M | A3, C2, C3, C4 |
 | C5 | **`terminal.link` (landed)**: OSC 8 and row-local URL detection on ctrl+left press, consumed input and bounded direct delivery. Runtime `stage`/`panel` placements with the stack rule remain open. | M | C3 |
 | A5 | **Link handlers landed.** `split` → `panel` remains blocked on the open half of C5 (runtime `stage`/`panel`); `split` still maps to canvas. | S | A4, C5 |
-| A6 | **Hardening.** Reconnect under load, the two-instance case, 32-command cap, PTY teardown races, a run against the real server with the installed plugins recorded in a checklist. | M | A4 |
+| A6 | **Landed: automated hardening.** Reconnect under load, the two-instance case, 32-command cap and once-per-second warning, 4 MiB input queue plus 64 KiB in flight, and real-PTY teardown races. The operator-only installed-plugin checklist above is documented but its real-server run remains outstanding. | M | A4 |
 
 Critical path: C1 → A3 (actions usable), then C2 → C3 → C4 → A4 (panes visible). C3 and C4 do not need C2 (they landed first, on claimed surfaces), but A4 needs all three. C2 to C4 can run in parallel with A1 to A3; C6 → A7 runs beside them and lands before A4.
 
