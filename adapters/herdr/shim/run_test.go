@@ -161,7 +161,7 @@ func TestPaneStub(t *testing.T) {
 	r.start(t)
 	r.host.until(t, protocol.MethodStateSet, "attached")
 	reply := r.invoke(t, "demo.pane-panel")
-	if reply.Error == nil || reply.Error.Code != protocol.CodeFailed || reply.Error.Message != paneUnsupported {
+	if reply.Error == nil || reply.Error.Code != protocol.CodeFailed || reply.Error.Message != "pane entrypoints are not supported yet" {
 		t.Fatalf("pane=%+v", reply)
 	}
 	rr := &runner{m: manifest.Manifest{ID: "demo"}}
@@ -173,7 +173,7 @@ func TestPaneStub(t *testing.T) {
 	errorShape := shape(t, "error_response")
 	for _, req := range []proxy.Request{{ID: "a", Method: "plugin.pane.open", Params: json.RawMessage(`{"plugin_id":"demo","entrypoint":"panel"}`)}, {ID: "b", Method: "plugin.pane.focus", Params: json.RawMessage(`{"pane_id":"husk:demo.panel"}`)}, {ID: "c", Method: "plugin.pane.close", Params: json.RawMessage(`{"pane_id":"husk:demo.panel"}`)}, {ID: "d", Method: "popup.close", Params: json.RawMessage(`{}`)}} {
 		_, failure, handled := rr.intercept(context.Background(), req)
-		if !handled || failure == nil || failure.Message != paneUnsupported {
+		if !handled || failure == nil || failure.Message != "pane entrypoints are not supported yet" {
 			t.Fatalf("%s: %v %v", req.Method, handled, failure)
 		}
 		raw, _ := json.Marshal(req)
@@ -184,7 +184,7 @@ func TestPaneStub(t *testing.T) {
 	}
 }
 
-func TestProxyNotificationAndRegistryAction(t *testing.T) {
+func TestProxyNotificationShapeAndTrims(t *testing.T) {
 	r := newRig(t, "never", true, "")
 	r.start(t)
 	r.host.until(t, protocol.MethodStateSet, "attached")
@@ -197,11 +197,25 @@ func TestProxyNotificationAndRegistryAction(t *testing.T) {
 	if err := shape(t, "success_response").Validate(result); err != nil {
 		t.Fatal(err)
 	}
-	if result["result"].(map[string]any)["type"] != "notification_show" {
+	answer := result["result"].(map[string]any)
+	if answer["type"] != "notification_show" || answer["shown"] != true || answer["reason"] != "shown" {
 		t.Fatal(result)
 	}
 	if raw := r.host.until(t, protocol.MethodToastShow, ""); !strings.Contains(string(raw), `Title\nBody`) {
 		t.Fatalf("notification=%s", raw)
+	}
+	request, _ := json.Marshal(map[string]any{"id": "trim", "method": "notification.show", "params": map[string]any{"title": strings.Repeat("界", 81), "body": strings.Repeat("é", 241)}})
+	_ = proxyCall(t, path, string(request)+"\n")
+	raw := r.host.until(t, protocol.MethodToastShow, "")
+	var trimmed struct{ Message string }
+	_ = json.Unmarshal(raw, &trimmed)
+	if trimmed.Message != strings.Repeat("界", 80)+"\n"+strings.Repeat("é", 240) {
+		t.Fatal("notification rune trims drifted")
+	}
+	for _, req := range r.server.Requests() {
+		if req.Method == "notification.show" {
+			t.Fatal("notification was forwarded upstream")
+		}
 	}
 	p.process.done <- 0
 }
