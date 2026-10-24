@@ -121,7 +121,7 @@ Conversion of the top level:
 
 | `herdr-plugin.toml` | `husk-plugin.json` v2 | Rule |
 |---|---|---|
-| `id` | `id` | Herdr allows letters, digits, `.`, `:`, `_`, `-`; Husk allows `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`. A `:` becomes `-`; an id that then collides with another converted id, or exceeds 64 characters, fails conversion (`id_unmappable`). The original id is kept in the shim for `HERDR_PLUGIN_ID` and every Herdr request. |
+| `id` | `id` | Herdr allows letters, digits, `.`, `:`, `_`, `-`; Husk allows `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`. A `:` becomes `-`; an id exceeding 64 characters fails conversion (`id_unmappable`). Collision detection is registry-local: conversion maps every enabled registry record's original id and refuses every distinct original id mapping to the same Husk id (`id_unmappable`), deterministically, not first-wins. A directory outside the registry is mapped alone; collisions outside the registry are core's `duplicate_plugin_id`. No batch context or persistent conversion ledger is required. The original id is kept in the shim for `HERDR_PLUGIN_ID` and every Herdr request. |
 | `name`, `version`, `description` | same | Copied. |
 | `min_herdr_version` | `x-herdr.min_version` | Carried for the shim's check; not a Husk field. Missing: fail (`manifest_invalid`), as Herdr does. |
 | `platforms` | filter | A plugin whose top-level list excludes this OS fails conversion (`platform_unsupported`). Entries carry their own `platforms`; entries excluded for this OS are dropped silently, as Herdr would refuse them with `platform_unsupported` at invocation. |
