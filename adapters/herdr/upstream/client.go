@@ -141,6 +141,8 @@ func reply(r response) error {
 
 // Call sends one request and returns the raw result, retaining vendor fields.
 // Transport failures use unavailable/herdr_absent; remote errors are unchanged.
+// Local malformed-reply errors use herdr_protocol only for ping, plugin.list
+// and subscription acknowledgements; other methods return the underlying error.
 func (c *Client) Call(ctx context.Context, method string, params any) (json.RawMessage, error) {
 	conn, closeConn, err := c.open(ctx)
 	if err != nil {
@@ -155,13 +157,22 @@ func (c *Client) Call(ctx context.Context, method string, params any) (json.RawM
 		return nil, callError(ctx, method, err)
 	}
 	if err = reply(r); err != nil {
-		return nil, protocolError(method, err)
+		return nil, methodProtocolError(method, err)
 	}
 	return r.Result, nil
 }
 
 func protocolError(method string, err error) *Error {
 	return &Error{Code: "herdr_protocol", Message: fmt.Sprintf("%s: %v", method, err)}
+}
+
+func methodProtocolError(method string, err error) error {
+	switch method {
+	case "ping", "plugin.list", "events.subscribe":
+		return protocolError(method, err)
+	default:
+		return err
+	}
 }
 
 func attachError(method string, err error) error {
@@ -186,7 +197,7 @@ func callError(ctx context.Context, method string, err error) error {
 	var syntax *json.SyntaxError
 	var shape *json.UnmarshalTypeError
 	if errors.As(err, &syntax) || errors.As(err, &shape) || errors.Is(err, bufio.ErrTooLong) {
-		return protocolError(method, err)
+		return methodProtocolError(method, err)
 	}
 	return Unavailable()
 }
@@ -336,15 +347,19 @@ type Stream struct {
 
 // Subscribe deduplicates hook names and sends one subscription entry per name.
 // Names requiring pane-specific parameters in the committed schema are refused
-// with invalid_subscription before dialing. The supplied context owns the entire
+// with invalid_subscription before dialing, as a guard. The shim first uses
+// FilterHookSubscriptions to omit only unusable entries and log each refusal.
+// Other names pass through unchecked. A server refusal is returned with its own
+// code and message, without retrying or failing the attach: the shim logs it and
+// suspends event hooks until the next attach while remaining live. Only malformed
+// acknowledgements become herdr_protocol. The supplied context owns the entire
 // stream, not only its opening handshake.
 func (c *Client) Subscribe(ctx context.Context, names []string) (*Stream, error) {
 	entries := make([]map[string]string, 0, len(names))
 	seen := map[string]bool{}
 	for _, name := range names {
-		switch name {
-		case "pane.agent_status_changed", "pane.output_matched", "pane.scroll_changed":
-			return nil, &Error{Code: "invalid_subscription", Message: fmt.Sprintf("events.subscribe: %s requires pane-specific parameters", name)}
+		if err := subscriptionError(name); err != nil {
+			return nil, err
 		}
 		if !seen[name] {
 			entries = append(entries, map[string]string{"type": name})
