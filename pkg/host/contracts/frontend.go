@@ -208,7 +208,8 @@ type Frontend interface {
 	// husk.surfaces (visibility, placement, overlays) and commits it; the
 	// engine keeps writing occupants and contributions. Loop only.
 	UpdateSurfaceView(fn func(*SurfaceView)) error
-	// RuntimeSurfaces returns detached runtime declarations in opening order. Loop only.
+	// RuntimeSurfaces returns detached runtime declarations ordered by last open
+	// or explicit focus, oldest first. Loop only.
 	RuntimeSurfaces() []RuntimeSurface
 	// CloseSurface force-releases a surface, including runtime lifetime. Loop only.
 	CloseSurface(protocol.SurfaceID) error
