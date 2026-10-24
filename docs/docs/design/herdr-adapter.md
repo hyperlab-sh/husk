@@ -325,11 +325,12 @@ All Level 1, none landed; every row but `plugin.add` is specified in the core sp
 
 ## Level 2: Status and work units
 
-Nothing here is landed. Status rows:
+Adapter implementation status is recorded per unit. Core capability rows retain their separate rollout status:
 
 | Area | Status |
 |---|---|
-| `cmd/husk-herdr`, `adapters/herdr/*` | not started |
+| `cmd/husk-herdr`, remaining adapter units | see work units below |
+| A2: `adapters/herdr/upstream`, `adapters/herdr/fakeherdr` | implemented: schema-backed fake, injectable client, version checks, EOF/error stream recovery seams and attach backoff |
 | Core: executable converters | Level 1 ([Pods](pods.md)) |
 | Core: live `plugin.add` | not yet specified; its own core spec |
 | Core: runtime surfaces | Level 1 ([Protocol](protocol.md), [State](state.md)) |
