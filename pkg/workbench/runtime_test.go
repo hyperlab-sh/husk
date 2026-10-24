@@ -130,7 +130,7 @@ func TestRuntimeModalOuterBounds(t *testing.T) {
 }
 
 func TestRuntimeModalInputAndUserClose(t *testing.T) {
-	for _, path := range []string{"key", "frame", "settings"} {
+	for _, path := range []string{"key", "frame", "settings", "home"} {
 		t.Run(path, func(t *testing.T) {
 			m := goldenModel()
 			fe := withFE(m)
@@ -152,6 +152,8 @@ func TestRuntimeModalInputAndUserClose(t *testing.T) {
 				if _, err := m.openSettings(nil); err != nil {
 					t.Fatal(err)
 				}
+			case "home":
+				m.activateHomeWorkbench()
 			}
 			if m.modalOwner().Open() || len(fe.Runtime) != 0 {
 				t.Fatal("user close path left runtime modal open")
