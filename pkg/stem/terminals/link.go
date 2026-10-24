@@ -17,6 +17,8 @@ func (t *Terminal) SetLinkHandler(send func(url string, row, col int)) { t.link 
 
 // Link resolves and consumes a link gesture without encoding any mouse input.
 // It is loop-only and reports whether the event belongs to a consumed gesture.
+// A release outside the surface may not be routed here. The next routed left
+// press always resets the pending gesture before resolving its URL.
 func (t *Terminal) Link(event uv.MouseEvent) bool {
 	if t.closed {
 		return false
