@@ -75,6 +75,7 @@ type plugin struct {
 	palette                           protocol.Palette
 	keys                              keyListing
 	baseline, shown, dirty, keysReady bool
+	hidePending                       bool
 	toggle                            *protocol.Message
 	loggedRefusal                     string
 	nextID                            int64
@@ -140,11 +141,21 @@ func run(parent context.Context, cfg config, stdin io.ReadCloser, stdout, log io
 	delay := time.Duration(0)
 	nextDelay := 100 * time.Millisecond
 	loggedErrors := make(map[string]bool)
+	errorsSuppressed := false
 	logError := func(err error) {
-		if message := err.Error(); !loggedErrors[message] {
-			fmt.Fprintln(log, "guide:", message)
-			loggedErrors[message] = true
+		message := err.Error()
+		if loggedErrors[message] {
+			return
 		}
+		if len(loggedErrors) >= 16 {
+			if !errorsSuppressed {
+				fmt.Fprintln(log, "guide: further errors suppressed until recovery")
+				errorsSuppressed = true
+			}
+			return
+		}
+		fmt.Fprintln(log, "guide:", message)
+		loggedErrors[message] = true
 	}
 	connect := func() {
 		generation++
@@ -227,27 +238,30 @@ func run(parent context.Context, cfg config, stdin io.ReadCloser, stdout, log io
 				batchErr = p.hostBatch(event.messages)
 			} else {
 				for _, m := range event.messages {
+					wasBaseline := p.baseline
 					if batchErr = p.fromSocket(m); batchErr != nil {
 						break
 					}
-					if p.baseline {
+					if !wasBaseline && p.baseline {
 						delay, nextDelay = 100*time.Millisecond, 200*time.Millisecond
 						if len(loggedErrors) > 0 {
 							fmt.Fprintln(log, "guide: connection recovered")
 							clear(loggedErrors)
+							errorsSuppressed = false
 						}
 					}
 				}
 			}
-			if batchErr != nil {
-				logError(batchErr)
-				disconnect()
-				connect()
-				continue
+			if batchErr == nil && p.socket != nil {
+				batchErr = p.flush()
 			}
-			if p.socket != nil {
-				if err := p.flush(); err != nil {
-					logError(err)
+			if batchErr != nil {
+				var hostErr *hostWriteError
+				if errors.As(batchErr, &hostErr) {
+					return batchErr
+				}
+				logError(batchErr)
+				if p.socket != nil {
 					disconnect()
 					connect()
 				}
@@ -272,12 +286,21 @@ func (p *plugin) update(lines []string) error {
 func (p *plugin) state() error {
 	return p.call(stateReply, protocol.MethodStateSet, map[string]any{"slice": "guide.state", "value": map[string]bool{"shown": p.shown}})
 }
+
+// hostWriteError distinguishes a fatal stdout failure from a retryable socket.
+type hostWriteError struct{ error }
+
+func (e *hostWriteError) Unwrap() error { return e.error }
+
 func (p *plugin) reply(m protocol.Message, result any, failure *protocol.Error) error {
 	reply := protocol.Message{ID: m.ID, Error: failure}
 	if failure == nil {
 		reply.Result = raw(result)
 	}
-	return p.stdout.Send(reply)
+	if err := p.stdout.Send(reply); err != nil {
+		return &hostWriteError{err}
+	}
+	return nil
 }
 func (p *plugin) requestKeys() error {
 	p.keyVersion++
@@ -317,7 +340,7 @@ func (p *plugin) fromHost(m protocol.Message) error {
 		p.shown = !p.shown
 		if !p.shown {
 			p.dirty = false
-			return errors.Join(p.update([]string{}), p.state(), p.reply(m, map[string]bool{"shown": false}, nil))
+			return errors.Join(p.hide(), p.reply(m, map[string]bool{"shown": false}, nil))
 		}
 		p.toggle = &m
 		p.dirty = true
@@ -405,7 +428,18 @@ func (p *plugin) fromSocket(m protocol.Message) error {
 	}
 	return nil
 }
+
+// hide retries both idempotent writes if either send failed before reconnect.
+func (p *plugin) hide() error {
+	err := errors.Join(p.update([]string{}), p.state())
+	p.hidePending = err != nil
+	return err
+}
+
 func (p *plugin) flush() error {
+	if p.baseline && !p.shown && p.hidePending {
+		return p.hide()
+	}
 	if !p.baseline || !p.shown || !p.keysReady {
 		return nil
 	}
