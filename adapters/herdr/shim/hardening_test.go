@@ -189,6 +189,12 @@ func TestHardeningTwoInstancesShareServer(t *testing.T) {
 					}
 				}
 				for _, r := range []*rig{first, second} {
+					// Scheduling the no-stream probe fences the entire startup
+					// section, not merely the earlier attached state publication.
+					r.clock.next(t, 5*time.Second)
+					if len(r.spawns) != 0 {
+						t.Fatal("auto ran startup or event hook before action")
+					}
 					if reply := r.invoke(t, "demo.go"); reply.Error != nil {
 						t.Fatal(reply.Error)
 					}
