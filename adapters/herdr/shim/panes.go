@@ -403,6 +403,8 @@ func (r *runner) servePane(p *pane, argv []string) {
 
 func (r *runner) paneNotification(m protocol.Message) {
 	switch m.Method {
+	case protocol.MethodTerminalLink:
+		r.linkNotification(m.Params)
 	case protocol.MethodTerminalInput:
 		var p protocol.TerminalInputParams
 		if json.Unmarshal(m.Params, &p) != nil {

@@ -37,6 +37,9 @@ type Options struct {
 	Spawn                                                                     func(Command) (Process, error)
 	// SpawnTerminal starts a pane session; nil uses SpawnTerminal.
 	SpawnTerminal func(Command, int, int) (TerminalProcess, error)
+	// SpawnOpener starts a detached URL opener. It is never joined or stopped
+	// with plugin commands; nil uses Spawn.
+	SpawnOpener func(Command) (Process, error)
 	// StartServer is the serialized, detached server-start seam; nil uses flock.
 	StartServer func(context.Context) error
 	// ServerLaunch replaces only detached exec, leaving the start lock and ping
@@ -95,6 +98,9 @@ func Run(ctx context.Context, o Options, in io.Reader, out, log io.Writer) error
 	}
 	if o.SpawnTerminal == nil {
 		o.SpawnTerminal = SpawnTerminal
+	}
+	if o.SpawnOpener == nil {
+		o.SpawnOpener = Spawn
 	}
 	if o.Platform == "" {
 		o.Platform = runtime.GOOS
