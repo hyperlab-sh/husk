@@ -100,6 +100,27 @@ func TestFrontendWatchEvents(t *testing.T) {
 	})
 }
 
+// A delivery queued in the same Update as the cancel must not reach fn.
+func TestFrontendWatchEventsCancelBeatsQueuedDelivery(t *testing.T) {
+	h, _, fe := bootFrontend(t, nil)
+	var calls int
+	h.loop(func() {
+		cancel, err := fe.WatchEvents("alpha.*", func(protocol.EventDeliverParams) { calls++ })
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		h.root.bus.Publish(eventbus.Event{Name: "alpha.saved", Source: "alpha"})
+		cancel()
+	})
+	h.loop(func() {})
+	h.loop(func() {
+		if calls != 0 {
+			t.Errorf("fn called %d times after cancel", calls)
+		}
+	})
+}
+
 func TestFrontendWatchEventsInvalidPattern(t *testing.T) {
 	h, _, fe := bootFrontend(t, nil)
 	h.loop(func() {
