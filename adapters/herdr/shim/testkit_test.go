@@ -202,6 +202,7 @@ func newRig(t *testing.T, policy string, enabled bool, extra string, configure .
 	r := &rig{host: h, clock: clk, server: srv, exit: make(chan error, 1), spawns: make(chan spawnRecord, 64), logs: &lockedBuffer{}}
 	next := 0
 	r.o = Options{Dir: dir, Binary: "/usr/local/herdr", Socket: filepath.Join(socketDir, "u.sock"), ConfigDir: filepath.Join(dir, "config"), StateDir: filepath.Join(dir, "state"), Env: []string{"KEEP=value", "HUSK_PLUGIN_TOKEN=secret", "HUSK_PLUGIN_ID=demo", "HUSK_PROTOCOL_VERSION=2.7", "HUSK_EXTRA=drop", "HUSK_SOCKET_PATH=/host.sock", "HUSK_INSTANCE=unit", "HUSK_BIN_PATH=/usr/local/husk", "HERDR_PLUGIN_EVENT=stale"}, Settings: settings.Config{Hooks: policy}, Host: h, Clock: clk, Now: func() time.Time { return time.Unix(100, 0) }, Platform: "linux", LogPath: "/logs/demo.log"}
+	r.o.Client = upstream.New(upstream.Options{Socket: r.o.Socket, Clock: clk, Dial: guardedDial(t, r.o.Socket)})
 	r.o.Spawn = func(c Command) (Process, error) {
 		next++
 		p := &testProcess{pid: next, done: make(chan int, 1), signals: make(chan syscall.Signal, 4), termStops: true}
