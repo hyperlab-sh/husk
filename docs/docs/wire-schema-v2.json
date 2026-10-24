@@ -608,6 +608,67 @@
       ],
       "type": "object"
     },
+    "SurfaceOpenParams": {
+      "properties": {
+        "frame": {
+          "$ref": "#/$defs/FrameSpec"
+        },
+        "height": {
+          "oneOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "pattern": "^[0-9]+%$",
+              "type": "string"
+            }
+          ]
+        },
+        "name": {
+          "maxLength": 32,
+          "pattern": "^[a-z0-9_-]{1,32}$",
+          "type": "string"
+        },
+        "placement": {
+          "enum": [
+            "modal",
+            "canvas"
+          ],
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 80,
+          "type": "string"
+        },
+        "width": {
+          "oneOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "pattern": "^[0-9]+%$",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "required": [
+        "placement",
+        "name"
+      ],
+      "type": "object"
+    },
+    "SurfaceOpenResult": {
+      "properties": {
+        "surface": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "surface"
+      ],
+      "type": "object"
+    },
     "SurfaceResizedParams": {
       "properties": {
         "surfaces": {
@@ -1139,6 +1200,12 @@
     "surface.close.result": {
       "description": "Result owned by design/protocol.md; no additional field constraints specified here."
     },
+    "surface.open.params": {
+      "$ref": "#/$defs/SurfaceOpenParams"
+    },
+    "surface.open.result": {
+      "$ref": "#/$defs/SurfaceOpenResult"
+    },
     "surface.resized.params": {
       "$ref": "#/$defs/SurfaceResizedParams"
     },
@@ -1582,6 +1649,15 @@
       },
       "result": {
         "$ref": "#/$defs/surface.close.result"
+      }
+    },
+    "surface.open": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/surface.open.params"
+      },
+      "result": {
+        "$ref": "#/$defs/surface.open.result"
       }
     },
     "surface.resized": {

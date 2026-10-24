@@ -24,6 +24,8 @@ import (
 // from defaultKeys. Snapshot is nil, so the model never rebuilds its catalog
 // from State: tests seed the catalog directly (addPlugin).
 type fakeFE struct {
+	Runtime         []contracts.RuntimeSurface
+	CloseFn         func(protocol.SurfaceID) error
 	TerminalDrawers map[protocol.SurfaceID]contracts.TerminalDrawer
 	TerminalKeys    []uv.KeyPressEvent
 	TerminalMice    []uv.MouseEvent
@@ -85,6 +87,15 @@ type fakeFE struct {
 	pluginIDs func() []string
 	isHost    func(action string) bool
 	defaultKeys
+}
+
+func (f *fakeFE) RuntimeSurfaces() []contracts.RuntimeSurface { return slices.Clone(f.Runtime) }
+func (f *fakeFE) CloseSurface(id protocol.SurfaceID) error {
+	if f.CloseFn != nil {
+		return f.CloseFn(id)
+	}
+	f.Runtime = slices.DeleteFunc(f.Runtime, func(r contracts.RuntimeSurface) bool { return r.Surface == id })
+	return nil
 }
 
 // wireMsg is one outbound call as a test reads it. Type is one of "key",

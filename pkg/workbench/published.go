@@ -107,7 +107,7 @@ func (m *workbenchModel) handlePublishedModalMouse(x, y int, left, wheelDown, wh
 	if x < 0 || y < 0 || x >= innerW || y >= innerH {
 		return true
 	}
-	if left && m.clickContribution(protocol.SurfaceModal, x, y, innerW, innerH) {
+	if left && m.clickContribution(m.modalSurface(), x, y, innerW, innerH) {
 		return true
 	}
 	button := "left"
@@ -116,6 +116,6 @@ func (m *workbenchModel) handlePublishedModalMouse(x, y int, left, wheelDown, wh
 	} else if wheelUp {
 		button = "wheel_up"
 	}
-	m.sendMouse(m.surfaceOwner(protocol.SurfaceModal), m.publisherMousePayload(protocol.SurfaceModal, x, y, button))
+	m.sendMouse(m.surfaceOwner(m.modalSurface()), m.publisherMousePayload(m.modalSurface(), x, y, button))
 	return true
 }

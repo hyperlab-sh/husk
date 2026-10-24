@@ -56,7 +56,7 @@ func (m *workbenchModel) terminalCursor() *tea.Cursor {
 	id := m.focusedSlot
 	r := m.slotRects[id]
 	if m.modalOwner().Open() {
-		id = protocol.SurfaceModal
+		id = m.modalSurface()
 		r = m.modalRect
 	}
 	t := m.terminalView(id)
@@ -86,7 +86,7 @@ func (m *workbenchModel) routeTerminalMouse(event tea.MouseMsg) bool {
 	}
 	var targets []target
 	if m.modalOwner().Open() {
-		targets = []target{{protocol.SurfaceModal, m.modalRect}}
+		targets = []target{{m.modalSurface(), m.modalRect}}
 	} else {
 		for _, hit := range m.hitOrder() {
 			targets = append(targets, target{hit.ID, hit.Rect})

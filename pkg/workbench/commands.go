@@ -128,6 +128,9 @@ type paletteCommand struct {
 
 func (m *workbenchModel) allCommands() []paletteCommand {
 	rows := m.builtinCommands()
+	if m.runtimeHidden && topCanvas(m.runtime) != "" {
+		rows = append(rows, paletteCommand{ID: "husk.surfaces.restore", Title: "Restore runtime surfaces", Category: "Workbench", Description: "Show the hidden runtime canvas stack", Shortcut: m.firstKey("husk.surfaces.restore")})
+	}
 	if m.fe == nil {
 		return rows
 	}

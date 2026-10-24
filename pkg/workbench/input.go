@@ -168,9 +168,9 @@ func (m *workbenchModel) keyContext() contracts.KeyContext {
 	if m.modalOwner().Open() {
 		ctx.ModalOpen = true
 		ctx.ModalAction = m.modalOwner().RailID
-		ctx.FocusSurface = string(protocol.SurfaceModal)
+		ctx.FocusSurface = string(m.modalSurface())
 		ctx.FocusOwner = m.modalOwner().PluginID
-		ctx.Capture = m.catalog.Capture[protocol.SurfaceModal]
+		ctx.Capture = m.catalog.Capture[m.modalSurface()]
 		if m.captureReleased {
 			ctx.Capture = protocol.CaptureNone
 		}
@@ -349,7 +349,7 @@ func (m *workbenchModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	// An open modal owns every key the keymap left alone.
 	if m.modalOwner().Open() {
-		m.sendKey(m.modalOwner().PluginID, protocol.SurfaceModal, key)
+		m.sendKey(m.modalOwner().PluginID, m.modalSurface(), key)
 		return m, nil
 	}
 
@@ -634,8 +634,10 @@ func (m *workbenchModel) handleMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 	if isLeftClick {
 		if slot, ok := m.closeHitAt(msg.X, msg.Y); ok {
-			if slot == protocol.SurfaceModal {
+			if slot == m.modalSurface() && m.modalOwner().Open() {
 				m.closeModal()
+			} else if !slot.Layout() {
+				m.closeRuntime(slot)
 			} else {
 				m.activateHomeWorkbench()
 			}
@@ -686,7 +688,7 @@ func (m *workbenchModel) handleMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 			continue
 		}
 		if image.Pt(msg.X, msg.Y).In(rect.Rect()) {
-			if isLeftClick && (slotID == protocol.SurfaceSidebarList || slotID == protocol.SurfaceMainStage || slotID == protocol.SurfaceSidePanel || slotID == protocol.SurfaceWorkspaceStage || slotID == protocol.SurfaceFullCanvas) {
+			if isLeftClick && (slotID == protocol.SurfaceSidebarList || slotID == protocol.SurfaceMainStage || slotID == protocol.SurfaceSidePanel || slotID == protocol.SurfaceWorkspaceStage || slotID == protocol.SurfaceFullCanvas || !slotID.Layout()) {
 				m.setFocus(slotID)
 			}
 			relX := msg.X - rect.InnerX
@@ -721,7 +723,7 @@ func (m *workbenchModel) closeHitAt(x, y int) (protocol.SurfaceID, bool) {
 	// close button on the underlying canvas/stage (matching esc, which only
 	// dismisses the modal).
 	if m.modalOwner().Open() {
-		spec := m.frameFor(protocol.SurfaceModal)
+		spec := m.frameFor(m.modalSurface())
 		if !spec.Close {
 			return "", false
 		}
@@ -731,11 +733,11 @@ func (m *workbenchModel) closeHitAt(x, y int) (protocol.SurfaceID, bool) {
 			cx = rect.X + rect.Width - 2
 		}
 		if y == rect.Y && (x == cx || (spec.Border && x == cx-1)) {
-			return protocol.SurfaceModal, true
+			return m.modalSurface(), true
 		}
 		return "", false
 	}
-	for _, slot := range []protocol.SurfaceID{protocol.SurfaceFullCanvas, protocol.SurfaceWorkspaceStage} {
+	for _, slot := range []protocol.SurfaceID{m.runtimeCanvas(), protocol.SurfaceFullCanvas, protocol.SurfaceWorkspaceStage} {
 		var rect slotRect
 		switch slot {
 		case protocol.SurfaceModal:
@@ -744,7 +746,10 @@ func (m *workbenchModel) closeHitAt(x, y int) (protocol.SurfaceID, bool) {
 			}
 			rect = m.modalRect
 		default:
-			if m.activePlacement == "" {
+			if slot == "" {
+				continue
+			}
+			if m.activePlacement == "" && slot.Layout() {
 				continue
 			}
 			r, ok := m.slotRects[slot]

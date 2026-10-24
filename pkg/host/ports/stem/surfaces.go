@@ -61,6 +61,15 @@ func (p *SurfacePort) run(ctx context.Context, fn func() error) error {
 	return codedEngine(err)
 }
 
+// SurfaceOpen serves surface.open (plugin callers only).
+func (p *SurfacePort) SurfaceOpen(ctx context.Context, c contracts.Caller, params protocol.SurfaceOpenParams) (result protocol.SurfaceOpenResult, err error) {
+	if err = allowCaller(protocol.MethodSurfaceOpen, c); err != nil {
+		return
+	}
+	err = p.run(ctx, func() error { var e error; result, e = p.engine.SurfaceOpen(c.PluginID, params); return e })
+	return
+}
+
 // SurfaceUpdate serves surface.update (plugin callers only).
 func (p *SurfacePort) SurfaceUpdate(ctx context.Context, c contracts.Caller, params protocol.SurfaceUpdateParams) error {
 	if err := allowCaller(protocol.MethodSurfaceUpdate, c); err != nil {

@@ -35,6 +35,8 @@ const (
 	MethodStateClear = "state.clear"
 	// MethodStateChanged reports a changed slice; see design/state.md.
 	MethodStateChanged = "state.changed"
+	// MethodSurfaceOpen opens a runtime surface; see design/protocol.md.
+	MethodSurfaceOpen = "surface.open"
 	// MethodSurfaceUpdate renders a surface; see design/protocol.md.
 	MethodSurfaceUpdate = "surface.update"
 	// MethodSurfaceClose closes a surface; see design/protocol.md.
@@ -116,7 +118,7 @@ func Methods() []string {
 	return []string{MethodSessionPing, MethodProtocolError, MethodActionInvoke, MethodActionList,
 		MethodEventEmit, MethodEventDeliver, MethodEventWatch, MethodHookCall, MethodHookList,
 		MethodStateGet, MethodStateSet, MethodStatePatch, MethodStateSnapshot, MethodStateWatch, MethodStateClear, MethodStateChanged,
-		MethodSurfaceUpdate, MethodSurfaceClose, MethodSurfaceResized, MethodTerminalAttach, MethodTerminalWrite, MethodTerminalDetach, MethodTerminalInput, MethodInputKey, MethodInputMouse, MethodInputKeyState,
+		MethodSurfaceOpen, MethodSurfaceUpdate, MethodSurfaceClose, MethodSurfaceResized, MethodTerminalAttach, MethodTerminalWrite, MethodTerminalDetach, MethodTerminalInput, MethodInputKey, MethodInputMouse, MethodInputKeyState,
 		MethodThemeChanged, MethodThemeGet, MethodThemeList, MethodThemeCheck, MethodSlotContribute, MethodSlotContributions, MethodToastShow,
 		MethodSettingsGet, MethodSettingsList, MethodSettingsSchema, MethodSettingsValidate, MethodSettingsSet,
 		MethodSecretsGet, MethodSecretsNames, MethodSecretsSet, MethodSecretsGrant, MethodSecretsRevoke, MethodSecretsReveal,

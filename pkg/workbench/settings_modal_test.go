@@ -41,10 +41,10 @@ func TestSettingsReplacedByInvokedModal(t *testing.T) {
 				t.Fatal("modal action declined")
 			}
 			m.settle()
-			if m.settings != nil || m.modalOwner() != (modalState{PluginID: "p", RailID: "p.dialog"}) {
+			if m.settings != nil || m.modalOwner() != (modalState{PluginID: "p", RailID: "p.dialog", Surface: protocol.SurfaceModal}) {
 				t.Fatalf("overlays stacked: settings=%v modal=%+v", m.settingsTab(), m.modalOwner())
 			}
-			want := contracts.Overlays{Modal: contracts.ModalOverlay{Plugin: "p", RailItem: "p.dialog"}}
+			want := contracts.Overlays{Modal: contracts.ModalOverlay{Plugin: "p", RailItem: "p.dialog", Surface: protocol.SurfaceModal}}
 			if got := fe.Views[len(fe.Views)-1].Overlays; got != want {
 				t.Fatalf("committed overlays = %+v, want %+v", got, want)
 			}

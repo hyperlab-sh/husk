@@ -88,6 +88,8 @@ func payloadTypes(method string) (reflect.Type, reflect.Type) {
 		return reflect.TypeFor[protocol.SessionPingParams](), reflect.TypeFor[protocol.SessionPingResult]()
 	case protocol.MethodProtocolError:
 		return reflect.TypeFor[protocol.ProtocolErrorParams](), nil
+	case protocol.MethodSurfaceOpen:
+		return reflect.TypeFor[protocol.SurfaceOpenParams](), reflect.TypeFor[protocol.SurfaceOpenResult]()
 	case protocol.MethodSurfaceUpdate:
 		return reflect.TypeFor[protocol.SurfaceUpdateParams](), nil
 	case protocol.MethodSurfaceClose:
@@ -183,6 +185,11 @@ func (g *generator) define(t reflect.Type) string {
 		// RowHitTarget.Validate enforces the relative bound at ingestion.
 		obj["description"] = "Optional surface-relative cell range [col_start, col_end); both or neither, with col_end > col_start >= 0. The host validates the relative bound."
 	}
+	if t == reflect.TypeFor[protocol.SurfaceOpenParams]() {
+		props["placement"] = map[string]any{"type": "string", "enum": []string{"modal", "canvas"}}
+		props["name"] = map[string]any{"type": "string", "pattern": "^[a-z0-9_-]{1,32}$", "maxLength": 32}
+		props["title"] = map[string]any{"type": "string", "maxLength": 80}
+	}
 	if t == reflect.TypeFor[protocol.SurfaceResizedParams]() {
 		// The v2 snapshot contract explicitly requires an array, not null.
 		props["surfaces"].(map[string]any)["type"] = "array"
@@ -220,6 +227,9 @@ func (g *generator) typeSchema(t reflect.Type) map[string]any {
 	}
 	if t == reflect.TypeFor[protocol.CaptureValue]() {
 		return map[string]any{"oneOf": []any{map[string]any{"type": "boolean"}, map[string]any{"type": "string", "enum": []string{"text", "all"}}}}
+	}
+	if t == reflect.TypeFor[protocol.SurfaceDimension]() {
+		return map[string]any{"oneOf": []any{map[string]any{"type": "integer"}, map[string]any{"type": "string", "pattern": "^[0-9]+%$"}}}
 	}
 	if t == reflect.TypeFor[json.RawMessage]() {
 		return map[string]any{}

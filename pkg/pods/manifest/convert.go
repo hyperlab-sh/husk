@@ -323,7 +323,7 @@ func eventPattern(pattern string) bool {
 func validateDeclarations(s *Spec) error {
 	surfaces := make(map[protocol.SurfaceID]bool)
 	for _, v := range s.Surfaces {
-		if !v.ID.Valid() || surfaces[v.ID] {
+		if !v.ID.Layout() || surfaces[v.ID] {
 			return fmt.Errorf("invalid or duplicate surface %q", v.ID)
 		}
 		surfaces[v.ID] = true
