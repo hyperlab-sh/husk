@@ -645,8 +645,11 @@ func (m *WorkbenchModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if s := m.settings; s != nil {
 		if s.profileForm != nil {
+			if !settingsWidgetMessage(msg) {
+				return m, nil
+			}
 			_, cmd := s.profileForm.Update(msg)
-			s.profileView = s.profileForm.View()
+			s.profileDirty = true
 			return m, cmd
 		}
 		if s.general != nil && s.tab == "general" && s.focus == settingsContentFocus {

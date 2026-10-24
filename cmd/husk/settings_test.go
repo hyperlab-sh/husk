@@ -238,11 +238,13 @@ func TestSettingsThemeListCurrentCursorMovementAndReload(t *testing.T) {
 		t.Fatal("movement wrote or did not move")
 	}
 	fe.ThemeRows = []contracts.ThemeEntry{{Name: "bad", Source: "user"}, {Name: "evening", Source: "user"}, {Name: theme.Default().Name, Current: true}}
+	fe.ServiceRev++
 	m.settle()
 	if m.settings.cursor != 1 {
 		t.Fatal("reload lost cursor name")
 	}
 	fe.ThemeRows = fe.ThemeRows[2:]
+	fe.ServiceRev++
 	m.settle()
 	if m.settings.cursor != 0 {
 		t.Fatal("removed cursor did not fall back to current")
