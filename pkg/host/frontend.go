@@ -53,20 +53,10 @@ func (r *Root) keyView(ctx context.Context) (portsservices.KeyView, error) {
 			view.Actions[action.ID] = action.Live
 		}
 		live := dispatcher.StateLiveness(r.st)
-		for plugin, doc := range r.store.Declared(store.DeclaredPlugins) {
-			if !live.Live(plugin) {
-				continue
+		for plugin, surfaces := range r.readCatalog().surfaces {
+			if live.Live(plugin) {
+				view.Surfaces[plugin] = surfaces
 			}
-			raw, err := json.Marshal(doc)
-			var declared declaredPlugin
-			if err != nil || json.Unmarshal(raw, &declared) != nil {
-				continue
-			}
-			surfaces := map[string]bool{}
-			for _, surface := range declared.Surfaces {
-				surfaces[string(surface.ID)] = true
-			}
-			view.Surfaces[plugin] = surfaces
 		}
 	}
 	if r.onLoop() {
@@ -74,6 +64,9 @@ func (r *Root) keyView(ctx context.Context) (portsservices.KeyView, error) {
 		return view, nil
 	}
 	err := r.do(ctx, capture)
+	if errors.Is(err, errLoopGone) {
+		err = contracts.NewError(protocol.CodeUnavailable, "the host loop no longer runs", nil)
+	}
 	return view, err
 }
 
@@ -262,11 +255,12 @@ type declaredPlugin struct {
 // declaredCatalog is everything the frontend reads from the declared plugins
 // documents.
 type declaredCatalog struct {
-	index  declaredIndex
-	rail   []contracts.RailItem
-	slots  []contracts.PublishedSlot
-	frames map[string]map[protocol.SurfaceID]protocol.FrameSpec
-	acts   []contracts.PluginAction
+	index    declaredIndex
+	rail     []contracts.RailItem
+	slots    []contracts.PublishedSlot
+	frames   map[string]map[protocol.SurfaceID]protocol.FrameSpec
+	acts     []contracts.PluginAction
+	surfaces map[string]map[string]bool
 }
 
 // declaredIndex indexes the declared plugins documents.
@@ -313,6 +307,7 @@ func (r *Root) buildCatalog() declaredCatalog {
 	slots := []contracts.PublishedSlot{}
 	frames := map[string]map[protocol.SurfaceID]protocol.FrameSpec{}
 	acts := []contracts.PluginAction{}
+	surfaces := map[string]map[string]bool{}
 	for _, id := range ids {
 		raw, err := json.Marshal(docs[id])
 		var d declaredPlugin
@@ -335,7 +330,9 @@ func (r *Root) buildCatalog() declaredCatalog {
 		for _, sl := range d.PublishedSlots {
 			slots = append(slots, contracts.PublishedSlot{Plugin: id, ID: sl.ID, Kind: sl.Kind, Rect: sl.Rect})
 		}
+		surfaces[id] = map[string]bool{}
 		for _, sf := range d.Surfaces {
+			surfaces[id][string(sf.ID)] = true
 			if sf.Frame == nil {
 				continue
 			}
@@ -345,7 +342,7 @@ func (r *Root) buildCatalog() declaredCatalog {
 			frames[id][sf.ID] = *sf.Frame
 		}
 	}
-	return declaredCatalog{index: idx, rail: items, slots: slots, frames: frames, acts: acts}
+	return declaredCatalog{index: idx, rail: items, slots: slots, frames: frames, acts: acts, surfaces: surfaces}
 }
 
 // warnDeclaredOnce reports an undecodable plugins document the first time it

@@ -36,8 +36,9 @@ func (r *Root) Setting(key string) (any, string, error) {
 	return (ports.Settings{Svc: r.rt.Settings}).Get(context.Background(), contracts.Caller{Kind: protocol.CallerHost}, key)
 }
 
-// KeyListing implements contracts.Frontend. Any goroutine; the same port and
-// CLI view used by the socket adapter, not a separate listing join.
+// KeyListing implements contracts.Frontend. Any goroutine; off-loop calls
+// block until a running, responsive loop captures the runtime catalog. This
+// uses the socket adapter's port and CLI view, not a snapshot-only read.
 func (r *Root) KeyListing() contracts.KeyListing {
 	listing, err := r.keys().List(context.Background(), contracts.Caller{Kind: protocol.CallerCLI})
 	if err != nil {
