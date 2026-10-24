@@ -17,6 +17,9 @@ import (
 // The descendant holds inherited stderr until its control connection closes.
 // It blocks on I/O, not a sleep, and stays in the spawned leader's group.
 func TestMain(m *testing.M) {
+	if len(os.Args) == 2 && os.Args[1] == "--pane-io" {
+		os.Exit(paneIOHelper())
+	}
 	if len(os.Args) == 3 {
 		switch os.Args[1] {
 		case "--stderr-leader":

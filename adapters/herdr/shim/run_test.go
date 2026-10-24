@@ -15,7 +15,6 @@ import (
 	"github.com/hyperlab-sh/husk/adapters/herdr/manifest"
 	"github.com/hyperlab-sh/husk/adapters/herdr/proxy"
 	"github.com/hyperlab-sh/husk/adapters/herdr/settings"
-	"github.com/hyperlab-sh/husk/adapters/herdr/upstream"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
@@ -202,53 +201,6 @@ func TestEOFStopsProcessGroupOnInjectedGrace(t *testing.T) {
 		t.Fatalf("second signal=%v", s)
 	}
 	// Cleanup consumes Run's result and checks that all workers join.
-}
-
-func TestPaneStub(t *testing.T) {
-	r := newRig(t, "never", false, "")
-	r.start(t)
-	r.host.until(t, protocol.MethodStateSet, "attached")
-	reply := r.invoke(t, "demo.pane-panel")
-	if reply.Error == nil || reply.Error.Code != protocol.CodeFailed || reply.Error.Message != "pane entrypoints are not supported yet" {
-		t.Fatalf("pane=%+v", reply)
-	}
-	registryPath := filepath.Join(t.TempDir(), "plugins.json")
-	if err := os.WriteFile(registryPath, []byte(`[{"plugin_id":"other","enabled":true}]`), 0600); err != nil {
-		t.Fatal(err)
-	}
-	rr := &runner{m: manifest.Manifest{ID: "demo"}, o: Options{RegistryPath: registryPath, Platform: "linux"}}
-	pp, err := proxy.Start(context.Background(), proxy.Options{Dial: upstream.New(upstream.Options{Socket: r.o.Socket}).Dial, Intercept: rr.intercept})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer pp.Close()
-	errorShape := shape(t, "error_response")
-	for _, req := range []proxy.Request{{ID: "a", Method: "plugin.pane.open", Params: json.RawMessage(`{"plugin_id":"demo","entrypoint":"panel"}`)}, {ID: "b", Method: "plugin.pane.focus", Params: json.RawMessage(`{"pane_id":"husk:demo.panel"}`)}, {ID: "c", Method: "plugin.pane.close", Params: json.RawMessage(`{"pane_id":"husk:demo.panel"}`)}, {ID: "d", Method: "popup.close", Params: json.RawMessage(`{}`)}} {
-		_, failure, handled := rr.intercept(context.Background(), req)
-		if !handled || failure == nil || failure.Code != "unsupported" || failure.Message != "pane entrypoints are not supported yet" {
-			t.Fatalf("%s: %v %v", req.Method, handled, failure)
-		}
-		raw, _ := json.Marshal(req)
-		envelope := proxyCall(t, pp.Path(), string(raw)+"\n")
-		if err := errorShape.Validate(envelope); err != nil {
-			t.Fatal(err)
-		}
-		body := envelope["error"].(map[string]any)
-		if body["code"] != "unsupported" || body["message"] != "pane entrypoints are not supported yet" {
-			t.Fatalf("pane proxy error=%v", body)
-		}
-	}
-	// D191 only stubs this plugin's panes. Cross-plugin opens, including
-	// another converted registry plugin, remain byte-exact raw passthrough.
-	line := "{ \"id\":\"cross\", \"method\":\"plugin.pane.open\", \"params\":{\"plugin_id\":\"other\",\"entrypoint\":\"panel\",\"placement\":\"popup\"} }\r\n"
-	answer := proxyCall(t, pp.Path(), line)
-	if answer["error"] != nil || answer["result"].(map[string]any)["type"] != "ok" {
-		t.Fatalf("cross-plugin pane was not forwarded: %v", answer)
-	}
-	requests := r.server.Requests()
-	if len(requests) == 0 || string(requests[len(requests)-1].Raw) != line {
-		t.Fatal("cross-plugin pane request bytes changed")
-	}
 }
 
 func TestProxyNotificationShapeAndTrims(t *testing.T) {
