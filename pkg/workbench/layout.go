@@ -266,11 +266,7 @@ func (m *workbenchModel) frameFor(slotID protocol.SurfaceID) frame.Spec {
 		if r.Frame == nil {
 			return frame.Spec{}
 		}
-		f := frame.Spec(*r.Frame)
-		if f.Label != "" && r.Title != "" {
-			f.Label = r.Title
-		}
-		return f
+		return frame.Spec(*r.Frame)
 	}
 	if slotID == protocol.SurfaceAppOverlay {
 		return frame.Spec{}

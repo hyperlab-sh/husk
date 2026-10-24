@@ -1095,9 +1095,6 @@ func (m *workbenchModel) surfaceView() contracts.SurfaceView {
 	}
 	slices.Sort(v.Visible)
 	v.Placement = contracts.Placement{RailItem: m.activeRailID, Kind: string(m.activePlacement)}
-	if m.runtimeCanvas() != "" {
-		v.Placement = contracts.Placement{Kind: string(protocol.SurfacePlacementCanvas)}
-	}
 	v.Overlays = contracts.Overlays{
 		Modal:          contracts.ModalOverlay{Plugin: m.modal.PluginID, RailItem: m.modal.RailID, Surface: m.modal.Surface},
 		Palette:        m.showPalette,
@@ -1375,7 +1372,7 @@ func (m *workbenchModel) activateRailItem(ri contracts.RailItem) {
 		return
 	}
 
-	m.hideRuntime()
+	hiddenCanvas := m.hideRuntime()
 	switch ri.Placement {
 	case contracts.PlacementModal:
 		if m.modalOwner().RailID == ri.ID {
@@ -1386,7 +1383,7 @@ func (m *workbenchModel) activateRailItem(ri contracts.RailItem) {
 		m.recomputeLayout()
 
 	case contracts.PlacementFullCanvas:
-		if m.activeRailID == ri.ID && m.activePlacement == contracts.PlacementFullCanvas {
+		if !hiddenCanvas && m.activeRailID == ri.ID && m.activePlacement == contracts.PlacementFullCanvas {
 			m.activateHomeWorkbench()
 			return
 		}
@@ -1397,7 +1394,7 @@ func (m *workbenchModel) activateRailItem(ri contracts.RailItem) {
 		m.recomputeLayout()
 
 	case contracts.PlacementStage:
-		if m.activeRailID == ri.ID && m.activePlacement == contracts.PlacementStage {
+		if !hiddenCanvas && m.activeRailID == ri.ID && m.activePlacement == contracts.PlacementStage {
 			m.activateHomeWorkbench()
 			return
 		}

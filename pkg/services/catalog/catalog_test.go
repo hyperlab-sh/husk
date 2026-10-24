@@ -72,6 +72,7 @@ func TestCatalogFieldRulesAndLimits(t *testing.T) {
 		{"surfaces empty", "alpha", "surfaces", []any{}, true},
 		{"surfaces all", "alpha", "surfaces", []any{"activity-rail", "sidebar-navigation", "sidebar-list", "thread-row-status", "sidebar-footer", "main-header", "main-stage", "side-panel", "app-overlay", "modal-surface", "full-canvas", "workspace-stage"}, true},
 		{"surfaces unknown", "alpha", "surfaces", []any{"unknown"}, false},
+		{"surfaces runtime id", "alpha", "surfaces", []any{"foo.bar"}, false},
 		{"surfaces duplicate", "alpha", "surfaces", []any{"main-stage", "main-stage"}, false},
 		{"surfaces type", "alpha", "surfaces", "main-stage", false},
 		{"surfaces element type", "alpha", "surfaces", []any{42}, false},
