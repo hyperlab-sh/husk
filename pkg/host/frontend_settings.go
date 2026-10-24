@@ -2,10 +2,13 @@ package host
 
 import (
 	"context"
+	"encoding/json"
+	"sync/atomic"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/hyperlab-sh/husk/pkg/host/contracts"
 	ports "github.com/hyperlab-sh/husk/pkg/host/ports/services"
+	portsstem "github.com/hyperlab-sh/husk/pkg/host/ports/stem"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 	svccontracts "github.com/hyperlab-sh/husk/pkg/services/contracts"
 )
@@ -99,4 +102,55 @@ func (r *Root) RemovePlugin(id string, reply func(contracts.PluginRemoval, error
 	frontendWrite(r, func(ctx context.Context) (contracts.PluginRemoval, error) {
 		return r.pods.Remove(ctx, contracts.Caller{Kind: protocol.CallerHost}, id)
 	}, reply)
+}
+
+// AddPlugin implements contracts.Frontend. Call and reply on the loop; the
+// port runs on a tracked worker.
+func (r *Root) AddPlugin(source contracts.PluginSource, reply func(contracts.PluginAddition, error)) {
+	frontendWrite(r, func(ctx context.Context) (contracts.PluginAddition, error) {
+		return r.pods.Add(ctx, contracts.Caller{Kind: protocol.CallerHost}, source)
+	}, reply)
+}
+
+// hostWatcher is the Notifier of a WatchEvents subscription. The bus calls it
+// on the loop at the end of an Update.
+type hostWatcher struct {
+	r         *Root
+	fn        func(protocol.EventDeliverParams)
+	cancelled atomic.Bool
+}
+
+func (w *hostWatcher) Notify(m protocol.Message) error {
+	var p protocol.EventDeliverParams
+	if err := json.Unmarshal(m.Params, &p); err != nil {
+		return err
+	}
+	run := func() {
+		if !w.cancelled.Load() {
+			w.fn(p)
+		}
+	}
+	if w.r.onLoop() {
+		run()
+		return nil
+	}
+	if !w.r.post(run) {
+		return errLoopGone
+	}
+	return nil
+}
+
+// WatchEvents implements contracts.Frontend. Loop only; cancel is idempotent
+// and any-goroutine.
+func (r *Root) WatchEvents(pattern string, fn func(protocol.EventDeliverParams)) (func(), error) {
+	w := &hostWatcher{r: r, fn: fn}
+	ctx, stop := context.WithCancel(r.closingCtx)
+	if err := portsstem.NewEvents(r.bus, r.loopSeam).Watch(ctx, contracts.Caller{Kind: protocol.CallerHost}, pattern, w); err != nil {
+		stop()
+		return nil, err
+	}
+	return func() {
+		w.cancelled.Store(true)
+		stop()
+	}, nil
 }
