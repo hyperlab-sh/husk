@@ -395,17 +395,27 @@ func (r *runner) request(m protocol.Message) (any, *protocol.Error) {
 		return nil, &protocol.Error{Code: protocol.CodeUnknownMethod, Message: "unknown method"}
 	}
 	var p struct {
-		Action string   `json:"action"`
-		Args   paneArgs `json:"args"`
+		Action string          `json:"action"`
+		Args   json.RawMessage `json:"args"`
 	}
 	if json.Unmarshal(m.Params, &p) != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "invalid action params"}
 	}
 	local := strings.TrimPrefix(p.Action, r.id+".")
 	if strings.HasPrefix(local, "pane-") {
+		var args paneArgs
+		if len(p.Args) > 0 && json.Unmarshal(p.Args, &args) != nil {
+			return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "invalid pane args"}
+		}
 		ctx, done := r.bounded(r.ctx, 10*time.Second)
 		defer done()
-		return r.openPane(ctx, strings.TrimPrefix(local, "pane-"), p.Args, correlationID(m.ID))
+		return r.openPane(ctx, strings.TrimPrefix(local, "pane-"), args, correlationID(m.ID))
+	}
+	var args struct {
+		Context json.RawMessage `json:"context"`
+	}
+	if len(p.Args) > 0 && json.Unmarshal(p.Args, &args) != nil {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "invalid action args"}
 	}
 	r.mu.Lock()
 	attached := r.state.Server == "attached"
@@ -415,7 +425,7 @@ func (r *runner) request(m protocol.Message) (any, *protocol.Error) {
 	}
 	for _, e := range r.m.Actions {
 		if strings.ReplaceAll(e.ID, ":", "-") == local && manifest.Supports(e.Platforms, r.o.Platform) {
-			result, err := r.launch(e, e.ID, "", nil, correlationID(m.ID), "api", p.Args.Context)
+			result, err := r.launch(e, e.ID, "", nil, correlationID(m.ID), "api", args.Context)
 			if err != nil {
 				var wire *protocol.Error
 				if errors.As(err, &wire) {
