@@ -303,18 +303,12 @@ func (r *Root) loadSpecs() error {
 		if info, err := os.Stat(arg); err == nil {
 			if info.IsDir() {
 				remember(arg)
-			} else {
+			} else if filepath.Base(arg) == manifest.FileName {
 				remember(filepath.Dir(arg))
 			}
 		}
 		spec, warns, err := reg.Load(arg)
 		if err != nil {
-			var failure *manifest.ConverterError
-			if errors.As(err, &failure) {
-				r.log(pods.LogMsg{Level: "warn", Message: err.Error()})
-				r.refuse("", err.Error())
-				continue
-			}
 			return fmt.Errorf("husk.plugins.paths[%d] %q (layer %s): %w", i, arg, snap.Source("husk.plugins.paths"), err)
 		}
 		add(spec, warns)

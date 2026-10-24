@@ -54,6 +54,14 @@ func hostConverterChild() int {
 		return 1
 	}
 	if command == "detect" {
+		if filepath.Base(dir) == "detect-bad" {
+			fmt.Fprintln(os.Stderr, "bad detection")
+			return 7
+		}
+		return 0
+	}
+	if filepath.Base(dir) == "invalid-document" {
+		fmt.Print("not a manifest")
 		return 0
 	}
 	if filepath.Base(dir) == "bad" {
@@ -103,7 +111,7 @@ func TestHostExecConvertersStartupAndAdd(t *testing.T) {
 	processes := newFakes()
 	h, err := boot(t, func(c *contracts.Config) {
 		settings := pluginSettings(c)
-		settings["paths"] = []string{alpha, bad}
+		settings["paths"] = []string{alpha}
 		settings["converters"] = []string{second, first, filepath.Base(first)}
 	}, withHook(hook), WithFactory(processes.factory), WithConverters([]string{first}), WithLogger(func(_, msg string) { logs = append(logs, msg) }))
 	if err != nil {

@@ -10,7 +10,7 @@ import (
 )
 
 func TestHostExecDiscoveryRemembersRefusedDirectories(t *testing.T) {
-	for _, mode := range []string{"directory", "discovered", "duplicate-id"} {
+	for _, mode := range []string{"directory", "discovered", "duplicate-id", "executable-parent"} {
 		t.Run(mode, func(t *testing.T) {
 			t.Setenv("GORACE", "atexit_sleep_ms=0")
 			exe, err := os.Executable()
@@ -22,6 +22,8 @@ func TestHostExecDiscoveryRemembersRefusedDirectories(t *testing.T) {
 			target := filepath.Join(plugins, "bad")
 			if mode == "duplicate-id" {
 				target = filepath.Join(plugins, "duplicate")
+			} else if mode == "executable-parent" {
+				target = filepath.Join(plugins, "parent")
 			}
 			if err := os.MkdirAll(target, 0700); err != nil {
 				t.Fatal(err)
@@ -30,6 +32,13 @@ func TestHostExecDiscoveryRemembersRefusedDirectories(t *testing.T) {
 				t.Fatal(err)
 			}
 			var paths []string
+			if mode == "executable-parent" {
+				tool := filepath.Join(target, "tool")
+				if err := os.Symlink(exe, tool); err != nil {
+					t.Fatal(err)
+				}
+				paths = []string{tool}
+			}
 			if mode == "duplicate-id" {
 				alpha := filepath.Join(plugins, "alpha")
 				if err := os.Mkdir(alpha, 0700); err != nil {
@@ -64,6 +73,15 @@ func TestHostExecDiscoveryRemembersRefusedDirectories(t *testing.T) {
 				t.Fatalf("trace=%s", raw)
 			}
 			refusals := h.root.Frontend().Refusals()
+			if mode == "executable-parent" {
+				if len(refusals) != 0 || h.root.Planned() != 2 {
+					t.Fatalf("refusals=%+v planned=%d", refusals, h.root.Planned())
+				}
+				if strings.Count(string(raw), filepath.Base(exe)+":detect "+target+"\n") != 1 {
+					t.Fatalf("trace=%s", raw)
+				}
+				return
+			}
 			if len(refusals) != 1 {
 				t.Fatalf("refusals=%+v", refusals)
 			}
