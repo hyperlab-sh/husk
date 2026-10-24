@@ -57,6 +57,32 @@ func converterChild(args []string) int {
 		return 0
 	}
 	switch mode {
+	case "real-deadline":
+		ready, err := os.OpenFile(filepath.Join(args[1], "ready"), os.O_WRONLY, 0)
+		if err != nil {
+			return 8
+		}
+		_, err = ready.Write([]byte{1})
+		_ = ready.Close()
+		if err != nil {
+			return 8
+		}
+		reader, writer, err := os.Pipe()
+		if err != nil {
+			return 8
+		}
+		defer reader.Close()
+		defer writer.Close()
+		var b [1]byte
+		_, _ = reader.Read(b[:]) // blocks until the host cancels this real process
+		return 8
+	case "stdout-large":
+		fmt.Print(strings.Repeat("x", maxManifestBytes+1))
+		return 0
+	case "stderr-large":
+		fmt.Fprint(os.Stderr, strings.Repeat("x", maxManifestBytes+1))
+	case "mixed-stderr":
+		fmt.Fprintln(os.Stderr, "plain diagnostic\nnot {json\n{\"message\":\"no code\"}")
 	case "bad":
 		fmt.Print("not json")
 		return 0
@@ -103,7 +129,7 @@ func TestExecConverterConversion(t *testing.T) {
 		t.Fatal(c.Format())
 	}
 	root := t.TempDir()
-	for _, mode := range []string{"ok", "hujson", "decline", "bad", "exit", "detect-fail", "relative"} {
+	for _, mode := range []string{"ok", "hujson", "mixed-stderr", "stdout-large", "stderr-large", "decline", "bad", "exit", "detect-fail", "relative"} {
 		t.Run(mode, func(t *testing.T) {
 			dir := filepath.Join(root, mode)
 			if err := os.Mkdir(dir, 0700); err != nil {
@@ -120,11 +146,14 @@ func TestExecConverterConversion(t *testing.T) {
 				t.Fatal("not claimed")
 			}
 			spec, warnings, err := c.Convert(src)
-			if mode != "ok" && mode != "hujson" {
+			if mode != "ok" && mode != "hujson" && mode != "mixed-stderr" {
 				if err == nil || !strings.Contains(err.Error(), "converter_failed") {
 					t.Fatalf("failure = %v", err)
 				}
 				if mode == "exit" && (!strings.Contains(err.Error(), "exit status 4") || !strings.Contains(err.Error(), "first diagnostic") || strings.Contains(err.Error(), "second diagnostic")) {
+					t.Fatal(err)
+				}
+				if strings.HasSuffix(mode, "-large") && (!strings.Contains(err.Error(), "output exceeds 1 MiB") || !strings.Contains(err.Error(), "exit status 0")) {
 					t.Fatal(err)
 				}
 				if mode == "detect-fail" && !strings.Contains(err.Error(), "exit status 3") {
@@ -160,8 +189,10 @@ func TestExecConverterDiscovery(t *testing.T) {
 	for _, tc := range []struct {
 		name, output string
 		fail         bool
+		count        int
 	}{
-		{"empty", "", false}, {"directories", dir + "\n" + dir + "\n", false}, {"limit", strings.Repeat(dir+"\n", 256), false}, {"overflow", strings.Repeat(dir+"\n", 257), true}, {"relative", "relative\n", true},
+		{"empty", "", false, 0}, {"directories", dir + "\n" + dir + "\n", false, 2}, {"limit", strings.Repeat(dir+"\n", 256), false, 256}, {"overflow", strings.Repeat(dir+"\n", 257), true, 0}, {"relative", "relative\n", true, 0},
+		{"blank-lines", "\n" + dir + "\n\n", false, 1}, {"crlf", "\r\n" + dir + "\r\n\r\n", false, 1}, {"limit-with-blanks", strings.Repeat("\n"+dir+"\n", 256), false, 256},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("CONVERTER_DIRS", tc.output)
@@ -169,8 +200,13 @@ func TestExecConverterDiscovery(t *testing.T) {
 			if (err != nil) != tc.fail {
 				t.Fatalf("dirs=%v err=%v", dirs, err)
 			}
-			if !tc.fail && len(dirs) != strings.Count(tc.output, "\n") {
+			if !tc.fail && len(dirs) != tc.count {
 				t.Fatalf("dirs=%v", dirs)
+			}
+			for _, got := range dirs {
+				if got != dir {
+					t.Errorf("directory=%q want=%q", got, dir)
+				}
 			}
 		})
 	}

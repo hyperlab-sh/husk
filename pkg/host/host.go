@@ -258,17 +258,33 @@ func (r *Root) loadSpecs() error {
 	reg := r.converter
 	snap := r.rt.Settings.Snapshot()
 	var converters []*manifest.ExecConverter
+	registered := map[string]bool{}
+	supplied := map[string]bool{}
 	for _, path := range append(append([]string(nil), r.opts.converters...), snap.Strings("husk.plugins.converters")...) {
-		converter, err := manifest.NewExecConverter(path, manifest.ExecOptions{Clock: r.cfg.Clock})
-		if err != nil {
-			r.log(pods.LogMsg{Level: "warn", Message: err.Error()})
+		if supplied[path] {
 			continue
 		}
+		supplied[path] = true
+		converter, err := manifest.NewExecConverter(path, manifest.ExecOptions{Clock: r.clock})
+		if err != nil {
+			r.log(pods.LogMsg{Level: "warn", Message: err.Error()})
+			r.refuse("", err.Error())
+			continue
+		}
+		if registered[converter.Path()] {
+			continue
+		}
+		registered[converter.Path()] = true
 		reg.Register(converter)
 		converters = append(converters, converter)
 	}
 	seen := map[string]bool{}
-	loadedDirs := map[string]bool{}
+	attempted := map[string]bool{}
+	remember := func(dir string) {
+		if abs, err := filepath.Abs(dir); err == nil {
+			attempted[filepath.Clean(abs)] = true
+		}
+	}
 	add := func(spec *manifest.Spec, warns []manifest.Warning) {
 		for _, w := range warns {
 			r.log(pods.LogMsg{PluginID: specID(spec), Level: "warn", Message: fmt.Sprintf("manifest %s: %s", w.Field, w.Message)})
@@ -281,12 +297,16 @@ func (r *Root) loadSpecs() error {
 			return
 		}
 		seen[spec.ID] = true
-		if spec.Dir != "" {
-			loadedDirs[filepath.Clean(spec.Dir)] = true
-		}
 		r.specs = append(r.specs, *spec)
 	}
 	for i, arg := range snap.Strings("husk.plugins.paths") {
+		if info, err := os.Stat(arg); err == nil {
+			if info.IsDir() {
+				remember(arg)
+			} else {
+				remember(filepath.Dir(arg))
+			}
+		}
 		spec, warns, err := reg.Load(arg)
 		if err != nil {
 			var failure *manifest.ConverterError
@@ -309,6 +329,7 @@ func (r *Root) loadSpecs() error {
 			return fmt.Errorf("husk.plugins.dirs[%d] %q (layer %s): not a readable directory: %w", i, dir, snap.Source("husk.plugins.dirs"), err)
 		}
 		for _, res := range results {
+			remember(res.Dir)
 			if res.Err != nil {
 				r.log(pods.LogMsg{Level: "warn", Message: fmt.Sprintf("husk.plugins.dirs %q: %v", dir, res.Err)})
 				r.refuse("", res.Err.Error())
@@ -321,12 +342,14 @@ func (r *Root) loadSpecs() error {
 		discovered, err := converter.Discover()
 		if err != nil {
 			r.log(pods.LogMsg{Level: "warn", Message: err.Error()})
+			r.refuse("", err.Error())
 			continue
 		}
 		for _, dir := range discovered {
-			if loadedDirs[dir] {
+			if attempted[dir] {
 				continue
 			}
+			remember(dir)
 			spec, warnings, err := reg.LoadPath(dir)
 			if err != nil {
 				r.log(pods.LogMsg{Level: "warn", Message: err.Error()})
