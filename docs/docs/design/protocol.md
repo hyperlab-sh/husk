@@ -188,7 +188,7 @@ A closed enum per protocol minor version. A receiver built for an older minor tr
 | `failed` | the handler ran and reported an application failure (a plugin's own failure, or a manifest that fails conversion in `plugin.add`) | plugin action or hook handlers, `plugin.add` |
 | `internal` | a bug in the receiver, including a reply that is neither result nor error | either side |
 
-`message` is a human-readable sentence for logs and toasts; programs branch on `code` only. `data` is optional and carries the specifics a program may need: `{"limit":4194304}` for `line_too_long` and size failures, `{"reason":"plugin_exited"}` or `{"reason":"shutdown"}` for `cancelled`, `{"reason":"user_denied"}` for a `denied` secret read, `{"revision":9}` for `conflict`. Every other spec names its errors from this table and says what it puts in `data`; no spec defines codes of its own.
+`message` is a human-readable sentence for logs and toasts; programs branch on `code` only. `data` is optional and carries the specifics a program may need: `{"limit":4194304}` for `line_too_long` and size failures, `{"reason":"plugin_exited"}` or `{"reason":"shutdown"}` for `cancelled`, `{"reason":"user_denied"}` for a `denied` secret read, `{"revision":9}` for `conflict`. A plugin `denied` a CLI-only method gets `{"reason":"user_only"}`; this also applies when the method admits other in-process user caller kinds but excludes plugins. Every other spec names its errors from this table and says what it puts in `data`; no spec defines codes of its own.
 
 ### Answering bad input
 
