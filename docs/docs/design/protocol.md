@@ -249,7 +249,7 @@ Minor 2.8 (**landed**) adds plugin-only `surface.open` for runtime `modal` and `
 
 Minor 2.9 (**landed**) adds `terminal.link`: a consumed ctrl+left click on an OSC 8 target or a row-local detected URL, delivered directly to the attached occupant. All earlier minors remain served.
 
-Minor 2.10 (landed) adds plugin-only `surface.focus` for an existing runtime surface. All earlier minors remain served; `protocol.Version` is `2.10`.
+Minor 2.10 (**landed**) adds plugin-only `surface.focus` for an existing runtime surface. All earlier minors remain served; `protocol.Version` is `2.10`.
 
 Version history:
 
@@ -393,7 +393,7 @@ Two capabilities a manifest cannot express motivate the minor: a plugin that dec
 
 | Namespace | Method | Form | Direction |
 | :--- | :--- | :--- | :--- |
-| `surface` | `surface.open` (minor 2.8) | request | plugin to Husk (socket) |
+| `surface` | `surface.open` (minor 2.8), `surface.focus` (minor 2.10) | request | plugin to Husk (socket) |
 | `terminal` | `terminal.attach` | request | plugin to Husk (socket) |
 | | `terminal.write` | request (acknowledged) or notification | plugin to Husk (socket) |
 | | `terminal.detach` | request or notification | plugin to Husk (socket) |
