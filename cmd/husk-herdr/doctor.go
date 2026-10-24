@@ -109,9 +109,26 @@ func doctor(args []string, out, diagnostics io.Writer, env environment) int {
 	if code != 0 {
 		fmt.Fprintf(out, "instance: unavailable (%s)\n", problem)
 	} else {
+		dirs, problems := registry.Discover(records, env.platform)
+		syncable := map[string]bool{}
+		for _, dir := range dirs {
+			syncable[dir] = true
+		}
+		for _, p := range problems {
+			if p.Code == "registry_warning" {
+				fmt.Fprintf(out, "%s: %s\n", p.Code, oneLine(p.Message))
+			}
+		}
 		for _, rec := range records {
-			id, _ := manifest.MapID(rec.ID)
-			if _, found := present[id]; rec.Enabled && manifest.Supports(rec.Platforms, env.platform) && !found {
+			if !rec.Enabled || !manifest.Supports(rec.Platforms, env.platform) || !syncable[rec.Root] {
+				continue
+			}
+			id, problem := convertedID(rec.Root, env)
+			if problem != "" {
+				fmt.Fprintf(out, "plugin %s: %s\n", rec.ID, problem)
+				continue
+			}
+			if _, found := present[id]; !found {
 				fmt.Fprintf(out, "plugin %s absent from instance; run husk-herdr sync\n", rec.ID)
 			}
 		}
