@@ -57,7 +57,6 @@ func TestCapturedRegistryLocations(t *testing.T) {
 			}
 			socketPath, socketErr := upstream.ResolveSocket(upstream.SocketOptions{
 				Platform: tc.platform, Getenv: lookup, Home: socketHome,
-				ConfigPath: lookup("HERDR_CONFIG_PATH"),
 			})
 			if want == "" {
 				if socketErr == nil {

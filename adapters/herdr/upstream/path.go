@@ -11,11 +11,8 @@ import (
 // Platform and Getenv follow ConfigDir's defaults when omitted.
 type SocketOptions struct {
 	Session, SocketPath, Home string
-	// ConfigPath is retained for compatibility but ignored: a configuration-file
-	// override does not move the registry or session socket directories.
-	ConfigPath string
-	Platform   string
-	Getenv     func(string) string
+	Platform                  string
+	Getenv                    func(string) string
 }
 
 // ResolveSocket follows the adapter attach contract: explicit session, then
