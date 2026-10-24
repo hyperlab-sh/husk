@@ -37,6 +37,9 @@ type Options struct {
 	Gates                map[string]<-chan struct{}
 	Passthrough          []string
 	OnRequest            func(Request)
+	// Reply may modify a generated result or supply a remote refusal. It runs
+	// outside locks; tests use synchronized state to model live server changes.
+	Reply func(Request, map[string]any) *ReplyError
 	// DisconnectFirst closes the first N validated requests for each named
 	// method before replying. Errors injects explicit remote error replies.
 	DisconnectFirst map[string]int
@@ -243,6 +246,14 @@ func (s *Server) serve(p *peer) {
 			}
 		}
 		result := s.respond(req)
+		if s.opts.Reply != nil {
+			if failure := s.opts.Reply(cloneRequest(req), result); failure != nil {
+				if err := p.write(map[string]any{"id": req.ID, "error": map[string]string{"code": failure.Code, "message": failure.Message}}); err != nil {
+					return
+				}
+				continue
+			}
+		}
 		if req.Method == "events.subscribe" {
 			// Serialize registration and ack with pushes, so Subscribe returning is a
 			// reliable barrier: no injected event can overtake its acknowledgement.

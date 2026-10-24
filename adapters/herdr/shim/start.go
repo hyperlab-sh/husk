@@ -22,13 +22,22 @@ func correlationID(id *protocol.ID) string {
 	return id.String()
 }
 
-func startServer(ctx context.Context, o Options) error {
-	env := envMap(o.Env)
+func startStateDirectory(env map[string]string) (string, error) {
 	stateHome := env["XDG_STATE_HOME"]
 	if stateHome == "" {
 		stateHome = filepath.Join(env["HOME"], ".local", "state")
 	}
-	dir := filepath.Join(stateHome, "husk", "herdr")
+	if !filepath.IsAbs(stateHome) {
+		return "", fmt.Errorf("absolute state directory is required to start server")
+	}
+	return filepath.Join(stateHome, "husk", "herdr"), nil
+}
+
+func startServer(ctx context.Context, o Options) error {
+	dir, err := startStateDirectory(envMap(o.Env))
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}

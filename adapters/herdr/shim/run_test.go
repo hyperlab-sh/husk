@@ -174,9 +174,12 @@ func TestHooksReconnectAndEvents(t *testing.T) {
 	r.host.until(t, protocol.MethodStateSet, "lost")
 	r.clock.fire(t, 5*time.Second)
 	r.host.until(t, protocol.MethodStateSet, "attached")
+	if err := r.server.Emit("pane_focused", map[string]any{"type": "pane_focused", "pane_id": "p", "workspace_id": "w"}); err != nil {
+		t.Fatal(err)
+	}
 	again := take(t, r.spawns)
-	if again.command.Argv[0] != "./startup" {
-		t.Fatal("startup not rerun on attach")
+	if again.command.Argv[0] != "./event" {
+		t.Fatal("startup reran against the same server identity")
 	}
 	again.process.done <- 0
 }
