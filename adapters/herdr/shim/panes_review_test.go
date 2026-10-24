@@ -154,17 +154,22 @@ func TestPaneReviewStaleDuplicateReopens(t *testing.T) {
 }
 
 func TestPaneReviewStateCheckRetryAndHostCloseOrigin(t *testing.T) {
-	for _, mode := range []string{"present", "gone", "failed"} {
+	for _, mode := range []string{"present", "gone", "failed", "timeout"} {
 		t.Run(mode, func(t *testing.T) {
 			clk := &testClock{timers: make(chan *testTimer, 64)}
 			h := &testHost{events: make(chan hostRecord, 64)}
 			logs := &lockedBuffer{}
 			calls := 0
-			h.call = func(_ context.Context, m string, _ any) (json.RawMessage, error) {
+			h.call = func(ctx context.Context, m string, _ any) (json.RawMessage, error) {
 				if m != protocol.MethodStateGet {
 					return json.RawMessage(`{}`), nil
 				}
 				calls++
+				if mode == "timeout" {
+					clk.fire(t, 2*time.Second)
+					<-ctx.Done()
+					return nil, ctx.Err()
+				}
 				if calls == 1 || mode == "failed" {
 					return nil, errors.New("temporary host error")
 				}
@@ -181,8 +186,12 @@ func TestPaneReviewStateCheckRetryAndHostCloseOrigin(t *testing.T) {
 			p := &pane{id: "demo.pane", process: process, ctx: ctx, cancel: cancel}
 			r := &runner{ctx: ctx, log: logs, o: Options{Host: h, Clock: clk}, panes: map[protocol.SurfaceID]*pane{p.id: p}, processes: map[Process]bool{process: true}, state: state{Surfaces: map[string]any{string(p.id): map[string]any{}}}}
 			r.checkPaneLifetime(p)
-			if calls != 2 {
-				t.Fatalf("state check attempts=%d", calls)
+			wantCalls := 2
+			if mode == "timeout" {
+				wantCalls = 1
+			}
+			if calls != wantCalls {
+				t.Fatalf("state check attempts=%d want %d", calls, wantCalls)
 			}
 			if mode == "gone" {
 				if len(r.panes) != 0 || !p.closed {
@@ -201,7 +210,7 @@ func TestPaneReviewStateCheckRetryAndHostCloseOrigin(t *testing.T) {
 				default:
 				}
 			}
-			if mode == "failed" && !strings.Contains(logs.String(), "runtime_state_check_failed") {
+			if (mode == "failed" || mode == "timeout") && !strings.Contains(logs.String(), "runtime_state_check_failed") {
 				t.Fatal("failed retry was silent")
 			}
 			assertNoPaneClose(t, h)
@@ -257,6 +266,11 @@ func TestPaneReviewEOFStopsPTYAndPendingAttach(t *testing.T) {
 			if process != nil {
 				if take(t, process.signals) != syscall.SIGHUP || take(t, process.signals) != syscall.SIGTERM {
 					t.Fatal("EOF did not stop pane group")
+				}
+				select {
+				case signal := <-process.signals:
+					t.Fatalf("signal before the shutdown grace: %v", signal)
+				default:
 				}
 				r.clock.fire(t, 2*time.Second)
 				if take(t, process.signals) != syscall.SIGKILL {
