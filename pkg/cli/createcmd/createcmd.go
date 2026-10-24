@@ -63,13 +63,20 @@ func command(version string, guideFS fs.FS, getwd func() (string, error), write 
 		if !nameRE.MatchString(name) {
 			return output.Usage("invalid name %q: use [a-z0-9][a-z0-9._-]{0,63}", name)
 		}
+		module := name
+		if args[0] == "tui" && len(args) == 3 {
+			module = args[2]
+		}
+		if args[0] == "tui" && !validModulePath(module) {
+			return output.Usage("invalid module path %q", module)
+		}
 		files, err := bundleFiles(name, guideFS)
 		if err == nil && args[0] == "tui" {
-			module := name
-			if len(args) == 3 {
-				module = args[2]
+			goVersion := goDirective(runtime.Version())
+			if goVersion == "" {
+				return output.Create(nil, "cannot determine Go language version from %q", runtime.Version())
 			}
-			files, err = tuiFiles(name, module, version, strings.TrimPrefix(runtime.Version(), "go"), files)
+			files, err = tuiFiles(name, module, version, goVersion, files)
 		}
 		if err != nil {
 			return output.Create(err, "%v", err)

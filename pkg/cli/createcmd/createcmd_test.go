@@ -47,8 +47,9 @@ func TestNamesAndArgumentsBeforeFilesystem(t *testing.T) {
 			}
 		})
 	}
-	for _, args := range [][]string{nil, {"bundle"}, {"tui"}, {"tui", "app", "module", "extra"}, {"bundle", "app", "extra"}} {
-		_, err := invoke(t, t.TempDir(), args, output.JSON, writeFile)
+	for _, args := range [][]string{nil, {"bundle"}, {"tui"}, {"tui", "app", ""}, {"tui", "app", "module", "extra"}, {"bundle", "app", "extra"}} {
+		cmd := command("", fakeGuide, func() (string, error) { t.Fatal("filesystem reached for invalid arguments"); return "", nil }, writeFile)
+		err := cmd.Run(t.Context(), args, output.Options{})
 		if output.AsError(err).Exit != 2 {
 			t.Fatalf("args %q: %v", args, err)
 		}
@@ -176,7 +177,17 @@ func TestGuideCommandArgumentsAndEnvironment(t *testing.T) {
 }
 
 func TestWriteFailureAtEveryFileLeavesEarlierFiles(t *testing.T) {
+	for _, verb := range []string{"bundle", "tui"} {
+		t.Run(verb, func(t *testing.T) { testWriteFailures(t, verb) })
+	}
+}
+
+func testWriteFailures(t *testing.T, verb string) {
+	t.Helper()
 	files, err := bundleFiles("app", fakeGuide)
+	if err == nil && verb == "tui" {
+		files, err = tuiFiles("app", "app", "", "1.26", files)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +196,7 @@ func TestWriteFailureAtEveryFileLeavesEarlierFiles(t *testing.T) {
 			root := t.TempDir()
 			calls := 0
 			failure := errors.New("injected write failure")
-			_, err := invoke(t, root, []string{"bundle", "app"}, output.JSON, func(p string, b []byte, m fs.FileMode) error {
+			_, err := invoke(t, root, []string{verb, "app"}, output.JSON, func(p string, b []byte, m fs.FileMode) error {
 				calls++
 				if calls == n {
 					return failure
@@ -193,7 +204,7 @@ func TestWriteFailureAtEveryFileLeavesEarlierFiles(t *testing.T) {
 				return writeFile(p, b, m)
 			})
 			e := output.AsError(err)
-			if e.Exit != 1 || e.Code != output.CodeCreate || !errors.Is(err, failure) || !strings.Contains(e.Message, "write "+filepath.Join(root, "app", filepath.FromSlash(files[n-1].name))+":") {
+			if e.Exit != 1 || e.Code != output.CodeCreate || !errors.Is(err, failure) || e.Message != "write "+filepath.Join(root, "app", filepath.FromSlash(files[n-1].name))+": "+failure.Error() {
 				t.Fatalf("error=%#v", e)
 			}
 			for i, f := range files {
