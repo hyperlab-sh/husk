@@ -386,7 +386,8 @@ included: the rule, not the palette, is what keeps it so.
    `surface_selected`, text in `ink` and `ink_muted`, the frame in
    `border_focused`.
 
-**Audit of the pre-migration chrome, now in `pkg/workbench`** (`render.go` and `secretprompt.go`,
+**Audit of the pre-migration chrome, now in `pkg/workbench`**
+(`render.go` and `secretprompt.go`,
 the only files that drew a status or accent role), every use that broke a
 rule and where it moved. Uses not listed (rail and bar backgrounds, idle
 icons, frame borders and `border_focused` on the focused surface, close
@@ -504,7 +505,8 @@ rewrites, each named for the behaviour it pins:
 
 ## Level 2: Migration from today
 
-All UI code and its tests now live in `package workbench` under `pkg/workbench`; the model remains unexported.
+All UI code and its tests now live in `package workbench` under
+`pkg/workbench`; the model remains unexported.
 
 | Today | After |
 | :--- | :--- |

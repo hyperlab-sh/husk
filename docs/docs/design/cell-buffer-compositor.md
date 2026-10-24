@@ -122,7 +122,8 @@ Rules:
 
 ## Functions that change
 
-All compositor code is private to `package workbench` under `pkg/workbench`; callers use `workbench.Options`, `workbench.Run` and `workbench.DumpFrame`.
+All compositor code is private to `package workbench` under `pkg/workbench`;
+callers use `workbench.Options`, `workbench.Run` and `workbench.DumpFrame`.
 
 | Today | After |
 | :--- | :--- |
