@@ -84,8 +84,6 @@ func form(method string) string {
 
 func payloadTypes(method string) (reflect.Type, reflect.Type) {
 	switch method {
-	case protocol.MethodEventDeliver:
-		return reflect.TypeFor[protocol.EventDeliverParams](), nil
 	case protocol.MethodSessionPing:
 		return reflect.TypeFor[protocol.SessionPingParams](), reflect.TypeFor[protocol.SessionPingResult]()
 	case protocol.MethodProtocolError:
