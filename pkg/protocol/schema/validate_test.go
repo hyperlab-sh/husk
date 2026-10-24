@@ -39,6 +39,7 @@ func payloads() map[string]payload {
 		protocol.MethodTerminalWrite:     {protocol.TerminalWriteParams{Surface: protocol.SurfaceMainStage, Data: "eA=="}, protocol.EmptyResult{}},
 		protocol.MethodTerminalDetach:    {protocol.TerminalDetachParams{Surface: protocol.SurfaceMainStage}, protocol.EmptyResult{}},
 		protocol.MethodTerminalInput:     {protocol.TerminalInputParams{Surface: protocol.SurfaceMainStage, Data: "eA=="}, nil},
+		protocol.MethodTerminalLink:      {protocol.TerminalLinkParams{Surface: protocol.SurfaceMainStage, URL: "https://example.test", Row: 1, Col: 2}, nil},
 		protocol.MethodSurfaceResized:    {protocol.SurfaceResizedParams{Surfaces: []protocol.SurfaceSize{{Surface: protocol.SurfaceMainStage, Width: 80, Height: 24, Focused: true, Visible: true}}}, nil},
 		protocol.MethodInputKey:          {protocol.SurfaceKeyParams{Surface: protocol.SurfaceMainStage, Key: "ctrl+x", Modifiers: mods}, nil},
 		protocol.MethodInputMouse:        {protocol.SurfaceMouseParams{Surface: protocol.SurfaceMainStage, X: 1, Y: 2, Button: "left", HitID: "r1", HitKind: "row", HitAction: "notes.open", HitPayload: map[string]string{"k": "v"}}, nil},
