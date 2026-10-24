@@ -429,8 +429,10 @@ Each entry has a `state`:
 | `effective` | Not shadowed by any entry that would always outrank it. |
 | `shadowed` | Another entry outranks it in every context where it could match; `shadowed_by` names that entry's source. |
 | `disabled` | A tombstone that is not itself shadowed. |
-| `unavailable` | Effective, but the owning plugin is not live or declares no such surface. Computed by the handler. |
-| `unknown_action` | Effective, but the action is not in the catalog. Computed by the handler. |
+| `unavailable` | Effective with a known action, but the action's owning plugin is not live, or a nonempty binding `plugin` condition names a plugin that is not live or does not declare the binding's `focus` surface. The action owner need not declare `focus`; without a `plugin` condition no surface-declaration check applies. Host actions do not require plugin liveness. Computed by the handler. |
+| `unknown_action` | Effective, but the action is not in the catalog, even if its `plugin` condition is unavailable. Computed by the handler. |
+
+State precedence: the handler preserves static `shadowed` and `disabled` states unchanged. Only static `effective` entries are annotated: first `unknown_action` if the action is absent from the catalog, then `unavailable` if either availability check above fails, otherwise `effective`. These annotations do not change resolution, static shadowing or the stored listing.
 
 Static shadowing (the listing has no context): entry A shadows entry B when all three hold: A's sequence equals B's, or one is a strict prefix of the other (a shorter A matches first; a longer A turns B's completing key into `Prefix`), except that a tombstone A longer than B does not shadow B, because a tombstone is a candidate only for its own sequence (D92); A ranks above B by steps 2 to 4 of "Which binding wins" (scope, layer, `plugin` condition; never file order, so two entries in the same layer, scope and condition never shadow each other: `duplicate` and `unreachable` handle those); and every context that matches B also matches A, that is: both are global, or `A.focus == B.focus` and (`A.plugin` is empty or equals `B.plugin`). A global entry therefore never shadows a surface-scoped one, and a surface-scoped entry never shadows a global one, because each fires in contexts the other does not.
 
