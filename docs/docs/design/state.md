@@ -508,9 +508,11 @@ first live claim wins among the claims that arrive after the re-registration.
 - `terminals`, a map from surface id to `{"title", "alt_screen", "mouse", "scrollback"}` for every attached surface: the title the application set (OSC 0/2), whether it is on the alternate screen, whether it enabled mouse reporting (so Input knows whether a wheel scrolls the application or the host's scrollback) and the scrollback line count. The engine updates it from the emulator's callbacks, coalesced per tick; the screen contents themselves are not State (see "What is not State"), exactly as `surface.update` lines are not.
 - `capture` values become `"text"` or `"all"` instead of `true` (`true` on the wire is recorded as `"text"`); `terminal.attach` records `"all"` unless the request said `true` or `"text"` (recorded as `"text"`) or `false` (no entry). A 2.1 reader that tests the entry for presence is unchanged.
 
-Runtime canvases form one instance-wide stack across plugins, ordered by open time, newest first. Opening a canvas shows and focuses the new top. Older runtime canvases stay open and occupied but hidden; the limit remains eight runtime surfaces per plugin. Closing a hidden canvas removes only that entry and does not change visibility or focus. Closing the top through any close path shows the next-newest still-open runtime canvas. When the last canvas closes, the frontend restores the rail selection or Home placement shown before the first runtime canvas opened.
+Runtime canvases form one instance-wide stack across plugins, ordered by open time, newest first. Opening a canvas shows and focuses the new top. Older runtime canvases stay open and occupied but hidden; the limit remains eight runtime surfaces per plugin. Closing a hidden canvas removes only that entry and does not change visibility or focus. Closing the top through any close path shows the next-newest still-open runtime canvas. When the last canvas closes, the frontend restores the underlying rail selection or Home placement and the focus captured when the stack was most recently shown. Showing a hidden stack, either by a new open or by restore, captures the current underlying focus again.
 
 Activating Home or any rail item hides the runtime canvas stack without closing any entry: occupancy, `runtime` and plugin lifetimes are unchanged. The host action `husk.surfaces.restore` re-shows the hidden stack, newest first, and focuses its top. It has no default binding, appears in the palette only while a hidden stack exists, and is a no-op otherwise. Opening a new runtime canvas shows and focuses the new top even when the existing stack was hidden.
+
+`placement` continues to describe the underlying rail/Home selection while a runtime canvas is shown: `kind` is `stage` or `full-canvas` with that rail item's `rail_item`, or both fields are empty for Home. There is no `placement.kind: "canvas"`. The shown runtime canvas is the dynamic id in `visible` whose entry in `runtime` has `placement: "canvas"`; hidden canvases remain in `runtime` and occupancy but not `visible`.
 
 With runtime surfaces (landed in minor 2.8), `overlays.modal` gains `surface`: the id of the modal's surface, `modal-surface` for a rail item and the dynamic id for a runtime modal, so the frontend's `FocusSurface` while a modal is open is whichever of the two it is. The example value above becomes `"overlays":{"modal":{"plugin":"","rail_item":"","surface":""},...}` and `"runtime":{}` is always present, `{}` when empty, like `capture` and the landed `terminals`.
 
@@ -772,6 +774,8 @@ With one:
     visibility writes: the host diffs the computed sizes at the end of each
     tick and pushes only the changes.
 
+20. **Runtime canvas stack and restoration (operator-confirmed C2 decision).** Runtime canvases use one global newest-first opening-order stack, not one stack per plugin and not replace-and-close. Home and rail activation hide it without changing runtime lifetime. Selecting the underlying rail item while the stack is shown reveals that item rather than toggling Home. `husk.surfaces.restore` explicitly re-shows the hidden top, with no default key and a palette entry only while hidden. Focus is captured each time the stack becomes shown, and restored when its last canvas closes. This is the canvas lifecycle decision recorded for C2; the future runtime stage/panel stacks must follow the same rule.
+
 ## Open questions
 
 1. **Secret slices.** The substrate note lets Store's crypto encrypt "slices
@@ -795,7 +799,7 @@ With one:
 5. **Test harness access to render buffers.** A harness may want surface lines
    from `husk state`. Recommendation: no; it uses the existing frame dump path,
    keeping frame-rate data out of State.
-6. **Runtime `stage` and `panel` placements.** `surface.open` (Level 1) offers
+6. **Runtime `stage` and `panel` placements.** `surface.open` (landed in minor 2.8) offers
    `modal` and `canvas`; a plugin that wants to sit in the main stage or the
    side panel beside the layout occupant has no placement yet. Recommendation:
    add both in a later minor with a stack rule matching runtime canvases:
