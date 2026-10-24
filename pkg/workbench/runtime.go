@@ -57,7 +57,7 @@ func (m *workbenchModel) syncRuntime() bool {
 			}
 		}
 	}
-	if oldTop == "" && newTop != "" {
+	if m.runtimeCanvas() == "" && newTop != "" {
 		m.runtimeFocus = m.focusedSlot
 	}
 	wasShown := !m.runtimeHidden
@@ -83,17 +83,21 @@ func (m *workbenchModel) syncRuntime() bool {
 	return true
 }
 
-func (m *workbenchModel) hideRuntime() {
-	if m.runtimeCanvas() != "" {
-		m.runtimeHidden = true
-		m.setFocus(m.runtimeFocus)
+// hideRuntime reports whether it hid a shown canvas stack.
+func (m *workbenchModel) hideRuntime() bool {
+	if m.runtimeCanvas() == "" {
+		return false
 	}
+	m.runtimeHidden = true
+	m.setFocus(m.runtimeFocus)
+	return true
 }
 
 func (m *workbenchModel) restoreRuntime() {
 	if !m.runtimeHidden || topCanvas(m.runtime) == "" {
 		return
 	}
+	m.runtimeFocus = m.focusedSlot
 	m.runtimeHidden = false
 	m.setFocus(topCanvas(m.runtime))
 	m.recomputeLayout()
