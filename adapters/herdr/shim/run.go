@@ -522,7 +522,9 @@ func (r *runner) stopCommands() {
 	r.mu.Lock()
 	for _, p := range ps {
 		if _, tracked := r.processes[p]; tracked {
-			_ = p.Signal(syscall.SIGTERM)
+			if _, alreadyStopping := r.paneTimers[p]; !alreadyStopping {
+				_ = p.Signal(syscall.SIGTERM)
+			}
 		}
 	}
 	r.mu.Unlock()

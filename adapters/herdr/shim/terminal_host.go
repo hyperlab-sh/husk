@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net"
+	"strconv"
 	"sync"
 
 	"github.com/hyperlab-sh/husk/pkg/protocol"
@@ -28,6 +29,7 @@ type terminalHost struct {
 	token   string
 	decoder *json.Decoder
 	stop    func() bool
+	next    uint64
 }
 
 func (h *terminalHost) Call(ctx context.Context, m string, p any) (json.RawMessage, error) {
@@ -39,18 +41,34 @@ func (h *terminalHost) Call(ctx context.Context, m string, p any) (json.RawMessa
 	if err != nil {
 		return nil, err
 	}
-	id := protocol.NewStringID("output")
+	h.next++
+	id := protocol.NewStringID("output-" + strconv.FormatUint(h.next, 10))
 	if err = protocol.NewWriter(h.conn).Send(protocol.Message{ID: &id, Method: m, Params: raw, Token: h.token}); err != nil {
 		return nil, err
 	}
-	var reply protocol.Message
-	if err = h.decoder.Decode(&reply); err != nil {
-		return nil, err
+	for {
+		var reply protocol.Message
+		if err = h.decoder.Decode(&reply); err != nil {
+			return nil, err
+		}
+		if reply.Method == protocol.MethodProtocolError {
+			var failure protocol.ProtocolErrorParams
+			if err = json.Unmarshal(reply.Params, &failure); err != nil {
+				return nil, err
+			}
+			return nil, &protocol.Error{Code: failure.Code, Message: failure.Message}
+		}
+		if reply.ID == nil || reply.ID.String() != id.String() || reply.Method != "" {
+			continue
+		}
+		if reply.Error != nil {
+			return nil, reply.Error
+		}
+		if reply.Result == nil {
+			return nil, &protocol.Error{Code: protocol.CodeInternal, Message: "terminal acknowledgement has no result"}
+		}
+		return reply.Result, nil
 	}
-	if reply.Error != nil {
-		return nil, reply.Error
-	}
-	return reply.Result, nil
 }
 func (h *terminalHost) Notify(ctx context.Context, m string, p any) error {
 	_, err := h.Call(ctx, m, p)

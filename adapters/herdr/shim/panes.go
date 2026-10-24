@@ -38,7 +38,7 @@ type pane struct {
 	size             protocol.TerminalAttachResult
 	closed           bool
 	changed          chan struct{}
-	input            chan []byte
+	input            *paneInput
 	ctx              context.Context
 	cancel           context.CancelFunc
 	once             sync.Once
@@ -89,15 +89,28 @@ func (r *runner) openPane(ctx context.Context, entry string, args paneArgs, corr
 		return nil, &protocol.Error{Code: protocol.CodeNotFound, Message: "unknown pane entrypoint"}
 	}
 	r.mu.Lock()
+	var existing *pane
 	for _, p := range r.panes {
 		if p.entry == e.ID {
-			r.mu.Unlock()
-			if _, err := r.o.Host.Call(ctx, protocol.MethodSurfaceFocus, protocol.SurfaceFocusParams{Surface: p.id}); err != nil {
-				return nil, wireFailure(err)
-			}
-			return p.result("plugin_pane_opened", r.m.ID), nil
+			existing = p
+			break
 		}
 	}
+	r.mu.Unlock()
+	if existing != nil {
+		_, err := r.o.Host.Call(ctx, protocol.MethodSurfaceFocus, protocol.SurfaceFocusParams{Surface: existing.id})
+		if err == nil {
+			return existing.result("plugin_pane_opened", r.m.ID), nil
+		}
+		var failure *protocol.Error
+		if !errors.As(err, &failure) || failure.Code != protocol.CodeNotFound {
+			return nil, wireFailure(err)
+		}
+		// Focus confirms this lifetime no longer exists in the host. Retire its
+		// process and local slot, then admit a fresh lifetime under the gate.
+		r.closePaneFrom(existing, true)
+	}
+	r.mu.Lock()
 	attached := r.state.Server == "attached"
 	count := len(r.panes)
 	r.mu.Unlock()
@@ -105,7 +118,7 @@ func (r *runner) openPane(ctx context.Context, entry string, args paneArgs, corr
 		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "herdr server unavailable", Data: json.RawMessage(`{"reason":"herdr_absent"}`)}
 	}
 	if count >= 8 {
-		return nil, &protocol.Error{Code: protocol.CodeBusy, Message: "maximum terminal surfaces reached"}
+		return nil, &protocol.Error{Code: protocol.CodeBusy, Message: "maximum terminal surfaces reached", Data: json.RawMessage(`{"reason":"too_many_surfaces"}`)}
 	}
 	placement := args.Placement
 	if placement == "" {
@@ -151,8 +164,13 @@ func (r *runner) openPane(ctx context.Context, entry string, args paneArgs, corr
 		return nil, &protocol.Error{Code: protocol.CodeFailed, Message: "invalid surface.open reply"}
 	}
 	pctx, cancel := context.WithCancel(r.ctx)
-	p := &pane{id: opened.Surface, entry: e.ID, placement: placement, title: e.Title, changed: make(chan struct{}, 1), input: make(chan []byte, 64), ctx: pctx, cancel: cancel}
+	p := &pane{id: opened.Surface, entry: e.ID, placement: placement, title: e.Title, changed: make(chan struct{}, 1), input: newPaneInput(), ctx: pctx, cancel: cancel}
 	r.mu.Lock()
+	if r.stopping || r.ctx.Err() != nil {
+		r.mu.Unlock()
+		r.closePane(p)
+		return nil, wireFailure(context.Canceled)
+	}
 	r.panes[p.id] = p
 	r.mu.Unlock()
 	success := false
@@ -237,7 +255,7 @@ func (r *runner) openPane(ctx context.Context, entry string, args paneArgs, corr
 	if r.stopping || running >= 32 {
 		r.mu.Unlock()
 		p.mu.Unlock()
-		return nil, &protocol.Error{Code: protocol.CodeBusy, Message: "maximum concurrent commands reached"}
+		return nil, &protocol.Error{Code: protocol.CodeBusy, Message: "maximum concurrent commands reached", Data: json.RawMessage(`{"reason":"too_many_commands"}`)}
 	}
 	process, err := r.o.SpawnTerminal(Command{Argv: e.Command, Env: env, Dir: dir}, p.size.Width, p.size.Height)
 	if err != nil {
@@ -259,7 +277,11 @@ func (r *runner) openPane(ctx context.Context, entry string, args paneArgs, corr
 	return p.result("plugin_pane_opened", r.m.ID), nil
 }
 
-func (r *runner) closePane(p *pane) {
+func (r *runner) closePane(p *pane) { r.closePaneFrom(p, false) }
+
+// hostClosed suppresses redundant release notifications for a lifetime the host
+// has already removed. All callers run off the stdin notification loop.
+func (r *runner) closePaneFrom(p *pane, hostClosed bool) {
 	p.once.Do(func() {
 		p.mu.Lock()
 		p.closed = true
@@ -272,7 +294,6 @@ func (r *runner) closePane(p *pane) {
 		r.mu.Lock()
 		delete(r.panes, p.id)
 		r.mu.Unlock()
-		_ = r.o.Host.Notify(r.ctx, protocol.MethodSurfaceClose, protocol.SurfaceCloseParams{Surface: p.id})
 		if process != nil {
 			_ = process.Signal(syscall.SIGHUP)
 			_ = process.Signal(syscall.SIGTERM)
@@ -292,6 +313,13 @@ func (r *runner) closePane(p *pane) {
 			})
 			r.mu.Unlock()
 		}
+		if !hostClosed {
+			// EOF cancels normal requests, but cleanup still gets a bounded chance
+			// to release its surface. Signals and the kill timer are already armed.
+			ctx, done := r.bounded(context.WithoutCancel(r.ctx), 2*time.Second)
+			_ = r.o.Host.Notify(ctx, protocol.MethodSurfaceClose, protocol.SurfaceCloseParams{Surface: p.id})
+			done()
+		}
 		r.change(func(s *state) { delete(s.Surfaces, string(p.id)) })
 	})
 }
@@ -306,12 +334,11 @@ func (r *runner) servePane(p *pane, argv []string) {
 	go func() {
 		defer close(inputDone)
 		for {
-			select {
-			case b := <-p.input:
-				if _, err := process.Write(b); err != nil {
-					return
-				}
-			case <-p.ctx.Done():
+			b, ok := p.input.next(p.ctx)
+			if !ok {
+				return
+			}
+			if _, err := process.Write(b); err != nil {
 				return
 			}
 		}
@@ -391,11 +418,12 @@ func (r *runner) paneNotification(m protocol.Message) {
 		if pane == nil {
 			return
 		}
-		select {
-		case pane.input <- b:
-		case <-pane.ctx.Done():
-		default:
-			r.closePane(pane)
+		if pane.ctx.Err() == nil && pane.input.append(b, r.o.Now()) {
+			r.workers.Add(1)
+			go func() {
+				defer r.workers.Done()
+				r.logLine(map[string]any{"level": "warning", "code": "terminal_input_overflow", "surface": pane.id, "message": "terminal input queue full; newest bytes dropped"})
+			}()
 		}
 	case protocol.MethodSurfaceResized:
 		var batch protocol.SurfaceResizedParams
@@ -416,20 +444,7 @@ func (r *runner) paneNotification(m protocol.Message) {
 				r.workers.Add(1)
 				go func() {
 					defer r.workers.Done()
-					ctx, done := r.bounded(r.ctx, 2*time.Second)
-					defer done()
-					raw, err := r.o.Host.Call(ctx, protocol.MethodStateGet, map[string]any{"slice": "husk.surfaces"})
-					if err != nil {
-						return
-					}
-					var snapshot struct {
-						Value struct {
-							Runtime map[protocol.SurfaceID]json.RawMessage `json:"runtime"`
-						} `json:"value"`
-					}
-					if json.Unmarshal(raw, &snapshot) == nil && snapshot.Value.Runtime[p.id] == nil {
-						r.closePane(p)
-					}
+					r.checkPaneLifetime(p)
 				}()
 				continue
 			}

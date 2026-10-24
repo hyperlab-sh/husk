@@ -17,7 +17,16 @@ func paneProxyError(err *protocol.Error) *proxy.Error {
 	}
 	code := string(err.Code)
 	if err.Code == protocol.CodeBusy {
-		code = "ui_busy"
+		var data struct {
+			Reason string `json:"reason"`
+		}
+		_ = json.Unmarshal(err.Data, &data)
+		switch data.Reason {
+		case "modal_open":
+			code = "ui_busy"
+		case "too_many_surfaces", "too_many_commands":
+			code = "limit_reached"
+		}
 	}
 	return &proxy.Error{Code: code, Message: err.Message}
 }
