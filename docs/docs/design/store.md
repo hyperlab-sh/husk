@@ -373,6 +373,8 @@ type Bootstrap struct {
 }
 ```
 
+Bootstrap applies the Settings duplicate-spelling rule to `husk.bundle` before merging each input: when a document spells that key both dotted and nested, that input contributes no bundle value. Both spellings are excluded, so a valid lower input remains eligible; if none supplies a value, no bundle is loaded. Other keys are untouched. The later Settings rebuild reports the `duplicate_key` diagnostic ([Services](services.md)); bootstrap does not manufacture a second diagnostic or load a bundle that Settings will reject.
+
 File format: config documents are HuJSON (JSON plus comments and trailing
 commas, `github.com/tailscale/hujson`), extension `.json`. HuJSON keeps `null`,
 which the delete rule needs, and its patch support keeps user comments when
