@@ -250,6 +250,11 @@ func (f *fakeFE) UseProfile(name string, reply func(contracts.ProfileUseResult, 
 	defer f.mu.Unlock()
 	f.ProfileUses = append(f.ProfileUses, profileUse{name, reply})
 }
+func (f *fakeFE) AddPlugin(source contracts.PluginSource, reply func(contracts.PluginAddition, error)) {
+}
+func (f *fakeFE) WatchEvents(pattern string, fn func(protocol.EventDeliverParams)) (func(), error) {
+	return func() {}, nil
+}
 func (f *fakeFE) RemovePlugin(id string, reply func(contracts.PluginRemoval, error)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

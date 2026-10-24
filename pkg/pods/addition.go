@@ -40,8 +40,8 @@ func addError(code protocol.Code, reason, message string) error {
 // admission and gate completion are loop-confined. Once admitted, a batch
 // belongs to the Host, not to the request context.
 func (h *Host) Add(ctx context.Context, c contracts.Caller, source contracts.PluginSource) (contracts.PluginAddition, error) {
-	if c.Kind != contracts.CallerCLI {
-		return contracts.PluginAddition{}, contracts.NewError(protocol.CodeDenied, "only the user's CLI may add plugins", nil)
+	if c.Kind != contracts.CallerCLI && c.Kind != contracts.CallerHost {
+		return contracts.PluginAddition{}, contracts.NewError(protocol.CodeDenied, "only the user's CLI or the host may add plugins", nil)
 	}
 	if source.Path != "" && source.Dir != "" {
 		return contracts.PluginAddition{}, addError(protocol.CodeInvalidParams, "path_and_dir", "give path or dir, not both")

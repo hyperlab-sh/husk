@@ -82,6 +82,24 @@ type Frontend interface {
 	// with the result or a CodedError. During shutdown reply may never arrive.
 	RemovePlugin(id string, reply func(PluginRemoval, error))
 
+	// AddPlugin loads a plugin or a directory of plugins into the running
+	// instance off-loop, through the same PluginPort.Add as plugin.add with a
+	// host caller: same sources, refusals and reload reports. Call on the
+	// loop; reply runs exactly once on the loop, never synchronously, with the
+	// result or a CodedError. During shutdown reply may never arrive.
+	AddPlugin(source PluginSource, reply func(PluginAddition, error))
+
+	// WatchEvents subscribes fn to events matching pattern (an exact name or
+	// "<prefix>.*", the event.watch rules) through EventPort.Watch with a host
+	// caller. fn runs on the loop, in bus order, with the params exactly as
+	// event.deliver carries them, source as stamped by the host. A refused
+	// pattern returns its CodedError (invalid_params) and registers nothing.
+	// cancel removes the subscription, is idempotent and safe from any
+	// goroutine; once it has returned fn is not called again. Host shutdown
+	// ends the subscription. Delivery uses the bus's per-subscriber queue and
+	// back-pressure. Call on the loop.
+	WatchEvents(pattern string, fn func(protocol.EventDeliverParams)) (cancel func(), err error)
+
 	// Catalog returns a detached view of the optional catalog cache. Any
 	// goroutine; never performs Store I/O. Warmed off-loop after startup and
 	// every services.reloaded event, then published on the loop.

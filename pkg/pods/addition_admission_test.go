@@ -44,7 +44,7 @@ func TestAddAdmissionNeverConvertsInvalidOrNonCLICallers(t *testing.T) {
 		{"relative", contracts.PluginSource{Path: "./a"}, cliCaller, protocol.CodeInvalidParams, "relative_path"},
 		{"plugin", contracts.PluginSource{Path: "/a"}, contracts.Caller{Kind: contracts.CallerPlugin}, protocol.CodeDenied, ""},
 		{"input", contracts.PluginSource{Path: "/a"}, contracts.Caller{Kind: contracts.CallerInput}, protocol.CodeDenied, ""},
-		{"host", contracts.PluginSource{Path: "/a"}, contracts.Caller{Kind: contracts.CallerHost}, protocol.CodeDenied, ""},
+		{"host passes the caller gate", contracts.PluginSource{Path: "./a"}, contracts.Caller{Kind: contracts.CallerHost}, protocol.CodeInvalidParams, "relative_path"},
 		{"zero", contracts.PluginSource{Path: "/a"}, contracts.Caller{}, protocol.CodeDenied, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -9,3 +9,12 @@ import "strings"
 func CLIOnlyEventPattern(pattern string) bool {
 	return strings.HasPrefix(pattern, "secrets.") || strings.HasPrefix(pattern, "services.")
 }
+
+// EventDeliverParams is the params object of an event.deliver notification:
+// the event name, the host-stamped source (a plugin id, "husk" for core
+// publishers, "user" for a CLI emit) and the payload object (never null).
+type EventDeliverParams struct {
+	Name   string         `json:"name"`
+	Source string         `json:"source"`
+	Data   map[string]any `json:"data"`
+}
