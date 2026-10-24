@@ -297,7 +297,7 @@ Each shim keeps `<id>.state` (instance scope, not persistent, 256 KiB cap) as it
 | Cross-plugin synthetic id sent to the requesting shim for focus or close | proxy | `not_found`; the target shim alone controls that lifetime | the pane remains unchanged |
 | Terminal input exceeds its byte queue cap | shim | newest chunk dropped; warning at most once per second; no signals or host close | the program keeps running |
 | Runtime State check fails twice or its 2 s context ends | shim | log `runtime_state_check_failed`; retain the unconfirmed lifetime | a later duplicate open recovers if focus reports `not_found` |
-| `terminal.write` refused (surface gone) | shim | stops the pump, SIGHUPs the group | nothing further |
+| `terminal.write` refused (surface gone) | shim | stops the pump and stops the group as on a host close (SIGHUP and SIGTERM, then SIGKILL after 2 s) | nothing further |
 | Command passes `--session <name>` to `herdr` | nobody | bypasses the proxy: its UI calls reach the server, its pane opens in Herdr | documented limit |
 | Plugin sends `server.stop`, `session.stop` or `plugin.unlink|disable|enable` through the proxy | proxy | forwarded (the plugin could have done it anyway) and logged at warning level with the plugin id and method | the server stops or the registry changes, as under Herdr; the log says which plugin did it |
 | Herdr plugin installed while Husk runs | nobody until `sync` or `doctor` | `husk-herdr sync` requests `plugin.add` for it | `doctor` lists it as absent from the instance until then |
