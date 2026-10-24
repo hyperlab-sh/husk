@@ -1,0 +1,80 @@
+id = "sample:tools"
+name = "Sample tools"
+version = "1.2.3"
+description = "An anonymized command and pane catalog"
+min_herdr_version = "0.9.0"
+platforms = ["linux", "macos", "windows"]
+
+[[build]]
+command = ["sh", "-c", "exit 99"]
+
+[[startup]]
+command = ["node", "./tools/watcher.js", "--daemon"]
+platforms = ["linux", "macos"]
+
+[[actions]]
+id = "inspect:selection"
+title = "Inspect selection"
+description = "Show the active selection"
+contexts = ["workspace", "pane"]
+default_key = "prefix+i"
+shortcut = "ctrl+i"
+command = ["./tools/inspect", "--selection"]
+platforms = ["linux", "macos"]
+
+[[actions]]
+id = "inspect-selection-windows"
+title = "Inspect selection"
+command = ["powershell", "-Command", "Write-Output inspected"]
+platforms = ["windows"]
+
+[[actions]]
+id = "notify"
+title = "Notify"
+command = ["sh", "-c", "printf '%s' \"$HERDR_PLUGIN_ID\""]
+
+[[panes]]
+id = "picker"
+title = "Picker"
+placement = "popup"
+width = "70%"
+height = 18
+command = ["./tools/picker", "--interactive"]
+
+[[panes]]
+id = "picker-windows"
+title = "Picker"
+placement = "popup"
+width = 80
+height = "60%"
+platforms = ["windows"]
+command = ["powershell", "-File", "./tools/picker.ps1"]
+
+[[panes]]
+id = "sidebar"
+title = "Sidebar"
+placement = "split"
+width = 30
+command = ["./tools/sidebar"]
+platforms = ["linux", "macos"]
+
+[[events]]
+on = "pane.focused"
+command = ["./tools/focus-hook"]
+
+[[events]]
+on = "pane.focused"
+command = ["sh", "-c", "printf focused"]
+platforms = ["linux", "macos"]
+
+[[link_handlers]]
+id = "issue"
+title = "Inspect issue"
+pattern = '^https://example\.invalid/issues/[0-9]+$'
+action = "notify"
+
+[[link_handlers]]
+id = "fallback"
+title = "Inspect other link"
+pattern = '^https?://'
+action = "notify"

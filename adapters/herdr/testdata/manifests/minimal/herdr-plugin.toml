@@ -1,0 +1,4 @@
+id = "sample.empty"
+name = "Empty plugin"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
