@@ -465,14 +465,18 @@ undeclares a plugin, [Pods](pods.md)), `pods.plugin-added` (the same
 shape, published after a `plugin.add` batch's launch gate opens), `services.reloaded` and
 `secrets.read` now, and the `state.`, `surface.`, `input.`, `pods.`,
 `services.`, `secrets.`, `user.` and `husk.` prefixes. `secrets.read` and
-`services.reloaded` are delivered to CLI watchers only, never to a plugin
-subscriber ([Services](services.md)). The mechanism is at subscription time,
+`services.reloaded` are delivered to user-trust watchers only, never to a
+plugin subscriber ([Services](services.md)): a `cli` caller's `event.watch`
+and an in-process `host` subscription (the `WatchEvents` frontend seam,
+[Pods](pods.md) "Frontend seams"), which acts with the user's trust as the
+Settings center's seams do. The mechanism is at subscription time,
 not delivery: manifest conversion rejects a plugin pattern that would match a
 `secrets.` or `services.` name (an exact name, or a prefix pattern at or above
 them, `secrets.*` included; only that pattern is dropped, with a `problems`
 entry on the plugin's declared document, the way conversion treats a bad
 binding; the plugin's other subscriptions are applied), and `event.watch` from a plugin caller answers
-`denied` for such a pattern. A plugin may declare
+`denied` for such a pattern. The `cli` and `host` callers are not refused
+these patterns. A plugin may declare
 events in its manifest for introspection
 (`"events": {"publish": [{"name": "notes.saved", "title": "...", "coalesce": false}]}`).
 
