@@ -424,7 +424,8 @@ func (s *Service) rebuild(ctx context.Context, in c.ReloadInput, startup bool) (
 		layerFiles[string(l.Layer)] = l.File
 	}
 	flat := map[string]any{}
-	flatten("", in.Doc.Doc, schema, flat)
+	ambiguous := flatten("", in.Doc.Doc, schema, flat)
+	layers, resolvedSources := resolveSpellings(in.ConfigLayers, schema, flat, ambiguous, &r.Problems)
 	for name := range s.opts.PluginAdditions {
 		if name == "paths" || name == "dirs" {
 			delete(flat, "husk.plugins."+name)
@@ -435,7 +436,7 @@ func (s *Service) rebuild(ctx context.Context, in c.ReloadInput, startup bool) (
 	// hide the user value or manufacture a restart_required warning.
 	delete(flat, "husk.bundle")
 	bundleLayer := "default"
-	for _, l := range in.ConfigLayers {
+	for _, l := range layers {
 		raw, present := c.Dotted(l.Doc, "husk.bundle")
 		if l.Layer != store.LayerUser && l.Layer != store.LayerInstance {
 			if present {
@@ -478,6 +479,9 @@ func (s *Service) rebuild(ctx context.Context, in c.ReloadInput, startup bool) (
 	}
 	for key, raw := range flat {
 		layer := originOf(in.Doc.Origins, key)
+		if resolved, ok := resolvedSources[key]; ok {
+			layer = resolved
+		}
 		if key == "husk.bundle" {
 			layer = bundleLayer
 		}
@@ -497,7 +501,7 @@ func (s *Service) rebuild(ctx context.Context, in c.ReloadInput, startup bool) (
 		next.sources[key] = layer
 		next.values[key] = v
 	}
-	s.addPlugins(next, in.ConfigLayers, layerFiles, &r.Problems)
+	s.addPlugins(next, layers, layerFiles, &r.Problems)
 	// Most restart keys take effect on the first successful load. Start-consumed
 	// keys are fixed even at generation zero. Removing a key counts as a change
 	// back to the default.
@@ -623,7 +627,19 @@ func originOf(origins map[string]store.Layer, key string) string {
 // value of the wrong shape there (an object for a scalar) reaches validation
 // whole instead of becoming unknown leaves. An empty object at a schema
 // prefix says nothing and is dropped.
-func flatten(prefix string, m map[string]any, schema map[string]Entry, out map[string]any) {
+func flatten(prefix string, m map[string]any, schema map[string]Entry, out map[string]any) map[string]bool {
+	duplicates := map[string]bool{}
+	flattenInto(prefix, m, schema, out, duplicates)
+	return duplicates
+}
+
+func flattenInto(prefix string, m map[string]any, schema map[string]Entry, out map[string]any, duplicates map[string]bool) {
+	put := func(key string, value any) {
+		if _, exists := out[key]; exists {
+			duplicates[key] = true
+		}
+		out[key] = value
+	}
 	for k, v := range m {
 		key := k
 		if prefix != "" {
@@ -631,16 +647,16 @@ func flatten(prefix string, m map[string]any, schema map[string]Entry, out map[s
 		}
 		obj, isObj := v.(map[string]any)
 		if _, known := schema[key]; known || !isObj {
-			out[key] = v
+			put(key, v)
 			continue
 		}
 		if len(obj) == 0 {
 			if !isSchemaPrefix(schema, key) {
-				out[key] = v
+				put(key, v)
 			}
 			continue
 		}
-		flatten(key, obj, schema, out)
+		flattenInto(key, obj, schema, out, duplicates)
 	}
 }
 func isSchemaPrefix(schema map[string]Entry, key string) bool {

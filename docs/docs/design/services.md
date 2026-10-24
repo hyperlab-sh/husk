@@ -292,11 +292,12 @@ These arrays remain start-consumed keys. An unrelated invalid key never resets a
 
 #### Validation
 
-Applied to the whole merged document on every rebuild. Severity decides the outcome: any `error` means no candidate. This is the complete list of Settings codes.
+Applied to the whole merged document on every rebuild. A layer may spell a key with dotted members or nested objects. If one layer document spells the same key both ways (for example, `{"plugins":{"a.b":1,"a":{"b":2}}}`), Settings reports `duplicate_key` on that key and layer, regardless of appearance order or whether the values are equal. That layer contributes no value for that key: resolution falls through to lower layers, or the schema default when none supplies it. Other keys are unaffected. Startup initialization uses those independently resolved values; later reloads retain the ordinary all-or-nothing rule. Severity decides the outcome: any `error` means no candidate. This is the complete list of Settings codes.
 
 | Code | Condition | Severity | Effect on the candidate |
 | :--- | :--- | :--- | :--- |
 | `invalid_value` | Known key, value of the wrong type, outside `Min`/`Max`, or not in `Enum` | error | none built; the message names the layer, the key and the expected type; `Source` names the layer file |
+| `duplicate_key` | One layer document spells the same key both dotted and nested | error | none built; that layer contributes no value for the key, which falls through to lower layers; other keys are unaffected |
 | `unknown_key` | No schema entry for the key, in any namespace | warning | the raw value is kept with its layer for `settings.list` and `settings.get` by `cli`/`host`; no plugin ever sees it; typed getters do not know it |
 | `restart_required` | Known key with `apply: restart` whose value differs from the value in force | warning | the value in force stays in the snapshot; removing the key counts as a change back to the default; the message names both values |
 | `type_clash` | Store merged an object over a non-object or the reverse ([Store](store.md)) | warning | the higher layer's value stands, as Store merged it; the message names the key and both layers |
