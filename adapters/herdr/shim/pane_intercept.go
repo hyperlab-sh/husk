@@ -24,8 +24,10 @@ func paneProxyError(err *protocol.Error) *proxy.Error {
 		switch data.Reason {
 		case "modal_open":
 			code = "ui_busy"
-		case "too_many_surfaces", "too_many_commands":
+		case "too_many_surfaces":
 			code = "limit_reached"
+		case "too_many_commands":
+			code = "plugin_command_limit_reached"
 		}
 	}
 	return &proxy.Error{Code: code, Message: err.Message}

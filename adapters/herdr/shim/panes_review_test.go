@@ -260,7 +260,7 @@ func TestPaneReviewEOFStopsPTYAndPendingAttach(t *testing.T) {
 }
 
 func TestPaneReviewProxyBusyReasons(t *testing.T) {
-	for _, tc := range []struct{ reason, want string }{{"modal_open", "ui_busy"}, {"too_many_surfaces", "limit_reached"}, {"too_many_commands", "limit_reached"}, {"", "busy"}} {
+	for _, tc := range []struct{ reason, want string }{{"modal_open", "ui_busy"}, {"too_many_surfaces", "limit_reached"}, {"too_many_commands", "plugin_command_limit_reached"}, {"", "busy"}} {
 		data, _ := json.Marshal(map[string]string{"reason": tc.reason})
 		failure := paneProxyError(&protocol.Error{Code: protocol.CodeBusy, Message: "capacity reached", Data: data})
 		if failure.Code != tc.want {

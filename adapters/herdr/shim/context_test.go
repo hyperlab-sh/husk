@@ -30,7 +30,7 @@ func shape(t *testing.T, fragment string) *jsonschema.Schema {
 }
 
 func TestContextGoldensMatchCommittedSchema(t *testing.T) {
-	r := newRig(t, "never", false, "")
+	r := newRig(t, false, "")
 	var document map[string]any
 	if err := json.Unmarshal(fakeherdr.Schema(), &document); err != nil {
 		t.Fatal(err)

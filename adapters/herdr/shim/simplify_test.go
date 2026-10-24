@@ -14,7 +14,7 @@ import (
 )
 
 func TestMissingServerThenNextActionRedials(t *testing.T) {
-	r := newRig(t, "", true, "")
+	r := newRig(t, true, "")
 	var absent atomic.Bool
 	absent.Store(true)
 	dial := guardedDial(t, r.o.Socket)
@@ -44,7 +44,7 @@ func TestMissingServerThenNextActionRedials(t *testing.T) {
 }
 
 func TestOnlyThreeInterceptionsForwardOtherBytes(t *testing.T) {
-	r := newRig(t, "", true, "")
+	r := newRig(t, true, "")
 	r.start(t)
 	r.host.until(t, protocol.MethodStateSet, "")
 	if reply := r.invoke(t, "demo.go"); reply.Error != nil {
@@ -74,7 +74,7 @@ func TestOnlyThreeInterceptionsForwardOtherBytes(t *testing.T) {
 func strconvJSON(s string) string { raw, _ := json.Marshal(s); return string(raw) }
 
 func TestHooksAndBackgroundAttachmentAreNotRun(t *testing.T) {
-	r := newRig(t, "", true, "[[startup]]\ncommand=['./startup']\n[[events]]\non='pane.focused'\ncommand=['./event']\n")
+	r := newRig(t, true, "[[startup]]\ncommand=['./startup']\n[[events]]\non='pane.focused'\ncommand=['./event']\n")
 	r.start(t)
 	r.host.until(t, protocol.MethodStateSet, "")
 	if records := r.server.Requests(); len(records) != 0 {

@@ -1,15 +1,19 @@
 package shim
 
 import (
-	"github.com/hyperlab-sh/husk/pkg/ptyhost"
 	"io"
 	"os/exec"
+
+	"github.com/hyperlab-sh/husk/pkg/protocol"
+	"github.com/hyperlab-sh/husk/pkg/ptyhost"
 )
 
-// TerminalProcess is a process group whose terminal master is interruptible on close.
+// TerminalProcess is a process group whose terminal master is interruptible on
+// close. Pump is its sole output reader; input is already decoded before Write.
 type TerminalProcess interface {
 	Process
-	io.ReadWriteCloser
+	io.WriteCloser
+	Pump(protocol.SurfaceID, func(protocol.TerminalWriteParams) error) error
 	Resize(int, int) error
 }
 type terminalProcess struct{ *ptyhost.Child }

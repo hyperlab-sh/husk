@@ -20,7 +20,7 @@ func TestRound3ActionArgsOnlyValidatePaneFields(t *testing.T) {
 				{"combined", `{"width":"abc","env":{"A":1},"context":{"selected_text":"relayed"}}`},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
-					r := newRig(t, "never", false, "")
+					r := newRig(t, false, "")
 					r.start(t)
 					r.host.until(t, protocol.MethodStateSet, "")
 					action := "demo.go"

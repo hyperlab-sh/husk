@@ -175,7 +175,7 @@ func (b *lockedBuffer) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 func (b *lockedBuffer) String() string { b.mu.Lock(); defer b.mu.Unlock(); return string(b.data) }
-func newRig(t *testing.T, policy string, enabled bool, extra string, configure ...func(*fakeherdr.Options)) *rig {
+func newRig(t *testing.T, enabled bool, extra string, configure ...func(*fakeherdr.Options)) *rig {
 	t.Helper()
 	dir := t.TempDir()
 	socketDir, err := os.MkdirTemp("/tmp", "ha-")

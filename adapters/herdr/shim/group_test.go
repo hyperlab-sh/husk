@@ -27,7 +27,7 @@ func (p *descendantGroup) Signal(s syscall.Signal) error {
 }
 
 func TestEOFStopsDescendantsAfterLeaderExit(t *testing.T) {
-	r := newRig(t, "never", false, "")
+	r := newRig(t, false, "")
 	group := &descendantGroup{testProcess: &testProcess{pid: 42, done: make(chan int, 1), signals: make(chan syscall.Signal, 4)}, alive: true}
 	r.o.Spawn = func(Command) (Process, error) { return group, nil }
 	r.start(t)

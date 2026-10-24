@@ -2,7 +2,6 @@ package shim
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -310,22 +309,15 @@ func (r *runner) servePane(p *pane, argv []string) {
 			}
 			defer closer.Close()
 		}
-		buf := make([]byte, protocol.MaxTerminalBytes)
-		for {
-			n, err := process.Read(buf)
-			if n > 0 {
-				ctx, cancel := r.bounded(p.ctx, 10*time.Second)
-				_, failure := host.Call(ctx, protocol.MethodTerminalWrite, protocol.TerminalWriteParams{Surface: p.id, Data: base64.StdEncoding.EncodeToString(buf[:n])})
-				cancel()
-				if failure != nil {
-					r.closePane(p)
-					return
-				}
+		_ = process.Pump(p.id, func(params protocol.TerminalWriteParams) error {
+			ctx, cancel := r.bounded(p.ctx, 10*time.Second)
+			_, failure := host.Call(ctx, protocol.MethodTerminalWrite, params)
+			cancel()
+			if failure != nil {
+				r.closePane(p)
 			}
-			if err != nil {
-				return
-			}
-		}
+			return failure
+		})
 	}()
 	status, stderr := process.Wait()
 	r.mu.Lock()
