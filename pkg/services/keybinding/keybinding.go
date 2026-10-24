@@ -211,7 +211,7 @@ func begins(a, b []string) bool {
 	return true
 }
 func scope(b Binding, ctx KeyContext) bool {
-	return b.Focus == "" || b.Focus == ctx.FocusSurface && (b.Plugin == "" || b.Plugin == ctx.FocusOwner)
+	return b.Focus == "" || (b.Focus == ctx.FocusSurface || ctx.ModalOpen && b.Focus == string(protocol.SurfaceModal)) && (b.Plugin == "" || b.Plugin == ctx.FocusOwner)
 }
 
 // shadows is the static rule of "husk keys": a shadows b when their sequences
@@ -249,7 +249,7 @@ func (s *Service) Resolve(ctx KeyContext, keys []string) Result {
 		if ctx.Capture == protocol.CaptureAll && !b.Disable && (b.Action == "husk.modal.close" || b.Focus == "" && b.Action != "husk.capture.release") {
 			continue
 		}
-		if ctx.ModalOpen && !release && !b.Disable && b.Focus != "modal-surface" && !(b.Focus == "" && (b.Action == "husk.modal.close" || ctx.ModalAction != "" && b.Action == ctx.ModalAction)) {
+		if ctx.ModalOpen && !release && !b.Disable && b.Focus != "modal-surface" && b.Focus != ctx.FocusSurface && !(b.Focus == "" && (b.Action == "husk.modal.close" || ctx.ModalAction != "" && b.Action == ctx.ModalAction)) {
 			continue
 		}
 		// Capture keeps plain typing: a global text-key candidate is removed

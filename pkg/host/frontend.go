@@ -447,6 +447,12 @@ func (r *Root) OwnSlices() (contracts.FrontendSlices, error) {
 	return s, nil
 }
 
+// RuntimeSurfaces implements contracts.Frontend.
+func (r *Root) RuntimeSurfaces() []contracts.RuntimeSurface { return r.engine.RuntimeSurfaces() }
+
+// CloseSurface implements contracts.Frontend.
+func (r *Root) CloseSurface(id protocol.SurfaceID) error { return r.engine.CloseSurface(id) }
+
 // UpdateSurfaceView implements contracts.Frontend.
 func (r *Root) UpdateSurfaceView(fn func(*contracts.SurfaceView)) error {
 	return r.engine.UpdateView(fn)

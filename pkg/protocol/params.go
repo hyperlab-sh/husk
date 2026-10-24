@@ -35,17 +35,9 @@ const (
 	SurfaceWorkspaceStage SurfaceID = "workspace-stage"
 )
 
-// Valid reports whether s is a defined host layout surface.
-func (s SurfaceID) Valid() bool {
-	switch s {
-	case SurfaceActivityRail, SurfaceSidebarNavigation, SurfaceSidebarList,
-		SurfaceThreadRowStatus, SurfaceSidebarFooter, SurfaceMainHeader,
-		SurfaceMainStage, SurfaceSidePanel, SurfaceAppOverlay, SurfaceModal,
-		SurfaceFullCanvas, SurfaceWorkspaceStage:
-		return true
-	}
-	return false
-}
+// Valid reports whether s is a layout identifier or a namespaced runtime id.
+// Existence and ownership are checked by the receiving host module.
+func (s SurfaceID) Valid() bool { return s.Layout() || validRuntimeID(string(s)) }
 
 // Humanised returns the surface id with every hyphen replaced by a space and
 // its first rune upper-cased, leaving all other runes unchanged.

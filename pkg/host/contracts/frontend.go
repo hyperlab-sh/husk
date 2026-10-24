@@ -205,6 +205,10 @@ type Frontend interface {
 	// husk.surfaces (visibility, placement, overlays) and commits it; the
 	// engine keeps writing occupants and contributions. Loop only.
 	UpdateSurfaceView(fn func(*SurfaceView)) error
+	// RuntimeSurfaces returns detached runtime declarations in opening order. Loop only.
+	RuntimeSurfaces() []RuntimeSurface
+	// CloseSurface force-releases a surface, including runtime lifetime. Loop only.
+	CloseSurface(protocol.SurfaceID) error
 }
 
 // PublishedSlot is one published extension point a plugin declared in its
@@ -335,8 +339,10 @@ type Overlays struct {
 
 // ModalOverlay is the modal overlay: which plugin's rail item is open.
 type ModalOverlay struct {
-	Plugin   string `json:"plugin"`
-	RailItem string `json:"rail_item"`
+	// Surface identifies the actual modal, fixed or runtime.
+	Surface  protocol.SurfaceID `json:"surface"`
+	Plugin   string             `json:"plugin"`
+	RailItem string             `json:"rail_item"`
 }
 
 // KeyContext carries the focus and overlay facts a key resolution needs.

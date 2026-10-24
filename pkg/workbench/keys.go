@@ -72,7 +72,7 @@ func (d defaultKeys) Resolve(ctx contracts.KeyContext, keys []string) contracts.
 		return contracts.KeyResolution{}
 	}
 	for _, b := range d.ordered() {
-		if b.key != keys[0] || b.focus != "" && b.focus != ctx.FocusSurface {
+		if b.key != keys[0] || b.focus != "" && b.focus != ctx.FocusSurface && !(ctx.ModalOpen && b.focus == string(protocol.SurfaceModal)) {
 			continue
 		}
 		if ctx.Frozen && b.action != "husk.quit" {

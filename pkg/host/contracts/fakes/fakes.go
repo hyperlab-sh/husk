@@ -838,6 +838,12 @@ type Surfaces struct {
 // NewSurfaces returns a Surfaces logging to rec.
 func NewSurfaces(rec *Recorder) *Surfaces { return &Surfaces{callLog: callLog{r: orNew(rec)}} }
 
+// SurfaceOpen implements contracts.SurfacePort.
+func (f *Surfaces) SurfaceOpen(_ context.Context, c contracts.Caller, p protocol.SurfaceOpenParams) (protocol.SurfaceOpenResult, error) {
+	f.RecordCaller("Surfaces.SurfaceOpen", c, p.Name)
+	return protocol.SurfaceOpenResult{Surface: protocol.SurfaceID(c.PluginID + "." + p.Name)}, f.Err
+}
+
 // SurfaceUpdate implements contracts.SurfacePort.
 func (f *Surfaces) SurfaceUpdate(_ context.Context, c contracts.Caller, p protocol.SurfaceUpdateParams) error {
 	f.RecordCaller("Surfaces.SurfaceUpdate", c, p.Surface)

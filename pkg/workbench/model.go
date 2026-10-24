@@ -203,6 +203,9 @@ type workbenchModel struct {
 
 	activeRailID    string // "" (Home), or rail item ID
 	activePlacement contracts.RailPlacement
+	runtime         []contracts.RuntimeSurface
+	runtimeHidden   bool
+	runtimeFocus    protocol.SurfaceID
 	modal           modalState // the one source of truth for the open modal; use modalOwner/openModal/closeModal
 
 	showHotspots     bool
@@ -876,7 +879,7 @@ func (m *workbenchModel) refresh() bool {
 	if m.fe == nil {
 		return false
 	}
-	changed := false
+	changed := m.syncRuntime()
 	pal, idx := m.fe.PaletteANSI()
 	if served := theme.Palette(pal); served != m.served || !maps.Equal(idx, m.ansi) {
 		m.served, m.ansi = served, idx
@@ -1052,7 +1055,7 @@ func (m *workbenchModel) geometryJSON() []byte {
 		rects[id] = toGeo(r)
 	}
 	if m.modalOwner().Open() {
-		rects[protocol.SurfaceModal] = toGeo(m.modalRect)
+		rects[m.modalSurface()] = toGeo(m.modalRect)
 	}
 	doc := struct {
 		Terminal struct {
@@ -1071,7 +1074,7 @@ func (m *workbenchModel) geometryJSON() []byte {
 func (m *workbenchModel) focusJSON() []byte {
 	focused := m.focusedSlot
 	if m.modalOwner().Open() {
-		focused = protocol.SurfaceModal
+		focused = m.modalSurface()
 	}
 	b, _ := json.Marshal(struct {
 		Surface         protocol.SurfaceID `json:"surface"`
@@ -1088,12 +1091,15 @@ func (m *workbenchModel) surfaceView() contracts.SurfaceView {
 		v.Visible = append(v.Visible, id)
 	}
 	if m.modalOwner().Open() {
-		v.Visible = append(v.Visible, protocol.SurfaceModal)
+		v.Visible = append(v.Visible, m.modalSurface())
 	}
 	slices.Sort(v.Visible)
 	v.Placement = contracts.Placement{RailItem: m.activeRailID, Kind: string(m.activePlacement)}
+	if m.runtimeCanvas() != "" {
+		v.Placement = contracts.Placement{Kind: string(protocol.SurfacePlacementCanvas)}
+	}
 	v.Overlays = contracts.Overlays{
-		Modal:          contracts.ModalOverlay{Plugin: m.modal.PluginID, RailItem: m.modal.RailID},
+		Modal:          contracts.ModalOverlay{Plugin: m.modal.PluginID, RailItem: m.modal.RailID, Surface: m.modal.Surface},
 		Palette:        m.showPalette,
 		SlotExplorer:   m.stageMode == "hotspots",
 		SettingsCenter: m.settingsTab(),
@@ -1295,8 +1301,9 @@ func (m *workbenchModel) hostActionTable() map[string]contracts.HostActionHandle
 			next.Alt = m.altLatched
 			m.syncModifierTransitions(next)
 		}),
-		"husk.modal.close":     do(m.closeModal),
-		"husk.capture.release": do(m.releaseCapture),
+		"husk.modal.close":      do(m.closeModal),
+		"husk.capture.release":  do(m.releaseCapture),
+		"husk.surfaces.restore": do(m.restoreRuntime),
 	}
 }
 
@@ -1347,10 +1354,11 @@ func (m *workbenchModel) setFocus(slot protocol.SurfaceID) {
 // homeApplies reports whether "home" has anywhere to go; otherwise the key
 // belongs to the focused occupant.
 func (m *workbenchModel) homeApplies() bool {
-	return m.activeRailID != "" || m.stageMode == "hotspots"
+	return m.runtimeCanvas() != "" || m.activeRailID != "" || m.stageMode == "hotspots"
 }
 
 func (m *workbenchModel) activateHomeWorkbench() {
+	m.hideRuntime()
 	m.activeRailID = ""
 	m.activePlacement = ""
 	m.closeModal()
@@ -1367,6 +1375,7 @@ func (m *workbenchModel) activateRailItem(ri contracts.RailItem) {
 		return
 	}
 
+	m.hideRuntime()
 	switch ri.Placement {
 	case contracts.PlacementModal:
 		if m.modalOwner().RailID == ri.ID {
@@ -1404,6 +1413,7 @@ func (m *workbenchModel) activateRailItem(ri contracts.RailItem) {
 // modalState identifies the open modal: the plugin that owns it and the rail
 // item that opened it. The zero value means no modal is open.
 type modalState struct {
+	Surface  protocol.SurfaceID
 	PluginID string
 	RailID   string
 }
@@ -1419,13 +1429,18 @@ func (m *workbenchModel) modalOwner() modalState { return m.modal }
 // openModal replaces Settings with pluginID's rail item railID as the open modal.
 func (m *workbenchModel) openModal(pluginID, railID string) {
 	m.closeSettings()
-	m.modal = modalState{PluginID: pluginID, RailID: railID}
+	m.closeModal()
+	m.modal = modalState{PluginID: pluginID, RailID: railID, Surface: protocol.SurfaceModal}
 }
 
 // closeModal dismisses the open modal, if any.
 func (m *workbenchModel) closeModal() {
+	id := m.modal.Surface
 	m.clearPending()
 	m.modal = modalState{}
+	if id != "" && !id.Layout() {
+		m.closeRuntime(id)
+	}
 }
 
 // surfaceOwner is the plugin that holds slot's claim: the occupant ("" when

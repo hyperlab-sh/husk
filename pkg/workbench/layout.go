@@ -180,13 +180,20 @@ func (m *workbenchModel) placeSlots() {
 
 	modalW := min(92, m.width-10)
 	modalH := min(24, m.height-6)
-	m.modalRect = m.frameRect(protocol.SurfaceModal, max(4, (m.width-modalW)/2), max(2, (m.height-modalH)/2), modalW, modalH)
+	m.modalRect = m.frameRect(m.modalSurface(), max(4, (m.width-modalW)/2), max(2, (m.height-modalH)/2), modalW, modalH)
+	if !m.modalSurface().Layout() {
+		m.modalRect = m.runtimeModalRect(m.modalSurface())
+	}
 
 	railW := activityRailWidth
 	m.slotRects[protocol.SurfaceActivityRail] = m.frameRect(protocol.SurfaceActivityRail, 0, 1, railW, bodyH)
 
 	remW, leftW := sideWidths(m.width, m.sidebarWidth, m.leftSideShown())
 
+	if id := m.runtimeCanvas(); id != "" {
+		m.slotRects[id] = m.frameRect(id, railW, 1, remW, bodyH)
+		return
+	}
 	if m.activePlacement == contracts.PlacementFullCanvas {
 		m.slotRects[protocol.SurfaceFullCanvas] = m.frameRect(protocol.SurfaceFullCanvas, railW, 1, remW, bodyH)
 		return
@@ -255,6 +262,16 @@ func (m *workbenchModel) frameRect(slotID protocol.SurfaceID, x, y, w, h int) sl
 // the modal surface, the active canvas/stage item otherwise). Absent means a
 // blank canvas.
 func (m *workbenchModel) frameFor(slotID protocol.SurfaceID) frame.Spec {
+	if r, ok := m.runtimeSurface(slotID); ok {
+		if r.Frame == nil {
+			return frame.Spec{}
+		}
+		f := frame.Spec(*r.Frame)
+		if f.Label != "" && r.Title != "" {
+			f.Label = r.Title
+		}
+		return f
+	}
 	if slotID == protocol.SurfaceAppOverlay {
 		return frame.Spec{}
 	}

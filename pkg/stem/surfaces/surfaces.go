@@ -89,7 +89,7 @@ func decodeOccupants(raw json.RawMessage) (Occupants, error) {
 		return nil, fmt.Errorf("decode: %w", err)
 	}
 	for surface, occ := range v {
-		if occ.Plugin == "" || occ.Surface != surface {
+		if occ.Plugin == "" || occ.Surface != surface || !surface.Layout() {
 			delete(v, surface)
 		}
 	}

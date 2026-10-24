@@ -190,13 +190,14 @@ func (m *workbenchModel) drawModal(c *canvas) {
 	rect := m.modalRect
 	innerW, innerH := rect.InnerW, rect.InnerH
 
-	su := m.slotUpdates[protocol.SurfaceModal]
+	id := m.modalSurface()
+	su := m.slotUpdates[id]
 	// A declared region composes over the blank canvas before slot_update too.
-	if !m.drawTerminal(c, protocol.SurfaceModal, rect) {
-		m.publishedContent(protocol.SurfaceModal, innerW, innerH).draw(c, rect.InnerX, rect.InnerY)
+	if !m.drawTerminal(c, id, rect) {
+		m.publishedContent(id, innerW, innerH).draw(c, rect.InnerX, rect.InnerY)
 	}
 
-	spec := m.frameFor(protocol.SurfaceModal)
+	spec := m.frameFor(id)
 	label := ""
 	if spec.Label != "" {
 		label = spec.Label
@@ -205,9 +206,9 @@ func (m *workbenchModel) drawModal(c *canvas) {
 		}
 	}
 	if spec.Label != "" {
-		label = m.terminalLabel(protocol.SurfaceModal, label)
+		label = m.terminalLabel(id, label)
 	}
-	m.drawChrome(c, protocol.SurfaceModal, rect, spec, label)
+	m.drawChrome(c, id, rect, spec, label)
 	m.fillSlotBg(c, rect)
 }
 
@@ -218,7 +219,7 @@ func (m *workbenchModel) layoutLabel() string {
 	switch {
 	case m.modalOwner().Open() || m.settings != nil:
 		return "Modal"
-	case m.activePlacement == contracts.PlacementFullCanvas:
+	case m.runtimeCanvas() != "" || m.activePlacement == contracts.PlacementFullCanvas:
 		return "Full canvas"
 	case m.activePlacement == contracts.PlacementStage:
 		if left {
