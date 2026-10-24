@@ -49,6 +49,9 @@ func NewExecConverter(path string, opts ExecOptions) (*ExecConverter, error) {
 	return &ExecConverter{path: resolved, opts: opts}, nil
 }
 
+// Path returns the resolved absolute executable path used for registration identity.
+func (c *ExecConverter) Path() string { return c.path }
+
 // Format identifies the external converter without teaching the host a format.
 func (c *ExecConverter) Format() string { return "exec:" + filepath.Base(c.path) }
 
@@ -72,7 +75,7 @@ func (c *ExecConverter) Convert(src Source) (*Spec, []Warning, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	spec, warnings, err := (V2Converter{}).Convert(Source{Path: filepath.Join(src.Dir, FileName), Dir: src.Dir, Bytes: out})
+	spec, warnings, err := (V2Converter{}).Convert(Source{Path: src.Dir, Dir: src.Dir, Bytes: out})
 	if err != nil {
 		return nil, nil, converterFailure("convert", "exit status 0", stderr, err)
 	}
@@ -109,7 +112,10 @@ func (c *ExecConverter) Discover() ([]string, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(out))
 	scanner.Buffer(make([]byte, 4096), maxManifestBytes)
 	for scanner.Scan() {
-		dir := scanner.Text()
+		dir := scanner.Text() // bufio.ScanLines already removes a trailing carriage return.
+		if dir == "" {
+			continue
+		}
 		if len(dirs) == 256 || !filepath.IsAbs(dir) {
 			return nil, converterFailure("discover", "exit status 0", stderr, errors.New("expected at most 256 absolute directories"))
 		}
@@ -122,17 +128,18 @@ func (c *ExecConverter) Discover() ([]string, error) {
 }
 
 type converterOutput struct {
-	bytes.Buffer
+	// Do not embed Buffer: its promoted ReadFrom lets io.Copy bypass Write.
+	buffer   bytes.Buffer
 	exceeded bool
 }
 
 func (b *converterOutput) Write(p []byte) (int, error) {
 	n := len(p)
-	if b.Len()+n > maxManifestBytes {
+	if b.buffer.Len()+n > maxManifestBytes {
 		b.exceeded = true
-		p = p[:maxManifestBytes-b.Len()]
+		p = p[:maxManifestBytes-b.buffer.Len()]
 	}
-	_, _ = b.Buffer.Write(p)
+	_, _ = b.buffer.Write(p)
 	return n, nil
 }
 
@@ -165,6 +172,10 @@ func (c *ExecConverter) run(args ...string) ([]byte, []byte, error) {
 		}
 	}
 	err := run(ctx, c.path, args, env, &stdout, &stderr)
+	status := "exit status 0"
+	if err != nil {
+		status = err.Error()
+	}
 	if ctx.Err() != nil {
 		err = errors.New("deadline exceeded after 5s")
 	}
@@ -172,9 +183,9 @@ func (c *ExecConverter) run(args ...string) ([]byte, []byte, error) {
 		err = errors.New("output exceeds 1 MiB")
 	}
 	if err != nil {
-		return nil, stderr.Bytes(), converterFailure(args[0], err.Error(), stderr.Bytes(), err)
+		return nil, stderr.buffer.Bytes(), converterFailure(args[0], status, stderr.buffer.Bytes(), err)
 	}
-	return stdout.Bytes(), stderr.Bytes(), nil
+	return stdout.buffer.Bytes(), stderr.buffer.Bytes(), nil
 }
 
 // ConverterError identifies an isolated executable-converter failure.

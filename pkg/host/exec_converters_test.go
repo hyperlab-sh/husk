@@ -11,6 +11,7 @@ import (
 
 	"github.com/hyperlab-sh/husk/pkg/host/contracts"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
+	"github.com/hyperlab-sh/husk/pkg/substrate/store"
 )
 
 func TestMain(m *testing.M) {
@@ -61,6 +62,9 @@ func hostConverterChild() int {
 	}
 	exe, _ := os.Executable()
 	id := filepath.Base(dir)
+	if declaredID, err := os.ReadFile(filepath.Join(dir, "plugin-id")); err == nil {
+		id = string(declaredID)
+	}
 	_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"manifest_version": 2, "protocol": protocol.Major, "id": id, "name": id, "version": "1", "command": []string{exe, "converter-idle"}, "actions": []any{map[string]any{"id": id + ".open", "title": "Open"}}, "x-fixture": map[string]any{"kept": true}})
 	return 0
 }
@@ -92,21 +96,27 @@ func TestHostExecConvertersStartupAndAdd(t *testing.T) {
 	bad := makeDir("bad", "first")
 	trace := filepath.Join(root, "trace")
 	t.Setenv("CONVERTER_TRACE", trace)
-	t.Setenv("CONVERTER_DISCOVER", alpha+"\n"+beta+"\n"+beta+"\n")
+	t.Setenv("CONVERTER_DISCOVER", alpha+"\n"+beta+"\n"+beta+"\n"+bad+"\n"+bad+"\n")
+	t.Setenv("PATH", root+string(os.PathListSeparator)+os.Getenv("PATH"))
 	var logs []string
 	hook, ready := readyHook("")
+	processes := newFakes()
 	h, err := boot(t, func(c *contracts.Config) {
 		settings := pluginSettings(c)
 		settings["paths"] = []string{alpha, bad}
-		settings["converters"] = []string{second, filepath.Join(root, "missing")}
-	}, withHook(hook), WithConverters([]string{first}), WithLogger(func(_, msg string) { logs = append(logs, msg) }))
+		settings["converters"] = []string{second, first, filepath.Base(first)}
+	}, withHook(hook), WithFactory(processes.factory), WithConverters([]string{first}), WithLogger(func(_, msg string) { logs = append(logs, msg) }))
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Startup diagnostics are synchronous; inspect before the loop starts logging.
 	joined := strings.Join(logs, "\n")
-	if strings.Count(joined, "converter_unavailable") != 1 || !strings.Contains(joined, "converter_failed") {
+	if !strings.Contains(joined, "converter_failed") {
 		t.Fatal(joined)
+	}
+	refusals := h.root.Frontend().Refusals()
+	if len(refusals) != 1 || !strings.Contains(refusals[0].Reason, "converter_failed") || !strings.Contains(refusals[0].Reason, "exit status 6") || !strings.Contains(refusals[0].Reason, "bad conversion") {
+		t.Fatalf("refusals=%+v", refusals)
 	}
 	if h.root.Planned() != 2 {
 		t.Fatalf("planned=%d", h.root.Planned())
@@ -116,10 +126,22 @@ func TestHostExecConvertersStartupAndAdd(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(raw)
-	if strings.Count(text, "first:detect "+alpha+"\n") != 1 || strings.Count(text, "second:convert "+beta+"\n") != 1 || strings.Count(text, ":discover\n") != 2 || strings.Contains(text, "second:detect "+alpha) {
+	if strings.Count(text, "first:detect "+alpha+"\n") != 1 || strings.Count(text, "second:convert "+beta+"\n") != 1 || strings.Count(text, ":discover\n") != 2 || strings.Count(text, "first:convert "+bad+"\n") != 1 || strings.Contains(text, "second:detect "+alpha) {
 		t.Fatal(text)
 	}
 	runHost(t, ready, h)
+	<-processes.started
+	<-processes.started
+	doc := h.root.store.Declared(store.DeclaredPlugins)["alpha"]
+	vendor, err := json.Marshal(doc["x-fixture"])
+	if err != nil || string(vendor) != `{"kept":true}` {
+		t.Fatalf("vendor=%s err=%v", vendor, err)
+	}
+	for _, field := range []string{"protocol", "command", "work_dir", "dir"} {
+		if _, present := doc[field]; present {
+			t.Errorf("declared catalog contains process field %s", field)
+		}
+	}
 	code, out, stderr := cliRun(h, "action", "list", "--format", "json")
 	if code != 0 || !strings.Contains(out, "alpha.open") || !strings.Contains(out, "beta.open") {
 		t.Fatalf("actions: %d %s %s", code, out, stderr)
@@ -145,5 +167,22 @@ func TestHostExecConverterDiscoveryFailure(t *testing.T) {
 	}
 	if h.root.Planned() != 0 || strings.Count(strings.Join(logs, "\n"), "converter_failed") != 1 {
 		t.Fatalf("planned=%d logs=%v", h.root.Planned(), logs)
+	}
+	refusals := h.root.Frontend().Refusals()
+	if len(refusals) != 1 || !strings.Contains(refusals[0].Reason, "failed discovery") {
+		t.Fatalf("refusals=%+v", refusals)
+	}
+}
+
+func TestHostExecConverterUnavailable(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing")
+	var logs []string
+	h, err := boot(t, func(c *contracts.Config) { pluginSettings(c)["converters"] = []string{missing} }, WithConverters([]string{missing}), WithLogger(func(_, msg string) { logs = append(logs, msg) }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	refusals := h.root.Frontend().Refusals()
+	if len(refusals) != 1 || !strings.Contains(refusals[0].Reason, "converter_unavailable") || strings.Count(strings.Join(logs, "\n"), "converter_unavailable") != 1 {
+		t.Fatalf("refusals=%+v logs=%v", refusals, logs)
 	}
 }
