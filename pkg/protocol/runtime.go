@@ -121,11 +121,6 @@ func validRuntimeName(s string) bool {
 	return true
 }
 
-// SurfaceFocusParams selects an existing runtime surface without creating one.
-type SurfaceFocusParams struct {
-	Surface SurfaceID `json:"surface"`
-}
-
 // SurfaceOpenResult identifies the surface occupied from this reply onward.
 type SurfaceOpenResult struct {
 	Surface SurfaceID `json:"surface"`
