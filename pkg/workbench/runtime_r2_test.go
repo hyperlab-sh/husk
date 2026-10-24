@@ -53,12 +53,23 @@ func TestRuntimeCanvasRailSelectionDoesNotToggleUnderlyingItem(t *testing.T) {
 			m.railItems = []contracts.RailItem{ri}
 			m.activateRailItem(ri)
 			openRuntimeFixture(m, fe, "p.canvas", protocol.SurfacePlacementCanvas)
-			m.activateRailItem(ri)
+			clickRail := func() {
+				t.Helper()
+				rr := m.slotRects[protocol.SurfaceActivityRail]
+				for _, b := range m.railButtons() {
+					if b.kind == "plugin" && b.item.ID == ri.ID {
+						m.handleMouse(tea.MouseClickMsg{X: rr.X, Y: rr.Y + b.startY, Button: tea.MouseLeft})
+						return
+					}
+				}
+				t.Fatal("rail item has no button")
+			}
+			clickRail()
 			if !m.runtimeHidden || m.runtimeCanvas() != "" || m.activeRailID != ri.ID || m.activePlacement != placement || !slices.Contains(m.surfaceView().Visible, m.focusedSlot) {
 				t.Fatalf("rail selection toggled away: view=%+v focus=%s hidden=%v", m.surfaceView(), m.focusedSlot, m.runtimeHidden)
 			}
 			// Once the rail item really is shown, its ordinary toggle still works.
-			m.activateRailItem(ri)
+			clickRail()
 			if m.activeRailID != "" {
 				t.Fatal("shown rail item no longer toggles Home")
 			}
