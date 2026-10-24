@@ -778,7 +778,11 @@ func (m *WorkbenchModel) notePodTransition(id string, from, to contracts.PodStat
 		if lastError == "" {
 			msg = id + ": failed"
 		}
-		m.logf("plugin %s failed: %s", id, lastError)
+		// Pods already logs launch failures. State refresh only raises the
+		// toast, rather than reporting the same failure to stderr again.
+		if from == contracts.PodLive {
+			m.logf("plugin %s failed: %s", id, lastError)
+		}
 		m.failures = append(m.failures, msg)
 	case contracts.PodExited:
 		m.logf("plugin %s exited", id)

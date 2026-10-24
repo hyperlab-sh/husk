@@ -192,6 +192,15 @@ func (w *Wrapper) Start(opening []protocol.Message) error {
 		inWrite.Close()
 		outRead.Close()
 		outWrite.Close()
+		// ENOENT can also mean a missing interpreter or work directory.
+		// Give a build hint only when the executable itself is absent.
+		if _, statErr := os.Stat(argv[0]); errors.Is(err, exec.ErrNotFound) || errors.Is(err, os.ErrNotExist) && errors.Is(statErr, os.ErrNotExist) {
+			name := w.spec.CommandName
+			if name == "" {
+				name = w.spec.Command[0]
+			}
+			err = fmt.Errorf("command %q not found in %s; build it first", name, w.spec.WorkDir)
+		}
 		return fail(err)
 	}
 	inRead.Close()

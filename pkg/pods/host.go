@@ -347,7 +347,7 @@ func (h *Host) Handle(msg tea.Msg) bool {
 		}
 		p.info.LastError = m.Err.Error()
 		h.loop.Liveness(LivenessMsg{Info: p.Info()})
-		h.loop.Log(LogMsg{PluginID: m.PluginID, Level: "error", Message: fmt.Sprintf("failed to launch plugin %s: %v", m.PluginID, m.Err)})
+		h.loop.Log(LogMsg{PluginID: m.PluginID, Level: "error", Message: m.Err.Error()})
 		h.publishExited(p.Info())
 		return true
 	case ExitMsg:
