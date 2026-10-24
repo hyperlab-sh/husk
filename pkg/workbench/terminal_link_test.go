@@ -31,6 +31,40 @@ func TestTerminalUnfocusedPlainCtrlClickOnlyFocuses(t *testing.T) {
 	}
 }
 
+func TestRuntimeTerminalLinkCoordinates(t *testing.T) {
+	for _, placement := range []protocol.SurfacePlacement{protocol.SurfacePlacementModal, protocol.SurfacePlacementCanvas} {
+		t.Run(string(placement), func(t *testing.T) {
+			m, fe, term, input := terminalModel(t, false)
+			const id protocol.SurfaceID = "p.screen"
+			openRuntimeFixture(m, fe, id, placement)
+			fe.TerminalDrawers[id] = fe.TerminalDrawers[protocol.SurfaceMainStage]
+			delete(fe.TerminalDrawers, protocol.SurfaceMainStage)
+			term.Write([]byte("\x1b[?1000h\x1b[?1006h\r\n  https://example"))
+			var links []protocol.TerminalLinkParams
+			term.SetLinkHandler(func(url string, row, col int) {
+				links = append(links, protocol.TerminalLinkParams{Surface: id, URL: url, Row: row, Col: col})
+			})
+			r := m.slotRects[id]
+			if placement == protocol.SurfacePlacementModal {
+				r = m.modalRect
+			}
+			if r.InnerX == 0 || r.InnerY == 0 {
+				t.Fatal("runtime fixture must offset the emulator from the terminal origin")
+			}
+			m.Update(tea.MouseClickMsg{X: r.InnerX + 5, Y: r.InnerY + 1, Button: tea.MouseLeft, Mod: tea.ModCtrl})
+			m.Update(tea.MouseReleaseMsg{X: r.InnerX + 5, Y: r.InnerY + 1, Button: tea.MouseLeft})
+			term.Close()
+			want := protocol.TerminalLinkParams{Surface: id, URL: "https://example", Row: 1, Col: 5}
+			if len(links) != 1 || links[0] != want {
+				t.Fatalf("runtime links = %+v, want %+v", links, want)
+			}
+			if len(input) != 0 {
+				t.Fatalf("runtime link gesture encoded %q", <-input)
+			}
+		})
+	}
+}
+
 func TestTerminalLinkCoordinates(t *testing.T) {
 	m, _, term, input := terminalModel(t, false)
 	term.Write([]byte("\x1b[?1000h\x1b[?1006h\r\n  https://example"))
