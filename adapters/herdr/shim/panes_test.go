@@ -28,16 +28,21 @@ type paneProcess struct {
 	input  chan []byte
 	sizes  chan [2]int
 	once   sync.Once
+	write  func([]byte) (int, error)
+	closed chan struct{}
 }
 
 func (p *paneProcess) Read(b []byte) (int, error) { return p.reader.Read(b) }
 func (p *paneProcess) Write(b []byte) (int, error) {
+	if p.write != nil {
+		return p.write(b)
+	}
 	p.input <- append([]byte(nil), b...)
 	return len(b), nil
 }
 func (p *paneProcess) Resize(w, h int) error { p.sizes <- [2]int{w, h}; return nil }
 func (p *paneProcess) Close() error {
-	p.once.Do(func() { _ = p.reader.Close(); _ = p.output.Close() })
+	p.once.Do(func() { close(p.closed); _ = p.reader.Close(); _ = p.output.Close() })
 	return nil
 }
 
@@ -53,7 +58,7 @@ func paneRig(t *testing.T) (*rig, chan paneSpawn) {
 	spawns := make(chan paneSpawn, 16)
 	r.o.SpawnTerminal = func(c Command, w, h int) (TerminalProcess, error) {
 		rd, wr := io.Pipe()
-		p := &paneProcess{testProcess: &testProcess{pid: 100, done: make(chan int, 1), signals: make(chan syscall.Signal, 8), termStops: true}, reader: rd, output: wr, input: make(chan []byte, 4), sizes: make(chan [2]int, 4)}
+		p := &paneProcess{testProcess: &testProcess{pid: 100, done: make(chan int, 1), signals: make(chan syscall.Signal, 8), termStops: true}, reader: rd, output: wr, input: make(chan []byte, 4), sizes: make(chan [2]int, 4), closed: make(chan struct{})}
 		spawns <- paneSpawn{c, p, [2]int{w, h}}
 		return p, nil
 	}
@@ -193,7 +198,7 @@ func TestPaneBusyRefusalStartsNoProcess(t *testing.T) {
 	original := r.host.call
 	r.host.call = func(ctx context.Context, m string, p any) (json.RawMessage, error) {
 		if m == protocol.MethodSurfaceOpen {
-			return nil, &protocol.Error{Code: protocol.CodeBusy, Message: "a modal is open"}
+			return nil, &protocol.Error{Code: protocol.CodeBusy, Message: "a modal is open", Data: json.RawMessage(`{"reason":"modal_open"}`)}
 		}
 		return original(ctx, m, p)
 	}
@@ -254,7 +259,9 @@ func TestPaneExitHostCloseAndGrace(t *testing.T) {
 			case "write_refused":
 				_, _ = p.output.Write([]byte("bytes"))
 			}
-			r.host.until(t, protocol.MethodSurfaceClose, "")
+			if mode != "host_close" {
+				r.host.until(t, protocol.MethodSurfaceClose, "")
+			}
 			if take(t, p.signals) != syscall.SIGHUP || take(t, p.signals) != syscall.SIGTERM {
 				t.Fatal("group not stopped")
 			}
