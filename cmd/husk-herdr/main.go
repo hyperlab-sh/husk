@@ -18,6 +18,9 @@ type environment struct {
 	platform     string
 	configPath   string
 	registryPath string
+	home         string
+	getenv       func(string) string
+	lookup       func(string) (string, bool)
 }
 
 func main() {
@@ -26,7 +29,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	os.Exit(execute(os.Args[1:], os.Stdout, os.Stderr, captureEnvironment(exe, runtime.GOOS, os.Getenv, os.UserHomeDir)))
+	os.Exit(execute(os.Args[1:], os.Stdout, os.Stderr, captureEnvironment(exe, runtime.GOOS, os.Getenv, os.UserHomeDir, os.LookupEnv)))
 }
 
 func execute(args []string, out, diagnostics io.Writer, env environment) int {

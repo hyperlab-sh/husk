@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -31,17 +32,26 @@ func doctor(args []string, out, diagnostics io.Writer, env environment) int {
 	}
 	fmt.Fprintf(out, "binary: %s\nsocket: %s\n", o.Binary, o.Socket)
 	session, err := upstream.New(upstream.Options{Socket: o.Socket}).Attach(context.Background(), "0.9.0")
+	result := 0
 	if err != nil {
-		fmt.Fprintln(diagnostics, err)
-		return 1
+		status := "absent"
+		var named *upstream.Error
+		if errors.As(err, &named) && named.Code != "unavailable" {
+			status, result = "failed", 1
+		}
+		fmt.Fprintf(out, "server: %s (%v)\n", status, err)
+	} else {
+		fmt.Fprintf(out, "version: %s\n", session.Version)
 	}
-	fmt.Fprintf(out, "version: %s\nregistry: %s\n", session.Version, env.registryPath)
+	fmt.Fprintf(out, "registry: %s\n", env.registryPath)
 	enabled := map[string]bool{}
 	var plugins []struct {
 		ID      string `json:"plugin_id"`
 		Enabled bool   `json:"enabled"`
 	}
-	_ = json.Unmarshal(session.Plugins, &plugins)
+	if session != nil {
+		_ = json.Unmarshal(session.Plugins, &plugins)
+	}
 	for _, p := range plugins {
 		enabled[p.ID] = p.Enabled
 	}
@@ -61,6 +71,7 @@ func doctor(args []string, out, diagnostics io.Writer, env environment) int {
 			continue
 		}
 		fmt.Fprintf(out, "plugin %s: registry_enabled=%t server_enabled=%t hooks=%s\n", rec.ID, rec.Enabled, enabled[rec.ID], o.Settings.HookOwner(rec.ID, enabled[rec.ID]))
+		fmt.Fprintf(out, "plugin %s root: %s\n", rec.ID, rec.Root)
 		id, _ := manifest.MapID(rec.ID)
 		if len(mapped[id]) > 1 {
 			fmt.Fprintf(out, "duplicate id %s: %s\n", id, strings.Join(mapped[id], ", "))
@@ -69,8 +80,8 @@ func doctor(args []string, out, diagnostics io.Writer, env environment) int {
 	if o.Settings.Server == "start" && o.Settings.Session != "" {
 		fmt.Fprintln(out, "warning: a separate session runs enabled startup/event hooks again; daemon hooks can be duplicated")
 	}
-	root, _ := upstream.ConfigDir(env.platform, os.Getenv, os.Getenv("HOME"))
-	config := os.Getenv("HERDR_CONFIG_PATH")
+	root, _ := upstream.ConfigDir(env.platform, env.value, env.homeDir())
+	config := env.value("HERDR_CONFIG_PATH")
 	if config == "" {
 		config = filepath.Join(root, "config.toml")
 	}
@@ -83,8 +94,16 @@ func doctor(args []string, out, diagnostics io.Writer, env environment) int {
 		if toml.Unmarshal(data, &c) == nil {
 			for _, binding := range c.Keys.Command {
 				raw, _ := json.Marshal(binding)
-				if strings.Contains(string(raw), "plugin") {
-					fmt.Fprintf(out, "binding (copy into a Husk keymap): %s\n", raw)
+				var parsed struct{ Type, Command string }
+				if json.Unmarshal(raw, &parsed) != nil || parsed.Type != "plugin_action" {
+					continue
+				}
+				for _, rec := range records {
+					id, e := manifest.MapID(rec.ID)
+					if e == nil && rec.Enabled && manifest.Supports(rec.Platforms, env.platform) && (strings.HasPrefix(parsed.Command, id+".") || strings.HasPrefix(parsed.Command, rec.ID+".")) {
+						fmt.Fprintf(out, "binding (copy into a Husk keymap): %s\n", raw)
+						break
+					}
 				}
 			}
 		}
@@ -128,5 +147,5 @@ func doctor(args []string, out, diagnostics io.Writer, env environment) int {
 		}
 	}
 	fmt.Fprintln(out, "manual check: compare the attached session, hook owner and action bindings before invoking plugin commands")
-	return 0
+	return result
 }

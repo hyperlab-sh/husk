@@ -114,7 +114,7 @@ func Run(ctx context.Context, o Options, in io.Reader, out, log io.Writer) error
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	r := &runner{o: o, m: m, id: id, ctx: ctx, cancel: cancel, log: log, processes: map[Process]bool{}, state: state{Server: "absent", Socket: o.Socket, Startup: []map[string]any{}, Surfaces: map[string]any{}}}
-	p, err := proxy.Start(ctx, proxy.Options{Dial: o.Client.Dial, Intercept: r.intercept, Warn: func(m string) { r.logLine(map[string]any{"level": "warning", "plugin": r.m.ID, "method": m}) }})
+	p, err := proxy.Start(ctx, proxy.Options{Dial: o.Client.Dial, Clock: o.Clock, Intercept: r.intercept, Warn: func(m string) { r.logLine(map[string]any{"level": "warning", "plugin": r.m.ID, "method": m}) }})
 	if err != nil {
 		return err
 	}
@@ -214,6 +214,7 @@ func (r *runner) wait(d time.Duration) bool {
 	}
 }
 func (r *runner) attach() error {
+	var backoff upstream.Backoff
 	for {
 		var session *upstream.Session
 		var err error
@@ -230,11 +231,7 @@ func (r *runner) attach() error {
 				session, err = r.o.Client.Attach(r.ctx, r.m.MinVersion)
 			}
 		} else {
-			session, err = r.o.Client.WaitAttach(r.ctx, r.m.MinVersion, func(status string) {
-				if status != "attached" {
-					r.change(func(s *state) { s.Server = status })
-				}
-			})
+			session, err = r.o.Client.Attach(r.ctx, r.m.MinVersion)
 		}
 		if err != nil {
 			var named *upstream.Error
@@ -243,6 +240,13 @@ func (r *runner) attach() error {
 			}
 			if r.ctx.Err() != nil {
 				return nil
+			}
+			if retryable(err) {
+				r.change(func(s *state) { s.Server = "absent" })
+				if !r.wait(backoff.Next()) {
+					return nil
+				}
+				continue
 			}
 			return err
 		}
@@ -276,13 +280,25 @@ func (r *runner) attach() error {
 		if len(allowed) > 0 {
 			stream, err = r.o.Client.Subscribe(r.ctx, allowed)
 			if err != nil {
+				if r.ctx.Err() != nil {
+					return nil
+				}
+				if retryable(err) {
+					r.change(func(s *state) { s.Server = "lost" })
+					if !r.wait(backoff.Next()) {
+						return nil
+					}
+					continue
+				}
 				var remote *upstream.Error
-				if !errors.As(err, &remote) || remote.Code == "herdr_protocol" {
+				if errors.As(err, &remote) && remote.Code == "herdr_protocol" {
 					return err
 				}
+				// An explicit subscription refusal suspends event hooks only.
 				r.logLine(map[string]any{"message": err.Error()})
 			}
 		}
+		backoff = upstream.Backoff{}
 		r.change(func(s *state) { s.Server = "attached"; s.Version = session.Version; s.Hooks = owner; s.LastError = "" })
 		if owner == "shim" {
 			for _, e := range r.m.Startup {
@@ -325,7 +341,7 @@ func (r *runner) attach() error {
 			}
 		}
 		r.change(func(s *state) { s.Server = "lost" })
-		if !r.wait(5 * time.Second) {
+		if !r.wait(backoff.Next()) {
 			return nil
 		}
 	}
@@ -335,7 +351,7 @@ func retryable(err error) bool {
 		return false
 	}
 	var e *upstream.Error
-	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || errors.As(err, &e) && e.Code == "unavailable"
+	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || !errors.As(err, &e) || e.Code == "unavailable"
 }
 
 const paneUnsupported = "pane entrypoints are not supported yet"
@@ -383,6 +399,10 @@ func (r *runner) launch(e manifest.Entry, action, event string, eventJSON json.R
 	defer done()
 	c, err := BuildContext(ctx, r.o.Client, correlation, source, provided)
 	if err != nil {
+		var remote *upstream.Error
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || errors.As(err, &remote) && remote.Code == "unavailable" {
+			return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: err.Error(), Data: json.RawMessage(`{"reason":"herdr_absent"}`)}
+		}
 		return nil, err
 	}
 	env := CommandEnvironment(r.o.Env, r.o.Dir, r.o.Binary, r.proxy.Path(), r.o.ConfigDir, r.o.StateDir, r.m.ID, action, event, eventJSON, c)
@@ -391,7 +411,13 @@ func (r *runner) launch(e manifest.Entry, action, event string, eventJSON json.R
 		r.mu.Unlock()
 		return nil, context.Canceled
 	}
-	if len(r.processes) >= 32 {
+	running := 0
+	for _, leader := range r.processes {
+		if leader {
+			running++
+		}
+	}
+	if running >= 32 {
 		now := r.o.Now()
 		log := r.lastDrop.IsZero() || now.Sub(r.lastDrop) >= time.Second
 		if log {
@@ -459,9 +485,13 @@ func (r *runner) stopCommands() {
 		r.children.Wait()
 		return
 	}
+	r.mu.Lock()
 	for _, p := range ps {
-		_ = p.Signal(syscall.SIGTERM)
+		if _, tracked := r.processes[p]; tracked {
+			_ = p.Signal(syscall.SIGTERM)
+		}
 	}
+	r.mu.Unlock()
 	done := make(chan struct{})
 	go func() { r.children.Wait(); close(done) }()
 	killed := make(chan struct{})
@@ -488,6 +518,8 @@ func (r *runner) stopCommands() {
 		for p := range r.processes {
 			if groupAlive(p) {
 				alive = true
+			} else {
+				delete(r.processes, p)
 			}
 		}
 		r.mu.Unlock()

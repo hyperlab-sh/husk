@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"sync"
 	"syscall"
+	"time"
 )
 
 // Command is the complete spawn input, with no shell interpolation.
@@ -32,6 +33,9 @@ func Spawn(c Command) (Process, error) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	tail := &tailBuffer{}
 	cmd.Stderr = tail
+	// A descendant can retain stderr after its leader exits. Bound exec's copy
+	// join so leader completion releases the command slot independently of it.
+	cmd.WaitDelay = 2 * time.Second
 	null, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
 	if err != nil {
 		return nil, err
@@ -45,13 +49,45 @@ func Spawn(c Command) (Process, error) {
 }
 
 type process struct {
-	cmd  *exec.Cmd
-	tail *tailBuffer
+	cmd         *exec.Cmd
+	tail        *tailBuffer
+	groupMu     sync.Mutex
+	groupEmpty  bool
+	groupSignal func(int, syscall.Signal) error
 }
 
-func (p *process) PID() int                      { return p.cmd.Process.Pid }
-func (p *process) GroupAlive() bool              { return syscall.Kill(-p.PID(), 0) != syscall.ESRCH }
-func (p *process) Signal(s syscall.Signal) error { return syscall.Kill(-p.PID(), s) }
+func (p *process) PID() int { return p.cmd.Process.Pid }
+func (p *process) GroupAlive() bool {
+	p.groupMu.Lock()
+	defer p.groupMu.Unlock()
+	return p.groupAlive()
+}
+func (p *process) groupAlive() bool {
+	if p.groupEmpty {
+		return false
+	}
+	if p.groupSignal == nil {
+		p.groupSignal = syscall.Kill
+	}
+	if p.groupSignal(-p.PID(), 0) == syscall.ESRCH {
+		p.groupEmpty = true
+	}
+	return !p.groupEmpty
+}
+func (p *process) Signal(s syscall.Signal) error {
+	p.groupMu.Lock()
+	defer p.groupMu.Unlock()
+	// Once observed empty, this group identity is retired forever, including
+	// after shutdown stops the observer. Never signal a subsequently reused id.
+	if !p.groupAlive() {
+		return nil
+	}
+	err := p.groupSignal(-p.PID(), s)
+	if err == syscall.ESRCH {
+		p.groupEmpty = true
+	}
+	return err
+}
 func (p *process) Wait() (int, string) {
 	err := p.cmd.Wait()
 	status := 0

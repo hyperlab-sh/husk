@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 
 	"github.com/hyperlab-sh/husk/adapters/herdr/manifest"
 	"github.com/hyperlab-sh/husk/adapters/herdr/settings"
@@ -32,12 +31,16 @@ func runtimeOptions(dir string, env environment) (shim.Options, error) {
 	if err != nil {
 		return shim.Options{}, err
 	}
-	home, _ := os.UserHomeDir()
-	socket, err := upstream.ResolveSocket(upstream.SocketOptions{Session: c.Session, SocketPath: os.Getenv("HERDR_SOCKET_PATH"), Home: home, Platform: env.platform, Getenv: os.Getenv})
+	home := env.homeDir()
+	inheritedSocket := ""
+	if env.value("HERDR_ENV") == "1" {
+		inheritedSocket = env.value("HERDR_SOCKET_PATH")
+	}
+	socket, err := upstream.ResolveSocket(upstream.SocketOptions{Session: c.Session, SocketPath: inheritedSocket, Home: home, Platform: env.platform, Getenv: env.value})
 	if err != nil {
 		return shim.Options{}, err
 	}
-	root, ok := upstream.ConfigDir(env.platform, os.Getenv, home)
+	root, ok := upstream.ConfigDir(env.platform, env.value, home)
 	if !ok {
 		return shim.Options{}, fmt.Errorf("absolute configuration directory is required")
 	}
@@ -53,7 +56,7 @@ func runtimeOptions(dir string, env environment) (shim.Options, error) {
 		}
 		component := shim.PluginPathComponent(m.ID)
 		o.ConfigDir = filepath.Join(root, "plugins", "config", component)
-		o.StateDir = filepath.Join(shim.StateDir(runtime.GOOS, os.LookupEnv, os.TempDir()), "plugins", component)
+		o.StateDir = filepath.Join(shim.StateDir(env.platform, env.lookupValue, os.TempDir()), "plugins", component)
 	}
 	return o, nil
 }
