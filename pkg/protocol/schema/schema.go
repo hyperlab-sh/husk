@@ -75,7 +75,7 @@ func form(method string) string {
 		protocol.MethodSurfaceUpdate, protocol.MethodSurfaceClose, protocol.MethodSurfaceResized,
 		protocol.MethodInputKey, protocol.MethodInputMouse, protocol.MethodInputKeyState,
 		protocol.MethodThemeChanged, protocol.MethodSlotContributions, protocol.MethodToastShow,
-		protocol.MethodTerminalInput:
+		protocol.MethodTerminalInput, protocol.MethodTerminalLink:
 		return "notification"
 	default:
 		return "request"
@@ -104,6 +104,8 @@ func payloadTypes(method string) (reflect.Type, reflect.Type) {
 		return reflect.TypeFor[protocol.TerminalDetachParams](), reflect.TypeFor[protocol.EmptyResult]()
 	case protocol.MethodTerminalInput:
 		return reflect.TypeFor[protocol.TerminalInputParams](), nil
+	case protocol.MethodTerminalLink:
+		return reflect.TypeFor[protocol.TerminalLinkParams](), nil
 	case protocol.MethodInputKey:
 		return reflect.TypeFor[protocol.SurfaceKeyParams](), nil
 	case protocol.MethodInputMouse:
@@ -189,6 +191,10 @@ func (g *generator) define(t reflect.Type) string {
 		props["placement"] = map[string]any{"type": "string", "enum": []string{"modal", "canvas"}}
 		props["name"] = map[string]any{"type": "string", "pattern": "^[a-z0-9_-]{1,32}$", "maxLength": 32}
 		props["title"] = map[string]any{"type": "string", "maxLength": 80}
+	}
+	if t == reflect.TypeFor[protocol.TerminalLinkParams]() {
+		props["row"].(map[string]any)["minimum"] = 0
+		props["col"].(map[string]any)["minimum"] = 0
 	}
 	if t == reflect.TypeFor[protocol.SurfaceResizedParams]() {
 		// The v2 snapshot contract explicitly requires an array, not null.

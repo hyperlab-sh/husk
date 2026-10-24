@@ -144,6 +144,15 @@ type TerminalDetachParams struct {
 	Surface SurfaceID `json:"surface"`
 }
 
+// TerminalLinkParams reports a ctrl+left click on a terminal URL. Row and Col
+// are zero-based cells relative to the surface's inner content area.
+type TerminalLinkParams struct {
+	Surface SurfaceID `json:"surface"`
+	URL     string    `json:"url"`
+	Row     int       `json:"row"`
+	Col     int       `json:"col"`
+}
+
 // TerminalInputParams carries encoded input and emulator query replies.
 type TerminalInputParams struct {
 	Surface SurfaceID `json:"surface"`

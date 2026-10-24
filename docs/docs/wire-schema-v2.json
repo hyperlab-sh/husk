@@ -842,6 +842,31 @@
       ],
       "type": "object"
     },
+    "TerminalLinkParams": {
+      "properties": {
+        "col": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "row": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "surface": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "surface",
+        "url",
+        "row",
+        "col"
+      ],
+      "type": "object"
+    },
     "TerminalWriteParams": {
       "properties": {
         "data": {
@@ -1234,6 +1259,12 @@
       "$ref": "#/$defs/TerminalInputParams"
     },
     "terminal.input.result": {
+      "description": "Result owned by design/protocol.md; no additional field constraints specified here."
+    },
+    "terminal.link.params": {
+      "$ref": "#/$defs/TerminalLinkParams"
+    },
+    "terminal.link.result": {
       "description": "Result owned by design/protocol.md; no additional field constraints specified here."
     },
     "terminal.write.params": {
@@ -1703,6 +1734,15 @@
       },
       "result": {
         "$ref": "#/$defs/terminal.input.result"
+      }
+    },
+    "terminal.link": {
+      "form": "notification",
+      "params": {
+        "$ref": "#/$defs/terminal.link.params"
+      },
+      "result": {
+        "$ref": "#/$defs/terminal.link.result"
       }
     },
     "terminal.write": {

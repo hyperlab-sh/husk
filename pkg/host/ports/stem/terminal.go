@@ -37,6 +37,14 @@ func (p TerminalPort) TerminalAttach(ctx context.Context, c contracts.Caller, pa
 				p.Logf("terminals: dropped input for %s: %v", params.Surface, err)
 			}
 		})
+		if err == nil {
+			p.Engine.Terminal(params.Surface).SetLinkHandler(func(url string, row, col int) {
+				raw, _ := json.Marshal(protocol.TerminalLinkParams{Surface: params.Surface, URL: url, Row: row, Col: col})
+				if err := send(protocol.Message{Method: protocol.MethodTerminalLink, Params: raw}); err != nil && p.Logf != nil {
+					p.Logf("terminals: dropped link for %s: %v", params.Surface, err)
+				}
+			})
+		}
 		return err
 	})
 	return result, err
