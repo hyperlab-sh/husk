@@ -838,12 +838,6 @@ type Surfaces struct {
 // NewSurfaces returns a Surfaces logging to rec.
 func NewSurfaces(rec *Recorder) *Surfaces { return &Surfaces{callLog: callLog{r: orNew(rec)}} }
 
-// SurfaceFocus implements contracts.SurfacePort.
-func (f *Surfaces) SurfaceFocus(_ context.Context, c contracts.Caller, p protocol.SurfaceFocusParams) error {
-	f.RecordCaller("Surfaces.SurfaceFocus", c, p.Surface)
-	return f.Err
-}
-
 // SurfaceOpen implements contracts.SurfacePort.
 func (f *Surfaces) SurfaceOpen(_ context.Context, c contracts.Caller, p protocol.SurfaceOpenParams) (protocol.SurfaceOpenResult, error) {
 	f.RecordCaller("Surfaces.SurfaceOpen", c, p.Name)

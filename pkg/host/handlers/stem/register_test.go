@@ -38,7 +38,6 @@ func TestRegisterRoutesEveryStemMethod(t *testing.T) {
 		{protocol.MethodEventWatch, `{"pattern":"*"}`, plugin, "Events.Watch"},
 		{protocol.MethodHookCall, `{"hook":"h"}`, plugin, "Hooks.HookCall"},
 		{protocol.MethodHookList, ``, cli, "Hooks.HookList"},
-		{protocol.MethodSurfaceFocus, `{"surface":"notes.screen"}`, plugin, "Surfaces.SurfaceFocus"},
 		{protocol.MethodSurfaceOpen, `{"placement":"canvas","name":"screen"}`, plugin, "Surfaces.SurfaceOpen"},
 		{protocol.MethodSurfaceUpdate, `{"surface":"modal-surface","lines":[]}`, plugin, "Surfaces.SurfaceUpdate"},
 		{protocol.MethodSurfaceClose, `{"surface":"modal-surface"}`, plugin, "Surfaces.SurfaceClose"},

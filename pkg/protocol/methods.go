@@ -37,8 +37,6 @@ const (
 	MethodStateChanged = "state.changed"
 	// MethodSurfaceOpen opens a runtime surface; see design/protocol.md.
 	MethodSurfaceOpen = "surface.open"
-	// MethodSurfaceFocus focuses an owned runtime surface (minor 2.10).
-	MethodSurfaceFocus = "surface.focus"
 	// MethodSurfaceUpdate renders a surface; see design/protocol.md.
 	MethodSurfaceUpdate = "surface.update"
 	// MethodSurfaceClose closes a surface; see design/protocol.md.
@@ -53,8 +51,6 @@ const (
 	MethodTerminalDetach = "terminal.detach"
 	// MethodTerminalInput delivers encoded input and emulator replies.
 	MethodTerminalInput = "terminal.input"
-	// MethodTerminalLink reports a ctrl+left click on a terminal URL.
-	MethodTerminalLink = "terminal.link"
 	// MethodInputKey delivers a key; see design/keybindings.md.
 	MethodInputKey = "input.key"
 	// MethodInputMouse delivers a mouse event; see design/protocol.md.
@@ -122,7 +118,7 @@ func Methods() []string {
 	return []string{MethodSessionPing, MethodProtocolError, MethodActionInvoke, MethodActionList,
 		MethodEventEmit, MethodEventDeliver, MethodEventWatch, MethodHookCall, MethodHookList,
 		MethodStateGet, MethodStateSet, MethodStatePatch, MethodStateSnapshot, MethodStateWatch, MethodStateClear, MethodStateChanged,
-		MethodSurfaceOpen, MethodSurfaceFocus, MethodSurfaceUpdate, MethodSurfaceClose, MethodSurfaceResized, MethodTerminalAttach, MethodTerminalWrite, MethodTerminalDetach, MethodTerminalInput, MethodTerminalLink, MethodInputKey, MethodInputMouse, MethodInputKeyState,
+		MethodSurfaceOpen, MethodSurfaceUpdate, MethodSurfaceClose, MethodSurfaceResized, MethodTerminalAttach, MethodTerminalWrite, MethodTerminalDetach, MethodTerminalInput, MethodInputKey, MethodInputMouse, MethodInputKeyState,
 		MethodThemeChanged, MethodThemeGet, MethodThemeList, MethodThemeCheck, MethodSlotContribute, MethodSlotContributions, MethodToastShow,
 		MethodSettingsGet, MethodSettingsList, MethodSettingsSchema, MethodSettingsValidate, MethodSettingsSet,
 		MethodSecretsGet, MethodSecretsNames, MethodSecretsSet, MethodSecretsGrant, MethodSecretsRevoke, MethodSecretsReveal,

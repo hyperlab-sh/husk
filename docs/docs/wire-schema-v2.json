@@ -548,17 +548,6 @@
       ],
       "type": "object"
     },
-    "SurfaceFocusParams": {
-      "properties": {
-        "surface": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "surface"
-      ],
-      "type": "object"
-    },
     "SurfaceKeyParams": {
       "properties": {
         "key": {
@@ -850,31 +839,6 @@
       "required": [
         "surface",
         "data"
-      ],
-      "type": "object"
-    },
-    "TerminalLinkParams": {
-      "properties": {
-        "col": {
-          "minimum": 0,
-          "type": "integer"
-        },
-        "row": {
-          "minimum": 0,
-          "type": "integer"
-        },
-        "surface": {
-          "type": "string"
-        },
-        "url": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "surface",
-        "url",
-        "row",
-        "col"
       ],
       "type": "object"
     },
@@ -1236,12 +1200,6 @@
     "surface.close.result": {
       "description": "Result owned by design/protocol.md; no additional field constraints specified here."
     },
-    "surface.focus.params": {
-      "$ref": "#/$defs/SurfaceFocusParams"
-    },
-    "surface.focus.result": {
-      "$ref": "#/$defs/EmptyResult"
-    },
     "surface.open.params": {
       "$ref": "#/$defs/SurfaceOpenParams"
     },
@@ -1276,12 +1234,6 @@
       "$ref": "#/$defs/TerminalInputParams"
     },
     "terminal.input.result": {
-      "description": "Result owned by design/protocol.md; no additional field constraints specified here."
-    },
-    "terminal.link.params": {
-      "$ref": "#/$defs/TerminalLinkParams"
-    },
-    "terminal.link.result": {
       "description": "Result owned by design/protocol.md; no additional field constraints specified here."
     },
     "terminal.write.params": {
@@ -1699,15 +1651,6 @@
         "$ref": "#/$defs/surface.close.result"
       }
     },
-    "surface.focus": {
-      "form": "request",
-      "params": {
-        "$ref": "#/$defs/surface.focus.params"
-      },
-      "result": {
-        "$ref": "#/$defs/surface.focus.result"
-      }
-    },
     "surface.open": {
       "form": "request",
       "params": {
@@ -1760,15 +1703,6 @@
       },
       "result": {
         "$ref": "#/$defs/terminal.input.result"
-      }
-    },
-    "terminal.link": {
-      "form": "notification",
-      "params": {
-        "$ref": "#/$defs/terminal.link.params"
-      },
-      "result": {
-        "$ref": "#/$defs/terminal.link.result"
       }
     },
     "terminal.write": {

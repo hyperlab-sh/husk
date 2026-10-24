@@ -66,7 +66,6 @@ func MethodHomes() map[string]MethodHome {
 		protocol.MethodStateClear:    home("StatePort", "Clear", cliOnly),
 		protocol.MethodStateChanged:  {Port: Outbound},
 
-		protocol.MethodSurfaceFocus:   home("SurfacePort", "SurfaceFocus", pluginOnly),
 		protocol.MethodSurfaceOpen:    home("SurfacePort", "SurfaceOpen", pluginOnly),
 		protocol.MethodSurfaceUpdate:  home("SurfacePort", "SurfaceUpdate", pluginOnly),
 		protocol.MethodSurfaceClose:   home("SurfacePort", "SurfaceClose", pluginOnly),
@@ -76,7 +75,6 @@ func MethodHomes() map[string]MethodHome {
 		protocol.MethodTerminalWrite:  home("TerminalPort", "TerminalWrite", pluginOnly),
 		protocol.MethodTerminalDetach: home("TerminalPort", "TerminalDetach", pluginOnly),
 		protocol.MethodTerminalInput:  {Port: Outbound},
-		protocol.MethodTerminalLink:   {Port: Outbound},
 
 		protocol.MethodInputKey:      {Port: Outbound},
 		protocol.MethodInputMouse:    {Port: Outbound},

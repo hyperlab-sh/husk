@@ -61,14 +61,6 @@ func (p *SurfacePort) run(ctx context.Context, fn func() error) error {
 	return codedEngine(err)
 }
 
-// SurfaceFocus serves surface.focus for the opening plugin.
-func (p *SurfacePort) SurfaceFocus(ctx context.Context, c contracts.Caller, params protocol.SurfaceFocusParams) error {
-	if err := allowCaller(protocol.MethodSurfaceFocus, c); err != nil {
-		return err
-	}
-	return p.run(ctx, func() error { return p.engine.SurfaceFocus(c.PluginID, params) })
-}
-
 // SurfaceOpen serves surface.open (plugin callers only).
 func (p *SurfacePort) SurfaceOpen(ctx context.Context, c contracts.Caller, params protocol.SurfaceOpenParams) (result protocol.SurfaceOpenResult, err error) {
 	if err = allowCaller(protocol.MethodSurfaceOpen, c); err != nil {

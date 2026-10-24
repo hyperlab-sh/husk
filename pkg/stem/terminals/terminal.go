@@ -32,16 +32,14 @@ type Cursor struct {
 // Terminal owns one emulator and its reply drain. send must be worker-safe and
 // nonblocking: it offers bytes to the occupant's existing bounded output queue.
 type Terminal struct {
-	em        *vt.Emulator
-	pipe      *io.PipeWriter
-	done      chan struct{}
-	title     string
-	modes     map[ansi.Mode]bool
-	offset    int
-	focused   bool
-	closed    bool
-	link      func(string, int, int)
-	linkPress bool
+	em      *vt.Emulator
+	pipe    *io.PipeWriter
+	done    chan struct{}
+	title   string
+	modes   map[ansi.Mode]bool
+	offset  int
+	focused bool
+	closed  bool
 }
 
 // New creates an emulator and starts its input drain before any parser runs.
@@ -163,9 +161,6 @@ func (t *Terminal) Paste(text string) {
 // reporting a wheel scrolls host history instead.
 func (t *Terminal) Mouse(event uv.MouseEvent) {
 	if t.closed {
-		return
-	}
-	if t.Link(event) {
 		return
 	}
 	mode := t.mouseMode()

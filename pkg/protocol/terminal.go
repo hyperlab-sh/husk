@@ -144,23 +144,6 @@ type TerminalDetachParams struct {
 	Surface SurfaceID `json:"surface"`
 }
 
-// TerminalLinkParams reports a ctrl+left click on a terminal URL. Row and Col
-// are zero-based cells relative to the surface's inner content area.
-type TerminalLinkParams struct {
-	Surface SurfaceID `json:"surface"`
-	URL     string    `json:"url"`
-	Row     int       `json:"row"`
-	Col     int       `json:"col"`
-}
-
-// Validate checks the target, URL presence and zero-based cell coordinates.
-func (p TerminalLinkParams) Validate() error {
-	if !p.Surface.Valid() || p.URL == "" || p.Row < 0 || p.Col < 0 {
-		return &Error{Code: CodeInvalidParams, Message: "terminal.link requires a valid surface, non-empty url and nonnegative row/col"}
-	}
-	return nil
-}
-
 // TerminalInputParams carries encoded input and emulator query replies.
 type TerminalInputParams struct {
 	Surface SurfaceID `json:"surface"`
