@@ -764,10 +764,10 @@ type podsDoc struct {
 	} `json:"plugins"`
 }
 
-// notePodTransition reports a Pod's move to a terminal status: a failure or
-// crash raises a warning toast with the recorded cause, a clean exit only
-// logs (pods.md, failure table). Only a transition counts, so a Pod that
-// stays failed across refreshes toasts once.
+// notePodTransition raises a warning toast with the recorded cause when a
+// Pod fails or crashes. Pods logs terminal transitions; clean exits need no
+// frontend report (pods.md, failure table). Only a transition counts, so a
+// Pod that stays failed across refreshes toasts once.
 func (m *WorkbenchModel) notePodTransition(id string, from, to contracts.PodStatus, lastError string) {
 	if from == to {
 		return
@@ -781,8 +781,6 @@ func (m *WorkbenchModel) notePodTransition(id string, from, to contracts.PodStat
 		// Pods logs both launch failures and crashes. State refresh only
 		// raises the toast, independent of which transitions it observed.
 		m.failures = append(m.failures, msg)
-	case contracts.PodExited:
-		m.logf("plugin %s exited", id)
 	}
 }
 

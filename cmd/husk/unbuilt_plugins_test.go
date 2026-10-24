@@ -184,20 +184,26 @@ func TestPluginCommandChild(t *testing.T) {
 	os.Exit(0)
 }
 
-func TestPodFailureTransitionsOnlyToast(t *testing.T) {
-	for _, from := range []contracts.PodStatus{"", contracts.PodStarting, contracts.PodLive} {
-		t.Run(string(from), func(t *testing.T) {
-			m := goldenModel()
-			var stderr bytes.Buffer
-			m.logOut = &stderr
-			m.notePodTransition("alpha", from, contracts.PodFailed, "failure cause")
-			m.notePodTransition("alpha", contracts.PodFailed, contracts.PodFailed, "failure cause")
-			if stderr.Len() != 0 {
-				t.Errorf("frontend duplicated Pods failure log: %q", stderr.String())
-			}
-			if len(m.failures) != 1 || m.failures[0] != "alpha: failure cause" {
-				t.Errorf("failure toasts = %q, want one with the original cause", m.failures)
-			}
-		})
+func TestPodTerminalTransitionsDoNotLog(t *testing.T) {
+	for _, to := range []contracts.PodStatus{contracts.PodFailed, contracts.PodExited} {
+		for _, from := range []contracts.PodStatus{"", contracts.PodStarting, contracts.PodLive} {
+			t.Run(string(from)+"_to_"+string(to), func(t *testing.T) {
+				m := goldenModel()
+				var stderr bytes.Buffer
+				m.logOut = &stderr
+				m.notePodTransition("alpha", from, to, "failure cause")
+				m.notePodTransition("alpha", to, to, "failure cause")
+				if stderr.Len() != 0 {
+					t.Errorf("frontend duplicated Pods terminal log: %q", stderr.String())
+				}
+				if to == contracts.PodFailed {
+					if len(m.failures) != 1 || m.failures[0] != "alpha: failure cause" {
+						t.Errorf("failure toasts = %q, want one with the original cause", m.failures)
+					}
+				} else if len(m.failures) != 0 {
+					t.Errorf("clean exit raised failure toasts: %q", m.failures)
+				}
+			})
+		}
 	}
 }

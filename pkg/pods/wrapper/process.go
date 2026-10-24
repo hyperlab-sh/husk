@@ -200,8 +200,14 @@ func (w *Wrapper) Start(opening []protocol.Message) error {
 			name = w.spec.Command[0]
 		}
 		resolvedFromWorkDir := w.spec.WorkDir != "" && !filepath.IsAbs(name) && strings.ContainsAny(name, `/\`)
-		if _, statErr := os.Stat(argv[0]); resolvedFromWorkDir && (errors.Is(err, os.ErrNotExist) && errors.Is(statErr, os.ErrNotExist)) {
-			err = fmt.Errorf("command %q not found in %s; build it first", name, w.spec.WorkDir)
+		if resolvedFromWorkDir && errors.Is(err, os.ErrNotExist) {
+			// A vanished working directory also makes the executable stat
+			// fail. Preserve its native launch error instead of suggesting a build.
+			if _, dirErr := os.Stat(w.spec.WorkDir); dirErr == nil {
+				if _, statErr := os.Stat(argv[0]); errors.Is(statErr, os.ErrNotExist) {
+					err = fmt.Errorf("command %q not found in %s; build it first", name, w.spec.WorkDir)
+				}
+			}
 		}
 		return fail(err)
 	}
