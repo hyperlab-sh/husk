@@ -1,0 +1,13 @@
+{
+  "correlation_id": "external",
+  "focused_pane_agent": "worker",
+  "focused_pane_cwd": "/project",
+  "focused_pane_id": "provided",
+  "focused_pane_status": "working",
+  "invocation_source": "command_palette",
+  "selected_text": "selection",
+  "tab_id": "t",
+  "tab_label": "Main",
+  "workspace_cwd": "/project",
+  "workspace_id": "w"
+}
