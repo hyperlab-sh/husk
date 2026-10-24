@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image"
 	"maps"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -177,20 +178,22 @@ func (m *WorkbenchModel) refreshSettings() {
 		}
 		profiles := slices.Clone(m.fe.Profiles())
 		slices.SortFunc(profiles, func(a, b contracts.ProfileInfo) int { return strings.Compare(a.Name, b.Name) })
-		s.profiles = profiles
-		s.active = ""
-		for _, p := range profiles {
-			if p.Active {
-				s.active = p.Name
-				break
+		if !reflect.DeepEqual(profiles, s.profiles) {
+			s.profiles = profiles
+			s.active = ""
+			for _, p := range profiles {
+				if p.Active {
+					s.active = p.Name
+					break
+				}
 			}
-		}
-		if s.profileForm != nil {
-			choice := s.profileChoice
-			if choice != "" && !slices.ContainsFunc(profiles, func(p contracts.ProfileInfo) bool { return p.Name == choice }) {
-				choice = s.active
+			if s.profileForm != nil {
+				choice := s.profileChoice
+				if choice != "" && !slices.ContainsFunc(profiles, func(p contracts.ProfileInfo) bool { return p.Name == choice }) {
+					choice = s.active
+				}
+				m.buildSettingsProfiles(choice)
 			}
-			m.buildSettingsProfiles(choice)
 		}
 	}
 	if s.profileForm != nil && (s.styled != protocol.Palette(m.served) || !maps.Equal(s.indices, m.ansi)) {
