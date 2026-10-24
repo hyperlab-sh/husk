@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -278,9 +280,25 @@ func TestPaneReviewEOFStopsPTYAndPendingAttach(t *testing.T) {
 }
 
 func TestPaneReviewCrossPluginControlLimit(t *testing.T) {
-	r := &runner{m: manifest.Manifest{ID: "demo"}}
+	path := filepath.Join(t.TempDir(), "plugins.json")
+	if err := os.WriteFile(path, []byte(`[{"plugin_id":"other","enabled":true}]`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	h := &testHost{events: make(chan hostRecord, 8), invoke: func(context.Context, any) (json.RawMessage, error) {
+		return json.RawMessage(`{"type":"plugin_pane_opened","plugin_pane":{"plugin_id":"other","entrypoint":"panel","pane":{"pane_id":"husk:other.panel-1","terminal_id":"husk:other.panel-1","workspace_id":"w","tab_id":"t","focused":true,"agent_status":"idle","revision":0}}}`), nil
+	}}
+	r := &runner{m: manifest.Manifest{ID: "demo"}, o: Options{Host: h, RegistryPath: path, Platform: "linux"}}
+	result, failure, handled := r.intercept(context.Background(), proxy.Request{ID: "open", Method: "plugin.pane.open", Params: json.RawMessage(`{"plugin_id":"other","entrypoint":"panel","placement":"overlay"}`)})
+	if !handled || failure != nil {
+		t.Fatalf("cross-plugin open: %v %v", handled, failure)
+	}
+	if err := shape(t, "success_response").Validate(map[string]any{"id": "open", "result": result}); err != nil {
+		t.Fatal(err)
+	}
+	paneID := result.(map[string]any)["plugin_pane"].(map[string]any)["pane"].(map[string]any)["pane_id"]
+	params, _ := json.Marshal(map[string]any{"pane_id": paneID})
 	for _, method := range []string{"plugin.pane.focus", "plugin.pane.close"} {
-		_, failure, handled := r.intercept(context.Background(), proxy.Request{Method: method, Params: json.RawMessage(`{"pane_id":"husk:other.panel-1"}`)})
+		_, failure, handled := r.intercept(context.Background(), proxy.Request{Method: method, Params: params})
 		if !handled || failure == nil || failure.Code != "not_found" {
 			t.Fatalf("%s foreign lifetime: %v %v", method, handled, failure)
 		}
