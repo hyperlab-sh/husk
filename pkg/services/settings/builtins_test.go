@@ -15,7 +15,7 @@ func TestBuiltinsExactLaunchSchema(t *testing.T) {
 	var got []string
 	for _, entry := range Builtins() {
 		got = append(got, entry.Key)
-		if entry.Public || entry.Owner != "husk" {
+		if entry.Public != (entry.Key == "husk.bundle") || entry.Owner != "husk" {
 			t.Fatalf("host entry exposure: %+v", entry)
 		}
 		if entry.Key == "husk.bundle" && (entry.Apply != "restart" || entry.Type != TypeString || entry.Default != "") {
