@@ -223,7 +223,7 @@ type Dispatcher interface {
 }
 
 // Read-only views the Dispatcher is given. It owns neither. ActionCatalog is
-// implemented outside Stem, by cmd/husk over Store.Declared("plugins") and
+// implemented outside Stem, by the host over Store.Declared("plugins") and
 // the host action list, because Stem never imports Store (Store invariant 4).
 type ActionCatalog interface {
     Lookup(action string) (ActionDef, bool) // config, reloadable
@@ -579,7 +579,7 @@ introspection; the shapes are in [Hooks](hooks.md).
   legacy plugins until the major protocol bump, then goes. The catalog half
   of `hello.commands` and manifest declarations becomes the action catalog;
   plugin liveness becomes a State slice.
-- `cmd/husk/commands.go`: `executeCommand`'s `husk.*` switch cases become
+- `pkg/workbench/commands.go`: `executeCommand`'s `husk.*` switch cases become
   `RegisterHost` handlers. The rail item fallback becomes a host handler per
   rail item id, registered by the frontend through `Frontend.RegisterHostAction`
   ([Pods](pods.md), "Frontend seams"). The loop over `cp.Info.Commands` becomes `catalog.Lookup`.
@@ -588,7 +588,7 @@ introspection; the shapes are in [Hooks](hooks.md).
   and `isHostCommand` disappear: Input passes an action id and the Dispatcher
   decides host or plugin. `keyBinding` and `isChordKey` leave for the
   Keybinding service.
-- `cmd/husk/input.go`: key resolution still ends in an action id, now passed
+- `pkg/workbench/input.go`: key resolution still ends in an action id, now passed
   to `Dispatcher.Invoke` with a continuation. `slot_key` to the focused
   surface is not an action and is outside this spec.
 - `pkg/huskipc` (deleted; the replacements live in `pkg/protocol`): `CommandInvokePayload`, `HookCallPayload`,

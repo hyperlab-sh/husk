@@ -1,6 +1,6 @@
 # Cell-buffer compositor
 
-Status: implemented (see "Implementation notes"). Scope: `cmd/husk` rendering
+Status: implemented (see "Implementation notes"). Scope: `pkg/workbench` rendering
 only. No wire, manifest or plugin-visible change, except that the overlay layer
 makes an `app-overlay` occupant's content visible under the rules stated there.
 
@@ -96,7 +96,7 @@ View
 
 Rules:
 
-- **Geometry has one source.** Every surface draws at its `SlotRect`. The
+- **Geometry has one source.** Every surface draws at its `slotRect`. The
   joins and the explicit gutter fill disappear; the gutter is simply a column
   no surface writes, so it stays blank, as it is today.
 - **Styles live on cells.** Each blit parses its string with
@@ -122,7 +122,7 @@ Rules:
 
 ## Functions that change
 
-All in `package main` under `cmd/husk`; no exported API in `pkg/` changes.
+All compositor code is private to `package workbench` under `pkg/workbench`; callers use `workbench.Options`, `workbench.Run` and `workbench.DumpFrame`.
 
 | Today | After |
 | :--- | :--- |
@@ -148,7 +148,7 @@ over input.
 
 ## Migration order
 
-Each slice builds, passes `go test ./cmd/husk ./pkg/...`, and is shippable on
+Each slice builds, passes the affected `go test ./pkg/workbench/...`, and is shippable on
 its own.
 
 1. **Canvas and serializer, no composition change.** Add `compose.go`. `View`
@@ -213,7 +213,7 @@ its own.
 
 ## Keeping the gates green
 
-- **Golden frames** (`cmd/husk/golden_frame_test.go`, 144x40): regenerated
+- **Golden frames** (`pkg/workbench/golden_frame_test.go`, 144x40): regenerated
   exactly once, in slice 1, behind the cell-equivalence test. Slices 2 to 5
   must not touch `testdata/*.golden`. `requireFrameGeometry` keeps checking
   40 lines of 144 cells, which the full-cell serializer guarantees.
@@ -381,9 +381,9 @@ plugin covers only the cells it paints. No plugin kind is named here.
 - **Too small.** Nothing is drawn, like every surface; the occupant gets no
   `surface.resized` until the layout returns.
 
-Implementation, `cmd/husk`: `placeSlots` adds `app-overlay` to
+Implementation, `pkg/workbench`: `placeSlots` adds `app-overlay` to
 `slotRects` at the full frame before its early returns for the full-canvas
-and stage placements, as a plain `SlotRect` with the inner rect equal to the
+and stage placements, as a plain `slotRect` with the inner rect equal to the
 rect (not through `frameRect`); `frameFor` returns the zero `frame.Spec` for
 `app-overlay`, the `--demo-frame` override included; `hitOrder` skips it,
 which also keeps it out of `View`'s surface loop and out of

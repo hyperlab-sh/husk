@@ -1,6 +1,6 @@
 # Command palette input and Bubbles textinput
 
-Status: assessed, not adopted. Scope: `cmd/husk` command palette query line.
+Status: assessed, not adopted. Scope: `pkg/workbench` command palette query line.
 
 ## Question
 

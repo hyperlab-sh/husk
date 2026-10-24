@@ -197,7 +197,7 @@ What an index role does downstream:
   that makes the frontend redraw, and a Theme report's `Changed`, compare
   the palette and the index map (`maps.Equal`): a role going from `7` to
   `"#c0c0c0"` keeps the same hex in `palette` yet must recolour.
-  `cmd/husk` reads the map to draw an index role as the ANSI basic colour
+  `pkg/workbench` reads the map to draw an index role as the ANSI basic colour
   `ansi.BasicColor(n)`, never as the hex in `palette`, so the terminal
   renders its own colour N; the popup shadow and the OSC 11 check below read
   the same map.
@@ -757,12 +757,12 @@ xterm defaults), whose `ansi` object has all nineteen roles with the table's
 indices, and no `low_contrast` problem is raised; `theme.get` returns the
 same pair; switching back to `charm` emits a `theme.changed` with no `ansi`.
 
-In `cmd/husk`: the bottom bar shows `charm` with `theme.name` unset (the
+In `pkg/workbench`: the bottom bar shows `charm` with `theme.name` unset (the
 chrome spec's test, renamed); the goldens are regenerated once for the new
 values (the chrome spec's "Tests and goldens" owns the mechanics). Under
 `base16` the frontend draws each index role as `ansi.BasicColor(n)`; the
 View's `BackgroundColor` is nil when the canvas is an index and set to the
-canvas otherwise (no OSC 11 for an index canvas). In `cmd/husk/compose.go`:
+canvas otherwise (no OSC 11 for an index canvas). In `pkg/workbench/compose.go`:
 the shadow leaves a cell with a basic or indexed colour unchanged and still
 blends a hex neighbour in the same shadow band.
 
@@ -785,9 +785,9 @@ blends a hex neighbour in the same shadow band.
 | `contracts.Frontend` (`pkg/host/contracts/frontend.go`): `Palette() protocol.Palette` | Unchanged, plus `PaletteANSI() (protocol.Palette, map[string]int)`, the palette and a detached copy of its index map from one snapshot read. Any goroutine |
 | `pkg/host/frontend.go`: `Root.Palette()` returns `Theme.Wire()` | Plus `Root.PaletteANSI()` returning `Theme.WireANSI()` |
 | Theme handler (`pkg/host/handlers/services/theme.go`): `themeGetResult{Palette}` | Gains `ANSI protocol.ANSIRoles` (a `map[string]int`, the type `ThemeChangedParams.ANSI` also uses) with `json:"ansi,omitempty"`; the handler fills palette and `ansi` from one `WireANSI()` call; the `theme.changed` pushes (`pkg/host/loop.go` at launch, `pkg/host/reload_watch.go` on change) take both from one `WireANSI()` call the same way |
-| `cmd/husk` draws every role from its hex | Reads `PaletteANSI()` wherever it needs the map (`Palette()` stays for callers that need only the palette); `refresh` (`cmd/husk/model.go`), which today redraws only when `pal != m.palette`, compares the palette and the map: index roles drawn as `ansi.BasicColor(n)`; `castShadow` skips cells with basic or indexed colours; the View's `BackgroundColor` (OSC 11) is set only when `canvas` is not in the map |
-| `cmd/husk/compose.go` `castShadow` blends every cell's colours | Leaves a cell with an ANSI basic or indexed colour unblended ([Cell-buffer compositor](cell-buffer-compositor.md), "Popup shadow") |
-| `cmd/husk` goldens show `✦ CharmTone` and today's colours | Regenerated once with the chrome spec's colour changes |
+| `pkg/workbench` draws every role from its hex | Reads `PaletteANSI()` wherever it needs the map (`Palette()` stays for callers that need only the palette); `refresh` (`pkg/workbench/model.go`), which today redraws only when `pal != m.palette`, compares the palette and the map: index roles drawn as `ansi.BasicColor(n)`; `castShadow` skips cells with basic or indexed colours; the View's `BackgroundColor` (OSC 11) is set only when `canvas` is not in the map |
+| `pkg/workbench/compose.go` `castShadow` blends every cell's colours | Leaves a cell with an ANSI basic or indexed colour unblended ([Cell-buffer compositor](cell-buffer-compositor.md), "Popup shadow") |
+| `pkg/workbench` goldens show `✦ CharmTone` and today's colours | Regenerated once with the chrome spec's colour changes |
 | `AGENTS.md`, `README.md`: "one palette, CharmTone, do not add other themes" | Rewritten by the landing commit to name `charm` and the built-in layer; this spec does not edit them because they describe the code as it is |
 
 ## Decisions taken by this spec
