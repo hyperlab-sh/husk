@@ -9,9 +9,9 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
-func tickModel(t *testing.T) (*WorkbenchModel, *protocol.ModifierState, *int) {
+func tickModel(t *testing.T) (*workbenchModel, *protocol.ModifierState, *int) {
 	t.Helper()
-	m := newWorkbenchModel()
+	m := newModel()
 	m.recomputeLayout()
 	os := &protocol.ModifierState{}
 	polls := new(int)

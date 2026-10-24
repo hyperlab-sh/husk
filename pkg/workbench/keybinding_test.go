@@ -31,7 +31,7 @@ func routed(t *testing.T, buf *pluginWire) keyRoute {
 	return r
 }
 
-func press(m *WorkbenchModel, key string) {
+func press(m *workbenchModel, key string) {
 	switch key {
 	case "f1", "f2", "f3", "f4":
 		m.Update(tea.KeyPressMsg{Code: tea.KeyF1 + rune(key[1]-'1')})
@@ -61,7 +61,7 @@ func resetAll(bufs ...*pluginWire) {
 // application shortcuts (F2-F4, ctrl+f/g/e, US-layout Option characters) do
 // nothing, and the rail holds only host buttons.
 func TestZeroPluginsHaveNoApplicationShortcuts(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	m.recomputeLayout()
 	for _, key := range []string{"f2", "f3", "f4", "ctrl+f", "ctrl+g", "ctrl+e", "¡", "™", "£", "¢", "π", "√"} {
 		press(m, key)
@@ -87,7 +87,7 @@ func TestZeroPluginsHaveNoApplicationShortcuts(t *testing.T) {
 // Keys that used to be swallowed by host application shortcuts now reach the
 // focused surface's plugin unchanged.
 func TestFormerApplicationKeysReachFocusedPlugin(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	_, out := addPublicationTestPlugin(m, hello{PluginID: "p", Slots: []protocol.SurfaceID{protocol.SurfaceSidebarList}})
 	out.Reset()
 	keys := []string{"f2", "f3", "f4", "ctrl+f", "ctrl+g", "ctrl+e", "™"}
@@ -107,7 +107,7 @@ func TestFormerApplicationKeysReachFocusedPlugin(t *testing.T) {
 
 // Rail buttons follow registration order; no item ID is preferred.
 func TestRailOrderIsRegistrationOrder(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	addPublicationTestPlugin(m, hello{PluginID: "z", RailItems: []contracts.RailItem{
 		{ID: "z.second", Label: "Z2", Placement: contracts.PlacementStage},
 		{ID: "rail.project-git", Label: "Z1", Placement: contracts.PlacementModal},
@@ -135,7 +135,7 @@ func TestRailOrderIsRegistrationOrder(t *testing.T) {
 
 // A rail item's declared shortcut opens it and, pressed again, closes it.
 func TestRailItemShortcutTogglesItem(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	_, side := addPublicationTestPlugin(m, hello{PluginID: "side", Slots: []protocol.SurfaceID{protocol.SurfaceSidebarList}})
 	_, stage := addPublicationTestPlugin(m, hello{PluginID: "st", Slots: []protocol.SurfaceID{protocol.SurfaceWorkspaceStage},
 		RailItems: []contracts.RailItem{{ID: "st.open", Label: "Stage", Placement: contracts.PlacementStage}}, Binds: []bind{{Key: "f4", Action: "st.open"}}})
@@ -159,7 +159,7 @@ func TestRailItemShortcutTogglesItem(t *testing.T) {
 // Inside a modal, esc and the modal item's own shortcut close it; every other
 // key, including the old hard-coded f2/ctrl+f, goes to the modal plugin.
 func TestModalClosesOnOwnShortcutOnly(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	_, out := addPublicationTestPlugin(m, hello{PluginID: "mod",
 		RailItems: []contracts.RailItem{{ID: "mod.find", Label: "Find", Placement: contracts.PlacementModal}}, Binds: []bind{{Key: "ctrl+t", Action: "mod.find"}}})
 	m.recomputeLayout()
@@ -185,7 +185,7 @@ func TestModalClosesOnOwnShortcutOnly(t *testing.T) {
 
 // A bound key becomes an action invocation instead of a surface key; unbound keys still reach the focused surface.
 func TestKeybindingInvokesDeclaringPlugin(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	_, out := addPublicationTestPlugin(m, hello{PluginID: "a", Slots: []protocol.SurfaceID{protocol.SurfaceSidebarList},
 		Binds: []bind{{Key: "n", Action: "a.new"}, {Key: "f5", Action: "a.refresh"}}})
 	out.Reset()
@@ -205,7 +205,7 @@ func TestKeybindingInvokesDeclaringPlugin(t *testing.T) {
 // itself, so nothing is delivered to a plugin as an invocation. (Which binding
 // wins a conflicting key is the keybinding service's rule, tested there.)
 func TestKeybindingHostCommandsAndRailItems(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	_, out := addPublicationTestPlugin(m, hello{PluginID: "a", Slots: []protocol.SurfaceID{protocol.SurfaceSidebarList},
 		RailItems: []contracts.RailItem{{ID: "a.dash", Label: "Dash", Placement: contracts.PlacementFullCanvas}},
 		Binds: []bind{
@@ -235,7 +235,7 @@ func TestKeybindingHostCommandsAndRailItems(t *testing.T) {
 // Stage placement routes every key to the focused surface: the stage plugin
 // until tab moves focus to the sidebar. No key is diverted to the sidebar.
 func TestStageRoutesKeysToFocusedSurfaceOnly(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	_, side := addPublicationTestPlugin(m, hello{PluginID: "side", Slots: []protocol.SurfaceID{protocol.SurfaceSidebarList}})
 	_, stage := addPublicationTestPlugin(m, hello{PluginID: "st", Slots: []protocol.SurfaceID{protocol.SurfaceWorkspaceStage},
 		RailItems: []contracts.RailItem{{ID: "st.open", Label: "Stage", Placement: contracts.PlacementStage}}})
@@ -272,7 +272,7 @@ func TestStageRoutesKeysToFocusedSurfaceOnly(t *testing.T) {
 // A key for an unoccupied focused surface is dropped, not handed to whoever
 // owns the sidebar list.
 func TestUnoccupiedFocusDropsKeys(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	_, out := addPublicationTestPlugin(m, hello{PluginID: "a", Slots: []protocol.SurfaceID{protocol.SurfaceSidebarList}})
 	m.focusedSlot = protocol.SurfaceMainStage
 	out.Reset()
@@ -285,7 +285,7 @@ func TestUnoccupiedFocusDropsKeys(t *testing.T) {
 // A full-canvas rail item whose plugin did not claim the surface in hello
 // still receives the keys for the canvas it opened.
 func TestFullCanvasKeysReachRailItemPlugin(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	_, side := addPublicationTestPlugin(m, hello{PluginID: "side", Slots: []protocol.SurfaceID{protocol.SurfaceSidebarList}})
 	_, dash := addPublicationTestPlugin(m, hello{PluginID: "dash",
 		RailItems: []contracts.RailItem{{ID: "dash.open", Label: "Dash", Placement: contracts.PlacementFullCanvas}}})
@@ -306,6 +306,11 @@ func TestHostSourceHasNoApplicationIdentifiers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	commandFiles, err := filepath.Glob(filepath.Join("..", "..", "cmd", "husk", "*.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files = append(files, commandFiles...)
 	banned := []string{`"tv.`, `"fleet.`, `"gitstage.`, `"rail.tv-search"`, `"rail.fleet-dashboard"`, `"rail.project-git"`, "¡", "™", "£", "¢", "π", "√", "BBHotspot"}
 	for _, f := range files {
 		if strings.HasSuffix(f, "_test.go") {

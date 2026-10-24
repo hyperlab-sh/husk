@@ -45,14 +45,14 @@ type settingsGeneralViewKey struct {
 	profile              bool
 }
 
-func (m *WorkbenchModel) settingsGeneralViewKey() settingsGeneralViewKey {
+func (m *workbenchModel) settingsGeneralViewKey() settingsGeneralViewKey {
 	s := m.settings
 	return settingsGeneralViewKey{m.settingsContentRect().Dx(), m.settingsContentRect().Dy(), s.focus, s.tab, s.profileForm != nil}
 }
 
 // updateSettingsGeneralView is cheap on idle ticks: no schema/value reads and
 // no widget rendering unless palette, geometry, focus or field state changed.
-func (m *WorkbenchModel) updateSettingsGeneralView() {
+func (m *workbenchModel) updateSettingsGeneralView() {
 	s := m.settings
 	g := s.general
 	if g == nil {
@@ -70,7 +70,7 @@ func (m *WorkbenchModel) updateSettingsGeneralView() {
 	}
 }
 
-func (m *WorkbenchModel) enterSettingsGeneral(back bool) {
+func (m *workbenchModel) enterSettingsGeneral(back bool) {
 	s := m.settings
 	if s.tab != "general" || s.general == nil {
 		return
@@ -227,7 +227,7 @@ func (f *settingsField) syncWidget() {
 	}
 }
 
-func (m *WorkbenchModel) buildSettingsField(f *settingsField) {
+func (m *workbenchModel) buildSettingsField(f *settingsField) {
 	label := f.entry.Key[strings.LastIndex(f.entry.Key, ".")+1:]
 	if f.entry.Type == "duration" {
 		label += " (ms)"
@@ -279,7 +279,7 @@ func (m *WorkbenchModel) buildSettingsField(f *settingsField) {
 	f.widget.Update(nil)
 }
 
-func (m *WorkbenchModel) refreshSettingsGeneral() {
+func (m *workbenchModel) refreshSettingsGeneral() {
 	s := m.settings
 	if m.fe == nil {
 		return
@@ -368,7 +368,7 @@ func (g *settingsGeneral) targets() []string {
 	}
 	return keys
 }
-func (m *WorkbenchModel) settingsGeneralTab(back bool) bool {
+func (m *workbenchModel) settingsGeneralTab(back bool) bool {
 	g := m.settings.general
 	if g == nil {
 		return false
@@ -404,7 +404,7 @@ func settingsWidgetMessage(msg tea.Msg) bool {
 	return path == "charm.land/huh/v2" || strings.HasPrefix(path, "charm.land/bubbles/v2/")
 }
 
-func (m *WorkbenchModel) settingsGeneralKey(msg tea.Msg) tea.Cmd {
+func (m *workbenchModel) settingsGeneralKey(msg tea.Msg) tea.Cmd {
 	if !settingsWidgetMessage(msg) {
 		return nil
 	}
@@ -468,7 +468,7 @@ func (m *WorkbenchModel) settingsGeneralKey(msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
-func (m *WorkbenchModel) saveSettingsGeneral() {
+func (m *workbenchModel) saveSettingsGeneral() {
 	g := m.settings.general
 	if g == nil || g.saving || m.fe == nil {
 		return
@@ -492,7 +492,7 @@ func (m *WorkbenchModel) saveSettingsGeneral() {
 	g.saving = len(g.queue) > 0
 	m.nextSettingsSave()
 }
-func (m *WorkbenchModel) nextSettingsSave() {
+func (m *workbenchModel) nextSettingsSave() {
 	s := m.settings
 	g := s.general
 	if len(g.queue) == 0 {
@@ -553,7 +553,7 @@ func (m *WorkbenchModel) nextSettingsSave() {
 
 // Cache huh rendering only on Update. View consumes strings and hit targets,
 // keeping cursor models, dynamic titles and viewport bookkeeping out of View.
-func (m *WorkbenchModel) cacheSettingsGeneral() {
+func (m *workbenchModel) cacheSettingsGeneral() {
 	s := m.settings
 	g := s.general
 	if g == nil {

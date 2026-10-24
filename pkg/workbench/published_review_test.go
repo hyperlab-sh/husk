@@ -12,7 +12,7 @@ import (
 )
 
 func TestReviewParentChildContributionOwnership(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	_, _ = addPublicationTestPlugin(m, hello{PluginID: "p", Slots: []protocol.SurfaceID{protocol.SurfaceMainStage}, PublishedSlots: []slotDecl{{ID: "p.actions", Kind: "inline"}}})
 	_, child := addPublicationTestPlugin(m, hello{PluginID: "x.y"})
 	_, parent := addPublicationTestPlugin(m, hello{PluginID: "x"})
@@ -44,7 +44,7 @@ func TestReviewParentChildContributionOwnership(t *testing.T) {
 }
 
 func TestReviewDepartureRecomputesFramelessGeometry(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	addPublicationTestPlugin(m, hello{PluginID: "a", Slots: []protocol.SurfaceID{protocol.SurfaceMainStage}, Frames: map[protocol.SurfaceID]protocol.FrameSpec{protocol.SurfaceMainStage: {Border: true}}})
 	addPublicationTestPlugin(m, hello{PluginID: "b"})
 	before := m.slotRects[protocol.SurfaceMainStage]
@@ -68,7 +68,7 @@ func TestReviewDepartureRecomputesFramelessGeometry(t *testing.T) {
 func TestReviewPassiveContributionPreservesPublisherMouse(t *testing.T) {
 	for _, surface := range []protocol.SurfaceID{protocol.SurfaceMainStage, protocol.SurfaceModal} {
 		t.Run(string(surface), func(t *testing.T) {
-			m := newWorkbenchModel()
+			m := newModel()
 			_, a := addPublicationTestPlugin(m, hello{PluginID: "a", Slots: []protocol.SurfaceID{surface}, PublishedSlots: []slotDecl{{ID: "a.status", Kind: "inline"}}})
 			_, b := addPublicationTestPlugin(m, hello{PluginID: "b"})
 			contribute(m, "a.status", contribution{PluginID: "b", ID: "b.status", Content: "[Ready]"})
@@ -113,7 +113,7 @@ func TestReviewModalOrdinaryRowsPreserveMouseMetadata(t *testing.T) {
 		{"left", tea.MouseLeft}, {"wheel_up", tea.MouseWheelUp}, {"wheel_down", tea.MouseWheelDown},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			m := newWorkbenchModel()
+			m := newModel()
 			_, a := addPublicationTestPlugin(m, hello{PluginID: "a", Slots: []protocol.SurfaceID{protocol.SurfaceModal}, Frames: map[protocol.SurfaceID]protocol.FrameSpec{protocol.SurfaceModal: {Border: true}}})
 			m.content("a", protocol.SurfaceUpdateParams{Surface: protocol.SurfaceModal, Lines: []string{"", "", "ordinary publisher row"}, HitTargets: []protocol.RowHitTarget{{Line: 2, ID: "one", Kind: "row", Action: "select", Payload: map[string]string{"key": "value"}}}})
 			m.openModal("a", "demo")
@@ -146,7 +146,7 @@ func TestReviewRegionRendersBeforeSlotUpdate(t *testing.T) {
 				name = string(surface) + "/bordered"
 			}
 			t.Run(name, func(t *testing.T) {
-				m := newWorkbenchModel()
+				m := newModel()
 				_, _ = addPublicationTestPlugin(m, hello{PluginID: "a", Slots: []protocol.SurfaceID{surface}, Frames: map[protocol.SurfaceID]protocol.FrameSpec{surface: {Border: border}}, PublishedSlots: []slotDecl{{ID: "a.region", Kind: "region", Rect: &contracts.PublishedRect{Surface: surface, X: 2, Y: 2, Width: 12, Height: 1}}}})
 				_, b := addPublicationTestPlugin(m, hello{PluginID: "b"})
 				contribute(m, "a.region", contribution{PluginID: "b", ID: "b.button", Content: "[Action]", OnClick: "b.action"})

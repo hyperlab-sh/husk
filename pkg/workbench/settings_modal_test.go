@@ -8,7 +8,7 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
-func settingsModalFixture(t *testing.T) (*WorkbenchModel, *fakeFE) {
+func settingsModalFixture(t *testing.T) (*workbenchModel, *fakeFE) {
 	t.Helper()
 	m, fe := generalFixture(t, contracts.SettingEntry{Key: "husk.value", Type: "string", Default: "saved", Owner: "husk"})
 	addPublicationTestPlugin(m, hello{PluginID: "p", Slots: []protocol.SurfaceID{protocol.SurfaceModal}, RailItems: []contracts.RailItem{{ID: "p.dialog", Placement: contracts.PlacementModal}}})

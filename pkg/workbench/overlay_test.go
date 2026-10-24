@@ -37,7 +37,7 @@ func TestOverlayPlacement(t *testing.T) {
 						if got := m.frameFor(protocol.SurfaceAppOverlay); got != (frame.Spec{}) {
 							t.Fatalf("frame = %+v", got)
 						}
-						want := SlotRect{Width: size[0], Height: size[1], InnerW: size[0], InnerH: size[1]}
+						want := slotRect{Width: size[0], Height: size[1], InnerW: size[0], InnerH: size[1]}
 						if got := m.slotRects[protocol.SurfaceAppOverlay]; got != want {
 							t.Fatalf("rect = %+v, want %+v", got, want)
 						}

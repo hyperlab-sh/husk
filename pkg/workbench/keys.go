@@ -111,7 +111,7 @@ func (d defaultKeys) KeysFor(action string) []string {
 }
 
 // firstKey is the strongest spelling of action, or "" when none is bound.
-func (m *WorkbenchModel) firstKey(action string) string {
+func (m *workbenchModel) firstKey(action string) string {
 	if ks := m.keys.KeysFor(action); len(ks) > 0 {
 		return ks[0]
 	}

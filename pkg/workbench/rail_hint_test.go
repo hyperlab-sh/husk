@@ -35,7 +35,7 @@ func TestRailShortcutLabel(t *testing.T) {
 // A plugin that leaves takes its rail items out of the rail buttons:
 // refresh keeps only live plugins' items.
 func TestDepartedPluginRailItemsArePruned(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	fe := withFE(m)
 	fe.Rails = []contracts.RailItem{{ID: "gone.open", Plugin: "gone", Label: "Gone", Placement: contracts.PlacementModal}}
 	fe.bind("f7", "gone.open")

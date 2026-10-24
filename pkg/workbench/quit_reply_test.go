@@ -92,7 +92,7 @@ func quitRepliesBeforeStop(t *testing.T, id string, quitArgs func(id string) []s
 		if time.Now().After(deadline) {
 			t.Fatal("the instance never registered")
 		}
-		pm := probeMsg{fn: func(*WorkbenchModel) {}, done: make(chan struct{})}
+		pm := probeMsg{fn: func(*workbenchModel) {}, done: make(chan struct{})}
 		p.Send(pm)
 		<-pm.done
 	}

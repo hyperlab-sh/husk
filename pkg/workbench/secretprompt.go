@@ -67,7 +67,7 @@ func secretPromptFunc(prog *programRef) func(context.Context, secrets.Prompt) se
 }
 
 // answerSecretPrompt sends the answer once and takes the dialog down.
-func (m *WorkbenchModel) answerSecretPrompt(a secrets.Answer) {
+func (m *workbenchModel) answerSecretPrompt(a secrets.Answer) {
 	p := m.secretPrompt
 	m.secretPrompt = nil
 	if p == nil {
@@ -83,7 +83,7 @@ func (m *WorkbenchModel) answerSecretPrompt(a secrets.Answer) {
 // nothing reaches the palette, the keymap or a plugin, and only an explicit
 // y or n, once the dialog is armed, grants or declines; esc always dismisses. Enter does not answer, so a stray keystroke
 // cannot accept.
-func (m *WorkbenchModel) secretPromptKey(key string) (tea.Model, tea.Cmd) {
+func (m *workbenchModel) secretPromptKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "y":
 		if m.secretPrompt.armed {
@@ -112,7 +112,7 @@ func plainText(s string) string {
 
 // drawSecretPrompt draws the confirm box: the verified plugin id first, the
 // plugin's own claim of a display name marked as such, then what it asks for.
-func (m *WorkbenchModel) drawSecretPrompt(c *canvas) uv.Rectangle {
+func (m *workbenchModel) drawSecretPrompt(c *canvas) uv.Rectangle {
 	p := m.secretPrompt.prompt
 	boxW := min(72, m.width-8)
 	iw := boxW - 4

@@ -86,7 +86,7 @@ func normalizeTextEvent(msg tea.KeyPressMsg) tea.KeyPressMsg {
 // The same mode makes terminals report Caps, Num and Scroll Lock presses,
 // which they withhold otherwise. Those are swallowed too, so plugins see the
 // same key set as before; the lock state still rides on other keys' Mod.
-func (m *WorkbenchModel) trackModifierKey(k tea.Key, down bool) bool {
+func (m *workbenchModel) trackModifierKey(k tea.Key, down bool) bool {
 	switch k.Code {
 	case tea.KeyCapsLock, tea.KeyNumLock, tea.KeyScrollLock:
 		return true
@@ -123,7 +123,7 @@ func (m *WorkbenchModel) trackModifierKey(k tea.Key, down bool) bool {
 // repeat only, so the release of AltGr+Q (held as "@") is named "q" and the
 // release of a dead-key "é" is named "e". Shifted text needs no alias: the
 // alternate-keys flag gives the release the same shifted name.
-func (m *WorkbenchModel) recordHeldAlias(msg tea.KeyPressMsg, key string) {
+func (m *workbenchModel) recordHeldAlias(msg tea.KeyPressMsg, key string) {
 	if msg.Text == "" || msg.Code == tea.KeyExtended {
 		return
 	}
@@ -141,7 +141,7 @@ func (m *WorkbenchModel) recordHeldAlias(msg tea.KeyPressMsg, key string) {
 
 // releasedHeldKey maps a release's name to the name its press was held under.
 // A stale alias (its key already expired) falls back to the release's name.
-func (m *WorkbenchModel) releasedHeldKey(name string) string {
+func (m *workbenchModel) releasedHeldKey(name string) string {
 	text, ok := m.heldAliases[name]
 	if !ok {
 		return name
@@ -154,7 +154,7 @@ func (m *WorkbenchModel) releasedHeldKey(name string) string {
 }
 
 // dropHeldAliases forgets the aliases pointing at a held key that expired.
-func (m *WorkbenchModel) dropHeldAliases(key string) {
+func (m *workbenchModel) dropHeldAliases(key string) {
 	for code, text := range m.heldAliases {
 		if text == key {
 			delete(m.heldAliases, code)
@@ -163,7 +163,7 @@ func (m *WorkbenchModel) dropHeldAliases(key string) {
 }
 
 // keyContext is the focus and overlay state a key resolution depends on.
-func (m *WorkbenchModel) keyContext() contracts.KeyContext {
+func (m *workbenchModel) keyContext() contracts.KeyContext {
 	ctx := contracts.KeyContext{Frozen: m.layoutFrozen()}
 	if m.modalOwner().Open() {
 		ctx.ModalOpen = true
@@ -189,7 +189,7 @@ func (m *WorkbenchModel) keyContext() contracts.KeyContext {
 // far, and reports whether the keymap consumed it (a binding ran, or a longer
 // sequence is pending). A key it did not consume belongs to the focused
 // surface's occupant: no binding claims it, or the bound host action declined.
-func (m *WorkbenchModel) resolveKey(key string) bool {
+func (m *workbenchModel) resolveKey(key string) bool {
 	if key == "esc" && len(m.pendingKeys) > 0 {
 		m.clearPending() // esc cancels a pending sequence and is consumed
 		return true
@@ -231,13 +231,13 @@ func (m *WorkbenchModel) resolveKey(key string) bool {
 
 // clearPending discards the keys of a pending sequence, if any, and retires
 // its timer.
-func (m *WorkbenchModel) clearPending() {
+func (m *workbenchModel) clearPending() {
 	m.pendingKeys = nil
 	m.seqGen++
 }
 
 // scheduleSequenceTimeout arms the timeout of the sequence of generation gen.
-func (m *WorkbenchModel) scheduleSequenceTimeout(gen uint64) tea.Cmd {
+func (m *workbenchModel) scheduleSequenceTimeout(gen uint64) tea.Cmd {
 	msg := sequenceTimeoutMsg{gen: gen}
 	if m.after == nil {
 		return tea.Tick(sequenceTimeout, func(time.Time) tea.Msg { return msg })
@@ -251,7 +251,7 @@ func (m *WorkbenchModel) scheduleSequenceTimeout(gen uint64) tea.Cmd {
 // and a text-key opener such as ":" is typed into the query. An empty context
 // admits only global candidates, and the winner is the effective global entry,
 // so a Match on the opener is exactly that set.
-func (m *WorkbenchModel) paletteClosesOn(key string) bool {
+func (m *workbenchModel) paletteClosesOn(key string) bool {
 	if key == "esc" || key == "ctrl+c" {
 		return true
 	}
@@ -262,7 +262,7 @@ func (m *WorkbenchModel) paletteClosesOn(key string) bool {
 	return res.Outcome == contracts.KeyMatch && res.Binding != nil && res.Binding.Action == "husk.palette.open"
 }
 
-func (m *WorkbenchModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m *workbenchModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := legacyKeyString(msg)
 
 	// While the terminal is too small the UI is hidden: only quit is honoured
@@ -373,7 +373,7 @@ func (m *WorkbenchModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // keyOwner is the plugin that receives keys for slot: the surface's occupant,
 // or, for the surface opened by the active full-canvas/stage rail item, the
 // plugin that declared that rail item.
-func (m *WorkbenchModel) keyOwner(slot protocol.SurfaceID) string {
+func (m *workbenchModel) keyOwner(slot protocol.SurfaceID) string {
 	if owner := m.surfaceOwner(slot); owner != "" {
 		return owner
 	}
@@ -419,7 +419,7 @@ func cleanQueryPaste(content string) string {
 	}, strings.ReplaceAll(content, "\r\n", "\n"))
 }
 
-func (m *WorkbenchModel) pastePalette(content string) (tea.Model, tea.Cmd) {
+func (m *workbenchModel) pastePalette(content string) (tea.Model, tea.Cmd) {
 	clean := cleanQueryPaste(content)
 	if clean == "" {
 		return m, nil
@@ -465,7 +465,7 @@ func isPaletteText(key string) bool {
 // onBorderRing reports whether (x, y) lies on the border ring of a surface
 // whose occupant declared a border frame. Only those cells are drawn as
 // dividers, so only they may start a drag.
-func (m *WorkbenchModel) onBorderRing(x, y int) bool {
+func (m *workbenchModel) onBorderRing(x, y int) bool {
 	for slot, r := range m.slotRects {
 		if !image.Pt(x, y).In(r.Rect()) {
 			continue
@@ -490,14 +490,14 @@ func (m *WorkbenchModel) onBorderRing(x, y int) bool {
 // bordered surface than the divider's own neighbours. This is accepted because
 // every surface sharing a divider's column or row is drawn as part of the same
 // edge, so a bordered cell there is a drawn divider cell.
-func (m *WorkbenchModel) detectDividerAt(x, y int) string {
+func (m *workbenchModel) detectDividerAt(x, y int) string {
 	if !m.onBorderRing(x, y) {
 		return ""
 	}
 	return m.dividerBandAt(x, y)
 }
 
-func (m *WorkbenchModel) dividerBandAt(x, y int) string {
+func (m *workbenchModel) dividerBandAt(x, y int) string {
 	if m.activePlacement == contracts.PlacementFullCanvas || y < 1 || y >= m.height-1 {
 		return ""
 	}
@@ -545,7 +545,7 @@ func (m *WorkbenchModel) dividerBandAt(x, y int) string {
 	return ""
 }
 
-func (m *WorkbenchModel) applyDragAt(x, y int) bool {
+func (m *workbenchModel) applyDragAt(x, y int) bool {
 	bodyH := max(20, m.height-2)
 	railW := activityRailWidth
 	changed := false
@@ -585,7 +585,7 @@ func (m *WorkbenchModel) applyDragAt(x, y int) bool {
 	return changed
 }
 
-func (m *WorkbenchModel) handleMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
+func (m *workbenchModel) handleMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.showPalette || m.secretPrompt != nil || m.tooSmall() {
 		return m, nil
 	}
@@ -716,7 +716,7 @@ func (m *WorkbenchModel) handleMouse(event tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 // closeHitAt reports the framed surface (modal / full-canvas / stage) whose
 // close button covers (x, y), if that surface declared one.
-func (m *WorkbenchModel) closeHitAt(x, y int) (protocol.SurfaceID, bool) {
+func (m *workbenchModel) closeHitAt(x, y int) (protocol.SurfaceID, bool) {
 	// While a modal is open it is the topmost surface: clicks never reach a
 	// close button on the underlying canvas/stage (matching esc, which only
 	// dismisses the modal).
@@ -736,7 +736,7 @@ func (m *WorkbenchModel) closeHitAt(x, y int) (protocol.SurfaceID, bool) {
 		return "", false
 	}
 	for _, slot := range []protocol.SurfaceID{protocol.SurfaceFullCanvas, protocol.SurfaceWorkspaceStage} {
-		var rect SlotRect
+		var rect slotRect
 		switch slot {
 		case protocol.SurfaceModal:
 			if !m.modalOwner().Open() {

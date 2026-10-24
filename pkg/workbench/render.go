@@ -15,7 +15,7 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
-func (m *WorkbenchModel) View() tea.View {
+func (m *workbenchModel) View() tea.View {
 	if m.tooSmall() {
 		view := tea.NewView(m.renderTooSmall())
 		if _, indexed := m.ansi["canvas"]; !indexed {
@@ -121,7 +121,7 @@ var surfaceCallouts = map[protocol.SurfaceID]string{
 	protocol.SurfaceFullCanvas:        "②-⑦",
 }
 
-func (m *WorkbenchModel) renderActivityRailBox() string {
+func (m *workbenchModel) renderActivityRailBox() string {
 	rect := m.slotRects[protocol.SurfaceActivityRail]
 	railW := rect.Width
 	bodyH := rect.Height
@@ -186,7 +186,7 @@ func (m *WorkbenchModel) renderActivityRailBox() string {
 
 // drawModal draws the modal surface, framed as its plugin declared, at the
 // modal rect.
-func (m *WorkbenchModel) drawModal(c *canvas) {
+func (m *workbenchModel) drawModal(c *canvas) {
 	rect := m.modalRect
 	innerW, innerH := rect.InnerW, rect.InnerH
 
@@ -212,7 +212,7 @@ func (m *WorkbenchModel) drawModal(c *canvas) {
 }
 
 // layoutLabel describes the placement and the side columns actually drawn.
-func (m *WorkbenchModel) layoutLabel() string {
+func (m *workbenchModel) layoutLabel() string {
 	_, left := m.slotRects[protocol.SurfaceSidebarList]
 	_, right := m.slotRects[protocol.SurfaceSidePanel]
 	switch {
@@ -235,7 +235,7 @@ func (m *WorkbenchModel) layoutLabel() string {
 	return "Workbench"
 }
 
-func (m *WorkbenchModel) renderTopWorkbenchBar() string {
+func (m *workbenchModel) renderTopWorkbenchBar() string {
 	brand := lipgloss.NewStyle().
 		Foreground(m.palette.Ink).
 		Background(m.palette.SurfaceElevated).
@@ -285,7 +285,7 @@ func (m *WorkbenchModel) renderTopWorkbenchBar() string {
 		Render(fitLineWidth(line, m.width))
 }
 
-func (m *WorkbenchModel) renderBottomKeybindBar() string {
+func (m *workbenchModel) renderBottomKeybindBar() string {
 	keyStyle := lipgloss.NewStyle().
 		Foreground(m.palette.Ink).
 		Bold(true)
@@ -347,7 +347,7 @@ func regionSlot(id protocol.SurfaceID) bool {
 
 // drawSurface draws occupant content or an empty region's name, then badges
 // and the frame the occupant declared. Placement surfaces never show a name.
-func (m *WorkbenchModel) drawSurface(c *canvas, slotID protocol.SurfaceID, calloutNum, slotName string) {
+func (m *workbenchModel) drawSurface(c *canvas, slotID protocol.SurfaceID, calloutNum, slotName string) {
 	rect, ok := m.slotRects[slotID]
 	if !ok {
 		return
@@ -393,7 +393,7 @@ func (m *WorkbenchModel) drawSurface(c *canvas, slotID protocol.SurfaceID, callo
 // theirs. It runs after the frame chrome so a borderless frame's label row,
 // drawn over the first content row, is covered too; a border ring lies outside
 // the content area and keeps its own styling.
-func (m *WorkbenchModel) fillSlotBg(c *canvas, rect SlotRect) {
+func (m *workbenchModel) fillSlotBg(c *canvas, rect slotRect) {
 	if m.palette.Slot == nil || rect.InnerW <= 0 || rect.InnerH <= 0 {
 		return
 	}
@@ -408,7 +408,7 @@ func (m *WorkbenchModel) fillSlotBg(c *canvas, rect SlotRect) {
 // docs/docs/architecture.md, "Content clipping"). Lines are not padded: the
 // canvas clears the rest of each row when it draws them, from a zero pen, so
 // a style a line leaves open stops at its last character.
-func (m *WorkbenchModel) surfaceContentLines(su *protocol.SurfaceUpdateParams, w, h int) []string {
+func (m *workbenchModel) surfaceContentLines(su *protocol.SurfaceUpdateParams, w, h int) []string {
 	lines := make([]string, h)
 	for i := 0; i < h && su != nil && i < len(su.Lines); i++ {
 		if ansi.StringWidth(su.Lines[i]) > w {
@@ -420,18 +420,18 @@ func (m *WorkbenchModel) surfaceContentLines(su *protocol.SurfaceUpdateParams, w
 	return lines
 }
 
-func (m *WorkbenchModel) frameLabelStyle() lipgloss.Style {
+func (m *workbenchModel) frameLabelStyle() lipgloss.Style {
 	col := m.palette.InkMuted
 	return lipgloss.NewStyle().Foreground(col).Bold(true)
 }
 
-func (m *WorkbenchModel) closeStyle() lipgloss.Style {
+func (m *workbenchModel) closeStyle() lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(m.palette.InkMuted).Bold(true)
 }
 
 // drawFrame draws content lines into rect's inner area, then the declared
 // frame chrome around (or over) them.
-func (m *WorkbenchModel) drawFrame(c *canvas, slotID protocol.SurfaceID, rect SlotRect, spec frame.Spec, label string, lines []string) {
+func (m *workbenchModel) drawFrame(c *canvas, slotID protocol.SurfaceID, rect slotRect, spec frame.Spec, label string, lines []string) {
 	c.blitLines(rect.InnerX, rect.InnerY, rect.InnerW, rect.InnerH, lines)
 	m.drawChrome(c, slotID, rect, spec, label)
 	m.fillSlotBg(c, rect)
@@ -443,7 +443,7 @@ func (m *WorkbenchModel) drawFrame(c *canvas, slotID protocol.SurfaceID, rect Sl
 // Without one, the label and close glyph are drawn as cells over the first
 // content row (no geometry change); the close glyph keeps the row's last
 // cell and the label is truncated to the cells before it.
-func (m *WorkbenchModel) drawChrome(c *canvas, slotID protocol.SurfaceID, rect SlotRect, spec frame.Spec, label string) {
+func (m *workbenchModel) drawChrome(c *canvas, slotID protocol.SurfaceID, rect slotRect, spec frame.Spec, label string) {
 	if !spec.Enabled() {
 		return
 	}
@@ -515,7 +515,7 @@ func (m *WorkbenchModel) drawChrome(c *canvas, slotID protocol.SurfaceID, rect S
 // dividerEdgeStyles returns the edge styles/glyphs for a bordered surface,
 // highlighting the divider being dragged or hovered (only visible when the
 // occupying plugin declared a border frame).
-func (m *WorkbenchModel) dividerEdgeStyles(slotID protocol.SurfaceID) (left, right, top, bot lipgloss.Style, lG, rG, tG, bG string) {
+func (m *workbenchModel) dividerEdgeStyles(slotID protocol.SurfaceID) (left, right, top, bot lipgloss.Style, lG, rG, tG, bG string) {
 	borderCol := m.palette.Border
 	if m.focusedSlot == slotID {
 		borderCol = m.palette.BorderFocused
@@ -584,7 +584,7 @@ func (m *WorkbenchModel) dividerEdgeStyles(slotID protocol.SurfaceID) (left, rig
 
 // drawHotspotArchitectureStage draws Husk's slot architecture explorer over
 // the main-stage slot rect.
-func (m *WorkbenchModel) drawHotspotArchitectureStage(c *canvas) {
+func (m *workbenchModel) drawHotspotArchitectureStage(c *canvas) {
 	rect := m.slotRects[protocol.SurfaceMainStage]
 	// The architecture explorer is Husk's own UI and always draws its own core
 	// frame: derive a fresh inner rect from the OUTER slot rect so the explorer
@@ -592,7 +592,7 @@ func (m *WorkbenchModel) drawHotspotArchitectureStage(c *canvas) {
 	// border of its own.
 	coreFrame := frame.Spec{Border: true, Label: "Slot Architecture Explorer"}
 	_, _, coreW, coreH := frame.InnerRect(rect.X, rect.Y, rect.Width, rect.Height, coreFrame)
-	coreRect := SlotRect{
+	coreRect := slotRect{
 		X: rect.X, Y: rect.Y, Width: rect.Width, Height: rect.Height,
 		InnerX: rect.X + 1, InnerY: rect.Y + 1, InnerW: coreW, InnerH: coreH,
 	}
@@ -671,7 +671,7 @@ func (m *WorkbenchModel) drawHotspotArchitectureStage(c *canvas) {
 }
 
 // drawToast draws the active toast near the top-right corner.
-func (m *WorkbenchModel) drawToast(c *canvas) {
+func (m *workbenchModel) drawToast(c *canvas) {
 	if m.activeToast == nil {
 		return
 	}
@@ -700,7 +700,7 @@ func (m *WorkbenchModel) drawToast(c *canvas) {
 }
 
 // drawCommandPalette draws the command palette box.
-func (m *WorkbenchModel) drawCommandPalette(c *canvas) uv.Rectangle {
+func (m *workbenchModel) drawCommandPalette(c *canvas) uv.Rectangle {
 	palW := min(82, m.width-8)
 	cmds := m.filteredCommands()
 
@@ -815,7 +815,7 @@ func paletteCell(s string, w int, right bool, st lipgloss.Style) string {
 
 // paletteRow renders one palette list row exactly iw cells wide, with the
 // row background on every cell and the selected row highlighted end to end.
-func (m *WorkbenchModel) paletteRow(c paletteCommand, sel bool, iw int, cols paletteCols) string {
+func (m *workbenchModel) paletteRow(c paletteCommand, sel bool, iw int, cols paletteCols) string {
 	bg := m.palette.Surface
 	if sel {
 		bg = m.palette.SurfaceSelected

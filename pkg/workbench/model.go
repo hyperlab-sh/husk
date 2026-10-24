@@ -27,13 +27,13 @@ import (
 
 // Rect returns the outer rectangle as a half-open image.Rectangle, so point
 // and clip tests can use Point.In, Intersect and Overlaps.
-func (r SlotRect) Rect() image.Rectangle {
+func (r slotRect) Rect() image.Rectangle {
 	// A literal, not image.Rect: Rect swaps inverted corners, which would turn a
 	// negative size into a non-empty rectangle.
 	return image.Rectangle{Min: image.Pt(r.X, r.Y), Max: image.Pt(r.X+r.Width, r.Y+r.Height)}
 }
 
-type SlotRect struct {
+type slotRect struct {
 	X      int
 	Y      int
 	Width  int
@@ -115,7 +115,7 @@ type contribution struct {
 	OnClick  string
 }
 
-type WorkbenchModel struct {
+type workbenchModel struct {
 	// host and fe are nil for the built-in demos and the hermetic tests: the
 	// model then draws from the caches below, which tests fill directly.
 	host      host.Looped
@@ -144,8 +144,8 @@ type WorkbenchModel struct {
 	podStatus   map[string]contracts.PodStatus // every Pod's status, for --dump-frame
 	railItems   []contracts.RailItem
 	slotUpdates map[protocol.SurfaceID]*protocol.SurfaceUpdateParams
-	slotRects   map[protocol.SurfaceID]SlotRect
-	modalRect   SlotRect
+	slotRects   map[protocol.SurfaceID]slotRect
+	modalRect   slotRect
 	demoFrame   bool
 	catalog     *surfaceCatalog
 
@@ -233,15 +233,15 @@ type WorkbenchModel struct {
 
 const activityRailWidth = 7
 
-func newWorkbenchModel() *WorkbenchModel {
-	m := &WorkbenchModel{
+func newModel() *workbenchModel {
+	m := &workbenchModel{
 		catalog:      newSurfaceCatalog(),
 		keys:         defaultKeys{},
 		registered:   map[string]bool{},
 		plugins:      make(map[string]bool),
 		podStatus:    make(map[string]contracts.PodStatus),
 		slotUpdates:  make(map[protocol.SurfaceID]*protocol.SurfaceUpdateParams),
-		slotRects:    make(map[protocol.SurfaceID]SlotRect),
+		slotRects:    make(map[protocol.SurfaceID]slotRect),
 		width:        144,
 		height:       40,
 		palette:      newDrawPalette(theme.Default(), nil),
@@ -264,7 +264,7 @@ func newWorkbenchModel() *WorkbenchModel {
 	return m
 }
 
-func (m *WorkbenchModel) logf(format string, args ...any) {
+func (m *workbenchModel) logf(format string, args ...any) {
 	if m.logOut != nil {
 		fmt.Fprintf(m.logOut, "husk: "+format+"\n", args...)
 	}
@@ -272,7 +272,7 @@ func (m *WorkbenchModel) logf(format string, args ...any) {
 
 // attach connects the model to a running-to-be host. It is called once, before
 // the program starts.
-func (m *WorkbenchModel) attach(h host.Looped, closeGate func()) {
+func (m *workbenchModel) attach(h host.Looped, closeGate func()) {
 	m.host, m.fe, m.keys = h, h.Frontend(), h.Frontend()
 	m.closeGate = closeGate
 	m.runCtx, m.stopRun = context.WithCancel(context.Background())
@@ -281,7 +281,7 @@ func (m *WorkbenchModel) attach(h host.Looped, closeGate func()) {
 // content is the host's content sink: every accepted surface.update arrives
 // here on the loop. The engine already checked occupancy, so the plugin id is
 // the authority and the update's own plugin_id is overwritten.
-func (m *WorkbenchModel) content(plugin string, p protocol.SurfaceUpdateParams) {
+func (m *workbenchModel) content(plugin string, p protocol.SurfaceUpdateParams) {
 	update := p
 	update.PluginID = plugin
 	update.Lines = slices.Clone(p.Lines)
@@ -315,7 +315,7 @@ const (
 	heldKeyReleaseTTL = time.Second
 )
 
-func (m *WorkbenchModel) modifierTickInterval(now time.Time) time.Duration {
+func (m *workbenchModel) modifierTickInterval(now time.Time) time.Duration {
 	mods := m.modifiers
 	if mods.Alt || mods.Ctrl || mods.Shift || mods.Super || len(m.heldKeys) > 0 ||
 		now.Sub(m.lastInput) < modifierActiveFor {
@@ -326,7 +326,7 @@ func (m *WorkbenchModel) modifierTickInterval(now time.Time) time.Duration {
 
 // startModifierTick starts the poll chain unless one is already running or
 // the terminal is unfocused.
-func (m *WorkbenchModel) startModifierTick() tea.Cmd {
+func (m *workbenchModel) startModifierTick() tea.Cmd {
 	if m.modTickOn || m.blurred {
 		return nil
 	}
@@ -337,7 +337,7 @@ func (m *WorkbenchModel) startModifierTick() tea.Cmd {
 // handleBlur drops OS-derived modifier and held-key state (other apps' Alt
 // presses must not leak in) and lets the tick chain lapse. A latched Alt
 // (the "?" toggle or --hold-alt) is host-side state and survives.
-func (m *WorkbenchModel) handleBlur() {
+func (m *workbenchModel) handleBlur() {
 	m.blurred = true
 	m.termMods = 0
 	m.syncModifierTransitions(protocol.ModifierState{Alt: m.altLatched})
@@ -351,7 +351,7 @@ func (m *WorkbenchModel) handleBlur() {
 // Init attaches the model's State slices, registers the host actions and
 // starts the host. The program goroutine is the loop, so the loop-only
 // Frontend calls are legal here.
-func (m *WorkbenchModel) Init() tea.Cmd {
+func (m *workbenchModel) Init() tea.Cmd {
 	m.attachSlices()
 	m.registerActions()
 	m.refresh()
@@ -367,11 +367,11 @@ func (m *WorkbenchModel) Init() tea.Cmd {
 
 // runHost runs host.Run until the context ends. It is a command, so it runs
 // on its own goroutine, and its result comes back as a message.
-func (m *WorkbenchModel) runHost() tea.Msg {
+func (m *workbenchModel) runHost() tea.Msg {
 	return hostRunEndedMsg{err: m.host.Run(m.runCtx)}
 }
 
-func (m *WorkbenchModel) currentHeldKeys() []string {
+func (m *workbenchModel) currentHeldKeys() []string {
 	var out []string
 	if m.modifiers.Alt {
 		out = append(out, "alt")
@@ -393,7 +393,7 @@ func (m *WorkbenchModel) currentHeldKeys() []string {
 
 // broadcastKeyState tells every live plugin about a key or modifier
 // transition. Delivery failures (a plugin that just exited) are not errors.
-func (m *WorkbenchModel) broadcastKeyState(phase protocol.KeyPhase, key string, held bool) {
+func (m *workbenchModel) broadcastKeyState(phase protocol.KeyPhase, key string, held bool) {
 	if m.terminalView(protocol.SurfaceID(m.keyContext().FocusSurface)) != nil {
 		return
 	}
@@ -413,7 +413,7 @@ func (m *WorkbenchModel) broadcastKeyState(phase protocol.KeyPhase, key string, 
 	}
 }
 
-func (m *WorkbenchModel) syncModifierTransitions(next protocol.ModifierState) {
+func (m *workbenchModel) syncModifierTransitions(next protocol.ModifierState) {
 	prev := m.modifiers
 	m.modifiers = next
 
@@ -440,7 +440,7 @@ func (m *WorkbenchModel) syncModifierTransitions(next protocol.ModifierState) {
 // Update runs one message, then settles: derived state is re-read from the
 // host, frontend-owned State is written, and the host ticks so those writes
 // flush in this same Update.
-func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *workbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.cmds = nil
 	next, cmd := m.update(msg)
 	if !m.closed {
@@ -451,7 +451,7 @@ func (m *WorkbenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return next, tea.Batch(cmds...)
 }
 
-func (m *WorkbenchModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *workbenchModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = max(0, msg.Width)
@@ -661,13 +661,13 @@ func (m *WorkbenchModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // quitCmd stops the host and the program. The post gate closes first so the
 // workers Close waits for never block on a loop that no longer reads (D62).
-func (m *WorkbenchModel) quitCmd() tea.Cmd {
+func (m *workbenchModel) quitCmd() tea.Cmd {
 	m.shutdownHost()
 	return tea.Quit
 }
 
 // shutdownHost closes the post gate, then the host; both are idempotent.
-func (m *WorkbenchModel) shutdownHost() {
+func (m *workbenchModel) shutdownHost() {
 	if m.closeGate != nil {
 		m.closeGate()
 	}
@@ -684,7 +684,7 @@ func (m *WorkbenchModel) shutdownHost() {
 
 // attachSlices registers the frontend-owned State slices and takes the
 // persisted dock preferences from husk.layout.
-func (m *WorkbenchModel) attachSlices() {
+func (m *workbenchModel) attachSlices() {
 	if m.fe == nil || m.slicesOwned {
 		return
 	}
@@ -717,7 +717,7 @@ type layoutDoc struct {
 	MainHeaderHeight int `json:"main_header_height"`
 }
 
-func (m *WorkbenchModel) layoutJSON() []byte {
+func (m *workbenchModel) layoutJSON() []byte {
 	var d layoutDoc
 	d.Sidebar.Shown, d.Sidebar.Width = m.showSidebar, m.sidebarWidth
 	d.Sidebar.NavHeight, d.Sidebar.FooterHeight = m.sidebarNavH, m.sidebarFootH
@@ -729,7 +729,7 @@ func (m *WorkbenchModel) layoutJSON() []byte {
 
 // applyLayout adopts a persisted husk.layout value. A missing or out-of-range
 // field keeps the current default.
-func (m *WorkbenchModel) applyLayout(raw json.RawMessage) {
+func (m *workbenchModel) applyLayout(raw json.RawMessage) {
 	var d layoutDoc
 	d.Sidebar.Shown, d.Sidebar.Width = m.showSidebar, m.sidebarWidth
 	d.Sidebar.NavHeight, d.Sidebar.FooterHeight = m.sidebarNavH, m.sidebarFootH
@@ -768,7 +768,7 @@ type podsDoc struct {
 // Pod fails or crashes. Pods logs terminal transitions; clean exits need no
 // frontend report (pods.md, failure table). Only a transition counts, so a
 // Pod that stays failed across refreshes toasts once.
-func (m *WorkbenchModel) notePodTransition(id string, from, to contracts.PodStatus, lastError string) {
+func (m *workbenchModel) notePodTransition(id string, from, to contracts.PodStatus, lastError string) {
 	if from == to {
 		return
 	}
@@ -788,7 +788,7 @@ func (m *WorkbenchModel) notePodTransition(id string, from, to contracts.PodStat
 // (invalid manifest, duplicate id, protocol mismatch) the way a launch
 // failure is: no husk.pods entry exists to carry the failure, so the host
 // lists them and the model reports each one once.
-func (m *WorkbenchModel) noteRefusals() {
+func (m *workbenchModel) noteRefusals() {
 	if m.fe == nil {
 		return
 	}
@@ -807,7 +807,7 @@ func (m *WorkbenchModel) noteRefusals() {
 // noteConfigNotices toasts the newest reload the user did not start that
 // ended with errors. Each reload is one toast; several that land together
 // show the last, which carries the current count.
-func (m *WorkbenchModel) noteConfigNotices() {
+func (m *workbenchModel) noteConfigNotices() {
 	if m.fe == nil {
 		return
 	}
@@ -826,7 +826,7 @@ func (m *WorkbenchModel) noteConfigNotices() {
 // line, which stays last; alone it is its own "Configuration" toast. Once the
 // toast expires, the next arrival starts a fresh one. The log holds each
 // failure in full.
-func (m *WorkbenchModel) toastFailures() {
+func (m *workbenchModel) toastFailures() {
 	cfg := m.pendingConfig
 	m.pendingConfig = ""
 	if len(m.failures) == 0 && cfg == "" {
@@ -872,7 +872,7 @@ type derived struct {
 // refresh re-reads Pods, occupancy, rail items, published slots and frames
 // from State and the Frontend when State moved. It reports whether anything
 // the layout or the draw depends on changed, and has already re-laid out then.
-func (m *WorkbenchModel) refresh() bool {
+func (m *workbenchModel) refresh() bool {
 	if m.fe == nil {
 		return false
 	}
@@ -959,7 +959,7 @@ func (m *WorkbenchModel) refresh() bool {
 
 // pruneContent forgets the last frame of every surface whose occupant changed
 // or left: a departed plugin's content must not linger.
-func (m *WorkbenchModel) pruneContent() {
+func (m *workbenchModel) pruneContent() {
 	for s, su := range m.slotUpdates {
 		if m.catalog.Occupants[s] != su.PluginID {
 			delete(m.slotUpdates, s)
@@ -968,7 +968,7 @@ func (m *WorkbenchModel) pruneContent() {
 }
 
 // dropGoneSurfaces leaves a placement or modal whose plugin is no longer live.
-func (m *WorkbenchModel) dropGoneSurfaces() {
+func (m *workbenchModel) dropGoneSurfaces() {
 	if m.modal.PluginID != "" && !m.plugins[m.modal.PluginID] {
 		m.closeModal()
 	}
@@ -983,7 +983,7 @@ func (m *WorkbenchModel) dropGoneSurfaces() {
 // State is written, and the host ticks so the writes flush now. It repeats
 // while a pass changes something (a new occupant can open a side column),
 // bounded so a flapping host cannot spin the loop.
-func (m *WorkbenchModel) settle() {
+func (m *workbenchModel) settle() {
 	defer m.toastFailures()
 	// Settings needs the final serving snapshot, not each stabilization pass.
 	defer m.refreshSettings()
@@ -1007,7 +1007,7 @@ func (m *WorkbenchModel) settle() {
 
 // pollToast shows the oldest live engine toast unless a local one is up, and
 // keeps a poll running while one is showing.
-func (m *WorkbenchModel) pollToast() {
+func (m *workbenchModel) pollToast() {
 	if m.fe == nil {
 		return
 	}
@@ -1037,7 +1037,7 @@ type geoRect struct {
 	Inner geoSize `json:"inner"`
 }
 
-func toGeo(r SlotRect) geoRect {
+func toGeo(r slotRect) geoRect {
 	return geoRect{
 		geoSize: geoSize{X: r.X, Y: r.Y, Width: r.Width, Height: r.Height},
 		Inner:   geoSize{X: r.InnerX, Y: r.InnerY, Width: r.InnerW, Height: r.InnerH},
@@ -1046,7 +1046,7 @@ func toGeo(r SlotRect) geoRect {
 
 // geometryJSON is the value of husk.geometry: the terminal size and every
 // laid-out rect (the modal's only while it is open).
-func (m *WorkbenchModel) geometryJSON() []byte {
+func (m *workbenchModel) geometryJSON() []byte {
 	rects := make(map[protocol.SurfaceID]geoRect, len(m.slotRects)+1)
 	for id, r := range m.slotRects {
 		rects[id] = toGeo(r)
@@ -1068,7 +1068,7 @@ func (m *WorkbenchModel) geometryJSON() []byte {
 }
 
 // focusJSON is the value of husk.focus.
-func (m *WorkbenchModel) focusJSON() []byte {
+func (m *workbenchModel) focusJSON() []byte {
 	focused := m.focusedSlot
 	if m.modalOwner().Open() {
 		focused = protocol.SurfaceModal
@@ -1082,7 +1082,7 @@ func (m *WorkbenchModel) focusJSON() []byte {
 }
 
 // surfaceView is the frontend half of husk.surfaces: what the layout shows.
-func (m *WorkbenchModel) surfaceView() contracts.SurfaceView {
+func (m *workbenchModel) surfaceView() contracts.SurfaceView {
 	var v contracts.SurfaceView
 	for id := range m.slotRects {
 		v.Visible = append(v.Visible, id)
@@ -1104,7 +1104,7 @@ func (m *WorkbenchModel) surfaceView() contracts.SurfaceView {
 // flushState writes the frontend-owned State that changed and reports whether
 // it wrote anything. Equal values are not written again, so a quiet frame
 // costs no State revision.
-func (m *WorkbenchModel) flushState() bool {
+func (m *workbenchModel) flushState() bool {
 	if m.fe == nil || !m.slicesOwned {
 		return false
 	}
@@ -1137,7 +1137,7 @@ func (m *WorkbenchModel) flushState() bool {
 // hotspots rail button): kind host, no focus snapshot. A plugin rail click
 // (activateRailItem) and a close-button click act on the model directly and
 // never dispatch an action.
-func (m *WorkbenchModel) run(action string, args map[string]any) {
+func (m *workbenchModel) run(action string, args map[string]any) {
 	m.invoke(action, args, protocol.CallerHost, nil)
 }
 
@@ -1145,7 +1145,7 @@ func (m *WorkbenchModel) run(action string, args map[string]any) {
 // attached, otherwise directly on the model's own handlers. A refusal toasts.
 // It reports whether a host handler declined, which is known on return only
 // for host actions: a plugin action answers later and never declines.
-func (m *WorkbenchModel) invoke(action string, args map[string]any, kind protocol.CallerKind, focus *protocol.FocusContext) (declined bool) {
+func (m *workbenchModel) invoke(action string, args map[string]any, kind protocol.CallerKind, focus *protocol.FocusContext) (declined bool) {
 	if m.fe == nil {
 		if h := m.actions[action]; h != nil {
 			_, err := h(args)
@@ -1172,7 +1172,7 @@ func (m *WorkbenchModel) invoke(action string, args map[string]any, kind protoco
 // registerActions binds the model's handlers with the host: the husk.* set
 // once, and one handler per declared rail item, replaced as plugins come and
 // go.
-func (m *WorkbenchModel) registerActions() {
+func (m *workbenchModel) registerActions() {
 	if m.fe == nil {
 		return
 	}
@@ -1212,7 +1212,7 @@ func (m *WorkbenchModel) registerActions() {
 }
 
 // hostActionTable is the husk.* action set the model serves.
-func (m *WorkbenchModel) hostActionTable() map[string]contracts.HostActionHandler {
+func (m *workbenchModel) hostActionTable() map[string]contracts.HostActionHandler {
 	do := func(f func()) contracts.HostActionHandler {
 		return func(map[string]any) (map[string]any, error) { f(); return nil, nil }
 	}
@@ -1300,7 +1300,7 @@ func (m *WorkbenchModel) hostActionTable() map[string]contracts.HostActionHandle
 	}
 }
 
-func (m *WorkbenchModel) openPalette() {
+func (m *workbenchModel) openPalette() {
 	if m.settings != nil {
 		return
 	}
@@ -1312,7 +1312,7 @@ func (m *WorkbenchModel) openPalette() {
 
 // focusNext moves focus to the next shown surface in tab order. Slots with no
 // rect (a hidden column) are skipped.
-func (m *WorkbenchModel) focusNext() {
+func (m *workbenchModel) focusNext() {
 	order := []protocol.SurfaceID{
 		protocol.SurfaceSidebarList,
 		protocol.SurfaceMainStage,
@@ -1336,7 +1336,7 @@ func (m *WorkbenchModel) focusNext() {
 // setFocus moves focus by the user's choice (tab or click). It also forgets
 // any remembered fallback slot, so a column that returns later does not take
 // the focus back.
-func (m *WorkbenchModel) setFocus(slot protocol.SurfaceID) {
+func (m *workbenchModel) setFocus(slot protocol.SurfaceID) {
 	if slot != m.focusedSlot {
 		m.clearPending()
 	}
@@ -1346,11 +1346,11 @@ func (m *WorkbenchModel) setFocus(slot protocol.SurfaceID) {
 
 // homeApplies reports whether "home" has anywhere to go; otherwise the key
 // belongs to the focused occupant.
-func (m *WorkbenchModel) homeApplies() bool {
+func (m *workbenchModel) homeApplies() bool {
 	return m.activeRailID != "" || m.stageMode == "hotspots"
 }
 
-func (m *WorkbenchModel) activateHomeWorkbench() {
+func (m *workbenchModel) activateHomeWorkbench() {
 	m.activeRailID = ""
 	m.activePlacement = ""
 	m.closeModal()
@@ -1362,7 +1362,7 @@ func (m *WorkbenchModel) activateHomeWorkbench() {
 // activateRailItem opens (or toggles closed) the surface of a rail item. The
 // occupant learns of it through surface.resized, which the host pushes when
 // the visibility and geometry land in State.
-func (m *WorkbenchModel) activateRailItem(ri contracts.RailItem) {
+func (m *workbenchModel) activateRailItem(ri contracts.RailItem) {
 	if !m.plugins[ri.Plugin] {
 		return
 	}
@@ -1414,16 +1414,16 @@ func (s modalState) Open() bool { return s.PluginID != "" || s.RailID != "" }
 // modalOwner is the single accessor for the open modal's owner. Everything that
 // needs to know whether a modal is up, who owns it or which rail item opened it
 // reads it here; nothing else keeps a copy.
-func (m *WorkbenchModel) modalOwner() modalState { return m.modal }
+func (m *workbenchModel) modalOwner() modalState { return m.modal }
 
 // openModal replaces Settings with pluginID's rail item railID as the open modal.
-func (m *WorkbenchModel) openModal(pluginID, railID string) {
+func (m *workbenchModel) openModal(pluginID, railID string) {
 	m.closeSettings()
 	m.modal = modalState{PluginID: pluginID, RailID: railID}
 }
 
 // closeModal dismisses the open modal, if any.
-func (m *WorkbenchModel) closeModal() {
+func (m *workbenchModel) closeModal() {
 	m.clearPending()
 	m.modal = modalState{}
 }
@@ -1432,13 +1432,13 @@ func (m *WorkbenchModel) closeModal() {
 // the host draws it). Write authorisation, published-content cleanup and
 // rendering all resolve through the claim, including for the modal surface;
 // modalOwner only says which modal is open and which rail item opened it.
-func (m *WorkbenchModel) surfaceOwner(slot protocol.SurfaceID) string {
+func (m *workbenchModel) surfaceOwner(slot protocol.SurfaceID) string {
 	return m.catalog.Occupants[slot]
 }
 
 // sendKey delivers a key to a plugin's surface; a plugin that just exited
 // cannot receive it, which is not an error worth a toast.
-func (m *WorkbenchModel) sendKey(plugin string, surface protocol.SurfaceID, key string) {
+func (m *workbenchModel) sendKey(plugin string, surface protocol.SurfaceID, key string) {
 	if m.fe == nil || plugin == "" {
 		return
 	}
@@ -1448,7 +1448,7 @@ func (m *WorkbenchModel) sendKey(plugin string, surface protocol.SurfaceID, key 
 }
 
 // sendMouse delivers a mouse event to a plugin's surface.
-func (m *WorkbenchModel) sendMouse(plugin string, p protocol.SurfaceMouseParams) {
+func (m *workbenchModel) sendMouse(plugin string, p protocol.SurfaceMouseParams) {
 	if m.fe == nil || plugin == "" {
 		return
 	}

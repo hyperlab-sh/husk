@@ -66,7 +66,7 @@ func TestMainHeaderDividerOnItsOwnBottomBorderOnly(t *testing.T) {
 }
 
 func TestPaletteAcceptsUnicodeQuery(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	m.showPalette = true
 	for _, r := range "aé日🙂" {
 		m.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
@@ -106,7 +106,7 @@ func TestPaletteRejectsNonASCIIChords(t *testing.T) {
 		{Code: '日', Mod: tea.ModCtrl},
 		{Code: 'ö', Text: "ö", Mod: tea.ModSuper},
 	} {
-		m := newWorkbenchModel()
+		m := newModel()
 		m.showPalette = true
 		m.paletteQuery = "x"
 		m.Update(msg)
@@ -115,7 +115,7 @@ func TestPaletteRejectsNonASCIIChords(t *testing.T) {
 		}
 	}
 	// Shift alone is still text.
-	m := newWorkbenchModel()
+	m := newModel()
 	m.showPalette = true
 	m.Update(tea.KeyPressMsg{Code: 'ö', ShiftedCode: 'Ö', Text: "Ö", Mod: tea.ModShift})
 	if m.paletteQuery != "Ö" {
@@ -124,7 +124,7 @@ func TestPaletteRejectsNonASCIIChords(t *testing.T) {
 }
 
 func TestPaletteUnicodeFilterMatches(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	// Positive: a registered title contains non-ASCII text.
 	for _, q := range []string{"🏠", "⓪"} {
 		m.paletteQuery = q
@@ -140,7 +140,7 @@ func TestPaletteUnicodeFilterMatches(t *testing.T) {
 
 // sidePanelModel lays out a 144x40 workbench with the side panel occupied and
 // the given border declarations for the centre column and the panel.
-func sidePanelModel(t *testing.T, centreBorder, panelBorder bool) *WorkbenchModel {
+func sidePanelModel(t *testing.T, centreBorder, panelBorder bool) *workbenchModel {
 	t.Helper()
 	m := sizedModel(t, 144, 40)
 	addTestPlugin(m, "p", map[protocol.SurfaceID]frame.Spec{

@@ -16,14 +16,14 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/theme"
 )
 
-func generalFixture(t testing.TB, entries ...contracts.SettingEntry) (*WorkbenchModel, *fakeFE) {
+func generalFixture(t testing.TB, entries ...contracts.SettingEntry) (*workbenchModel, *fakeFE) {
 	t.Helper()
 	m, fe := settingsFixture(t, "")
 	fe.SchemaRows = entries
 	m.openSettings(map[string]any{"tab": "general"})
 	return m, fe
 }
-func editGeneral(m *WorkbenchModel, key, text string) {
+func editGeneral(m *workbenchModel, key, text string) {
 	f := m.settings.general.fields[key]
 	f.text = text
 	f.revision++

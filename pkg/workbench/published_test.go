@@ -13,7 +13,7 @@ import (
 )
 
 func TestPublishedClickRoutesToContributor(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	_, a := addPublicationTestPlugin(m, hello{PluginID: "a", Slots: []protocol.SurfaceID{protocol.SurfaceMainStage}, PublishedSlots: []slotDecl{{ID: "a.action", Kind: "inline"}}})
 	_, bOut := addPublicationTestPlugin(m, hello{PluginID: "b"})
 	contribute(m, "a.action", contribution{PluginID: "b", ID: "b.inspect", Content: "[Inspect]", OnClick: "b.inspect"})
@@ -58,7 +58,7 @@ func TestPublishedClickRoutesToContributor(t *testing.T) {
 }
 
 func TestPublishedBlankFirstRowDoesNotStartDividerDrag(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	_, _ = addPublicationTestPlugin(m, hello{PluginID: "a", Slots: []protocol.SurfaceID{protocol.SurfaceMainStage}, PublishedSlots: []slotDecl{{ID: "a.action", Kind: "inline"}}})
 	_, b := addPublicationTestPlugin(m, hello{PluginID: "b"})
 	contribute(m, "a.action", contribution{PluginID: "b", ID: "b.button", Content: "[Inspect]", OnClick: "b.inspect"})
@@ -87,7 +87,7 @@ func TestPublishedRegionAndModalClicks(t *testing.T) {
 			{"borderless-chrome", frame.Spec{Label: "Publisher", Close: true}},
 		} {
 			t.Run(string(surface)+"/"+tc.name, func(t *testing.T) {
-				m := newWorkbenchModel()
+				m := newModel()
 				m.width, m.height = 84, 24
 				_, a := addPublicationTestPlugin(m, hello{
 					PluginID: "a", Slots: []protocol.SurfaceID{surface}, Frames: map[protocol.SurfaceID]protocol.FrameSpec{surface: protocol.FrameSpec(tc.spec)},
@@ -156,7 +156,7 @@ func TestPublishedRegionAndModalClicks(t *testing.T) {
 }
 
 func TestPublishedBorderlessFrameOccludesContribution(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	_, _ = addPublicationTestPlugin(m, hello{PluginID: "a", Slots: []protocol.SurfaceID{protocol.SurfaceModal}, Frames: map[protocol.SurfaceID]protocol.FrameSpec{protocol.SurfaceModal: {Label: "Header", Close: true}}, PublishedSlots: []slotDecl{{ID: "a.inline", Kind: "inline"}}})
 	_, b := addPublicationTestPlugin(m, hello{PluginID: "b"})
 	contribute(m, "a.inline", contribution{PluginID: "b", ID: "b.button", Content: strings.Repeat("X", 100), OnClick: "b.click"})

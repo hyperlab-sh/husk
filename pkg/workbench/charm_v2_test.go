@@ -14,7 +14,7 @@ import (
 )
 
 func TestCharmV2ViewDeclaresTerminalModes(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	m.recomputeLayout()
 	m.seedPubslotsDemo()
 	view := m.View()
@@ -27,7 +27,7 @@ func TestCharmV2ViewDeclaresTerminalModes(t *testing.T) {
 }
 
 func TestViewRequestsKeyEventTypes(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	m.recomputeLayout()
 	if !m.View().KeyboardEnhancements.ReportEventTypes {
 		t.Fatal("View must request kitty key event types or KeyReleaseMsg never fires")
@@ -35,7 +35,7 @@ func TestViewRequestsKeyEventTypes(t *testing.T) {
 }
 
 func TestKeyReleaseClearsHeldKeyWithoutTimer(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	m.pollMods = func() (protocol.ModifierState, bool) { return protocol.ModifierState{}, false }
 	_, out := addPublicationTestPlugin(m, hello{PluginID: "p"})
 	m.Update(tea.KeyboardEnhancementsMsg{Flags: ansi.KittyReportEventTypes})
@@ -62,7 +62,7 @@ func TestKeyReleaseClearsHeldKeyWithoutTimer(t *testing.T) {
 }
 
 func TestHeldKeyTimerStillExpiresWithoutEventTypes(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	m.pollMods = func() (protocol.ModifierState, bool) { return protocol.ModifierState{}, false }
 	m.Update(tea.KeyboardEnhancementsMsg{Flags: 1})
 	m.heldKeys["x"] = time.Now().Add(-time.Second)
@@ -73,7 +73,7 @@ func TestHeldKeyTimerStillExpiresWithoutEventTypes(t *testing.T) {
 }
 
 func TestHeldKeySafetyExpiryWithEventTypes(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	m.pollMods = func() (protocol.ModifierState, bool) { return protocol.ModifierState{}, false }
 	m.Update(tea.KeyboardEnhancementsMsg{Flags: ansi.KittyReportEventTypes})
 	m.heldKeys["x"] = time.Now().Add(-2 * time.Second)
@@ -84,7 +84,7 @@ func TestHeldKeySafetyExpiryWithEventTypes(t *testing.T) {
 }
 
 func TestKeyboardEnhancementsFallbackResumesShortExpiry(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	m.pollMods = func() (protocol.ModifierState, bool) { return protocol.ModifierState{}, false }
 	m.Update(tea.KeyboardEnhancementsMsg{Flags: ansi.KittyReportEventTypes})
 	m.Update(tea.KeyboardEnhancementsMsg{Flags: 1})
@@ -96,7 +96,7 @@ func TestKeyboardEnhancementsFallbackResumesShortExpiry(t *testing.T) {
 }
 
 func TestViewRequestsAlternateKeys(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	m.recomputeLayout()
 	if !m.View().KeyboardEnhancements.ReportAlternateKeys {
 		t.Fatal("View must request alternate keys so shifted-symbol releases match their press")
@@ -146,7 +146,7 @@ func TestCharmV2KeyWireSpellings(t *testing.T) {
 		{"enter", tea.KeyPressMsg{Code: tea.KeyEnter}, "enter"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			m := newWorkbenchModel()
+			m := newModel()
 			_, out := addPublicationTestPlugin(m, hello{PluginID: "p", Slots: []protocol.SurfaceID{protocol.SurfaceSidebarList}})
 			out.Reset()
 			m.Update(tc.key)
@@ -170,7 +170,7 @@ func TestCharmV2KeyWireSpellings(t *testing.T) {
 }
 
 func TestCharmV2PastePreservesWireAndDoesNotRunShortcuts(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	_, out := addPublicationTestPlugin(m, hello{PluginID: "p", Slots: []protocol.SurfaceID{protocol.SurfaceSidebarList}})
 	out.Reset()
 	_, cmd := m.Update(tea.PasteMsg{Content: "q"})
@@ -194,7 +194,7 @@ func TestCharmV2PastePreservesWireAndDoesNotRunShortcuts(t *testing.T) {
 }
 
 func TestCharmV2KeyReleaseDoesNotRepeatShortcut(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	_, out := addPublicationTestPlugin(m, hello{PluginID: "p"})
 	m.Update(tea.KeyPressMsg{Code: '[', Text: "["})
 	if m.showSidebar {
@@ -220,7 +220,7 @@ func TestCharmV2KeyReleaseDoesNotRepeatShortcut(t *testing.T) {
 }
 
 func TestCharmV2KeyRepeatState(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	_, out := addPublicationTestPlugin(m, hello{PluginID: "p"})
 	for _, key := range []tea.KeyPressMsg{
 		{Code: 'x', Text: "x"},
@@ -240,7 +240,7 @@ func TestCharmV2KeyRepeatState(t *testing.T) {
 }
 
 func TestCharmV2DockAndPaletteKeys(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	m.recomputeLayout()
 	m.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
 	if m.showSidePane {
@@ -271,7 +271,7 @@ func TestCharmV2DockAndPaletteKeys(t *testing.T) {
 }
 
 func TestCharmV2ModalKeyRouting(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	_, out := addPublicationTestPlugin(m, hello{PluginID: "p", Slots: []protocol.SurfaceID{protocol.SurfaceModal}})
 	m.openModal("p", "modal")
 	m.recomputeLayout()
@@ -293,7 +293,7 @@ func TestCharmV2ModalKeyRouting(t *testing.T) {
 }
 
 func TestCharmV2MouseResizeLifecycle(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	addTestPlugin(m, "p", map[protocol.SurfaceID]frame.Spec{protocol.SurfaceSidebarList: {Border: true}})
 	m.catalog.Occupants[protocol.SurfaceSidebarList] = "p"
 	m.recomputeLayout()
@@ -341,7 +341,7 @@ func TestPalettePasteInsertsTextWithoutBrackets(t *testing.T) {
 		{"empty", "", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			m := newWorkbenchModel()
+			m := newModel()
 			m.showPalette = true
 			_, cmd := m.Update(tea.PasteMsg{Content: tc.paste})
 			if cmd != nil {
@@ -358,7 +358,7 @@ func TestPalettePasteInsertsTextWithoutBrackets(t *testing.T) {
 }
 
 func TestPalettePasteAppendsToTypedTextAndResetsCursor(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	m.showPalette = true
 	m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	m.paletteCursor = 2
@@ -373,7 +373,7 @@ func TestPalettePasteAppendsToTypedTextAndResetsCursor(t *testing.T) {
 }
 
 func TestPaletteTypedSingleCharsStillWork(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	m.showPalette = true
 	for _, r := range "q[é" {
 		m.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
@@ -384,7 +384,7 @@ func TestPaletteTypedSingleCharsStillWork(t *testing.T) {
 }
 
 func TestPaletteKeepsBracketedExtendedKeyText(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	m.showPalette = true
 	m.Update(tea.KeyPressMsg{Code: tea.KeyExtended, Text: "[é]"})
 	if m.paletteQuery != "[é]" {

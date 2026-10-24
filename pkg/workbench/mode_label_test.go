@@ -81,7 +81,7 @@ func TestZeroPluginsLayOutEveryRegionSlot(t *testing.T) {
 	}
 }
 
-func surfaceText(m *WorkbenchModel, id protocol.SurfaceID) string {
+func surfaceText(m *workbenchModel, id protocol.SurfaceID) string {
 	r := m.slotRects[id]
 	rows := strings.Split(m.View().Content, "\n")
 	var out []string

@@ -10,7 +10,7 @@ import (
 
 // drawPalette resolves the serving palette and its index map once per change.
 // Keeping role names explicit makes the chrome's drawing discipline auditable.
-// The comparable hex palette stays in WorkbenchModel.served, not here.
+// The comparable hex palette stays in model.served, not here.
 type drawPalette struct {
 	Name            string
 	Canvas          color.Color

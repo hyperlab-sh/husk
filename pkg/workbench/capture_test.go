@@ -68,7 +68,7 @@ func TestRefreshReadsCaptureFromState(t *testing.T) {
 	}
 }
 
-func captureModel(t *testing.T) (*WorkbenchModel, *fakeFE, *pluginWire, *pluginWire) {
+func captureModel(t *testing.T) (*workbenchModel, *fakeFE, *pluginWire, *pluginWire) {
 	t.Helper()
 	m := goldenModel()
 	_, side := addPublicationTestPlugin(m, hello{PluginID: "side", Slots: []protocol.SurfaceID{protocol.SurfaceSidebarList}})

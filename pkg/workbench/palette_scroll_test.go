@@ -13,7 +13,7 @@ import (
 // paletteModel hosts a plugin with n actions ("Action 00".."Action nn") so the
 // palette lists more results than it draws at once. Extra actions go first in
 // the returned plugin list.
-func paletteModel(t *testing.T, acts ...contracts.PluginAction) *WorkbenchModel {
+func paletteModel(t *testing.T, acts ...contracts.PluginAction) *workbenchModel {
 	t.Helper()
 	m := goldenModel()
 	plugins := map[string]bool{}
@@ -40,7 +40,7 @@ func manyActions(n int) []contracts.PluginAction {
 }
 
 // drawnPalette returns the plain text rows of the drawn palette box.
-func drawnPalette(m *WorkbenchModel) []string {
+func drawnPalette(m *workbenchModel) []string {
 	c := newCanvas(m.width, m.height)
 	m.drawCommandPalette(c)
 	var rows []string
@@ -54,7 +54,7 @@ func drawnPalette(m *WorkbenchModel) []string {
 
 // highlightedRows returns the plain text of the drawn palette rows painted
 // with the selection background.
-func highlightedRows(m *WorkbenchModel) []string {
+func highlightedRows(m *workbenchModel) []string {
 	r, g, b, _ := m.palette.SurfaceSelected.RGBA()
 	needle := fmt.Sprintf("48;2;%d;%d;%d", r>>8, g>>8, b>>8)
 	c := newCanvas(m.width, m.height)

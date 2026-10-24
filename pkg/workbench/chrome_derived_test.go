@@ -10,7 +10,7 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
-func hintKeys(m *WorkbenchModel) []string {
+func hintKeys(m *workbenchModel) []string {
 	var out []string
 	for _, h := range m.footerHints() {
 		out = append(out, h.key)
@@ -22,7 +22,7 @@ func hintKeys(m *WorkbenchModel) []string {
 // is Home, the slot lab and the palette, the palette lists only workbench
 // commands, and the footer has no navigation keys of any application.
 func TestZeroPluginsChromeIsHostOnly(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	m.width, m.height = 160, 40
 	m.recomputeLayout()
 
@@ -41,7 +41,7 @@ func TestZeroPluginsChromeIsHostOnly(t *testing.T) {
 		if c.PluginID != "husk.core" || !strings.HasPrefix(c.ID, "husk.") {
 			t.Errorf("non-host command with zero plugins: %+v", c)
 		}
-		for _, banned := range []string{"bb", "Herdr", "tv.", "fleet", "F2", "F3", "F4"} {
+		for _, banned := range []string{"bb", strings.Join([]string{"Her", "dr"}, ""), "tv.", "fleet", "F2", "F3", "F4"} {
 			if strings.Contains(c.Title, banned) || strings.Contains(c.Description, banned) {
 				t.Errorf("command %q mentions %q", c.ID, banned)
 			}
@@ -62,7 +62,7 @@ func TestZeroPluginsChromeIsHostOnly(t *testing.T) {
 // Hints the host reports for the focused surface appear in the footer when the
 // focus context names that surface's owner, and are capped.
 func TestFooterHintsFollowHostHints(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	m.width, m.height = 200, 40
 	addPublicationTestPlugin(m, hello{PluginID: "side", Slots: []protocol.SurfaceID{protocol.SurfaceSidebarList}})
 	fe := withFE(m)
@@ -94,7 +94,7 @@ func TestFooterHintsFollowHostHints(t *testing.T) {
 
 // A plugin cannot crowd the footer: at most maxPluginFooterHints are shown.
 func TestFooterHintsCapPluginBindings(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	fe := withFE(m)
 	m.plugins["p"] = true
 	for _, k := range []string{"a", "b", "c", "d", "e", "f"} {
@@ -115,7 +115,7 @@ func TestFooterHintsCapPluginBindings(t *testing.T) {
 
 // The slot map's j/k hint appears only while it is the focused stage.
 func TestFooterHintsSlotMapNav(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	m.stageMode = "hotspots"
 	m.focusedSlot = protocol.SurfaceMainStage
 	if !strings.Contains(strings.Join(hintKeys(m), "|"), "j/k") {

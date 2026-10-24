@@ -38,7 +38,7 @@ func TestPublisherMouseColumnRanges(t *testing.T) {
 				hits[i].Action = "example.select"
 				hits[i].Payload = map[string]string{"target": hits[i].ID}
 			}
-			m := newWorkbenchModel()
+			m := newModel()
 			m.slotUpdates[protocol.SurfaceMainStage] = &protocol.SurfaceUpdateParams{HitTargets: hits}
 			got := m.publisherMousePayload(protocol.SurfaceMainStage, tc.x, tc.y, "left")
 			want := protocol.SurfaceMouseParams{Surface: protocol.SurfaceMainStage, X: tc.x, Y: tc.y, Button: "left"}

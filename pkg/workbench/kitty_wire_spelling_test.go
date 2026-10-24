@@ -42,7 +42,7 @@ func TestUnreportedEnterTabBackspaceReleaseLapsesAtSafetyNet(t *testing.T) {
 		{"backspace", "\x1b[127u", "backspace"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			m := newWorkbenchModel()
+			m := newModel()
 			m.pollMods = func() (protocol.ModifierState, bool) { return protocol.ModifierState{}, false }
 			m.keyReleases = true
 			_, out := addPublicationTestPlugin(m, hello{PluginID: "p"})
@@ -81,7 +81,7 @@ func TestFlag8EnterTabBackspaceReleaseClearsHeldKey(t *testing.T) {
 		{"backspace", "\x1b[127u", "\x1b[127;1:3u", "backspace"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			m := newWorkbenchModel()
+			m := newModel()
 			m.pollMods = func() (protocol.ModifierState, bool) { return protocol.ModifierState{}, false }
 			m.keyReleases = true
 			_, out := addPublicationTestPlugin(m, hello{PluginID: "p"})

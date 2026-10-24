@@ -22,7 +22,7 @@ func TestEmptySurfaceNameClipsAndHides(t *testing.T) {
 	} {
 		t.Run(fmt.Sprintf("%dx%d", tc.w, tc.h), func(t *testing.T) {
 			m := goldenModel()
-			m.slotRects[protocol.SurfaceMainStage] = SlotRect{Width: tc.w, Height: tc.h, InnerW: tc.w, InnerH: tc.h}
+			m.slotRects[protocol.SurfaceMainStage] = slotRect{Width: tc.w, Height: tc.h, InnerW: tc.w, InnerH: tc.h}
 			c := newCanvas(24, 6)
 			defer c.release()
 			m.drawSurface(c, protocol.SurfaceMainStage, "⑥", "main-stage")
@@ -65,7 +65,7 @@ func TestEmptyNameNeverOnPlacementSurfaces(t *testing.T) {
 func TestHotspotBadgeDrawnOverEmptyName(t *testing.T) {
 	m := goldenModel()
 	m.showHotspots = true
-	m.slotRects[protocol.SurfaceMainStage] = SlotRect{Width: 10, Height: 1, InnerW: 10, InnerH: 1}
+	m.slotRects[protocol.SurfaceMainStage] = slotRect{Width: 10, Height: 1, InnerW: 10, InnerH: 1}
 	c := newCanvas(10, 1)
 	defer c.release()
 	m.drawSurface(c, protocol.SurfaceMainStage, "⑥", "main-stage")
@@ -82,7 +82,7 @@ func TestExplorerReplacesMainStageName(t *testing.T) {
 	}
 }
 
-func docksHint(m *WorkbenchModel) string {
+func docksHint(m *workbenchModel) string {
 	for _, h := range m.footerHints() {
 		if h.desc == "docks" {
 			return h.key

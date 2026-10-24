@@ -54,7 +54,7 @@ func (r *timerRecorder) after(d time.Duration, msg tea.Msg) tea.Cmd {
 
 // seqModel is a model with plugin p on main-stage and sidebar-list, focus on
 // main-stage, the chord table below and a recording timer.
-func seqModel(t *testing.T) (*WorkbenchModel, *fakeFE, *timerRecorder) {
+func seqModel(t *testing.T) (*workbenchModel, *fakeFE, *timerRecorder) {
 	t.Helper()
 	m := goldenModel()
 	fe := withFE(m)
@@ -94,7 +94,7 @@ func sentKeys(fe *fakeFE) []string {
 func TestSequenceTable(t *testing.T) {
 	tests := []struct {
 		name string
-		run  func(t *testing.T, m *WorkbenchModel, fe *fakeFE, rec *timerRecorder)
+		run  func(t *testing.T, m *workbenchModel, fe *fakeFE, rec *timerRecorder)
 		// pending is what the model keeps afterwards.
 		pending     []string
 		wantInvoked []string
@@ -103,7 +103,7 @@ func TestSequenceTable(t *testing.T) {
 	}{
 		{
 			name: "prefix waits and arms the 1500 ms timer",
-			run: func(t *testing.T, m *WorkbenchModel, _ *fakeFE, _ *timerRecorder) {
+			run: func(t *testing.T, m *workbenchModel, _ *fakeFE, _ *timerRecorder) {
 				press(m, "a")
 			},
 			pending:    []string{"a"},
@@ -111,7 +111,7 @@ func TestSequenceTable(t *testing.T) {
 		},
 		{
 			name: "timeout discards without replay or dispatch",
-			run: func(t *testing.T, m *WorkbenchModel, _ *fakeFE, rec *timerRecorder) {
+			run: func(t *testing.T, m *workbenchModel, _ *fakeFE, rec *timerRecorder) {
 				press(m, "a")
 				m.Update(rec.msgs[0])
 			},
@@ -119,7 +119,7 @@ func TestSequenceTable(t *testing.T) {
 		},
 		{
 			name: "a stale timeout is ignored and the current one fires",
-			run: func(t *testing.T, m *WorkbenchModel, _ *fakeFE, rec *timerRecorder) {
+			run: func(t *testing.T, m *workbenchModel, _ *fakeFE, rec *timerRecorder) {
 				press(m, "t")
 				press(m, "t") // every pending key restarts the timer
 				if len(rec.msgs) != 2 || rec.msgs[0] == rec.msgs[1] {
@@ -135,7 +135,7 @@ func TestSequenceTable(t *testing.T) {
 		},
 		{
 			name: "a timeout after the sequence completed is ignored",
-			run: func(t *testing.T, m *WorkbenchModel, _ *fakeFE, rec *timerRecorder) {
+			run: func(t *testing.T, m *workbenchModel, _ *fakeFE, rec *timerRecorder) {
 				press(m, "g")
 				press(m, "g")
 				m.Update(rec.msgs[0])
@@ -145,7 +145,7 @@ func TestSequenceTable(t *testing.T) {
 		},
 		{
 			name: "esc cancels and is consumed, not resolved",
-			run: func(t *testing.T, m *WorkbenchModel, _ *fakeFE, _ *timerRecorder) {
+			run: func(t *testing.T, m *workbenchModel, _ *fakeFE, _ *timerRecorder) {
 				press(m, "a")
 				press(m, "esc")
 			},
@@ -153,7 +153,7 @@ func TestSequenceTable(t *testing.T) {
 		},
 		{
 			name: "match clears and dispatches",
-			run: func(t *testing.T, m *WorkbenchModel, _ *fakeFE, _ *timerRecorder) {
+			run: func(t *testing.T, m *workbenchModel, _ *fakeFE, _ *timerRecorder) {
 				press(m, "a")
 				press(m, "b")
 			},
@@ -162,7 +162,7 @@ func TestSequenceTable(t *testing.T) {
 		},
 		{
 			name: "breaking key that is bound fires alone",
-			run: func(t *testing.T, m *WorkbenchModel, _ *fakeFE, _ *timerRecorder) {
+			run: func(t *testing.T, m *workbenchModel, _ *fakeFE, _ *timerRecorder) {
 				press(m, "g")
 				press(m, "b")
 			},
@@ -171,7 +171,7 @@ func TestSequenceTable(t *testing.T) {
 		},
 		{
 			name: "breaking key that is unbound reaches the occupant",
-			run: func(t *testing.T, m *WorkbenchModel, _ *fakeFE, _ *timerRecorder) {
+			run: func(t *testing.T, m *workbenchModel, _ *fakeFE, _ *timerRecorder) {
 				press(m, "g")
 				press(m, "z")
 			},
@@ -180,7 +180,7 @@ func TestSequenceTable(t *testing.T) {
 		},
 		{
 			name: "breaking key that is a prefix starts a new sequence with a new timer",
-			run: func(t *testing.T, m *WorkbenchModel, _ *fakeFE, _ *timerRecorder) {
+			run: func(t *testing.T, m *workbenchModel, _ *fakeFE, _ *timerRecorder) {
 				press(m, "a")
 				press(m, "g")
 			},
@@ -189,7 +189,7 @@ func TestSequenceTable(t *testing.T) {
 		},
 		{
 			name: "focus moved by a host action",
-			run: func(t *testing.T, m *WorkbenchModel, _ *fakeFE, _ *timerRecorder) {
+			run: func(t *testing.T, m *workbenchModel, _ *fakeFE, _ *timerRecorder) {
 				press(m, "a")
 				m.setFocus(protocol.SurfaceSidebarList)
 			},
@@ -197,7 +197,7 @@ func TestSequenceTable(t *testing.T) {
 		},
 		{
 			name: "focus moved by tab",
-			run: func(t *testing.T, m *WorkbenchModel, _ *fakeFE, _ *timerRecorder) {
+			run: func(t *testing.T, m *workbenchModel, _ *fakeFE, _ *timerRecorder) {
 				press(m, "a")
 				press(m, "tab")
 			},
@@ -206,7 +206,7 @@ func TestSequenceTable(t *testing.T) {
 		},
 		{
 			name: "focus moved by a click",
-			run: func(t *testing.T, m *WorkbenchModel, _ *fakeFE, _ *timerRecorder) {
+			run: func(t *testing.T, m *workbenchModel, _ *fakeFE, _ *timerRecorder) {
 				press(m, "a")
 				r := m.slotRects[protocol.SurfaceSidebarList]
 				m.Update(tea.MouseClickMsg{X: r.InnerX + 1, Y: r.InnerY + 1, Button: tea.MouseLeft})
@@ -218,7 +218,7 @@ func TestSequenceTable(t *testing.T) {
 		},
 		{
 			name: "modal opens",
-			run: func(t *testing.T, m *WorkbenchModel, _ *fakeFE, _ *timerRecorder) {
+			run: func(t *testing.T, m *workbenchModel, _ *fakeFE, _ *timerRecorder) {
 				press(m, "a")
 				m.openModal("p", "p.panel")
 			},
@@ -226,7 +226,7 @@ func TestSequenceTable(t *testing.T) {
 		},
 		{
 			name: "modal closes",
-			run: func(t *testing.T, m *WorkbenchModel, _ *fakeFE, _ *timerRecorder) {
+			run: func(t *testing.T, m *workbenchModel, _ *fakeFE, _ *timerRecorder) {
 				m.openModal("p", "p.panel")
 				press(m, "a")
 				m.closeModal()
@@ -235,7 +235,7 @@ func TestSequenceTable(t *testing.T) {
 		},
 		{
 			name: "palette opens",
-			run: func(t *testing.T, m *WorkbenchModel, _ *fakeFE, _ *timerRecorder) {
+			run: func(t *testing.T, m *workbenchModel, _ *fakeFE, _ *timerRecorder) {
 				press(m, "a")
 				m.openPalette()
 			},
@@ -243,7 +243,7 @@ func TestSequenceTable(t *testing.T) {
 		},
 		{
 			name: "occupant of the focused surface leaves",
-			run: func(t *testing.T, m *WorkbenchModel, _ *fakeFE, _ *timerRecorder) {
+			run: func(t *testing.T, m *workbenchModel, _ *fakeFE, _ *timerRecorder) {
 				press(m, "a")
 				hostLeave(m, "p")
 			},
@@ -251,7 +251,7 @@ func TestSequenceTable(t *testing.T) {
 		},
 		{
 			name: "a click inside the focused surface keeps the sequence",
-			run: func(t *testing.T, m *WorkbenchModel, _ *fakeFE, _ *timerRecorder) {
+			run: func(t *testing.T, m *workbenchModel, _ *fakeFE, _ *timerRecorder) {
 				press(m, "a")
 				r := m.slotRects[protocol.SurfaceMainStage]
 				m.Update(tea.MouseClickMsg{X: r.InnerX + 1, Y: r.InnerY + 1, Button: tea.MouseLeft})
@@ -261,7 +261,7 @@ func TestSequenceTable(t *testing.T) {
 		},
 		{
 			name: "the focused side column is hidden",
-			run: func(t *testing.T, m *WorkbenchModel, _ *fakeFE, _ *timerRecorder) {
+			run: func(t *testing.T, m *workbenchModel, _ *fakeFE, _ *timerRecorder) {
 				m.setFocus(protocol.SurfaceSidebarList)
 				press(m, "a")
 				m.run("husk.sidebar.toggle", nil)
@@ -274,7 +274,7 @@ func TestSequenceTable(t *testing.T) {
 		},
 		{
 			name: "the column focus fell back from returns",
-			run: func(t *testing.T, m *WorkbenchModel, _ *fakeFE, _ *timerRecorder) {
+			run: func(t *testing.T, m *workbenchModel, _ *fakeFE, _ *timerRecorder) {
 				m.setFocus(protocol.SurfaceSidebarList)
 				m.run("husk.sidebar.toggle", nil)
 				press(m, "a")
@@ -288,7 +288,7 @@ func TestSequenceTable(t *testing.T) {
 		},
 		{
 			name: "occupant handover keeps focus but not the sequence",
-			run: func(t *testing.T, m *WorkbenchModel, _ *fakeFE, _ *timerRecorder) {
+			run: func(t *testing.T, m *workbenchModel, _ *fakeFE, _ *timerRecorder) {
 				hostPlugin(m, "q") // live, no surface yet
 				press(m, "a")
 				withFE(m).occ[protocol.SurfaceMainStage] = "q" // the engine hands the surface over
@@ -302,7 +302,7 @@ func TestSequenceTable(t *testing.T) {
 		},
 		{
 			name: "paste discards, then travels as one bracket-wrapped key",
-			run: func(t *testing.T, m *WorkbenchModel, _ *fakeFE, _ *timerRecorder) {
+			run: func(t *testing.T, m *workbenchModel, _ *fakeFE, _ *timerRecorder) {
 				press(m, "a")
 				m.Update(tea.PasteMsg{Content: "b"})
 			},

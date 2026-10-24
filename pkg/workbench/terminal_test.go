@@ -20,7 +20,7 @@ func (d testDrawer) TerminalCursor() contracts.TerminalCursor {
 	return contracts.TerminalCursor{X: c.X, Y: c.Y, Visible: c.Visible, Style: c.Style, Blink: c.Blink}
 }
 
-func terminalModel(t *testing.T, modal bool) (*WorkbenchModel, *fakeFE, *terminals.Terminal, <-chan []byte) {
+func terminalModel(t *testing.T, modal bool) (*workbenchModel, *fakeFE, *terminals.Terminal, <-chan []byte) {
 	t.Helper()
 	m, fe, _, _ := captureModel(t)
 	id := protocol.SurfaceMainStage

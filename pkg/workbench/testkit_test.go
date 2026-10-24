@@ -401,7 +401,7 @@ func (f *fakeFE) revision(ns string) uint64 {
 // withFE attaches a recording frontend to a hermetic model and routes its
 // host-action dispatch to the model's own handlers, as the real Dispatcher
 // would after registerActions.
-func withFE(m *WorkbenchModel) *fakeFE {
+func withFE(m *workbenchModel) *fakeFE {
 	if fe, ok := m.fe.(*fakeFE); ok {
 		return fe
 	}
@@ -431,7 +431,7 @@ func withFE(m *WorkbenchModel) *fakeFE {
 
 // addPlugin makes id a live plugin occupying the given surfaces with the given
 // content, the state a refresh from a host produces, and lays out.
-func addPlugin(m *WorkbenchModel, id string, surfs map[protocol.SurfaceID][]string) {
+func addPlugin(m *workbenchModel, id string, surfs map[protocol.SurfaceID][]string) {
 	m.plugins[id] = true
 	for s, lines := range surfs {
 		m.catalog.Occupants[s] = id
@@ -441,19 +441,19 @@ func addPlugin(m *WorkbenchModel, id string, surfs map[protocol.SurfaceID][]stri
 }
 
 // addSlot declares a published slot of owner and returns it.
-func addSlot(m *WorkbenchModel, id, owner, kind string, rect *contracts.PublishedRect) *publishedSlot {
+func addSlot(m *workbenchModel, id, owner, kind string, rect *contracts.PublishedRect) *publishedSlot {
 	s := &publishedSlot{ID: id, Owner: owner, Kind: kind, Rect: rect}
 	m.catalog.Slots[id] = s
 	return s
 }
 
 // contribute appends a contribution to a declared slot.
-func contribute(m *WorkbenchModel, slot string, c contribution) {
+func contribute(m *workbenchModel, slot string, c contribution) {
 	m.catalog.Slots[slot].Contributions = append(m.catalog.Slots[slot].Contributions, c)
 }
 
 // setContent publishes content for a surface the way the content sink does.
-func setContent(m *WorkbenchModel, plugin string, p protocol.SurfaceUpdateParams) {
+func setContent(m *workbenchModel, plugin string, p protocol.SurfaceUpdateParams) {
 	m.content(plugin, p)
 }
 
@@ -480,7 +480,7 @@ type slotDecl struct {
 
 // addPublicationTestPlugin makes the plugin live with a recording frontend and
 // returns its outbound view.
-func addPublicationTestPlugin(m *WorkbenchModel, h hello) (string, *pluginWire) {
+func addPublicationTestPlugin(m *workbenchModel, h hello) (string, *pluginWire) {
 	fe := withFE(m)
 	m.plugins[h.PluginID] = true
 	for _, s := range h.Slots {
@@ -575,7 +575,7 @@ func (f *fakeFE) publish() {
 
 // hostPlugin brings a plugin live through the same path a real host does:
 // State changes, the model refreshes from it and lays out.
-func hostPlugin(m *WorkbenchModel, id string, slots ...protocol.SurfaceID) {
+func hostPlugin(m *workbenchModel, id string, slots ...protocol.SurfaceID) {
 	fe := withFE(m)
 	if fe.pods == nil {
 		fe.pods, fe.occ = map[string]string{}, map[protocol.SurfaceID]string{}
@@ -589,7 +589,7 @@ func hostPlugin(m *WorkbenchModel, id string, slots ...protocol.SurfaceID) {
 }
 
 // hostLeave makes a plugin exit: its Pod ends and its surfaces free up.
-func hostLeave(m *WorkbenchModel, id string) {
+func hostLeave(m *workbenchModel, id string) {
 	fe := withFE(m)
 	fe.pods[id] = "exited"
 	for s, p := range fe.occ {

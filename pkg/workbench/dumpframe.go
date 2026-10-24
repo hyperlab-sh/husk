@@ -36,6 +36,8 @@ const dumpFrameMaxSettle = time.Second
 
 // dumpFrameOptions describes what --dump-frame waits for.
 type dumpFrameOptions struct {
+	// Context bounds the entire headless run; nil uses Background.
+	Context context.Context
 	// Launched is the number of plugins the host will launch (its plan, not
 	// the number of arguments: an empty directory plans none). Zero means no
 	// plugin is awaited; otherwise the frame is taken once the host reported
@@ -67,7 +69,7 @@ type dumpCapMsg struct{}
 // the driver asks the program to quit once the model has settled. There is no
 // second event loop and no sleep.
 type dumpFrameDriver struct {
-	*WorkbenchModel
+	*workbenchModel
 	opt          dumpFrameOptions
 	mode         string
 	railTriggers bool
@@ -86,7 +88,7 @@ type dumpFrameDriver struct {
 // activity fingerprints what a plugin can change: its Pod status and the
 // content it published. A change restarts the quiet window.
 func (d *dumpFrameDriver) activity() string {
-	m := d.WorkbenchModel
+	m := d.workbenchModel
 	// JSON sorts map keys and snapshots pointed-to updates, so both in-place
 	// changes and replacement content restart settling, independent of order.
 	content, _ := json.Marshal(m.slotUpdates)
@@ -94,7 +96,7 @@ func (d *dumpFrameDriver) activity() string {
 }
 
 func (d *dumpFrameDriver) Init() tea.Cmd {
-	return tea.Batch(d.WorkbenchModel.Init(), d.arm())
+	return tea.Batch(d.workbenchModel.Init(), d.arm())
 }
 
 func (d *dumpFrameDriver) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -112,7 +114,7 @@ func (d *dumpFrameDriver) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return d, nil
 	}
-	_, cmd := d.WorkbenchModel.Update(msg)
+	_, cmd := d.workbenchModel.Update(msg)
 	d.advance()
 	if d.failed {
 		return d, tea.Batch(cmd, tea.Quit)
@@ -159,7 +161,7 @@ func (d *dumpFrameDriver) arm() tea.Cmd {
 // advance opens the requested rail item once all plugins registered and
 // records whether every awaited surface has content.
 func (d *dumpFrameDriver) advance() {
-	m := d.WorkbenchModel
+	m := d.workbenchModel
 	d.ready = false
 	if d.opt.Launched > 0 {
 		if len(m.podStatus) < d.opt.Launched {
@@ -211,12 +213,16 @@ func (d *dumpFrameDriver) advance() {
 // signal handling) and returns the frame once the model has settled. When the
 // deadline passes first, it still returns the frame as it stands together with
 // an error saying what was missing, so callers can print both.
-func runDumpFrame(m *WorkbenchModel, opt dumpFrameOptions) (string, error) {
+func runDumpFrame(m *workbenchModel, opt dumpFrameOptions) (string, error) {
 	timeout := opt.Timeout
 	if timeout <= 0 {
 		timeout = dumpFrameTimeout
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	parent := opt.Context
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 
 	quiet := opt.Quiet
@@ -230,7 +236,7 @@ func runDumpFrame(m *WorkbenchModel, opt dumpFrameOptions) (string, error) {
 	if maxSettle <= 0 {
 		maxSettle = dumpFrameMaxSettle
 	}
-	d := &dumpFrameDriver{WorkbenchModel: m, opt: opt, mode: opt.RailMode, quiet: quiet, maxSettle: maxSettle}
+	d := &dumpFrameDriver{workbenchModel: m, opt: opt, mode: opt.RailMode, quiet: quiet, maxSettle: maxSettle}
 	p := tea.NewProgram(d,
 		tea.WithContext(ctx),
 		tea.WithInput(nil),

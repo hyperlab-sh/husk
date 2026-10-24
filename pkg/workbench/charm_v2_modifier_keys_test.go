@@ -29,7 +29,7 @@ func decodeCharmEvent(t *testing.T, input string) tea.Msg {
 }
 
 func TestViewRequestsAllKeysAsEscapeCodes(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	m.recomputeLayout()
 	ke := m.View().KeyboardEnhancements
 	if !ke.ReportAllKeysAsEscapeCodes {
@@ -47,7 +47,7 @@ func TestViewRequestsAllKeysAsEscapeCodes(t *testing.T) {
 // Lock keys are reported only in all-keys mode. They are swallowed, so the
 // plugin sees no new key names, while an ordinary key still reaches it.
 func TestLockKeysAreSwallowed(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	m.pollMods = func() (protocol.ModifierState, bool) { return protocol.ModifierState{}, false }
 	m.width, m.height = 144, 40
 	m.recomputeLayout()
@@ -129,7 +129,7 @@ func TestDecodedBareModifiersDriveModifierState(t *testing.T) {
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			m := newWorkbenchModel()
+			m := newModel()
 			m.pollMods = func() (protocol.ModifierState, bool) { return protocol.ModifierState{}, false }
 			_, out := addPublicationTestPlugin(m, hello{PluginID: "p", Slots: []protocol.SurfaceID{protocol.SurfaceSidebarList}})
 			for _, s := range tc.steps {
@@ -166,7 +166,7 @@ func TestDecodedBareModifiersDriveModifierState(t *testing.T) {
 }
 
 func TestBareAltReleaseKeepsLatchedAlt(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	m.pollMods = func() (protocol.ModifierState, bool) { return protocol.ModifierState{}, false }
 	m.altLatched = true
 	m.modifiers.Alt = true
@@ -178,7 +178,7 @@ func TestBareAltReleaseKeepsLatchedAlt(t *testing.T) {
 }
 
 func TestBlurDropsTerminalModifierKeys(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	m.pollMods = func() (protocol.ModifierState, bool) { return protocol.ModifierState{}, false }
 	m.Update(decodeCharmEvent(t, "\x1b[57441;2u")) // left shift down
 	m.Update(tea.BlurMsg{})                        // its release goes to another window
@@ -258,7 +258,7 @@ func TestAllKeysAsEscapeCodesKeepTextInput(t *testing.T) {
 		}
 	}
 
-	m := newWorkbenchModel()
+	m := newModel()
 	m.pollMods = func() (protocol.ModifierState, bool) { return protocol.ModifierState{}, false }
 	m.width, m.height = 144, 40
 	m.recomputeLayout()
@@ -293,7 +293,7 @@ func TestLayoutTextReleaseClearsHeldKey(t *testing.T) {
 		{"shifted", "\x1b[97:65;2;65u", "\x1b[97:65;2:3u", "A"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			m := newWorkbenchModel()
+			m := newModel()
 			m.pollMods = func() (protocol.ModifierState, bool) { return protocol.ModifierState{}, false }
 			m.keyReleases = true
 			_, out := addPublicationTestPlugin(m, hello{PluginID: "p"})
@@ -317,7 +317,7 @@ func TestLayoutTextReleaseClearsHeldKey(t *testing.T) {
 // An alias whose key expired must not swallow a later plain release, and
 // expiry and blur drop aliases with their keys.
 func TestLayoutTextAliasDoesNotOutliveItsKey(t *testing.T) {
-	m := newWorkbenchModel()
+	m := newModel()
 	m.pollMods = func() (protocol.ModifierState, bool) { return protocol.ModifierState{}, false }
 	m.keyReleases = true
 	_, out := addPublicationTestPlugin(m, hello{PluginID: "p"})
