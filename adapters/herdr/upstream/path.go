@@ -7,26 +7,28 @@ import (
 )
 
 // SocketOptions are settings and environment values captured by the shim.
-// ConfigPath is HERDR_CONFIG_PATH (a config file, not a directory); SocketPath
-// is inherited HERDR_SOCKET_PATH. Home is the user's home directory.
-type SocketOptions struct{ Session, SocketPath, ConfigPath, Home string }
+// SocketPath is inherited HERDR_SOCKET_PATH. Home is the user's home directory.
+// Platform and Getenv follow ConfigDir's defaults when omitted.
+type SocketOptions struct {
+	Session, SocketPath, Home string
+	// ConfigPath is retained for compatibility but ignored: a configuration-file
+	// override does not move the registry or session socket directories.
+	ConfigPath string
+	Platform   string
+	Getenv     func(string) string
+}
 
 // ResolveSocket follows the adapter attach contract: explicit session, then
-// inherited socket, then the default socket beside the configuration file.
+// inherited socket, then the default socket under ConfigDir.
 // Session names cannot escape the session directory. The special default
 // session uses the configuration directory directly, just as the CLI does.
 func ResolveSocket(o SocketOptions) (string, error) {
 	if o.Session == "" && o.SocketPath != "" {
 		return o.SocketPath, nil
 	}
-	var dir string
-	if o.ConfigPath != "" {
-		dir = filepath.Dir(o.ConfigPath)
-	} else {
-		if o.Home == "" {
-			return "", fmt.Errorf("home directory is required")
-		}
-		dir = filepath.Join(o.Home, ".config", "herdr")
+	dir, ok := ConfigDir(o.Platform, o.Getenv, o.Home)
+	if !ok {
+		return "", fmt.Errorf("absolute configuration directory is required")
 	}
 	if o.Session == "" || o.Session == "default" {
 		return filepath.Join(dir, "herdr.sock"), nil
