@@ -107,6 +107,25 @@ func CommandEnvironment(base []string, dir, binary, socket, configDir, stateDir,
 	return result
 }
 
+// openerEnvironment retains desktop/session variables but removes credentials,
+// proxy routing and invocation context. A browser is not a plugin command and
+// may outlive both this shim and its private socket.
+func openerEnvironment(base []string) []string {
+	env := make([]string, 0, len(base))
+	for _, entry := range base {
+		key, _, _ := strings.Cut(entry, "=")
+		if strings.HasPrefix(key, "HUSK_") || strings.HasPrefix(key, "HERDR_PLUGIN_") {
+			continue
+		}
+		switch key {
+		case "HERDR_SOCKET_PATH", "HERDR_ENV", "HERDR_BIN_PATH", "HERDR_WORKSPACE_ID", "HERDR_TAB_ID", "HERDR_PANE_ID":
+			continue
+		}
+		env = append(env, entry)
+	}
+	return env
+}
+
 func ensureDirs(paths ...string) error {
 	for _, p := range paths {
 		if err := os.MkdirAll(p, 0700); err != nil {

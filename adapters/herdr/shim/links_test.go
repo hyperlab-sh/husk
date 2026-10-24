@@ -47,7 +47,7 @@ func TestTerminalLinkHandlers(t *testing.T) {
 	// manifest, not a glob, full-string match, or case-folded URL comparison.
 	for _, tc := range []struct {
 		name, pattern, target, platform, handlerPlatforms, actionPlatforms, want string
-		foreign, missing                                                         bool
+		foreign, missing, closed, pending                                        bool
 	}{
 		{name: "substring", pattern: `example\.test`, target: "https://example.test/path", want: "first"},
 		{name: "anchors", pattern: `^example\.test$`, target: "https://example.test/path", want: "opener"},
@@ -63,11 +63,23 @@ func TestTerminalLinkHandlers(t *testing.T) {
 		{name: "http fallback", pattern: `never`, target: "http://other.test/path?a=1&b=2", want: "opener"},
 		{name: "darwin fallback", pattern: `never`, target: "https://other.test", platform: "darwin", want: "opener"},
 		{name: "ignore custom scheme", pattern: `never`, target: "custom://other", want: "ignore"},
+		{name: "uppercase web scheme", pattern: `never`, target: "HTTP://other.test", want: "ignore"},
+		{name: "mixed case web scheme", pattern: `never`, target: "Https://other.test", want: "ignore"},
+		{name: "opaque web URL", pattern: `never`, target: "http:other.test", want: "ignore"},
+		{name: "ASCII word class on Unicode host", pattern: `^https://\w+\.test/`, target: "https://例え.test/path", want: "opener"},
+		{name: "ASCII digit class on Unicode path", pattern: `/\d+$`, target: "https://other.test/١", want: "opener"},
+		{name: "ASCII space class on Unicode path", pattern: `/\s+$`, target: "https://other.test/\u00a0", want: "opener"},
+		{name: "ASCII boundary on Unicode host", pattern: `\b例え\b`, target: "https://例え.test/path", want: "opener"},
 		{name: "foreign surface", pattern: `example`, target: "https://example.test", foreign: true, want: "ignore"},
+		{name: "closed surface", pattern: `example`, target: "https://example.test", closed: true, want: "ignore"},
+		{name: "pending PTY", pattern: `example`, target: "https://example.test", pending: true, want: "ignore"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rig := newRig(t, "never", false, "")
 			o := rig.o
+			// Poison inherited routing, invocation and credential variables. The
+			// opener must retain desktop environment but none of these identities.
+			o.Env = append(o.Env, "DISPLAY=:42", "HERDR_ENV=1", "HERDR_SOCKET_PATH=/stale.sock", "HERDR_BIN_PATH=/stale", "HERDR_WORKSPACE_ID=stale", "HERDR_TAB_ID=stale", "HERDR_PANE_ID=stale", "HERDR_PLUGIN_ID=stale", "HERDR_PLUGIN_ROOT=/stale", "HERDR_PLUGIN_CONFIG_DIR=/stale", "HERDR_PLUGIN_STATE_DIR=/stale", "HERDR_PLUGIN_CONTEXT_JSON={}")
 			o.Client = upstream.New(upstream.Options{Socket: o.Socket, Dial: guardedDial(t, o.Socket), Clock: o.Clock})
 			if tc.platform != "" {
 				o.Platform = tc.platform
@@ -107,8 +119,15 @@ func TestTerminalLinkHandlers(t *testing.T) {
 			o.SpawnOpener = func(c Command) (Process, error) { opens <- c; return opener, nil }
 			logs := &linkLog{lockedBuffer: rig.logs, records: make(chan map[string]any, 16)}
 			r := &runner{o: o, m: m, id: "demo", ctx: ctx, cancel: cancel, log: logs, proxy: p, processes: map[Process]bool{}, panes: map[protocol.SurfaceID]*pane{}, state: state{Surfaces: map[string]any{}}}
+			r.links = compileLinkHandlers(m, o.Platform)
+			// Once compiled, matching must not consult or recompile the source
+			// manifest on each click.
+			r.m.LinkHandlers = nil
 			surface := protocol.SurfaceID("demo.owned")
-			r.panes[surface] = &pane{id: surface, process: &paneProcess{}, ctx: ctx}
+			r.panes[surface] = &pane{id: surface, process: &paneProcess{}, closed: tc.closed, ctx: ctx}
+			if tc.pending {
+				r.panes[surface].process = nil
+			}
 			if tc.foreign {
 				surface = "other.foreign"
 			}
@@ -148,6 +167,9 @@ func TestTerminalLinkHandlers(t *testing.T) {
 				if !reflect.DeepEqual(command.Argv, []string{binary, tc.target}) {
 					t.Fatalf("opener=%v", command.Argv)
 				}
+				if got, want := envMap(command.Env), map[string]string{"KEEP": "value", "DISPLAY": ":42"}; !reflect.DeepEqual(got, want) {
+					t.Fatalf("opener inherited plugin identity or lost desktop variables: keys=%v", reflect.ValueOf(got).MapKeys())
+				}
 				// No join: shutdown returns even while the detached opener waits.
 				r.stopCommands()
 				opener.done <- 7
@@ -156,11 +178,12 @@ func TestTerminalLinkHandlers(t *testing.T) {
 					t.Fatalf("opener completion not logged: %v", record)
 				}
 			case "ignore":
-				if !tc.foreign && strings.Count(rig.logs.String(), `"level":"debug"`) != 1 {
+				silent := tc.foreign || tc.closed || tc.pending
+				if !silent && strings.Count(rig.logs.String(), `"level":"debug"`) != 1 {
 					t.Fatal("expected one debug ignore log")
 				}
-				if tc.foreign && rig.logs.String() != "" {
-					t.Fatal("foreign surface was not ignored silently")
+				if silent && rig.logs.String() != "" {
+					t.Fatal("non-live or foreign surface was not ignored silently")
 				}
 			}
 			select {

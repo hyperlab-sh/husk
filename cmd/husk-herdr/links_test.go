@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -38,7 +40,7 @@ func runLinkShim() int {
 				return nil, err
 			}
 			defer conn.Close()
-			err = json.NewEncoder(conn).Encode(linkCapture{Opener: c.Argv})
+			err = json.NewEncoder(conn).Encode(linkCapture{Opener: c.Argv, Env: c.Env})
 			return linkOpenerProcess{}, err
 		}
 		err = shim.Run(context.Background(), o, os.Stdin, os.Stdout, os.Stderr)
@@ -181,8 +183,18 @@ func TestLinkHostClicks(t *testing.T) {
 	seen := map[string]bool{}
 	for _, c := range harness.captures {
 		if c.Opener != nil {
-			if !reflect.DeepEqual(c.Opener, []string{"xdg-open", "https://external.test"}) {
+			opener := "xdg-open"
+			if runtime.GOOS == "darwin" {
+				opener = "open"
+			}
+			if !reflect.DeepEqual(c.Opener, []string{opener, "https://external.test"}) {
 				t.Fatalf("opener=%v", c.Opener)
+			}
+			for _, entry := range c.Env {
+				key, _, _ := strings.Cut(entry, "=")
+				if strings.HasPrefix(key, "HUSK_") || strings.HasPrefix(key, "HERDR_PLUGIN_") || key == "HERDR_ENV" || key == "HERDR_SOCKET_PATH" || key == "HERDR_BIN_PATH" || key == "HERDR_WORKSPACE_ID" || key == "HERDR_TAB_ID" || key == "HERDR_PANE_ID" {
+					t.Errorf("opener inherited plugin variable %q", key)
+				}
 			}
 			seen["opener"] = true
 			continue
