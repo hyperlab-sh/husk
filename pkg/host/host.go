@@ -411,6 +411,7 @@ func (r *Root) buildStore() error {
 	}
 	docs := r.instanceDocs()
 	s, err := store.Open(store.Options{
+		Distribution: r.cfg.Distribution,
 		Bundle:       config,
 		InstanceDocs: docs,
 		Instance:     store.InstanceRef{ID: r.cfg.InstanceID},

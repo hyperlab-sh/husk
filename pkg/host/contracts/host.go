@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"context"
+	"io/fs"
 	"time"
 
 	"github.com/hyperlab-sh/husk/pkg/instance"
@@ -27,6 +28,9 @@ const RateLimitPerSecond = 20
 // Config is everything the composition root needs. host-root implements Host
 // over it.
 type Config struct {
+	// Distribution carries embedded application defaults below bundle and user
+	// configuration. Its root contains document files such as config.json.
+	Distribution fs.FS
 	// InstanceID is the pid or the --instance name.
 	InstanceID string
 	// RuntimeDir is the runtime path, checked/created after bundle validation.
