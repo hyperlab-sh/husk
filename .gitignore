@@ -14,7 +14,8 @@ docs/site/
 /bin/
 .pi/
 
-# reference plugin binary
+# bundled plugin binaries
 /plugins/reference/reference
+/plugins/terminal/terminal
 /plugins/guide/guide
 /husk
