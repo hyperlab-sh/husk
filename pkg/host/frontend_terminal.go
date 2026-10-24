@@ -30,6 +30,14 @@ func (r *Root) SendTerminalKey(surface protocol.SurfaceID, key uv.KeyPressEvent)
 	}
 }
 
+// ResolveTerminalLink implements contracts.Frontend.
+func (r *Root) ResolveTerminalLink(surface protocol.SurfaceID, event uv.MouseEvent) bool {
+	if t := r.engine.Terminal(surface); t != nil {
+		return t.Link(event)
+	}
+	return false
+}
+
 // SendTerminalMouse implements contracts.Frontend.
 func (r *Root) SendTerminalMouse(surface protocol.SurfaceID, event uv.MouseEvent) {
 	if t := r.engine.Terminal(surface); t != nil {

@@ -78,6 +78,16 @@ func (m *workbenchModel) terminalCursor() *tea.Cursor {
 // except ctrl+left presses, which also resolve terminal links.
 func (m *workbenchModel) routeTerminalMouse(event tea.MouseMsg) bool {
 	mouse := event.Mouse()
+	if _, ok := event.(tea.MouseReleaseMsg); ok && m.terminalFocusClick && (mouse.Button == tea.MouseLeft || mouse.Button == tea.MouseNone) {
+		m.terminalFocusClick = false
+		return true
+	}
+	if _, ok := event.(tea.MouseMotionMsg); ok && m.terminalFocusClick && mouse.Button == tea.MouseLeft {
+		return true
+	}
+	if _, ok := event.(tea.MouseClickMsg); ok && mouse.Button == tea.MouseLeft {
+		m.terminalFocusClick = false
+	}
 	if click, ok := event.(tea.MouseClickMsg); ok && click.Button == tea.MouseLeft && m.detectDividerAt(mouse.X, mouse.Y) != "" {
 		return false
 	}
@@ -105,19 +115,18 @@ func (m *workbenchModel) routeTerminalMouse(event tea.MouseMsg) bool {
 		if x < 0 || y < 0 || x >= r.InnerW || y >= r.InnerH {
 			return false
 		}
+		rel := uv.Mouse{X: x, Y: y, Button: mouse.Button, Mod: uv.KeyMod(mouse.Mod)}
 		_, wheel := event.(tea.MouseWheelMsg)
 		if !wheel && !m.modalOwner().Open() && m.focusedSlot != hit.id {
 			if _, ok := event.(tea.MouseClickMsg); ok {
 				m.setFocus(hit.id)
-				// Modified link clicks also work on an unfocused terminal.
-				if mouse.Button != tea.MouseLeft || !mouse.Mod.Contains(tea.ModCtrl) {
-					return true
+				// Resolve links without encoding the focus click's fallback.
+				if mouse.Button == tea.MouseLeft {
+					m.terminalFocusClick = !m.fe.ResolveTerminalLink(hit.id, uv.MouseClickEvent(rel))
 				}
-			} else {
-				return true
 			}
+			return true
 		}
-		rel := uv.Mouse{X: x, Y: y, Button: mouse.Button, Mod: uv.KeyMod(mouse.Mod)}
 		var encoded uv.MouseEvent
 		switch event.(type) {
 		case tea.MouseClickMsg:

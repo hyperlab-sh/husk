@@ -8,6 +8,45 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 )
 
+func TestTerminalLinkViewportAndMouseModes(t *testing.T) {
+	for _, tc := range []struct {
+		name, modes, text, want string
+		motion, history         bool
+	}{
+		{name: "drag", modes: "\x1b[?1002h\x1b[?1006h", text: "https://drag.test", want: "https://drag.test", motion: true},
+		{name: "history", text: "https://history.test\r\nlive one\r\nlive two\r\nlive three", want: "https://history.test", history: true},
+		{name: "reporting off", text: "https://plain.test", want: "https://plain.test"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			input := make(chan []byte, 16)
+			term := New(40, 3, 20, func(b []byte) { input <- b })
+			defer term.Close()
+			var links []string
+			term.SetLinkHandler(func(url string, row, col int) { links = append(links, url) })
+			term.Write([]byte(tc.modes + tc.text))
+			if tc.history {
+				term.Mouse(uv.MouseWheelEvent{Button: uv.MouseWheelUp})
+				if term.offset == 0 {
+					t.Fatal("fixture did not scroll the history viewport")
+				}
+			}
+			mouse := uv.Mouse{X: 3, Y: 0, Button: uv.MouseLeft, Mod: uv.ModCtrl}
+			term.Mouse(uv.MouseClickEvent(mouse))
+			if tc.motion {
+				term.Mouse(uv.MouseMotionEvent(mouse))
+			}
+			term.Mouse(uv.MouseReleaseEvent(mouse))
+			term.Close()
+			if len(links) != 1 || links[0] != tc.want {
+				t.Fatalf("links = %v, want %q", links, tc.want)
+			}
+			if len(input) != 0 {
+				t.Fatalf("link gesture encoded %q", <-input)
+			}
+		})
+	}
+}
+
 func TestTerminalLinks(t *testing.T) {
 	for _, tc := range []struct {
 		name, text, url string
@@ -22,6 +61,8 @@ func TestTerminalLinks(t *testing.T) {
 		{name: "unbalanced brackets", text: "(https://example.test/a(b))]}>!", url: "https://example.test/a(b)", x: 5, mod: uv.ModCtrl, button: uv.MouseLeft},
 		{name: "wide cell prefix", text: "界 https://example.test", url: "https://example.test", x: 5, mod: uv.ModCtrl, button: uv.MouseLeft},
 		{name: "OSC wide continuation", text: "\x1b]8;;https://target\x1b\\界\x1b]8;;\x1b\\", url: "https://target", x: 1, mod: uv.ModCtrl, button: uv.MouseLeft},
+		{name: "mixed case scheme", text: "Https://example.test", x: 2, mod: uv.ModCtrl, button: uv.MouseLeft},
+		{name: "scheme suffix in word", text: "xHTTPs://example.test", x: 10, mod: uv.ModCtrl, button: uv.MouseLeft},
 		{name: "plain text", text: "plain text", x: 2, mod: uv.ModCtrl, button: uv.MouseLeft},
 		{name: "no ctrl", text: "https://example.test", x: 2, button: uv.MouseLeft},
 		{name: "right button", text: "https://example.test", x: 2, mod: uv.ModCtrl, button: uv.MouseRight},

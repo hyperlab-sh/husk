@@ -140,14 +140,15 @@ type workbenchModel struct {
 	actions map[string]contracts.HostActionHandler
 	cmds    []tea.Cmd // commands host-action handlers queued during this Update
 
-	plugins     map[string]bool                // live plugins
-	podStatus   map[string]contracts.PodStatus // every Pod's status, for --dump-frame
-	railItems   []contracts.RailItem
-	slotUpdates map[protocol.SurfaceID]*protocol.SurfaceUpdateParams
-	slotRects   map[protocol.SurfaceID]slotRect
-	modalRect   slotRect
-	demoFrame   bool
-	catalog     *surfaceCatalog
+	plugins            map[string]bool                // live plugins
+	podStatus          map[string]contracts.PodStatus // every Pod's status, for --dump-frame
+	railItems          []contracts.RailItem
+	slotUpdates        map[protocol.SurfaceID]*protocol.SurfaceUpdateParams
+	slotRects          map[protocol.SurfaceID]slotRect
+	modalRect          slotRect
+	terminalFocusClick bool // an unfocused terminal's focus-only left press
+	demoFrame          bool
+	catalog            *surfaceCatalog
 
 	width        int
 	height       int

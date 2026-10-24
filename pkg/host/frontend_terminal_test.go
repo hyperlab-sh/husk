@@ -40,7 +40,7 @@ func terminalKeyStateFrontend(t *testing.T) (*harness, *fakes, contracts.Fronten
 		t.Fatal(setupErr)
 	}
 	h.loop(func() {
-		_, setupErr = h.root.engine.TerminalAttach("alpha", protocol.TerminalAttachParams{Surface: protocol.SurfaceSidebarList}, protocol.TerminalAttachResult{Width: 20, Height: 5}, nil)
+		_, setupErr = h.root.engine.TerminalAttach("alpha", protocol.TerminalAttachParams{Surface: protocol.SurfaceSidebarList}, protocol.TerminalAttachResult{Width: 20, Height: 5}, nil, nil)
 	})
 	if setupErr != nil {
 		t.Fatal(setupErr)

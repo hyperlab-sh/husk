@@ -8,11 +8,19 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 )
 
+// linkScheme is immutable after compilation and shared by loop-only lookups.
+var linkScheme = regexp.MustCompile(`(?:^|[^A-Za-z0-9+.-])([a-z][a-z0-9+.-]*://)`)
+
 // SetLinkHandler installs the loop-only delivery callback for ctrl+left clicks.
 // Delivery must be nonblocking; a refused delivery still consumes the gesture.
 func (t *Terminal) SetLinkHandler(send func(url string, row, col int)) { t.link = send }
 
-func (t *Terminal) linkMouse(event uv.MouseEvent) bool {
+// Link resolves and consumes a link gesture without encoding any mouse input.
+// It is loop-only and reports whether the event belongs to a consumed gesture.
+func (t *Terminal) Link(event uv.MouseEvent) bool {
+	if t.closed {
+		return false
+	}
 	m := event.Mouse()
 	if _, ok := event.(uv.MouseReleaseEvent); ok && (m.Button == uv.MouseLeft || m.Button == uv.MouseNone) && t.linkPress {
 		t.linkPress = false
@@ -85,11 +93,11 @@ func (t *Terminal) linkAt(col, row int) string {
 	}
 	text := strings.Join(cells[start:end], "")
 	// Scheme matching is deliberately case-sensitive and row-local.
-	scheme := regexp.MustCompile(`[a-z][a-z0-9+.-]*://`).FindStringIndex(text)
+	scheme := linkScheme.FindStringSubmatchIndex(text)
 	if scheme == nil {
 		return ""
 	}
-	url := text[scheme[0]:]
+	url := text[scheme[2]:]
 	for len(url) > 0 {
 		last := url[len(url)-1]
 		if strings.ContainsRune(`.,;:!?'"`, rune(last)) {
@@ -115,7 +123,7 @@ func (t *Terminal) linkAt(col, row int) string {
 	}
 	// Prefixes and trimmed suffixes are not themselves clickable URL cells.
 	pos := len(strings.Join(cells[start:clicked], ""))
-	if pos < scheme[0] || pos >= scheme[0]+len(url) {
+	if pos < scheme[2] || pos >= scheme[2]+len(url) {
 		return ""
 	}
 	return url
