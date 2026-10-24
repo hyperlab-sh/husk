@@ -282,7 +282,7 @@ func (r *runner) launch(e manifest.Entry, action, correlation string, provided j
 		}
 		return nil, err
 	}
-	env := CommandEnvironment(r.o.Env, r.o.Dir, r.o.Binary, r.proxy.Path(), r.o.ConfigDir, r.o.StateDir, r.m.ID, action, "", nil, c)
+	env := CommandEnvironment(r.o.Env, r.o.Dir, r.o.Binary, r.proxy.Path(), r.o.ConfigDir, r.o.StateDir, r.m.ID, action, c)
 	r.mu.Lock()
 	if r.stopping || r.ctx.Err() != nil {
 		r.mu.Unlock()

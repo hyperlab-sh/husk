@@ -102,17 +102,11 @@ func TestSchemaShapes(t *testing.T) {
 	}
 }
 
-func TestEventAndErrorShapes(t *testing.T) {
-	event := map[string]any{"event": "pane_focused", "data": map[string]any{"type": "pane_focused", "pane_id": "p", "workspace_id": "w"}}
-	if err := validator(t, "event").Validate(jsonValue(t, event)); err != nil {
-		t.Fatal(err)
-	}
-	body := map[string]any{"code": "unavailable", "message": "stream failed"}
+func TestErrorShapes(t *testing.T) {
+	body := map[string]any{"code": "unavailable", "message": "request failed"}
 	if err := validator(t, "error_response").Validate(jsonValue(t, map[string]any{"id": "1", "error": body})); err != nil {
 		t.Fatal(err)
 	}
-	// The defensive id-less fixture reuses this body, but the schema does
-	// not define its framing: error_response itself requires an id.
 	if err := validator(t, "error_response/$defs/ErrorBody").Validate(jsonValue(t, body)); err != nil {
 		t.Fatal(err)
 	}

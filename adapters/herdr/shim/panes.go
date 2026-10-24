@@ -174,7 +174,7 @@ func (r *runner) openPane(ctx context.Context, entry string, args paneArgs, corr
 	for k, v := range args.Env {
 		base = append(base, k+"="+v)
 	}
-	env := CommandEnvironment(base, r.o.Dir, r.o.Binary, r.proxy.Path(), r.o.ConfigDir, r.o.StateDir, r.m.ID, "", "", nil, c)
+	env := CommandEnvironment(base, r.o.Dir, r.o.Binary, r.proxy.Path(), r.o.ConfigDir, r.o.StateDir, r.m.ID, "", c)
 	values := envMap(env)
 	delete(values, "HERDR_PANE_ID")
 	values["HERDR_PLUGIN_ENTRYPOINT_ID"] = e.ID
