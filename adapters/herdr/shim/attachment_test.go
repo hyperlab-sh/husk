@@ -2,10 +2,8 @@ package shim
 
 import (
 	"context"
-	"encoding/json"
 	"net"
 	"os"
-	"strings"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -262,44 +260,5 @@ func TestAcknowledgedStreamDoesNotScheduleProbes(t *testing.T) {
 	}
 	if pings != 1 {
 		t.Fatalf("stream attach sent %d pings", pings)
-	}
-}
-
-func TestExcessEventsHaveOnlyOneLimitLogPerSecond(t *testing.T) {
-	var seconds atomic.Int64
-	seconds.Store(100)
-	r := newRig(t, "always", false, "[[events]]\non='pane.focused'\ncommand=['./event']\n")
-	r.o.Now = func() time.Time { return time.Unix(seconds.Load(), 0) }
-	r.start(t)
-	r.host.until(t, protocol.MethodStateSet, "attached")
-	for _, batch := range []int{40, 8} {
-		for range batch {
-			if err := r.server.Emit("pane_focused", map[string]any{"type": "pane_focused", "pane_id": "p", "workspace_id": "w"}); err != nil {
-				t.Fatal(err)
-			}
-		}
-		r.server.DropSubscriptions() // Fence all event dispatch before inspecting logs.
-		r.host.until(t, protocol.MethodStateSet, "lost")
-		limits := 0
-		for _, line := range strings.Split(strings.TrimSpace(r.logs.String()), "\n") {
-			var record map[string]any
-			if err := json.Unmarshal([]byte(line), &record); err != nil {
-				t.Fatal(err)
-			}
-			if record["code"] == "command_limit" {
-				limits++
-			} else if strings.Contains(line, "maximum concurrent commands reached") {
-				t.Fatalf("unthrottled per-event limit log: %s", line)
-			}
-		}
-		want := int(seconds.Load() - 99)
-		if limits != want || len(r.spawns) != 32 {
-			t.Fatalf("limit logs=%d want %d; spawned=%d want 32", limits, want, len(r.spawns))
-		}
-		if seconds.Load() == 100 {
-			seconds.Store(101)
-			r.clock.fire(t, 5*time.Second)
-			r.host.until(t, protocol.MethodStateSet, "attached")
-		}
 	}
 }

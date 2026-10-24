@@ -22,6 +22,10 @@ func TestMain(m *testing.M) {
 	}
 	if len(os.Args) == 3 {
 		switch os.Args[1] {
+		case "--pane-group-leader":
+			os.Exit(paneGroupHelper("leader", os.Args[2]))
+		case "--pane-group-child":
+			os.Exit(paneGroupHelper("child", os.Args[2]))
 		case "--stderr-leader":
 			child := exec.Command(os.Args[0], "--stderr-holder", os.Args[2])
 			child.Stderr, child.Stdout = os.Stderr, os.Stdout

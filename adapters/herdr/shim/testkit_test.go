@@ -3,6 +3,7 @@ package shim
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -17,6 +18,19 @@ import (
 	"github.com/hyperlab-sh/husk/adapters/herdr/upstream"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
+
+// guardedDial makes the selected fixture the only possible upstream, even if a
+// test accidentally supplies inherited session settings or a different socket.
+func guardedDial(t *testing.T, allowed string) upstream.Dialer {
+	t.Helper()
+	return func(ctx context.Context, network, address string) (net.Conn, error) {
+		if allowed == "" || network != "unix" || address != allowed {
+			t.Errorf("refusing non-fixture upstream dial: %s %q", network, address)
+			return nil, fmt.Errorf("non-fixture upstream")
+		}
+		return (&net.Dialer{}).DialContext(ctx, network, address)
+	}
+}
 
 type testTimer struct {
 	mu     sync.Mutex
@@ -165,14 +179,21 @@ type rig struct {
 	logs   *lockedBuffer
 }
 type lockedBuffer struct {
-	mu   sync.Mutex
-	data []byte
+	mu      sync.Mutex
+	data    []byte
+	notices chan struct{}
 }
 
 func (b *lockedBuffer) Write(p []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.data = append(b.data, p...)
+	if b.notices != nil {
+		select {
+		case b.notices <- struct{}{}:
+		default:
+		}
+	}
 	return len(p), nil
 }
 func (b *lockedBuffer) String() string { b.mu.Lock(); defer b.mu.Unlock(); return string(b.data) }
