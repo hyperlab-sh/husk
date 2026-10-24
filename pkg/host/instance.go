@@ -34,5 +34,10 @@ func NewInstance(config contracts.Config, opts ...Option) (Looped, error) {
 	if err != nil {
 		return nil, err
 	}
-	return h.(Looped), nil
+	looped, ok := h.(Looped)
+	if !ok {
+		_ = h.Close()
+		return nil, fmt.Errorf("host does not run on a loop")
+	}
+	return looped, nil
 }
