@@ -1,9 +1,10 @@
 package workbench
 
 import (
-	tea "charm.land/bubbletea/v2"
 	"sync"
 	"sync/atomic"
+
+	tea "charm.land/bubbletea/v2"
 )
 
 // programRef lets the host's Post reach the tea.Program. The host is built

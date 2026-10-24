@@ -59,11 +59,10 @@ func quitRepliesBeforeStop(t *testing.T, id string, quitArgs func(id string) []s
 		tea.WithWindowSize(goldenW, goldenH),
 	)
 	prog.set(p)
-	h, err := newHost(prog, model, id, dir, nil, nil)
+	_, err := attachTestHost(t.Context(), prog, model, id, dir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	model.attach(h, prog.closeGate)
 	ended := make(chan error, 1)
 	go func() { _, err := p.Run(); ended <- err }()
 	t.Cleanup(func() { prog.closeGate(); p.Kill() })

@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
-	"io"
 	"strings"
 	"testing"
 	"time"
@@ -16,58 +14,69 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
-// planHost is a stepHost that plans plugins and optionally fails to run.
+// planHost publishes its scripted notices through the public constructor's
+// callbacks, on the real program loop, and optionally fails to run.
 type planHost struct {
 	stepHost
 	planned int
 	runErr  error
+	config  contracts.Config
+	steps   func(contracts.Config) []hostStep
 }
 
 func (h planHost) Planned() int { return h.planned }
+func (h planHost) newHost(cfg contracts.Config, _ ...host.Option) (host.Looped, error) {
+	h.config = cfg
+	fe := h.fe.(*fakeFE)
+	fe.pods, fe.occ = map[string]string{}, map[protocol.SurfaceID]string{}
+	return h, nil
+}
 func (h planHost) Run(ctx context.Context) error {
 	if h.runErr != nil {
 		return h.runErr
+	}
+	if h.steps != nil {
+		for _, step := range h.steps(h.config) {
+			if !h.config.Post(step) {
+				return ctx.Err()
+			}
+		}
 	}
 	return h.stepHost.Run(ctx)
 }
 
 var _ host.Looped = planHost{}
 
-// A run where no plugin went live exits 1, after printing the frame and the
-// diagnosis, so scripts and CI see the failure.
-func TestDumpFrameMainExitsNonZeroWhenNoPluginWentLive(t *testing.T) {
-	m, prog := dumpModel()
+func TestDumpFramePublicNoPluginWentLive(t *testing.T) {
+	m := goldenModel()
 	fe := withFE(m)
-	m.attach(planHost{stepHost: stepHost{fe: fe}, planned: 1}, nil)
-	feed(prog, starting(m, "broken"), func() { fe.pods["broken"] = "failed"; fe.publish() })
-	var out, errOut bytes.Buffer
-	code := dumpFrameMain(m, planHost{stepHost: stepHost{fe: fe}, planned: 1}, prog, "", &out, &errOut)
-	if code != 1 {
-		t.Fatalf("exit code = %d, want 1", code)
+	h := planHost{stepHost: stepHost{fe: fe}, planned: 1, steps: func(contracts.Config) []hostStep {
+		return []hostStep{starting(m, "broken"), func() { fe.pods["broken"] = "failed"; fe.publish() }}
+	}}
+	frame, err := DumpFrame(t.Context(), Options{NewHost: h.newHost})
+	if err == nil || !strings.Contains(err.Error(), "no plugin went live") {
+		t.Fatalf("error=%v; want no plugin went live", err)
 	}
-	if !strings.Contains(errOut.String(), "no plugin went live") {
-		t.Errorf("stderr %q lacks the diagnosis", errOut.String())
-	}
-	if got := len(strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n")); got != goldenH {
-		t.Errorf("the frame must still be printed, got %d rows", got)
+	if got := len(strings.Split(frame, "\n")); got != goldenH {
+		t.Errorf("the frame must still be returned, got %d rows", got)
 	}
 }
 
 // A discovery refusal is not an empty plugin plan: it fails unless an
 // accepted plugin goes live, retaining both the refusal and the frame.
-func TestDumpFrameMainRefusalsRequireALivePlugin(t *testing.T) {
+func TestDumpFramePublicRefusalsRequireALivePlugin(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		refused bool
 		live    bool
-		code    int
+		failure bool
 	}{
-		{"empty plan", false, false, 0},
-		{"all refused before a Pod", true, false, 1},
-		{"live sibling", true, true, 0},
+		{"empty plan", false, false, false},
+		{"all refused before a Pod", true, false, true},
+		{"live sibling", true, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			m, prog := dumpModel()
+			m := goldenModel()
 			fe := withFE(m)
 			if tc.refused {
 				fe.Refused = []contracts.PluginRefusal{{Reason: "manifest requires name and version"}}
@@ -75,119 +84,103 @@ func TestDumpFrameMainRefusalsRequireALivePlugin(t *testing.T) {
 			h := planHost{stepHost: stepHost{fe: fe}}
 			if tc.live {
 				h.planned = 1
-				feed(prog,
-					register(m, "healthy", []protocol.SurfaceID{protocol.SurfaceMainStage}),
-					slotMsg(m, "healthy", protocol.SurfaceMainStage, "HEALTHY-SIBLING"),
-				)
+				h.steps = func(cfg contracts.Config) []hostStep {
+					return []hostStep{
+						register(m, "healthy", []protocol.SurfaceID{protocol.SurfaceMainStage}),
+						func() {
+							cfg.Content("healthy", protocol.SurfaceUpdateParams{Surface: protocol.SurfaceMainStage, Lines: []string{"HEALTHY-SIBLING"}})
+						},
+					}
+				}
 			}
-			m.attach(h, nil)
-			var out, errOut bytes.Buffer
-			m.logOut = &errOut
-			if code := dumpFrameMain(m, h, prog, "", &out, &errOut); code != tc.code {
-				t.Errorf("exit code=%d want=%d; stderr=%q", code, tc.code, errOut.String())
+			var errOut bytes.Buffer
+			frame, err := DumpFrame(t.Context(), Options{NewHost: h.newHost, Log: &errOut})
+			if (err != nil) != tc.failure {
+				t.Errorf("error=%v want failure=%v; log=%q", err, tc.failure, errOut.String())
 			}
-			if tc.code == 1 && !strings.Contains(errOut.String(), "no plugin went live") {
-				t.Errorf("stderr lacks failure diagnosis: %q", errOut.String())
+			if tc.failure && (err == nil || !strings.Contains(err.Error(), "no plugin went live")) {
+				t.Errorf("error lacks failure diagnosis: %v", err)
 			}
 			if tc.refused {
 				if n := strings.Count(errOut.String(), "plugin refused: manifest requires name and version"); n != 1 {
-					t.Errorf("refusal printed %d times, want once: %q", n, errOut.String())
+					t.Errorf("refusal logged %d times, want once: %q", n, errOut.String())
 				}
-				if !strings.Contains(ansi.Strip(out.String()), "Plugin failed") {
+				if !strings.Contains(ansi.Strip(frame), "Plugin failed") {
 					t.Error("frame lost the refusal toast")
 				}
 			}
-			if tc.live && !strings.Contains(ansi.Strip(out.String()), "HEALTHY-SIBLING") {
+			if tc.live && !strings.Contains(ansi.Strip(frame), "HEALTHY-SIBLING") {
 				t.Error("frame lost the live sibling's content")
 			}
-			if got := len(strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n")); got != goldenH {
+			if got := len(strings.Split(frame, "\n")); got != goldenH {
 				t.Errorf("frame has %d rows, want %d", got, goldenH)
 			}
 		})
 	}
 }
 
-// A host that stops on its own (socket path too long, bind failure) fails the
-// run at once instead of rendering an empty workbench.
-func TestDumpFrameMainExitsNonZeroWhenHostStops(t *testing.T) {
-	m, prog := dumpModel()
+// A host that stops on its own fails the run at once, returning its cause and
+// the current frame instead of waiting out the settle window.
+func TestDumpFramePublicHostStops(t *testing.T) {
+	m := goldenModel()
 	h := planHost{stepHost: stepHost{fe: withFE(m)}, planned: 1, runErr: errors.New("start server: socket path is 116 bytes")}
-	m.attach(h, nil)
-	var out, errOut bytes.Buffer
 	start := time.Now()
-	code := dumpFrameMain(m, h, prog, "", &out, &errOut)
-	if code != 1 {
-		t.Fatalf("exit code = %d, want 1", code)
+	frame, err := DumpFrame(t.Context(), Options{NewHost: h.newHost})
+	if err == nil || !strings.Contains(err.Error(), "host stopped") || !strings.Contains(err.Error(), "socket path is 116 bytes") {
+		t.Fatalf("error=%v; want host failure", err)
 	}
-	if !strings.Contains(errOut.String(), "host stopped") || !strings.Contains(errOut.String(), "socket path is 116 bytes") {
-		t.Errorf("stderr %q lacks the host error", errOut.String())
+	if frame == "" {
+		t.Error("host failure lost the current frame")
 	}
 	if time.Since(start) > dumpFrameTimeout/2 {
 		t.Error("the host failure waited out the settle window")
 	}
 }
 
-// The cause of a stopped host reaches stderr once: the model's log and the
-// run's error must not both print it.
-func TestDumpFrameMainReportsAStoppedHostOnce(t *testing.T) {
-	m, prog := dumpModel()
-	var out, errOut bytes.Buffer
-	m.logOut = &errOut
+// The stopped host's cause is returned once, not also printed by the UI's log.
+func TestDumpFramePublicReportsAStoppedHostOnce(t *testing.T) {
+	m := goldenModel()
+	var errOut bytes.Buffer
 	h := planHost{stepHost: stepHost{fe: withFE(m)}, planned: 1, runErr: errors.New("start server: socket path is 116 bytes")}
-	m.attach(h, nil)
-	if code := dumpFrameMain(m, h, prog, "", &out, &errOut); code != 1 {
-		t.Fatalf("exit code = %d, want 1", code)
+	frame, err := DumpFrame(t.Context(), Options{NewHost: h.newHost, Log: &errOut})
+	if err == nil || frame == "" {
+		t.Fatalf("error=%v frame bytes=%d", err, len(frame))
 	}
-	if n := strings.Count(errOut.String(), "socket path is 116 bytes"); n != 1 {
-		t.Errorf("the cause printed %d times, want once: %q", n, errOut.String())
-	}
-}
-
-func TestDumpFrameMainExitsZeroOnSuccess(t *testing.T) {
-	m, prog := dumpModel()
-	var out, errOut bytes.Buffer
-	if code := dumpFrameMain(m, planHost{stepHost: stepHost{fe: withFE(m)}}, prog, "", &out, &errOut); code != 0 {
-		t.Fatalf("exit code = %d, stderr %q", code, errOut.String())
+	if n := strings.Count(err.Error()+errOut.String(), "socket path is 116 bytes"); n != 1 {
+		t.Errorf("the cause appeared %d times, want once: error=%v log=%q", n, err, errOut.String())
 	}
 }
 
-// --rail with a placement no loaded plugin declares exits 1, with the cause
-// once on stderr and the frame still on stdout.
-func TestDumpFrameMainExitsNonZeroWhenNoRailItemMatches(t *testing.T) {
+func TestDumpFramePublicSuccess(t *testing.T) {
+	m := goldenModel()
+	h := planHost{stepHost: stepHost{fe: withFE(m)}}
+	var errOut bytes.Buffer
+	frame, err := DumpFrame(t.Context(), Options{NewHost: h.newHost, Log: &errOut})
+	if err != nil || frame == "" || errOut.Len() != 0 {
+		t.Fatalf("error=%v frame bytes=%d log=%q", err, len(frame), errOut.String())
+	}
+}
+
+func TestDumpFramePublicNoRailItemMatches(t *testing.T) {
 	for _, mode := range []string{"modal", "full-canvas", "stage"} {
 		t.Run(mode, func(t *testing.T) {
-			m, prog := dumpModel()
-			h := planHost{stepHost: stepHost{fe: withFE(m)}, planned: 1}
-			m.attach(h, nil)
-			feed(prog,
-				register(m, "alpha", []protocol.SurfaceID{protocol.SurfaceMainStage}),
-				slotMsg(m, "alpha", protocol.SurfaceMainStage, "ONLY-STAGE"),
-			)
-			var out, errOut bytes.Buffer
-			if code := dumpFrameMain(m, h, prog, mode, &out, &errOut); code != 1 {
-				t.Fatalf("exit code = %d, want 1", code)
-			}
+			m := goldenModel()
+			h := planHost{stepHost: stepHost{fe: withFE(m)}, planned: 1, steps: func(cfg contracts.Config) []hostStep {
+				return []hostStep{
+					register(m, "alpha", []protocol.SurfaceID{protocol.SurfaceMainStage}),
+					func() {
+						cfg.Content("alpha", protocol.SurfaceUpdateParams{Surface: protocol.SurfaceMainStage, Lines: []string{"ONLY-STAGE"}})
+					},
+				}
+			}}
+			frame, err := DumpFrame(t.Context(), Options{NewHost: h.newHost, RailMode: mode})
 			want := "no loaded plugin declares a " + mode + " rail item"
-			if n := strings.Count(errOut.String(), want); n != 1 {
-				t.Errorf("stderr %q has the cause %d times, want once", errOut.String(), n)
+			if err == nil || strings.Count(err.Error(), want) != 1 {
+				t.Errorf("error=%v; want cause once: %s", err, want)
 			}
-			if !strings.Contains(ansi.Strip(out.String()), "ONLY-STAGE") {
-				t.Errorf("the frame must still be printed:\n%s", out.String())
+			if !strings.Contains(ansi.Strip(frame), "ONLY-STAGE") {
+				t.Errorf("the frame must still be returned:\n%s", ansi.Strip(frame))
 			}
 		})
 	}
-}
-
-// dumpFrameMain preserves the former output assertions at the model seam;
-// the command package separately pins the process exit policy.
-func dumpFrameMain(m *workbenchModel, h host.Looped, prog *programRef, rail string, stdout, stderr io.Writer) int {
-	frame, err := runDumpFrame(m, dumpFrameOptions{Launched: h.Planned(), RailMode: rail, Program: prog})
-	prog.closeGate()
-	m.shutdownHost()
-	fmt.Fprintln(stdout, frame)
-	if err != nil {
-		fmt.Fprintf(stderr, "husk: --dump-frame: %v\n", err)
-		return 1
-	}
-	return 0
 }
