@@ -365,6 +365,11 @@ func TestClearWithoutAFirerOrForAnUnknownSlice(t *testing.T) {
 		if len(r.f.hooks) != 0 {
 			t.Fatalf("firer called for an unregistered slice: %v", r.f.hooks)
 		}
+		for _, s := range r.ord.got() {
+			if strings.HasPrefix(s, "delete") {
+				t.Fatalf("persisted copies deleted for an unregistered slice: %v", r.ord.got())
+			}
+		}
 	})
 	t.Run("denied callers never reach the hook", func(t *testing.T) {
 		r := newClearRig(t, answer(allowed(), nil))
