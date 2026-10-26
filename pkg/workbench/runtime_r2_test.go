@@ -146,3 +146,34 @@ func TestRuntimeCanvasFrameCloseHandsOffAndRestoresFocus(t *testing.T) {
 		t.Fatal("final close retained runtime surfaces")
 	}
 }
+
+func TestRuntimeCanvasFooterShowsOnlyDockKeysThatChangeTheFrame(t *testing.T) {
+	for _, p := range []contracts.RailPlacement{"", contracts.PlacementStage, contracts.PlacementFullCanvas} {
+		for _, left := range []bool{false, true} {
+			t.Run(string(p)+"/"+map[bool]string{false: "nosidebar", true: "sidebar"}[left], func(t *testing.T) {
+				m := goldenModel()
+				fe := withFE(m)
+				m.activePlacement = p
+				m.showSidebar = left
+				openRuntimeFixture(m, fe, "p.canvas", protocol.SurfacePlacementCanvas)
+				m.recomputeLayout()
+				if m.runtimeCanvas() == "" {
+					t.Fatal("no runtime canvas")
+				}
+				shown := strings.Fields(docksHint(m))
+				for _, key := range shown {
+					before := m.View().Content
+					press(m, key)
+					if after := m.View().Content; after == before {
+						t.Errorf("footer shows %q but pressing it leaves the frame unchanged", key)
+					}
+					m.showSidebar, m.showSidePane = left, true
+					m.recomputeLayout()
+				}
+				if len(shown) != 0 {
+					t.Fatalf("docks hint under a runtime canvas: %q", shown)
+				}
+			})
+		}
+	}
+}
