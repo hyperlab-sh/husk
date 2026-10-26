@@ -72,6 +72,25 @@ func TestKeybindingParseErrorFallbackIsPerProfile(t *testing.T) {
 	}
 }
 
+// A deleted profile file leaves no last good document: a later broken file
+// falls back to nothing.
+func TestKeybindingParseErrorAfterDeletedProfileFileHasNoFallback(t *testing.T) {
+	kb := keybinding.New()
+	name := "work"
+	load := func(layers []store.LayerDoc, problems []store.Problem) {
+		in := input(`{}`)
+		in.Profile = &name
+		in.Layers, in.KeymapProblems = layers, problems
+		apply(t, kb, in)
+	}
+	load([]store.LayerDoc{{Layer: store.LayerProfile, Doc: doc(bind(`{"key":"ctrl+9","action":"p.work"}`))}}, nil)
+	load(nil, nil)
+	load(nil, []store.Problem{{Code: "invalid_document", Layer: store.LayerProfile, Message: "bad"}})
+	if got := resolved(kb, keybinding.KeyContext{}, "ctrl+9"); got != "<none>" || len(problemsWith(kb, "parse_error")) != 1 {
+		t.Fatalf("deleted document came back: %s, %+v", got, kb.Listing().Problems)
+	}
+}
+
 // A distribution part that fails to parse while the other loads does not
 // serve the partial fold: the last good distribution document stays.
 func TestKeybindingParseErrorInOneDistributionPartKeepsLastGood(t *testing.T) {

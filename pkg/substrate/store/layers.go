@@ -309,19 +309,8 @@ func (s *Store) loadLayers(name DocName, profile string) (layerLoad, error) {
 // A distribution profile is folded into its single distribution layer; flags
 // are folded into the single instance layer. Parse failures are reported by Resolve.
 func (s *Store) Layers(name DocName, profile string) ([]LayerDoc, error) {
-	s.configMu.Lock()
-	defer s.configMu.Unlock()
-	load, err := s.cachedLayers(name, profile)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]LayerDoc, len(load.layers))
-	for i, l := range load.layers {
-		out[i] = l
-		out[i].Doc = copyDoc(l.Doc)
-		out[i].MemberOrder = copyOrder(l.MemberOrder)
-	}
-	return out, nil
+	layers, _, err := s.LayersWithProblems(name, profile)
+	return layers, err
 }
 
 // LayersWithProblems is Layers plus the parse problems (code invalid_document)

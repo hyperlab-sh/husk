@@ -580,7 +580,8 @@ func jsonType(v any) string {
 	return fmt.Sprintf("%T", v)
 }
 
-func invalidKeyDetail(raw map[string]any) (string, string) {
+// invalidKeySpelling is the first key spelling of raw that does not normalize.
+func invalidKeySpelling(raw map[string]any) string {
 	var keys []string
 	if key, ok := raw["key"].(string); ok {
 		keys = []string{key}
@@ -589,10 +590,10 @@ func invalidKeyDetail(raw map[string]any) (string, string) {
 	}
 	for _, key := range keys {
 		if _, err := keyspelling.Normalize(key); err != nil {
-			return key, err.Error()
+			return key
 		}
 	}
-	return "", ""
+	return ""
 }
 
 // Rebuild parses every layer and prepares a complete immutable index.
@@ -797,7 +798,7 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 					code = "unparsable_key"
 				}
 				if code == "invalid_key" || code == "unparsable_key" {
-					key, _ = invalidKeyDetail(raw)
+					key = invalidKeySpelling(raw)
 				}
 				issue(code, src, key, problem.message)
 				continue
@@ -820,9 +821,14 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 		}
 	}
 	// The last good profile document is kept per profile name, so switching
-	// away from a profile and back still finds it.
+	// away from a profile and back still finds it. The selected profile is
+	// excluded: a deleted file leaves no last good document.
+	selected := ""
+	if in.Profile != nil {
+		selected = string(LayerProfile) + "\x00" + *in.Profile
+	}
 	for key, kept := range old.documents {
-		if _, exists := next.documents[key]; !exists && strings.HasPrefix(key, string(LayerProfile)+"\x00") {
+		if _, exists := next.documents[key]; !exists && key != selected && strings.HasPrefix(key, string(LayerProfile)+"\x00") {
 			next.documents[key] = kept
 		}
 	}
