@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -222,7 +221,7 @@ func (w *State) Clear(ctx context.Context, c contracts.Caller, namespace string,
 	// An unregistered namespace changes nothing (state.md): checked before
 	// the hook and before any persisted copy is touched.
 	if _, ok := w.st.Snapshot().Slices[namespace]; !ok {
-		return w.mapWriteError(namespace, 0, 0, fmt.Errorf("%w: %s", state.ErrUnregistered, namespace))
+		return errNotRegistered(namespace)
 	}
 	if !force {
 		if err := w.beforeClear(ctx, namespace); err != nil {
@@ -234,6 +233,11 @@ func (w *State) Clear(ctx context.Context, c contracts.Caller, namespace string,
 			return coded(protocol.CodeUnavailable, "the host is shutting down")
 		}
 		return coded(protocol.CodeCancelled, "request ended before deletion; nothing was cleared")
+	}
+	// The hook wait or a plugin removal may have unregistered the slice since
+	// the first check; its persisted copies are kept (state.md).
+	if _, ok := w.st.Snapshot().Slices[namespace]; !ok {
+		return errNotRegistered(namespace)
 	}
 	if w.cleaner != nil {
 		// Persisted copies go first, mirroring store.md's documented clear
@@ -549,6 +553,10 @@ var (
 	errPointerSyntax = contracts.NewError(protocol.CodeInvalidParams, "path must be empty or an RFC 6901 pointer starting with /", nil)
 	errNoResolve     = contracts.NewError(protocol.CodeNotFound, "path does not resolve in this slice", nil)
 )
+
+func errNotRegistered(namespace string) error {
+	return contracts.NewError(protocol.CodeNotFound, "slice "+namespace+" is not registered", nil)
+}
 
 // resolvePointer resolves an RFC 6901 pointer against a JSON value. A pointer
 // that does not start with "/" is a syntax error; a token that does not exist
