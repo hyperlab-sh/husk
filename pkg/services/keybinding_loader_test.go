@@ -351,3 +351,28 @@ func TestCoordinatorCarriesStoreParseProblemsToKeybinding(t *testing.T) {
 		t.Errorf("after break: %+v", kb.Listing().Problems)
 	}
 }
+
+// no_exit_binding names only the action that is unbound.
+func TestKeybindingNoExitBindingNamesTheMissingAction(t *testing.T) {
+	for _, tc := range []struct {
+		name, disabled, want, absent string
+	}{
+		{"palette", `"ctrl+p","alt+p",":"`, "husk.palette.open", "husk.quit"},
+		{"quit", `"q","ctrl+c"`, "husk.quit", "husk.palette.open"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			kb := keybinding.New()
+			var entries []string
+			for _, k := range strings.Split(tc.disabled, ",") {
+				entries = append(entries, fmt.Sprintf(`{"key":%s,"disable":true}`, k))
+			}
+			in := input(`{}`)
+			in.Layers = []store.LayerDoc{{Layer: store.LayerUser, Doc: doc(bind(entries...))}}
+			apply(t, kb, in)
+			ps := problemsWith(kb, "no_exit_binding")
+			if len(ps) != 1 || !strings.Contains(ps[0].Message, tc.want) || strings.Contains(ps[0].Message, tc.absent) {
+				t.Fatalf("problems = %+v", ps)
+			}
+		})
+	}
+}
