@@ -111,6 +111,7 @@ type clearRig struct {
 	f   *fakeFirer
 	ord *order
 	log *logLines
+	hs  *handleSource
 }
 
 func newClearRig(t *testing.T, fn func(context.Context, string, map[string]any) (hooks.Outcome, error), specs ...state.Spec) *clearRig {
@@ -120,7 +121,7 @@ func newClearRig(t *testing.T, fn func(context.Context, string, map[string]any) 
 	}
 	r := &clearRig{ord: &order{}, log: &logLines{}}
 	r.f = &fakeFirer{o: r.ord, fn: fn}
-	r.w, r.st, _ = newPort(t, StatePortOptions{Cleaner: orderedCleaner{r.ord}, Hooks: r.f, Logf: r.log.logf}, specs...)
+	r.w, r.st, r.hs = newPort(t, StatePortOptions{Cleaner: orderedCleaner{r.ord}, Hooks: r.f, Logf: r.log.logf}, specs...)
 	if _, err := r.w.Set(ctxBG, callerAtlas, "atlas.state", json.RawMessage(`{"dirty":1}`)); err != nil {
 		t.Fatal(err)
 	}
@@ -378,4 +379,18 @@ func TestClearWithoutAFirerOrForAnUnknownSlice(t *testing.T) {
 			t.Fatalf("firer called for a denied caller: %v", r.f.hooks)
 		}
 	})
+}
+
+func TestClearUnregisteredDuringHookWaitKeepsPersistedCopies(t *testing.T) {
+	var r *clearRig
+	r = newClearRig(t, func(context.Context, string, map[string]any) (hooks.Outcome, error) {
+		r.hs.live[specFresh.Owner+"\x00"+specFresh.Namespace].Unregister()
+		return allowed(), nil
+	})
+	wantPortCode(t, r.w.Clear(ctxBG, callerCLI, "atlas.state", false), protocol.CodeNotFound)
+	for _, s := range r.ord.got() {
+		if strings.HasPrefix(s, "delete") {
+			t.Fatalf("a delete ran after the slice was unregistered: %v", r.ord.got())
+		}
+	}
 }
