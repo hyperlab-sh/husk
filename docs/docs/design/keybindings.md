@@ -514,7 +514,7 @@ This is the complete list of loader codes, plus `invalid_plugin_catalog`, raised
 | `unreachable` | loader | Within one scope, layer and plugin condition, an effective sequence is a strict prefix of another effective sequence (a tombstone is not the shorter one). | The longer one is dropped. |
 | `too_many` | loader | More than 2048 entries in one layer file; more than 128 in one manifest (raised by conversion, carried in the document's `problems`); or more than 4096 effective entries after shadowing. | Extra entries are dropped. Past the 4096 cap the last entries in the static order (loader step 5) go first, so a flood of low-layer entries cannot push out `profile` or `user` entries. |
 | `global_not_allowed` | conversion | A manifest entry without `focus`, with a `focus` the plugin does not own, or with `plugin` or `disable`. | The entry is dropped. |
-| `foreign_action` | conversion | A manifest entry whose `action` is neither the plugin's own nor `husk.*`. | The entry is dropped. |
+| `foreign_action` | conversion | A manifest entry whose `action` is none of the plugin's own actions, own rail item ids or `husk.*`. | The entry is dropped. |
 | `cli_only_event` | conversion | A manifest subscribes to a `secrets.` or `services.` event pattern, which only `cli` and in-process `host` watchers receive (carried in the document's `problems`; `index` is the position in the manifest's own subscription list and `key` names the member, for example `events.subscribe[1]`). | That subscription is dropped; the plugin's others stand. |
 | `suggestion_ignored` | loader, from conversion's `suggestions` | A rail item or command carried `shortcut`. | Nothing is bound; the rail shows no key until a layer binds one. |
 | `no_exit_binding` | loader | After ranking, no effective entry has action `husk.quit` or none has `husk.palette.open`. | The keymap is used as written; a toast at startup. Recovery: `husk action invoke husk.quit`, or a signal. |
@@ -618,7 +618,7 @@ Behavior changes users can notice, compared with the layer-first draft of this s
 11. **Palette and inspector keys stay widget-local.** They are the input handling of two host-owned surfaces.
 12. **Modal grab considers only `modal-surface` scope plus the modal's own close action.** `modal-surface` scope means any open modal, rail or runtime, so one `esc` binding closes both and a plugin's modal-scoped bindings follow it into its runtime modals; a separate scope for runtime modals would need every close key bound twice.
 13. **Manifest `shortcut` fields are suggestions, reported and ignored.** Otherwise a plugin could still declare a global key through the rail.
-14. **A foreign action in a manifest binding is dropped.** A plugin binds its own actions and `husk.*` only.
+14. **A foreign action in a manifest binding is dropped.** A plugin binds its own actions, its own rail item ids and `husk.*` only.
 15. **Conversion owns the manifest rules; the service owns key parsing.** One owner per rule; two codes (`global_not_allowed`, `foreign_action`) whose messages say what was wrong (D27).
 16. **`keys.list` computes availability in the Server handler**, keeping `Resolve` pure.
 17. **Parse failure on reload keeps the last good document for that layer and profile name** (D40). At first load the layer is absent instead.
