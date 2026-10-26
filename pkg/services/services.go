@@ -683,6 +683,19 @@ func (co *Coordinator) loadInput(ctx context.Context, f *flight) inputResult {
 	if err != nil {
 		return inputResult{err: err}
 	}
+	// Parse problems are an optional capability, so a narrow StoreReader still serves.
+	var keymapProblems []store.Problem
+	if reader, ok := co.opts.Store.(interface {
+		LayerProblems(store.DocName, string) ([]store.Problem, error)
+	}); ok {
+		keymapProblems, err = reader.LayerProblems("keymap", selected)
+		if ended := ctx.Err(); ended != nil {
+			return inputResult{err: ended}
+		}
+		if err != nil {
+			return inputResult{err: err}
+		}
+	}
 	configLayers, err := co.opts.Store.Layers("config", selected)
 	if ended := ctx.Err(); ended != nil {
 		return inputResult{err: ended}
@@ -697,7 +710,7 @@ func (co *Coordinator) loadInput(ctx context.Context, f *flight) inputResult {
 			return inputResult{err: err}
 		}
 	}
-	return inputResult{in: ReloadInput{Doc: resolved, Layers: layers, ConfigLayers: configLayers, Themes: themes, Declared: declared, Profile: &selected, ProfileNames: profileNames, ProfileProblems: selectionProblems, ProfileWrite: profileWrite}}
+	return inputResult{in: ReloadInput{Doc: resolved, Layers: layers, KeymapProblems: keymapProblems, ConfigLayers: configLayers, Themes: themes, Declared: declared, Profile: &selected, ProfileNames: profileNames, ProfileProblems: selectionProblems, ProfileWrite: profileWrite}}
 }
 
 // Inputs collects fresh user-authorized disk input for a dry run

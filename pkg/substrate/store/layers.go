@@ -323,6 +323,18 @@ func (s *Store) Layers(name DocName, profile string) ([]LayerDoc, error) {
 	}
 	return out, nil
 }
+
+// LayerProblems returns the parse problems (code invalid_document) of the
+// layer files that Layers left out for name and profile.
+func (s *Store) LayerProblems(name DocName, profile string) ([]Problem, error) {
+	s.configMu.Lock()
+	defer s.configMu.Unlock()
+	load, err := s.cachedLayers(name, profile)
+	if err != nil {
+		return nil, err
+	}
+	return append([]Problem(nil), load.problems...), nil
+}
 func (s *Store) cachedLayers(name DocName, profile string) (layerLoad, error) {
 	k := docKey{name, profile}
 	if l, ok := s.layerCache[k]; ok {
