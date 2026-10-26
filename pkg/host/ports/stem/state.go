@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -118,7 +118,7 @@ func (w *State) Get(_ context.Context, _ contracts.Caller, slice, path string) (
 	}
 	value := entry.Value
 	if path != "" {
-		resolved, err := resolvePointer(value, path)
+		resolved, err := resolvePointer(entry, path)
 		if err != nil {
 			return contracts.StateReadResult{}, err
 		}
@@ -219,6 +219,11 @@ func (w *State) Clear(ctx context.Context, c contracts.Caller, namespace string,
 	if c.Kind != contracts.CallerCLI {
 		return contracts.NewError(protocol.CodeDenied, "state.clear clears the user's own data; only the user's CLI may do it", nil)
 	}
+	// An unregistered namespace changes nothing (state.md): checked before
+	// the hook and before any persisted copy is touched.
+	if _, ok := w.st.Snapshot().Slices[namespace]; !ok {
+		return w.mapWriteError(namespace, 0, 0, fmt.Errorf("%w: %s", state.ErrUnregistered, namespace))
+	}
 	if !force {
 		if err := w.beforeClear(ctx, namespace); err != nil {
 			return err
@@ -270,9 +275,9 @@ func (w *State) applyClear(ctx context.Context, namespace string) error {
 }
 
 // beforeClear fires husk.before-state-clear for a registered slice and maps
-// what Fire returns to nil (proceed) or the error Clear answers with. A slice
-// that is not registered has no owner to name, so nothing is asked and the
-// clear falls through to its own not_found. The hook data carries the slice
+// what Fire returns to nil (proceed) or the error Clear answers with. Clear has
+// already refused an unregistered slice, so a missing entry here only means
+// it was unregistered since; nothing is asked. The hook data carries the slice
 // name and owner, never the value.
 func (w *State) beforeClear(ctx context.Context, namespace string) error {
 	if w.hooks == nil {
@@ -548,43 +553,13 @@ var (
 // resolvePointer resolves an RFC 6901 pointer against a JSON value. A pointer
 // that does not start with "/" is a syntax error; a token that does not exist
 // does not resolve.
-func resolvePointer(value json.RawMessage, pointer string) (json.RawMessage, error) {
+func resolvePointer(entry state.Entry, pointer string) (json.RawMessage, error) {
 	if !strings.HasPrefix(pointer, "/") {
 		return nil, errPointerSyntax
 	}
-	var doc any
-	if err := json.Unmarshal(value, &doc); err != nil {
-		return nil, contracts.NewError(protocol.CodeInternal, "slice value is not valid JSON: "+err.Error(), nil)
-	}
-	cur := doc
-	for _, token := range strings.Split(strings.TrimPrefix(pointer, "/"), "/") {
-		token = strings.ReplaceAll(strings.ReplaceAll(token, "~1", "/"), "~0", "~")
-		switch node := cur.(type) {
-		case map[string]any:
-			next, ok := node[token]
-			if !ok {
-				return nil, errNoResolve
-			}
-			cur = next
-		case []any:
-			if token == "" || token == "-" || (len(token) > 1 && token[0] == '0') {
-				return nil, errNoResolve
-			}
-			i, err := strconv.Atoi(token)
-			if err != nil || i < 0 || i >= len(node) {
-				return nil, errNoResolve
-			}
-			cur = node[i]
-		default:
-			return nil, errNoResolve
-		}
-	}
-	if cur == nil {
-		return json.RawMessage("null"), nil
-	}
-	raw, err := json.Marshal(cur)
-	if err != nil {
-		return nil, contracts.NewError(protocol.CodeInternal, "encoding pointer result: "+err.Error(), nil)
+	raw, ok := entry.At(pointer)
+	if !ok {
+		return nil, errNoResolve
 	}
 	return raw, nil
 }
