@@ -2,7 +2,6 @@ package server
 
 import (
 	"fmt"
-	"unicode/utf8"
 
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
@@ -35,10 +34,8 @@ func (c *connection) noteDiagnosticLocked(code protocol.Code, suppressed bool) {
 // method is peer-controlled, so it is truncated before it is kept.
 func (c *connection) noteIgnored(method string) {
 	if len(method) > maxIgnoredMethod {
+		// protocol.ValidateMethod admits only ASCII, so this cuts no rune.
 		method = method[:maxIgnoredMethod]
-		for !utf8.ValidString(method) {
-			method = method[:len(method)-1]
-		}
 	}
 	c.budgetMu.Lock()
 	defer c.budgetMu.Unlock()
