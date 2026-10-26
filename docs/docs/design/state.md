@@ -495,10 +495,12 @@ on immediate reoccupation. Yield requires occupancy through a layout
 claim; it is not available to an unclaimed or runtime surface
 (`invalid_params` naming `yield`, [Protocol](protocol.md) "Surface close").
 An absent or false `yield` keeps the retracting close, and a host
-force-release always retracts. A refused claim stays
-recorded in the declaration, the occupant is unchanged, and the refusal is
-counted and written once to the host log at warn level, naming the plugin,
-the surface and the occupant (no toast); a returning plugin's re-registered declarations resolve again,
+force-release always retracts. A refused claim stays recorded in the
+declaration, the occupant is unchanged, and the refusal is counted and
+written to the host log at warn level each time the claim is refused (once
+per arrival or re-resolution), naming the plugin, the surface and the
+occupant (no toast); a returning plugin's re-registered declarations
+resolve again,
 first live claim wins among the claims that arrive after the re-registration.
 
 #### Runtime and terminal surfaces
