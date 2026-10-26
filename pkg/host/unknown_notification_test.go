@@ -19,7 +19,12 @@ func TestUnknownMethodNotificationIsSilentOnTheRealSocket(t *testing.T) {
 	type entry struct{ level, msg string }
 	logs := make(chan entry, 16)
 	hook, ready := readyHook("")
-	h, err := boot(t, nil, withHook(hook), WithLogger(func(level, msg string) { logs <- entry{level, msg} }))
+	h, err := boot(t, nil, withHook(hook), WithLogger(func(level, msg string) {
+		select {
+		case logs <- entry{level, msg}:
+		default:
+		}
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +64,12 @@ func TestUnknownMethodNotificationIsSilentOnTheRealSocket(t *testing.T) {
 		t.Fatal("unexpected wire message:", m)
 	}
 	for {
-		e := <-logs
+		var e entry
+		select {
+		case e = <-logs:
+		case <-t.Context().Done():
+			t.Fatal("no debug log for the ignored notification")
+		}
 		if strings.Contains(e.msg, "state.nope") {
 			if e.level != "debug" {
 				t.Fatalf("level %q: %s", e.level, e.msg)
