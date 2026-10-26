@@ -110,6 +110,18 @@ type RefusedClaim struct {
 	At      time.Time
 }
 
+// WarnLogger is the optional level a Logger may add; the engine writes
+// refused claims through it when present and through Printf otherwise.
+type WarnLogger interface{ Warnf(format string, v ...any) }
+
+func (e *Engine) warnf(format string, v ...any) {
+	if w, ok := e.log.(WarnLogger); ok {
+		w.Warnf(format, v...)
+		return
+	}
+	e.log.Printf(format, v...)
+}
+
 // maxRefused bounds the refused-claim history in Stats.
 const maxRefused = 32
 
@@ -560,7 +572,7 @@ func (e *Engine) resolvePlugin(plugin string, old, cur *pluginDecl, res *Surface
 			// Still ours from a release the Pod has not re-declared; no-op.
 		default:
 			e.recordRefusal(surface, plugin)
-			e.log.Printf("surfaces: %s occupied by %s; claim by %s refused", surface, occupant, plugin)
+			e.warnf("surfaces: %s occupied by %s; claim by %s refused", surface, occupant, plugin)
 		}
 	}
 

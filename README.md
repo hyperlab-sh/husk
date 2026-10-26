@@ -8,7 +8,7 @@ Husk is an application-agnostic TUI workbench; everything app-specific lives in 
 
 ## Status
 
-Early. The workbench core, wire protocol, activity rail, command palette, mouse-resizable slots and plugin manifests work. The bundled plugins are a small reference plugin pair (`plugins/reference`, `plugins/reference-actions`). See the [documentation](docs/) and the open work in beads.
+Early. The workbench core, wire protocol, activity rail, command palette, mouse-resizable slots and plugin manifests work. The bundled plugins are the reference pair (`plugins/reference`, `plugins/reference-actions`), a terminal host (`plugins/terminal`) and an optional layout guide (`plugins/guide`). See the [documentation](docs/) and the open work in beads.
 
 ## Quick start
 

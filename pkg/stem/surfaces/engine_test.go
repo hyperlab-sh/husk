@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -1557,4 +1558,35 @@ func TestCommittedSurfacesAlwaysCarriesCaptureAndTerminals(t *testing.T) {
 	eng.CatalogChanged()
 	settle(st, eng)
 	check("empty foreign write")
+}
+
+// warnRecorder records Warnf lines apart from Printf ones.
+type warnRecorder struct {
+	testLogger
+	warns []string
+}
+
+func (w *warnRecorder) Warnf(format string, v ...any) {
+	w.warns = append(w.warns, fmt.Sprintf(format, v...))
+}
+
+func TestRefusedClaimWritesOneWarnLine(t *testing.T) {
+	rec := &warnRecorder{}
+	st, eng, pods := newEngine(t, Options{Logger: rec})
+	rec.testLogger = testLogger{t: t}
+	pods.launch("alpha.files")
+	pods.launch("beta.notes")
+	pods.claim("alpha.files", string(protocol.SurfaceMainStage))
+	settle(st, eng)
+	pods.claim("beta.notes", string(protocol.SurfaceMainStage))
+	settle(st, eng)
+
+	if len(rec.warns) != 1 {
+		t.Fatalf("warn lines = %q, want exactly one", rec.warns)
+	}
+	for _, want := range []string{"beta.notes", "alpha.files", string(protocol.SurfaceMainStage)} {
+		if !strings.Contains(rec.warns[0], want) {
+			t.Fatalf("warn line %q does not name %q", rec.warns[0], want)
+		}
+	}
 }
