@@ -393,37 +393,34 @@ func TestUnknownMethodNotificationsAreIgnoredAndCoalesced(t *testing.T) {
 				<-t.Context().Done()
 				return false
 			}
+			var calls atomic.Int64
 			s.Handle("sample", handlerFunc(func(_ context.Context, _ Caller, req protocol.Message, _ Notifier) protocol.Message {
+				calls.Add(1)
 				return protocol.Message{Error: &protocol.Error{Code: protocol.CodeUnknownMethod, Message: "no inbound handler for " + req.Method}}
 			}))
 			start(t, s)
 			c, r := dial(t, s)
-
-			var conn *connection
-			findConn := func() {
-				for conn == nil {
-					s.mu.Lock()
-					for k := range s.conns {
-						conn = k
-					}
-					s.mu.Unlock()
-					runtime.Gosched()
-				}
-			}
+			var sent int64
 			// burst writes n notifications. Registered-prefix ones enter the
 			// bounded notification queue (overflow is a correct busy reply), so
-			// they go in chunks of at most MaxNotificationQueue with the worker
-			// drained between chunks; the unregistered prefix never queues.
+			// they go in chunks of half the queue, and the next chunk waits until
+			// the handler has run for every line written so far (a slot is
+			// released just after its handler returns, hence the margin). The
+			// unregistered prefix never queues.
 			burst := func(n int) {
-				for sent := 0; sent < n; {
-					chunk := min(n-sent, MaxNotificationQueue)
+				chunkSize := MaxNotificationQueue / 2
+				if method != "sample.nope" {
+					chunkSize = n
+				}
+				for done := 0; done < n; {
+					chunk := min(n-done, chunkSize)
 					for i := 0; i < chunk; i++ {
 						write(t, c, fmt.Sprintf(`{"method":%q}`, method))
 					}
-					sent += chunk
+					done += chunk
+					sent += int64(chunk)
 					if method == "sample.nope" {
-						findConn()
-						for len(conn.notifySlots) > 0 {
+						for calls.Load() != sent {
 							runtime.Gosched()
 						}
 					}
