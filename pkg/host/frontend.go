@@ -413,7 +413,8 @@ func (r *Root) ActiveToast() (contracts.Toast, bool) {
 }
 
 // Tick implements Looped: the end-of-Update flushes, for a frontend write
-// that was not caused by a host message.
+// that was not caused by a host message. A first Tick, like a first Update,
+// fixes the loop goroutine and runs the WithOnLoopStart hook.
 func (r *Root) Tick() {
 	if r.loopGID.Load() == 0 {
 		r.loopGID.Store(goroutineID())

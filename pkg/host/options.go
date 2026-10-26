@@ -85,10 +85,15 @@ func WithConverters(paths []string) Option {
 // to a WatchEvents subscriber: at the first Update (or Tick) whatever the
 // message, ahead of the first end-of-Update event flush. fn receives the
 // host's Frontend, so it can call loop-only methods such as WatchEvents. Nil is
-// ignored; a later option replaces an earlier one. A panic in fn is not
+// ignored (it never clears an earlier fn); otherwise a later option replaces an
+// earlier one. A panic in fn is not
 // recovered here.
 func WithOnLoopStart(fn func(contracts.Frontend)) Option {
-	return func(o *options) { o.onLoopStart = fn }
+	return func(o *options) {
+		if fn != nil {
+			o.onLoopStart = fn
+		}
+	}
 }
 
 // WithFactory replaces the process Wrapper factory (fake plugins in tests).
