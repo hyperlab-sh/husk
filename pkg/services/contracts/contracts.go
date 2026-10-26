@@ -53,9 +53,9 @@ type SettingsSnapshot interface {
 type ReloadInput struct {
 	Doc    store.Resolved
 	Layers []store.LayerDoc
-	// KeymapProblems are the Store's parse problems for the keymap layer
-	// files absent from Layers, so a reload can keep a layer's last good
-	// document.
+	// KeymapProblems are the Store's parse problems (invalid_document) for
+	// keymap layer files Store left out; a distribution part that failed
+	// leaves the folded distribution layer present but partial.
 	KeymapProblems []store.Problem
 	Declared       map[store.DocName]map[string]store.Doc
 	Settings       SettingsSnapshot
