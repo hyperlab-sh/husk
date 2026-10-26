@@ -37,7 +37,7 @@ type options struct {
 	onSpawn       func(accepted bool)
 	keyring       store.Keyring         // replaces the OS keyring under Store when set
 	onStoreFlush  func(context.Context) // sees the context handed to Store.Close
-	workerWait    time.Duration         // overrides storeCloseTimeout for the worker wait when set
+	workerWait    time.Duration         // overrides workerWaitTimeout for the worker wait when set
 }
 
 func (o *options) workerWaitOr(d time.Duration) time.Duration {
