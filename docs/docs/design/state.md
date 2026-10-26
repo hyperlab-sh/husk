@@ -497,7 +497,8 @@ claim; it is not available to an unclaimed or runtime surface
 An absent or false `yield` keeps the retracting close, and a host
 force-release always retracts. A refused claim stays
 recorded in the declaration, the occupant is unchanged, and the refusal is
-counted; a returning plugin's re-registered declarations resolve again,
+counted and written once to the host log at warn level, naming the plugin,
+the surface and the occupant (no toast); a returning plugin's re-registered declarations resolve again,
 first live claim wins among the claims that arrive after the re-registration.
 
 #### Runtime and terminal surfaces
