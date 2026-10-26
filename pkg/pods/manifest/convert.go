@@ -81,6 +81,13 @@ func convert(src Source, modern bool) (*Spec, []Warning, error) {
 	if fields == nil {
 		return nil, nil, errors.New("manifest must be an object")
 	}
+	if !modern {
+		// The v2 detector claims only the number 2, so any other present
+		// version reaches here and must not load as v1.
+		if v := bytes.TrimSpace(fields["manifest_version"]); len(v) != 0 && !bytes.Equal(v, []byte("null")) {
+			return nil, nil, fmt.Errorf("unsupported manifest_version %s (supported: 2, or absent for v1)", v)
+		}
+	}
 	s := &Spec{WorkDir: src.Dir, Protocol: protocol.Major}
 	for _, f := range []struct {
 		key  string
@@ -218,6 +225,9 @@ func convert(src Source, modern bool) (*Spec, []Warning, error) {
 		for _, a := range s.Actions {
 			actions[a.ID] = true
 		}
+		for _, r := range s.RailItems {
+			actions[r.ID] = true
+		}
 		surfaces := make(map[string]bool)
 		for _, surface := range s.Surfaces {
 			surfaces[string(surface.ID)] = true
@@ -231,7 +241,7 @@ func convert(src Source, modern bool) (*Spec, []Warning, error) {
 			if b.Focus == "" || !surfaces[b.Focus] || b.Plugin != nil || b.Disable != nil {
 				code, message = "global_not_allowed", "focus must be a surface owned by this plugin; plugin/disable fields are not allowed"
 			} else if !actions[b.Action] && !(strings.HasPrefix(b.Action, "husk.") && len(b.Action) > 5) {
-				code, message = "foreign_action", "focus binding must target an own action or husk.*"
+				code, message = "foreign_action", "focus binding must target an own action, own rail item or husk.*"
 			}
 			if code != "" {
 				s.BindingProblems = append(s.BindingProblems, BindingProblem{Index: i, Code: code, Message: message})
