@@ -2,12 +2,18 @@ package server
 
 import (
 	"fmt"
+	"unicode/utf8"
 
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
+// maxIgnoredMethod caps the peer-supplied method kept for the debug notice.
+const maxIgnoredMethod = 128
+
 // Reader/handler paths only update bounded counters and arm one injected timer.
-// They never invoke a potentially blocking loop callback.
+// They never invoke a potentially blocking loop callback. Each interval posts
+// up to two notices per connection (warn diagnostics and debug ignored
+// notifications), in order, from the single posting goroutine.
 func (c *connection) noteDiagnostic(code protocol.Code) {
 	c.budgetMu.Lock()
 	defer c.budgetMu.Unlock()
@@ -25,8 +31,15 @@ func (c *connection) noteDiagnosticLocked(code protocol.Code, suppressed bool) {
 // noteIgnored counts a notification dropped because its method is unknown
 // (protocol.md: no response, logged at debug level). It shares the coalescing
 // timer and post budget of the warn diagnostics but reports as its own debug
-// notice, so a flood of them costs at most one loop message per interval.
+// notice, so a flood of them costs at most one loop message per interval. The
+// method is peer-controlled, so it is truncated before it is kept.
 func (c *connection) noteIgnored(method string) {
+	if len(method) > maxIgnoredMethod {
+		method = method[:maxIgnoredMethod]
+		for !utf8.ValidString(method) {
+			method = method[:len(method)-1]
+		}
+	}
 	c.budgetMu.Lock()
 	defer c.budgetMu.Unlock()
 	c.ignoredCount++
@@ -73,7 +86,7 @@ func (c *connection) publishDiagnostic() {
 		}
 		if c.ignoredCount > 0 {
 			notice := Notice{ConnID: c.id, Level: "debug", Count: c.ignoredCount, LastCode: protocol.CodeUnknownMethod}
-			notice.Message = fmt.Sprintf("connection %d: %d notifications for unknown methods ignored; last method %s", c.id, notice.Count, c.lastIgnoredMethod)
+			notice.Message = fmt.Sprintf("connection %d: %d notifications for unknown methods ignored; last method %q", c.id, notice.Count, c.lastIgnoredMethod)
 			notices = append(notices, notice)
 		}
 		c.diagnosticCount = 0

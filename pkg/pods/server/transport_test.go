@@ -399,43 +399,52 @@ func TestUnknownMethodNotificationsAreIgnoredAndCoalesced(t *testing.T) {
 			start(t, s)
 			c, r := dial(t, s)
 
-			// Far more than the notification queue holds, with Post about to block.
-			for i := 0; i < 5*MaxNotificationQueue; i++ {
-				write(t, c, fmt.Sprintf(`{"method":%q}`, method))
+			var conn *connection
+			findConn := func() {
+				for conn == nil {
+					s.mu.Lock()
+					for k := range s.conns {
+						conn = k
+					}
+					s.mu.Unlock()
+					runtime.Gosched()
+				}
 			}
+			// burst writes n notifications. Registered-prefix ones enter the
+			// bounded notification queue (overflow is a correct busy reply), so
+			// they go in chunks of at most MaxNotificationQueue with the worker
+			// drained between chunks; the unregistered prefix never queues.
+			burst := func(n int) {
+				for sent := 0; sent < n; {
+					chunk := min(n-sent, MaxNotificationQueue)
+					for i := 0; i < chunk; i++ {
+						write(t, c, fmt.Sprintf(`{"method":%q}`, method))
+					}
+					sent += chunk
+					if method == "sample.nope" {
+						findConn()
+						for len(conn.notifySlots) > 0 {
+							runtime.Gosched()
+						}
+					}
+				}
+			}
+			burst(5 * MaxNotificationQueue)
 			clock.Await(t, DiagnosticInterval)
 			clock.Advance(DiagnosticInterval)
 			n := testclock.Receive(t, entered)
 			if n.Level != "debug" || n.Count == 0 || !strings.Contains(n.Message, method) {
 				t.Fatal(n)
 			}
-			for i := 0; i < 5*MaxNotificationQueue; i++ {
-				write(t, c, fmt.Sprintf(`{"method":%q}`, method))
-			}
+			// Post is now blocked: the worker must still drain a second batch.
+			burst(5 * MaxNotificationQueue)
 			// session.ping is answered inline on the reader after every earlier
-			// line was read, so a protocol.error from a notification (enqueued
-			// by the notification worker) would have to precede it or be
-			// reported by the writer queue; assert both.
+			// line was read; a protocol.error for a notification would be read
+			// before it.
 			write(t, c, `{"id":5,"method":"session.ping"}`)
 			m := read(t, r)
 			if m.ID == nil || m.ID.String() != "5" || m.Error != nil {
 				t.Fatal("unexpected wire message:", m)
-			}
-			if method == "sample.nope" {
-				// Wait for the worker to drain every queued notification.
-				s.mu.Lock()
-				var conn *connection
-				for k := range s.conns {
-					conn = k
-				}
-				s.mu.Unlock()
-				for len(conn.notifySlots) > 0 {
-					runtime.Gosched()
-				}
-				write(t, c, `{"id":6,"method":"session.ping"}`)
-				if m := read(t, r); m.ID.String() != "6" {
-					t.Fatal("unexpected wire message:", m)
-				}
 			}
 			if got := posts.Load(); got != 1 {
 				t.Fatal("posts:", got)
@@ -455,5 +464,26 @@ func TestUnknownMethodRequestInRegisteredPrefixStillReplies(t *testing.T) {
 	m := read(t, r)
 	if m.ID == nil || m.ID.String() != "5" || m.Error == nil || m.Error.Code != protocol.CodeUnknownMethod {
 		t.Fatal(m)
+	}
+}
+
+// The wire validator already limits a method to 256 bytes of [a-z0-9_-] and
+// one dot, so control characters never reach the log; the notice still caps
+// and quotes the method it keeps.
+func TestIgnoredNotificationMethodIsBoundedAndQuoted(t *testing.T) {
+	s := inertServer(t)
+	clock := s.cfg.Clock.(*testclock.Clock)
+	notices := make(chan Notice, 4)
+	s.cfg.Post = func(v any) bool { notices <- v.(Notice); return true }
+	start(t, s)
+	c, _ := dial(t, s)
+	method := "unregistered." + strings.Repeat("a", 240)
+	write(t, c, fmt.Sprintf(`{"method":%q}`, method))
+	clock.Await(t, DiagnosticInterval)
+	clock.Advance(DiagnosticInterval)
+	n := testclock.Receive(t, notices)
+	want := fmt.Sprintf("%q", method[:maxIgnoredMethod])
+	if n.Level != "debug" || !strings.HasSuffix(n.Message, want) || strings.Contains(n.Message, method) {
+		t.Fatalf("%d bytes: %q", len(n.Message), n.Message)
 	}
 }
