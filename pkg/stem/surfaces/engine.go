@@ -60,8 +60,10 @@ type Declarations interface {
 // seam must never silently drop writes or fake liveness. Only the toast
 // bounds are optional, with the defaults below.
 type Options struct {
-	Clock        Clock
-	Liveness     Liveness
+	Clock    Clock
+	Liveness Liveness
+	// Logger receives diagnostics. A Logger that also has
+	// Warnf(format, v...) receives refused claims through it at warn level.
 	Logger       interface{ Printf(format string, v ...any) }
 	Publications Publications
 	Declarations Declarations
@@ -110,12 +112,12 @@ type RefusedClaim struct {
 	At      time.Time
 }
 
-// WarnLogger is the optional level a Logger may add; the engine writes
+// warnLogger is the optional level a Logger may add; the engine writes
 // refused claims through it when present and through Printf otherwise.
-type WarnLogger interface{ Warnf(format string, v ...any) }
+type warnLogger interface{ Warnf(format string, v ...any) }
 
 func (e *Engine) warnf(format string, v ...any) {
-	if w, ok := e.log.(WarnLogger); ok {
+	if w, ok := e.log.(warnLogger); ok {
 		w.Warnf(format, v...)
 		return
 	}
