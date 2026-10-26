@@ -5,6 +5,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/hyperlab-sh/husk/pkg/host/contracts"
 	"github.com/hyperlab-sh/husk/pkg/pods"
 	"github.com/hyperlab-sh/husk/pkg/pods/server"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
@@ -24,6 +25,7 @@ type options struct {
 	modifiers       func() protocol.ModifierState
 	pluginAdditions map[string][]string
 	converters      []string
+	onLoopStart     func(contracts.Frontend)
 
 	// Test seams.
 	catalogReader catalog.Reader
@@ -77,6 +79,16 @@ func WithPluginAdditions(additions map[string][]string) Option {
 // WithConverters registers executable converters in flag order, before settings.
 func WithConverters(paths []string) Option {
 	return func(o *options) { o.converters = append([]string(nil), paths...) }
+}
+
+// WithOnLoopStart runs fn once, on the loop, before the host delivers any event
+// to a WatchEvents subscriber: at the first Update (or Tick) whatever the
+// message, ahead of the first end-of-Update event flush. fn receives the
+// host's Frontend, so it can call loop-only methods such as WatchEvents. Nil is
+// ignored; a later option replaces an earlier one. A panic in fn is not
+// recovered here.
+func WithOnLoopStart(fn func(contracts.Frontend)) Option {
+	return func(o *options) { o.onLoopStart = fn }
 }
 
 // WithFactory replaces the process Wrapper factory (fake plugins in tests).

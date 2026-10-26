@@ -414,7 +414,13 @@ func (r *Root) ActiveToast() (contracts.Toast, bool) {
 
 // Tick implements Looped: the end-of-Update flushes, for a frontend write
 // that was not caused by a host message.
-func (r *Root) Tick() { r.tick() }
+func (r *Root) Tick() {
+	if r.loopGID.Load() == 0 {
+		r.loopGID.Store(goroutineID())
+	}
+	r.runLoopStart()
+	r.tick()
+}
 
 // OwnSlices implements contracts.Frontend.
 func (r *Root) OwnSlices() (contracts.FrontendSlices, error) {
