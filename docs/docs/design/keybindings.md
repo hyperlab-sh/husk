@@ -204,7 +204,7 @@ Format: HuJSON (JSON with comments and trailing commas), one file per layer, nam
 | Field | Type | Required | Rule |
 |---|---|---|---|
 | `version` | integer | yes | Must be `1`. Any other value rejects the file (`unsupported_version`). |
-| `builtin` | bool | no | `false` in the `distribution` layer removes the `husk` layer, including its `modal-surface` binding of `esc` to `husk.modal.close`; a distribution that drops the layer binds its own close key or its modals close only by mouse or by the key that opened them. In any other layer the field is reported (`invalid_entry`, key `builtin`) and ignored. |
+| `builtin` | bool | no | `false` in the `distribution` layer removes the `husk` layer, including its `modal-surface` binding of `esc` to `husk.modal.close`; a distribution that drops the layer binds its own close key or its modals close only by mouse or by the key that opened them. In any other layer, or when it is not a boolean, the field is reported (`invalid_entry`, key `builtin`) and ignored. |
 | `bind` | array | yes | The entries, in order. A missing or non-array `bind` rejects the file (`invalid_entry`, key `bind`). |
 | `key` | string | one of `key`/`keys` | One key. |
 | `keys` | array of 2 to 4 strings | one of `key`/`keys` | A sequence. |
@@ -502,12 +502,14 @@ Loader order, which decides which problem an entry gets when more than one rule 
 
 This is the complete list of loader codes, plus `invalid_plugin_catalog`, raised by the Service for a plugin's declared document that does not decode ([Services](services.md), "Snapshots, rebuilds and reports").
 
+Every loader problem's `message` says what was wrong, not only the code: which field or rule, and what was expected (for example `"hint" must be at most 40 runes, got 52`). There is one code per kind of drop; the message tells the causes of one code, such as the many of `invalid_entry`, apart.
+
 | Code | Raised by | Condition | Effect |
 |---|---|---|---|
 | `parse_error` | Store | The layer file is not valid HuJSON. | First load: the layer is absent. Reload: the last good document for that layer (and, for `profile`, that profile name) stays. |
 | `unsupported_version` | loader | `version` is not `1`. | Same as `parse_error`. |
 | `too_large` | loader | The document exceeds 256 KiB serialized. | Same as `parse_error`. |
-| `invalid_entry` | loader | A field has the wrong type; both or neither of `key`/`keys`; `keys` outside 2 to 4; `action` missing without `disable`, or present with it; `action` without a `.`; `plugin` without `focus`; `hint` over 40 runes; `args` not scalar-only or over 1 KiB; `builtin` outside the distribution layer (key `builtin`); `bind` missing or not an array (key `bind`, rejects the file). | The entry (or file) is dropped. |
+| `invalid_entry` | loader | A field has the wrong type; both or neither of `key`/`keys`; `keys` outside 2 to 4; `action` missing without `disable`, or present with it; `action` without a `.`; `plugin` without `focus`; `hint` over 40 runes; `args` not scalar-only or over 1 KiB; `builtin` outside the distribution layer or not a boolean (key `builtin`); `bind` missing or not an array (key `bind`, rejects the file). | The entry (or file) is dropped. |
 | `invalid_key` | loader | A key spelling in a layer file does not normalize. The message names the spelling and, for `shift+` symbols, the character to bind. | The entry is dropped. |
 | `unparsable_key` | loader | The same, for a `focus-local` entry. | The entry is dropped. |
 | `duplicate` | loader | Two entries in one layer have the same `(keys, focus, plugin)`. | The first stays effective; the later one is listed as shadowed by it. |
