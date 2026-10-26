@@ -490,6 +490,13 @@ func parse(raw map[string]any, src Source) (Binding, *entryProblem) {
 		sequence = []string{str}
 	} else {
 		if c.Decode(keys, &sequence) != nil {
+			if list, ok := keys.([]any); ok {
+				for i, element := range list {
+					if _, ok := element.(string); !ok {
+						return b, invalid(`"keys"[%d] must be a string, got %s`, i, jsonType(element))
+					}
+				}
+			}
 			return b, invalid(`"keys" must be an array of strings, got %s`, jsonType(keys))
 		}
 		if len(sequence) < 2 || len(sequence) > 4 {
@@ -629,6 +636,9 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 	for _, layer := range in.Layers {
 		present[layer.Layer] = true
 	}
+	// The distribution layer folds an embedded and a bundle part: when one
+	// part failed to parse, the partial fold gives way to the last good one.
+	partialDistribution := false
 	type missingLayer struct {
 		layer store.Layer
 		file  string
@@ -643,9 +653,20 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 			src.File = layerFile("", p.Layer, in.Profile)
 		}
 		issue("parse_error", src, "", p.Message)
+		if p.Layer == store.LayerDistribution && present[p.Layer] && old.documents[string(LayerDistribution)] != nil {
+			partialDistribution = true
+		}
 		if !present[p.Layer] {
 			present[p.Layer] = true
 			missing = append(missing, missingLayer{p.Layer, src.File})
+		}
+	}
+	if partialDistribution {
+		in.Layers = append([]store.LayerDoc(nil), in.Layers...)
+		for i := range in.Layers {
+			if in.Layers[i].Layer == store.LayerDistribution {
+				in.Layers[i].Doc = nil
+			}
 		}
 	}
 	for _, layer := range in.Layers {
@@ -796,6 +817,13 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 				seen[dup] = src
 			}
 			next.listing.Entries = append(next.listing.Entries, entry)
+		}
+	}
+	// The last good profile document is kept per profile name, so switching
+	// away from a profile and back still finds it.
+	for key, kept := range old.documents {
+		if _, exists := next.documents[key]; !exists && strings.HasPrefix(key, string(LayerProfile)+"\x00") {
+			next.documents[key] = kept
 		}
 	}
 	es := next.listing.Entries

@@ -324,16 +324,28 @@ func (s *Store) Layers(name DocName, profile string) ([]LayerDoc, error) {
 	return out, nil
 }
 
-// LayerProblems returns the parse problems (code invalid_document) of the
-// layer files that Layers left out for name and profile.
-func (s *Store) LayerProblems(name DocName, profile string) ([]Problem, error) {
+// LayersWithProblems is Layers plus the parse problems (code invalid_document)
+// of the layer files that were left out, both from one load under one lock.
+func (s *Store) LayersWithProblems(name DocName, profile string) ([]LayerDoc, []Problem, error) {
 	s.configMu.Lock()
 	defer s.configMu.Unlock()
 	load, err := s.cachedLayers(name, profile)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return append([]Problem(nil), load.problems...), nil
+	out := make([]LayerDoc, len(load.layers))
+	for i, l := range load.layers {
+		out[i] = l
+		out[i].Doc = copyDoc(l.Doc)
+		out[i].MemberOrder = copyOrder(l.MemberOrder)
+	}
+	var problems []Problem
+	for _, p := range load.problems {
+		if p.Code == "invalid_document" {
+			problems = append(problems, p)
+		}
+	}
+	return out, problems, nil
 }
 func (s *Store) cachedLayers(name DocName, profile string) (layerLoad, error) {
 	k := docKey{name, profile}

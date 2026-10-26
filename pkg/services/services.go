@@ -55,6 +55,8 @@ type StoreReader interface {
 	Invalidate()
 	Resolve(store.DocName, string) (store.Resolved, error)
 	Layers(store.DocName, string) ([]store.LayerDoc, error)
+	// LayersWithProblems is Layers plus the parse problems of the files it left out, from one load.
+	LayersWithProblems(store.DocName, string) ([]store.LayerDoc, []store.Problem, error)
 	Declared(store.DocName) map[string]store.Doc
 	Profiles() []string
 }
@@ -676,25 +678,12 @@ func (co *Coordinator) loadInput(ctx context.Context, f *flight) inputResult {
 	if err != nil {
 		return inputResult{err: err}
 	}
-	layers, err := co.opts.Store.Layers("keymap", selected)
+	layers, keymapProblems, err := co.opts.Store.LayersWithProblems("keymap", selected)
 	if ended := ctx.Err(); ended != nil {
 		return inputResult{err: ended}
 	}
 	if err != nil {
 		return inputResult{err: err}
-	}
-	// Parse problems are an optional capability, so a narrow StoreReader still serves.
-	var keymapProblems []store.Problem
-	if reader, ok := co.opts.Store.(interface {
-		LayerProblems(store.DocName, string) ([]store.Problem, error)
-	}); ok {
-		keymapProblems, err = reader.LayerProblems("keymap", selected)
-		if ended := ctx.Err(); ended != nil {
-			return inputResult{err: ended}
-		}
-		if err != nil {
-			return inputResult{err: err}
-		}
 	}
 	configLayers, err := co.opts.Store.Layers("config", selected)
 	if ended := ctx.Err(); ended != nil {

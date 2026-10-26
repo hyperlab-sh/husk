@@ -53,6 +53,10 @@ func (s *recStore) Layers(n store.DocName, _ string) ([]store.LayerDoc, error) {
 	}
 	return nil, nil
 }
+func (s *recStore) LayersWithProblems(n store.DocName, p string) ([]store.LayerDoc, []store.Problem, error) {
+	layers, err := s.Layers(n, p)
+	return layers, nil, err
+}
 func (s *recStore) Resolved() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
