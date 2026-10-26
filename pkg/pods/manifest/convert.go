@@ -85,7 +85,7 @@ func convert(src Source, modern bool) (*Spec, []Warning, error) {
 		// The v2 detector claims only the number 2, so any other present
 		// version reaches here and must not load as v1.
 		if v := bytes.TrimSpace(fields["manifest_version"]); len(v) != 0 && !bytes.Equal(v, []byte("null")) {
-			return nil, nil, fmt.Errorf("unsupported manifest_version %s (supported: 2, or absent for v1)", v)
+			return nil, nil, fmt.Errorf("unsupported manifest_version %s (supported: 2, or absent/null for v1)", v)
 		}
 	}
 	s := &Spec{WorkDir: src.Dir, Protocol: protocol.Major}

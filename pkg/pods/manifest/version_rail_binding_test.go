@@ -12,6 +12,7 @@ func TestUnsupportedManifestVersionIsRefusedNamingIt(t *testing.T) {
 	for _, tc := range []struct{ name, raw, want string }{
 		{"three", `{"manifest_version":3,"protocol":2,` + rest + `}`, "3"},
 		{"string", `{"manifest_version":"2","protocol":2,` + rest + `}`, `"2"`},
+		{"float", `{"manifest_version":2.0,"protocol":2,` + rest + `}`, "2.0"},
 		{"one", `{"manifest_version":1,` + rest + `}`, "1"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -39,11 +40,11 @@ func TestAbsentOrNullManifestVersionStillLoadsAsV1(t *testing.T) {
 }
 
 func TestKeybindingMayTargetOwnRailItemButNotAnothersPlugins(t *testing.T) {
-	raw := `{` + railBase + `,"surfaces":[{"id":"sidebar-list"}],
+	raw := `{` + railBase + `,
 	  "rail_items":[{"id":"p.panel","icon":"P","label":"Panel","placement":"modal"}],
 	  "keybindings":[
-	    {"key":"a","action":"p.panel","focus":"sidebar-list"},
-	    {"key":"b","action":"other.panel","focus":"sidebar-list"}]}`
+	    {"key":"a","action":"p.panel","focus":"main-stage"},
+	    {"key":"b","action":"other.panel","focus":"main-stage"}]}`
 	s, _, err := convertBytes(t, raw, true)
 	if err != nil {
 		t.Fatal(err)
