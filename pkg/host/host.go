@@ -107,14 +107,15 @@ type Root struct {
 	startupReports []services.Report // immutable construction result for the frontend
 
 	// Lifecycle.
-	live      atomicBool   // New returned: the loop may be running
-	loopGID   atomic.Int64 // goroutine id of the loop, learned on its first Update
-	mu        sync.Mutex   // guards running and closing
-	running   bool
-	closing   bool         // shutdown began: spawn refuses new workers
-	workers   atomic.Int32 // host workers not yet finished (for the shutdown error)
-	closeOnce sync.Once
-	closeErr  error
+	live        atomicBool   // New returned: the loop may be running
+	loopGID     atomic.Int64 // goroutine id of the loop, learned on its first Update
+	loopStarted bool         // the start hook ran; loop-only
+	mu          sync.Mutex   // guards running and closing
+	running     bool
+	closing     bool         // shutdown began: spawn refuses new workers
+	workers     atomic.Int32 // host workers not yet finished (for the shutdown error)
+	closeOnce   sync.Once
+	closeErr    error
 	// closingCtx ends when shutdown reaches the Server: socket requests still
 	// waiting on the loop fail fast instead of holding the Server's drain.
 	closingCtx    context.Context
