@@ -21,7 +21,7 @@ func problemsWith(kb *keybinding.Service, code string) []keybinding.Problem {
 }
 
 // A layer file that stops parsing keeps its last good document and reports
-// parse_error; the profile layer is cached per profile name.
+// parse_error.
 func TestKeybindingParseErrorKeepsLastGoodDocument(t *testing.T) {
 	for _, layer := range []store.Layer{store.LayerUser, store.LayerProfile, store.LayerDistribution} {
 		t.Run(string(layer), func(t *testing.T) {
@@ -47,6 +47,53 @@ func TestKeybindingParseErrorKeepsLastGoodDocument(t *testing.T) {
 				t.Errorf("parse_error = %+v", ps)
 			}
 		})
+	}
+}
+
+// The last good profile document is kept per profile name: a broken file of
+// profile "home" never falls back to the document of profile "work".
+func TestKeybindingParseErrorFallbackIsPerProfile(t *testing.T) {
+	kb := keybinding.New()
+	load := func(name string, layers []store.LayerDoc, problems []store.Problem) {
+		in := input(`{}`)
+		in.Profile = &name
+		in.Layers, in.KeymapProblems = layers, problems
+		apply(t, kb, in)
+	}
+	brokenProfile := []store.Problem{{Code: "invalid_document", Layer: store.LayerProfile, Message: "bad"}}
+	load("work", []store.LayerDoc{{Layer: store.LayerProfile, Doc: doc(bind(`{"key":"ctrl+9","action":"p.work"}`))}}, nil)
+	load("home", nil, brokenProfile)
+	if got := resolved(kb, keybinding.KeyContext{}, "ctrl+9"); got != "<none>" || len(problemsWith(kb, "parse_error")) != 1 {
+		t.Fatalf("home borrowed work's document: %s, %+v", got, kb.Listing().Problems)
+	}
+	load("work", nil, brokenProfile)
+	if got := resolved(kb, keybinding.KeyContext{}, "ctrl+9"); got != "p.work" {
+		t.Errorf("work after break = %s, want p.work", got)
+	}
+}
+
+// A distribution part that fails to parse while the other loads does not
+// serve the partial fold: the last good distribution document stays.
+func TestKeybindingParseErrorInOneDistributionPartKeepsLastGood(t *testing.T) {
+	kb := keybinding.New()
+	in := input(`{}`)
+	in.Layers = []store.LayerDoc{{Layer: store.LayerDistribution, Doc: doc(`{"version":1,"builtin":false,"bind":[{"key":"ctrl+9","action":"d.bundle"}]}`)}}
+	apply(t, kb, in)
+	partial := input(`{}`)
+	partial.Layers = []store.LayerDoc{{Layer: store.LayerDistribution, Doc: doc(`{"version":1,"bind":[{"key":"ctrl+8","action":"d.embedded"}]}`)}}
+	partial.KeymapProblems = []store.Problem{{Code: "invalid_document", Layer: store.LayerDistribution, File: "keymap.json", Message: "bad"}}
+	apply(t, kb, partial)
+	if got := resolved(kb, keybinding.KeyContext{}, "ctrl+9"); got != "d.bundle" {
+		t.Errorf("ctrl+9 = %s, want the last good distribution binding", got)
+	}
+	if got := resolved(kb, keybinding.KeyContext{}, "ctrl+8"); got != "<none>" {
+		t.Errorf("ctrl+8 = %s, the partial fold was served", got)
+	}
+	if len(kb.KeysFor("husk.quit")) != 0 {
+		t.Error("the last good builtin:false was lost")
+	}
+	if len(problemsWith(kb, "parse_error")) != 1 {
+		t.Errorf("problems = %+v", kb.Listing().Problems)
 	}
 }
 
@@ -121,8 +168,9 @@ func TestKeybindingCapFloodKeepsConfigurationAndBuiltins(t *testing.T) {
 	}
 }
 
-// The cap drops the lowest layer present first, in the layer order of D216.
-func TestKeybindingCapLayerOrderWithoutPlugins(t *testing.T) {
+// Past the cap the plugin entry goes first, then the built-in entries; the
+// configuration layers stay whole.
+func TestKeybindingCapDropsPluginThenHusk(t *testing.T) {
 	kb := keybinding.New()
 	in := input(`{}`)
 	for i, layer := range []store.Layer{store.LayerDistribution, store.LayerUser} {
@@ -134,13 +182,34 @@ func TestKeybindingCapLayerOrderWithoutPlugins(t *testing.T) {
 	}
 	in.Declared[store.DeclaredKeymap] = map[string]store.Doc{"plug": doc(bind(`{"key":"a","focus":"stage","action":"plug.run"}`))}
 	apply(t, kb, in)
-	dropped := map[string]int{}
+	dropped, effective := map[string]int{}, map[keybinding.Layer]int{}
 	for _, p := range problemsWith(kb, "too_many") {
-		dropped[p.Layer]++
+		// Only the cap's problems carry a key; the layer files are at their limit.
+		if p.Key != "" {
+			dropped[p.Layer]++
+		}
 	}
-	// 2048+2048 plus husk and plugin entries exceed the cap: plugin first, then husk.
-	if dropped["plugin:plug"] != 1 || dropped["husk"] == 0 || dropped["user"] != 0 || dropped["distribution"] != 0 {
+	builtins := 0
+	for _, e := range kb.Listing().Entries {
+		if e.Source.Layer == keybinding.LayerHusk {
+			builtins++
+		}
+		if e.State == "effective" {
+			effective[e.Source.Layer]++
+		}
+	}
+	total := 0
+	for _, n := range effective {
+		total += n
+	}
+	if dropped["plugin:plug"] != 1 || dropped["user"] != 0 || dropped["distribution"] != 0 {
 		t.Errorf("dropped per layer = %v", dropped)
+	}
+	if want := builtins - effective[keybinding.LayerHusk]; dropped["husk"] != want || want == 0 {
+		t.Errorf("dropped husk = %d, want %d of %d built-in entries", dropped["husk"], want, builtins)
+	}
+	if total != 4096 || effective[keybinding.LayerUser] != 2048 || effective[keybinding.LayerDistribution] != 2048 {
+		t.Errorf("effective = %v (total %d), want user and distribution whole and 4096 in all", effective, total)
 	}
 }
 
@@ -158,6 +227,7 @@ func TestKeybindingProblemMessagesNameTheCause(t *testing.T) {
 		`{"key":"ctrl+6","action":"x.run","args":{"a":[1]}}`,
 		`{"key":"ctrl+7","disable":true,"action":"x.run"}`,
 		`{"key":"ctrl+0","action":"x.run","disable":"yes"}`,
+		`{"keys":["a",1],"action":"x.run"}`,
 	))}}
 	apply(t, kb, in)
 	want := []string{
@@ -170,6 +240,7 @@ func TestKeybindingProblemMessagesNameTheCause(t *testing.T) {
 		`"args" value "a" must be a string, number or boolean, got an array`,
 		`"action" must be absent when "disable" is true`,
 		`"disable" must be a boolean, got a string`,
+		`"keys"[1] must be a string, got a number`,
 	}
 	ps := problemsWith(kb, "invalid_entry")
 	if len(ps) != len(want) {
@@ -224,17 +295,14 @@ type layerStore struct {
 	broken bool
 }
 
-func (s *layerStore) Layers(name store.DocName, _ string) ([]store.LayerDoc, error) {
-	if name != "keymap" || s.broken {
-		return nil, nil
+func (s *layerStore) LayersWithProblems(name store.DocName, _ string) ([]store.LayerDoc, []store.Problem, error) {
+	if name != "keymap" {
+		return nil, nil, nil
 	}
-	return []store.LayerDoc{{Layer: store.LayerUser, Doc: doc(bind(`{"key":"ctrl+9","action":"u.run"}`))}}, nil
-}
-func (s *layerStore) LayerProblems(name store.DocName, _ string) ([]store.Problem, error) {
-	if name != "keymap" || !s.broken {
-		return nil, nil
+	if s.broken {
+		return nil, []store.Problem{{Code: "invalid_document", Layer: store.LayerUser, File: "/abs/keymap.json", Line: 2, Message: "hujson: line 2: bad"}}, nil
 	}
-	return []store.Problem{{Code: "invalid_document", Layer: store.LayerUser, File: "/abs/keymap.json", Line: 2, Message: "hujson: line 2: bad"}}, nil
+	return []store.LayerDoc{{Layer: store.LayerUser, Doc: doc(bind(`{"key":"ctrl+9","action":"u.run"}`))}}, nil, nil
 }
 
 // Through the coordinator: the Store's parse problem reaches the keymap reload,
