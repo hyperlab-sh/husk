@@ -1,7 +1,7 @@
 # Terminal plugin
 
 A small plugin that hosts an arbitrary terminal program in its manifest-occupied surface
-(`main-stage` by default). It waits for a usable `surface.resized` entry before
+(`side-panel` by default, so it loads beside the reference plugin, which claims `main-stage`). It waits for a usable `surface.resized` entry before
 attaching, so moving its manifest to another surface requires no code change.
 The plugin owns the process and PTY; Husk owns the terminal emulator and cell
 rendering. Linux and macOS are supported; Windows ConPTY is not implemented.
