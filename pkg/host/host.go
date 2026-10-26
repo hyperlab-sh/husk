@@ -35,8 +35,8 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/substrate/store"
 )
 
-// storeCloseTimeout bounds the wait for host workers at shutdown.
-const storeCloseTimeout = 10 * time.Second
+// workerWaitTimeout bounds the wait for host workers at shutdown.
+const workerWaitTimeout = 10 * time.Second
 
 // storeFlushTimeout bounds the final Store flush at shutdown (store.md, exit
 // flush deadline).
@@ -802,9 +802,10 @@ func (r *Root) spawn(cmd tea.Cmd) bool {
 // then returns false instead of blocking, which is what Config.Post requires
 // of a closed gate. The pods.Stop kill path and the wrapper's exit notice also
 // call Post on the loop goroutine and need the gate closed; nothing bounds
-// them. Only the wait for host workers is bounded (storeCloseTimeout): when it
-// expires Close returns an error with the count of stuck workers and does not
-// close the Store, so a worker still inside a command never sees a closed
+// them. The wait for host workers is bounded (workerWaitTimeout); the final
+// Store flush is bounded by storeFlushTimeout (2 s, the store.md exit flush
+// deadline). When the worker wait expires Close returns an error with the
+// count of stuck workers and does not close the Store, so a worker still inside a command never sees a closed
 // Store. The Store then stays open until the process exits.
 func (r *Root) Close() error {
 	r.closeOnce.Do(func() {
@@ -877,12 +878,12 @@ func (r *Root) shutdown() error {
 	workersStuck := false
 	workersDone := make(chan struct{})
 	go func() { r.wg.Wait(); close(workersDone) }()
-	wctx, wcancel := context.WithTimeout(context.Background(), r.opts.workerWaitOr(storeCloseTimeout))
+	wctx, wcancel := context.WithTimeout(context.Background(), r.opts.workerWaitOr(workerWaitTimeout))
 	select {
 	case <-workersDone:
 	case <-wctx.Done():
 		workersStuck = true
-		errs = append(errs, fmt.Errorf("%d workers still running after %v: store left open", r.workers.Load(), r.opts.workerWaitOr(storeCloseTimeout)))
+		errs = append(errs, fmt.Errorf("%d workers still running after %v: store left open", r.workers.Load(), r.opts.workerWaitOr(workerWaitTimeout)))
 	}
 	wcancel()
 	if r.store != nil && !workersStuck {
