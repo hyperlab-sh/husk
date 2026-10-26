@@ -377,3 +377,43 @@ func TestHandlerValidationPanicsAndCloseCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestUnknownMethodInRegisteredPrefix(t *testing.T) {
+	notices := make(chan Notice, 8)
+	dir, err := os.MkdirTemp("/tmp", "hs-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	s := New(Config{InstanceID: "test", RuntimeDir: dir, Clock: testclock.New(), Entry: instance.Entry{HostVersion: "test"}, Post: func(v any) bool {
+		if n, ok := v.(Notice); ok {
+			notices <- n
+		}
+		return true
+	}})
+	t.Cleanup(func() { _ = s.Close() })
+	s.Handle("sample", handlerFunc(func(_ context.Context, _ Caller, req protocol.Message, _ Notifier) protocol.Message {
+		return protocol.Message{Error: &protocol.Error{Code: protocol.CodeUnknownMethod, Message: "no inbound handler for " + req.Method}}
+	}))
+	start(t, s)
+	c, r := dial(t, s)
+
+	write(t, c, `{"method":"sample.nope"}`)
+	n := testclock.Receive(t, notices)
+	if n.Level != "debug" || !strings.Contains(n.Message, "sample.nope") {
+		t.Fatal(n)
+	}
+
+	// The notification produced no wire message: the next line read is the
+	// reply to the request that follows it.
+	write(t, c, `{"id":5,"method":"sample.nope"}`)
+	m := read(t, r)
+	if m.ID == nil || m.ID.String() != "5" || m.Error == nil || m.Error.Code != protocol.CodeUnknownMethod {
+		t.Fatal(m)
+	}
+	select {
+	case n := <-notices:
+		t.Fatal("unexpected notice", n)
+	default:
+	}
+}
