@@ -35,8 +35,12 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/substrate/store"
 )
 
-// storeCloseTimeout bounds the final Store flush at shutdown.
+// storeCloseTimeout bounds the wait for host workers at shutdown.
 const storeCloseTimeout = 10 * time.Second
+
+// storeFlushTimeout bounds the final Store flush at shutdown (store.md, exit
+// flush deadline).
+const storeFlushTimeout = 2 * time.Second
 
 // loopWait bounds how long Close waits for the loop to run a loop-confined
 // shutdown step. A loop that does not run it in time is wedged: the step is
@@ -882,7 +886,10 @@ func (r *Root) shutdown() error {
 	}
 	wcancel()
 	if r.store != nil && !workersStuck {
-		ctx, cancel := context.WithTimeout(context.Background(), storeCloseTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), storeFlushTimeout)
+		if r.opts.onStoreFlush != nil {
+			r.opts.onStoreFlush(ctx)
+		}
 		if err := r.store.Close(ctx); err != nil {
 			errs = append(errs, fmt.Errorf("store: %w", err))
 		}
