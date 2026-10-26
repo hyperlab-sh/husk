@@ -876,7 +876,14 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 		sort.SliceStable(bs, func(i, j int) bool { return stronger(bs[i], bs[j]) })
 	}
 	if !quit || !palette {
-		issue("no_exit_binding", Source{Layer: LayerHusk}, "", "no effective entry binds husk.quit or husk.palette.open; use `husk action invoke husk.quit` or a signal to exit")
+		var missing []string
+		if !quit {
+			missing = append(missing, "husk.quit")
+		}
+		if !palette {
+			missing = append(missing, "husk.palette.open")
+		}
+		issue("no_exit_binding", Source{Layer: LayerHusk}, "", fmt.Sprintf("no effective entry binds %s; use `husk action invoke husk.quit` or a signal to exit", strings.Join(missing, " or ")))
 	}
 	if ctx.Err() != nil {
 		return c.ContextError(ctx, r)
