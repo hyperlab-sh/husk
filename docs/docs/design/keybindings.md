@@ -269,7 +269,7 @@ Manifest conversion ([Pods](pods.md)) owns these checks and is the only place th
 |---|---|
 | `focus` is absent, or names a surface the plugin does not list in `surfaces` | `global_not_allowed`; the message says which |
 | `plugin` or `disable` is present | `global_not_allowed`; the message names the field |
-| `action` is neither one of the plugin's own actions nor `husk.*` | `foreign_action` |
+| `action` is none of the plugin's own actions, own rail item ids or `husk.*` | `foreign_action` |
 | More than 128 entries | the first 128 in document order are kept; one `too_many` problem for the rest |
 
 Key spellings pass through conversion unparsed. The Keybinding service is the single key parser: a focus-local entry whose key does not normalize is dropped there with `unparsable_key`. The declared document carries no `plugin` field; when the service loads a `focus-local` entry it sets `Binding.Plugin` and `Source.Plugin` to the document's source key (the plugin id, [Store](store.md)) and does not re-check ownership.
