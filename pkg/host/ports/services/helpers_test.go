@@ -140,6 +140,10 @@ func (s *fakeStoreReader) Resolve(store.DocName, string) (store.Resolved, error)
 func (s *fakeStoreReader) Layers(store.DocName, string) ([]store.LayerDoc, error) {
 	return s.layers, nil
 }
+func (s *fakeStoreReader) LayersWithProblems(n store.DocName, p string) ([]store.LayerDoc, []store.Problem, error) {
+	layers, err := s.Layers(n, p)
+	return layers, nil, err
+}
 func (s *fakeStoreReader) Declared(n store.DocName) map[string]store.Doc { return s.declared[n] }
 func (s *fakeStoreReader) Profiles() []string {
 	return append([]string(nil), s.profiles...)
