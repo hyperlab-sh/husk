@@ -370,8 +370,13 @@ func TestKeybindingNoExitBindingNamesTheMissingAction(t *testing.T) {
 			in.Layers = []store.LayerDoc{{Layer: store.LayerUser, Doc: doc(bind(entries...))}}
 			apply(t, kb, in)
 			ps := problemsWith(kb, "no_exit_binding")
-			if len(ps) != 1 || !strings.Contains(ps[0].Message, tc.want) || strings.Contains(ps[0].Message, tc.absent) {
+			if len(ps) != 1 {
 				t.Fatalf("problems = %+v", ps)
+			}
+			// The recovery hint after ";" always names husk.quit.
+			cause, _, _ := strings.Cut(ps[0].Message, ";")
+			if !strings.Contains(cause, tc.want) || strings.Contains(cause, tc.absent) {
+				t.Fatalf("message = %q, want the cause to name only %s", ps[0].Message, tc.want)
 			}
 		})
 	}
