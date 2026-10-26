@@ -406,8 +406,10 @@ func (m *workbenchModel) footerHints() []footerHint {
 	}
 	hints = append(hints, footerHint{resize, "resize"})
 	var docks []string
-	left := m.activePlacement != contracts.PlacementFullCanvas
-	right := m.activePlacement == "" && panelFits(m.width, m.sidebarWidth, m.leftSideShown())
+	// A runtime canvas replaces the whole body: no dock is placed under it.
+	canvas := m.runtimeCanvas() != ""
+	left := !canvas && m.activePlacement != contracts.PlacementFullCanvas
+	right := !canvas && m.activePlacement == "" && panelFits(m.width, m.sidebarWidth, m.leftSideShown())
 	for _, a := range []struct {
 		id    string
 		shown bool
