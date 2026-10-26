@@ -11,8 +11,10 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -378,42 +380,80 @@ func TestHandlerValidationPanicsAndCloseCancellation(t *testing.T) {
 	}
 }
 
-func TestUnknownMethodInRegisteredPrefix(t *testing.T) {
-	notices := make(chan Notice, 8)
-	dir, err := os.MkdirTemp("/tmp", "hs-test-")
-	if err != nil {
-		t.Fatal(err)
+func TestUnknownMethodNotificationsAreIgnoredAndCoalesced(t *testing.T) {
+	for _, method := range []string{"sample.nope", "unregistered.nope"} {
+		t.Run(method, func(t *testing.T) {
+			s := inertServer(t)
+			clock := s.cfg.Clock.(*testclock.Clock)
+			entered := make(chan Notice, 8)
+			var posts atomic.Int32
+			s.cfg.Post = func(v any) bool {
+				posts.Add(1)
+				entered <- v.(Notice)
+				<-t.Context().Done()
+				return false
+			}
+			s.Handle("sample", handlerFunc(func(_ context.Context, _ Caller, req protocol.Message, _ Notifier) protocol.Message {
+				return protocol.Message{Error: &protocol.Error{Code: protocol.CodeUnknownMethod, Message: "no inbound handler for " + req.Method}}
+			}))
+			start(t, s)
+			c, r := dial(t, s)
+
+			// Far more than the notification queue holds, with Post about to block.
+			for i := 0; i < 5*MaxNotificationQueue; i++ {
+				write(t, c, fmt.Sprintf(`{"method":%q}`, method))
+			}
+			clock.Await(t, DiagnosticInterval)
+			clock.Advance(DiagnosticInterval)
+			n := testclock.Receive(t, entered)
+			if n.Level != "debug" || n.Count == 0 || !strings.Contains(n.Message, method) {
+				t.Fatal(n)
+			}
+			for i := 0; i < 5*MaxNotificationQueue; i++ {
+				write(t, c, fmt.Sprintf(`{"method":%q}`, method))
+			}
+			// session.ping is answered inline on the reader after every earlier
+			// line was read, so a protocol.error from a notification (enqueued
+			// by the notification worker) would have to precede it or be
+			// reported by the writer queue; assert both.
+			write(t, c, `{"id":5,"method":"session.ping"}`)
+			m := read(t, r)
+			if m.ID == nil || m.ID.String() != "5" || m.Error != nil {
+				t.Fatal("unexpected wire message:", m)
+			}
+			if method == "sample.nope" {
+				// Wait for the worker to drain every queued notification.
+				s.mu.Lock()
+				var conn *connection
+				for k := range s.conns {
+					conn = k
+				}
+				s.mu.Unlock()
+				for len(conn.notifySlots) > 0 {
+					runtime.Gosched()
+				}
+				write(t, c, `{"id":6,"method":"session.ping"}`)
+				if m := read(t, r); m.ID.String() != "6" {
+					t.Fatal("unexpected wire message:", m)
+				}
+			}
+			if got := posts.Load(); got != 1 {
+				t.Fatal("posts:", got)
+			}
+		})
 	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	s := New(Config{InstanceID: "test", RuntimeDir: dir, Clock: testclock.New(), Entry: instance.Entry{HostVersion: "test"}, Post: func(v any) bool {
-		if n, ok := v.(Notice); ok {
-			notices <- n
-		}
-		return true
-	}})
-	t.Cleanup(func() { _ = s.Close() })
+}
+
+func TestUnknownMethodRequestInRegisteredPrefixStillReplies(t *testing.T) {
+	s := inertServer(t)
 	s.Handle("sample", handlerFunc(func(_ context.Context, _ Caller, req protocol.Message, _ Notifier) protocol.Message {
 		return protocol.Message{Error: &protocol.Error{Code: protocol.CodeUnknownMethod, Message: "no inbound handler for " + req.Method}}
 	}))
 	start(t, s)
 	c, r := dial(t, s)
-
-	write(t, c, `{"method":"sample.nope"}`)
-	n := testclock.Receive(t, notices)
-	if n.Level != "debug" || !strings.Contains(n.Message, "sample.nope") {
-		t.Fatal(n)
-	}
-
-	// The notification produced no wire message: the next line read is the
-	// reply to the request that follows it.
 	write(t, c, `{"id":5,"method":"sample.nope"}`)
 	m := read(t, r)
 	if m.ID == nil || m.ID.String() != "5" || m.Error == nil || m.Error.Code != protocol.CodeUnknownMethod {
 		t.Fatal(m)
-	}
-	select {
-	case n := <-notices:
-		t.Fatal("unexpected notice", n)
-	default:
 	}
 }
