@@ -93,7 +93,7 @@ func TestTUIGoldenAndBundleIdentity(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	assertWrittenModes(t, root)
+	assertWrittenModes(t, root, false)
 	want := map[string]string{}
 	for name, content := range tree(t, golden) {
 		want[strings.TrimSuffix(name, ".golden")] = content
