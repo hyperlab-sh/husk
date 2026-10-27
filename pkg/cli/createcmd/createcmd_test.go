@@ -262,6 +262,10 @@ func assertWrittenModes(t *testing.T, root string) {
 		if err != nil {
 			return err
 		}
+		if rel == "." {
+			// The root is the caller's directory, not created by the command; its mode is not the command's to set.
+			return nil
+		}
 		want := fs.FileMode(0644)
 		if d.IsDir() || strings.HasSuffix(filepath.ToSlash(rel), "plugins/hello/hello") || strings.HasSuffix(filepath.ToSlash(rel), "plugins/guide/guide") {
 			want = 0755
