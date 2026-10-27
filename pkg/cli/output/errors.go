@@ -46,6 +46,12 @@ const (
 	CodeCreate      = "create"
 )
 
+// Codes returns the closed set of codes the CLI itself produces.
+func Codes() []string {
+	return []string{CodeUsage, CodeNoInstance, CodeAmbiguous, CodeTransport,
+		CodeProtocol, CodeEnvironment, CodeStore, CodeCreate}
+}
+
 // WarningUnresponsive is the only warning code of v1.
 const WarningUnresponsive = "unresponsive"
 

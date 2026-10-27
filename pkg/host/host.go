@@ -381,6 +381,17 @@ func (e *bundleStartError) Error() string {
 }
 func (e *bundleStartError) Unwrap() error { return e.err }
 
+// RuntimeDirError is returned (wrapped) by New when the runtime directory is
+// missing and cannot be created, or is not private to the user. A caller maps
+// it to the environment failure.
+type RuntimeDirError struct {
+	Dir string
+	Err error
+}
+
+func (e *RuntimeDirError) Error() string { return e.Err.Error() }
+func (e *RuntimeDirError) Unwrap() error { return e.Err }
+
 func (r *Root) instanceDocs() map[store.DocName]store.Doc {
 	docs := make(map[store.DocName]store.Doc, len(r.cfg.InstanceDocs))
 	for name, doc := range r.cfg.InstanceDocs {
@@ -408,7 +419,7 @@ func (r *Root) buildStore() error {
 	// This is deliberately after bundle validation, including in CLI start
 	// mode, so fatal bundle errors leave the user's directory tree untouched.
 	if err := instance.CheckRuntimeDir(r.cfg.RuntimeDir); err != nil {
-		return err
+		return &RuntimeDirError{Dir: r.cfg.RuntimeDir, Err: err}
 	}
 	var config fs.FS
 	if r.bundle != nil {

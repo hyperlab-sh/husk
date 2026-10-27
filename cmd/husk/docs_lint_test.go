@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -115,7 +116,7 @@ func TestDocsRepoPathsExist(t *testing.T) {
 // The README's closed set of CLI error codes is the set output defines.
 func TestReadmeErrorCodesMatchOutput(t *testing.T) {
 	readme := docFiles(t)["README.md"]
-	m := regexp.MustCompile("closed set: ([^.]*?), plus the instance's own code").FindStringSubmatch(readme)
+	m := regexp.MustCompile("closed set: (.*?), plus the instance's own code").FindStringSubmatch(readme)
 	if m == nil {
 		t.Fatal("README has no closed-set sentence")
 	}
@@ -123,11 +124,71 @@ func TestReadmeErrorCodesMatchOutput(t *testing.T) {
 	for _, c := range strings.Split(m[1], ",") {
 		got = append(got, strings.Trim(strings.TrimSpace(c), "`"))
 	}
-	want := []string{output.CodeUsage, output.CodeNoInstance, output.CodeAmbiguous, output.CodeTransport,
-		output.CodeProtocol, output.CodeEnvironment, output.CodeStore, output.CodeCreate}
+	want := output.Codes()
 	sort.Strings(got)
 	sort.Strings(want)
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("README codes = %v, want %v", got, want)
+	}
+}
+
+// Every command the CLI's usage text lists has a line in the README's
+// command block.
+func TestReadmeCommandBlockCoversCLIUsage(t *testing.T) {
+	readme := docFiles(t)["README.md"]
+	sec := readme[strings.Index(readme, "## Command line"):]
+	start := strings.Index(sec, "```bash\n")
+	if start < 0 {
+		t.Fatal("README has no command block")
+	}
+	block := sec[start:]
+	block = block[:strings.Index(block[8:], "```")+8]
+	have := map[string]bool{}
+	for _, l := range strings.Split(block, "\n") {
+		f := strings.Fields(l)
+		if len(f) >= 2 && f[0] == "husk" {
+			have[f[1]] = true
+			if len(f) >= 3 {
+				have[f[1]+" "+f[2]] = true
+			}
+		}
+	}
+	cmd := exec.Command(os.Args[0], "help")
+	cmd.Env = append(os.Environ(), "HUSK_TEST_RUN_MAIN=1")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("husk help: %v\n%s", err, out)
+	}
+	checked := 0
+	for _, l := range strings.Split(string(out), "\n") {
+		l = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(l), "usage:"))
+		if !strings.HasPrefix(l, "husk ") || strings.HasPrefix(l, "husk [flags]") || l == "husk help" {
+			continue
+		}
+		noun := ""
+		for _, form := range strings.Split(l, "|") {
+			f := strings.Fields(form)
+			if len(f) == 0 {
+				continue
+			}
+			if f[0] != "husk" { // "store paths | check": a bare verb of the same noun
+				f = []string{"husk", noun, f[0]}
+			}
+			if len(f) < 2 || strings.HasPrefix(f[1], "__") {
+				continue
+			}
+			noun = f[1]
+			key := noun
+			if len(f) >= 3 && !strings.ContainsAny(f[2], "<[-") {
+				key += " " + f[2]
+			}
+			checked++
+			if !have[key] {
+				t.Errorf("README command block lacks %q (usage line %q)", key, l)
+			}
+		}
+	}
+	if checked < 30 {
+		t.Fatalf("only %d usage forms checked; parsing broke\n%s", checked, out)
 	}
 }
