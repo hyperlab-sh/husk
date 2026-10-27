@@ -169,11 +169,13 @@ and footer") shows `husk.sidebar.toggle`, `husk.sidepanel.toggle` and
 | `husk.sidepanel.toggle` | No runtime canvas is shown, the placement is the default one (an open modal does not change the placement) and the panel fits, computed with the sidebar's current shown state (so it is shown when the panel is drawn, and when it is hidden by preference but would be drawn if shown) |
 | `husk.docks.cycle` | Both of the above are shown |
 
-A runtime canvas replaces the whole body, so no dock is placed under it; a
-canvas hidden by Home or a rail item is not shown, and the keys return. Keys
-whose action nothing binds are left out as before. When no key is shown the
-group is omitted. The keys themselves keep working whatever the footer shows:
-hiding a key hides a hint, never a binding.
+A runtime canvas fills the body beside the activity rail, so no dock is placed
+under it; a canvas hidden by Home or a rail item is not shown, and the keys
+return.
+
+Keys whose action nothing binds are left out as before. When no key is shown
+the group is omitted. The keys themselves keep working whatever the footer
+shows: hiding a key hides a hint, never a binding.
 
 ### Empty surfaces
 
