@@ -252,7 +252,7 @@ func tree(t *testing.T, root string) map[string]string {
 	return result
 }
 
-func assertWrittenModes(t *testing.T, root string) {
+func assertWrittenModes(t *testing.T, root string, rootCreated bool) {
 	t.Helper()
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -262,8 +262,8 @@ func assertWrittenModes(t *testing.T, root string) {
 		if err != nil {
 			return err
 		}
-		if rel == "." {
-			// The root is the caller's directory, not created by the command; its mode is not the command's to set.
+		if rel == "." && !rootCreated {
+			// The root is skipped only when the caller already owned it (e.g. t.TempDir()); a root the command created is checked like any directory.
 			return nil
 		}
 		want := fs.FileMode(0644)
@@ -392,7 +392,7 @@ func TestGoldenBundleTreeModesAndOutput(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	assertWrittenModes(t, dir)
+	assertWrittenModes(t, dir, true)
 	if got, want := tree(t, dir), tree(t, golden); !reflect.DeepEqual(got, want) {
 		t.Fatalf("tree differs:\ngot %#v\nwant %#v", got, want)
 	}
