@@ -150,30 +150,60 @@ func TestRuntimeCanvasFrameCloseHandsOffAndRestoresFocus(t *testing.T) {
 func TestRuntimeCanvasFooterShowsOnlyDockKeysThatChangeTheFrame(t *testing.T) {
 	for _, p := range []contracts.RailPlacement{"", contracts.PlacementStage, contracts.PlacementFullCanvas} {
 		for _, left := range []bool{false, true} {
-			t.Run(string(p)+"/"+map[bool]string{false: "nosidebar", true: "sidebar"}[left], func(t *testing.T) {
-				m := goldenModel()
-				fe := withFE(m)
-				m.activePlacement = p
-				m.showSidebar = left
-				openRuntimeFixture(m, fe, "p.canvas", protocol.SurfacePlacementCanvas)
-				m.recomputeLayout()
-				if m.runtimeCanvas() == "" {
-					t.Fatal("no runtime canvas")
-				}
-				shown := strings.Fields(docksHint(m))
-				for _, key := range shown {
-					before := m.View().Content
-					press(m, key)
-					if after := m.View().Content; after == before {
-						t.Errorf("footer shows %q but pressing it leaves the frame unchanged", key)
+			for _, canvas := range []bool{false, true} {
+				name := string(p) + "/" + map[bool]string{false: "nosidebar", true: "sidebar"}[left] + "/" + map[bool]string{false: "plain", true: "canvas"}[canvas]
+				t.Run(name, func(t *testing.T) {
+					m := goldenModel()
+					fe := withFE(m)
+					m.activePlacement = p
+					m.showSidebar = left
+					panel := m.showSidePane
+					// Home also returns to the default placement, so the baseline is that placement.
+					twin := goldenModel()
+					twin.showSidebar = left
+					twin.recomputeLayout()
+					baseline := docksHint(twin)
+					if canvas {
+						openRuntimeFixture(m, fe, "p.canvas", protocol.SurfacePlacementCanvas)
 					}
-					m.showSidebar, m.showSidePane = left, true
 					m.recomputeLayout()
-				}
-				if len(shown) != 0 {
-					t.Fatalf("docks hint under a runtime canvas: %q", shown)
-				}
-			})
+					if (m.runtimeCanvas() != "") != canvas {
+						t.Fatalf("runtime canvas=%q want present=%v", m.runtimeCanvas(), canvas)
+					}
+					shown := strings.Fields(docksHint(m))
+					if canvas && len(shown) != 0 {
+						t.Fatalf("docks hint under a runtime canvas: %q", shown)
+					}
+					if !canvas && p != contracts.PlacementFullCanvas && len(shown) == 0 {
+						t.Fatal("no dock keys shown without a canvas")
+					}
+					for _, key := range shown {
+						before := m.View().Content
+						press(m, key)
+						if after := m.View().Content; after == before {
+							t.Errorf("footer shows %q but pressing it leaves the frame unchanged", key)
+						}
+						m.showSidebar, m.showSidePane = left, panel
+						m.recomputeLayout()
+					}
+					if canvas {
+						// Hiding the stack (Home) does not close it; the docks are drawn again.
+						m.activateHomeWorkbench()
+						if m.runtimeCanvas() != "" || len(m.runtime) == 0 {
+							t.Fatalf("Home should hide, not close: canvas=%q stack=%d", m.runtimeCanvas(), len(m.runtime))
+						}
+						m.recomputeLayout()
+						if got := docksHint(m); got != baseline {
+							t.Fatalf("hidden canvas: docks %q want baseline %q", got, baseline)
+						}
+						m.restoreRuntime()
+						m.recomputeLayout()
+						if got := docksHint(m); got != "" {
+							t.Fatalf("restored canvas: docks %q want empty", got)
+						}
+					}
+				})
+			}
 		}
 	}
 }
