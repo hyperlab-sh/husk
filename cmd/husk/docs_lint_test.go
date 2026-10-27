@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hyperlab-sh/husk/pkg/cli/output"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
 
@@ -108,5 +109,25 @@ func TestDocsRepoPathsExist(t *testing.T) {
 				t.Errorf("%s references %q which does not exist", name, m[1])
 			}
 		}
+	}
+}
+
+// The README's closed set of CLI error codes is the set output defines.
+func TestReadmeErrorCodesMatchOutput(t *testing.T) {
+	readme := docFiles(t)["README.md"]
+	m := regexp.MustCompile("closed set: ([^.]*?), plus the instance's own code").FindStringSubmatch(readme)
+	if m == nil {
+		t.Fatal("README has no closed-set sentence")
+	}
+	var got []string
+	for _, c := range strings.Split(m[1], ",") {
+		got = append(got, strings.Trim(strings.TrimSpace(c), "`"))
+	}
+	want := []string{output.CodeUsage, output.CodeNoInstance, output.CodeAmbiguous, output.CodeTransport,
+		output.CodeProtocol, output.CodeEnvironment, output.CodeStore, output.CodeCreate}
+	sort.Strings(got)
+	sort.Strings(want)
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("README codes = %v, want %v", got, want)
 	}
 }

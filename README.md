@@ -50,6 +50,7 @@ husk plugin add --dir ./plugins           # load claimed immediate subdirectorie
 husk plugin log go.reference             # the log file of one plugin (not_found before it exists)
 husk plugin remove go.reference          # unload one plugin from this instance (stops it, undeclares it, reloads Services); not remembered across restarts
 husk create bundle demo               # write a runnable bundle with hello and the layout guide (local)
+husk create tui mytool [<module>]     # write a Go TUI application (local)
 husk store paths                      # config, state, data and runtime directories (local)
 husk store check                      # corrupt, quarantined and orphan records; deletes nothing
 husk store gc                         # run retention now
@@ -63,7 +64,7 @@ husk state dump                       # every slice with its value
 husk state watch [<slice>...]         # baseline, then one JSON line per change
 husk state set '<json>'               # {"slice": ..., "value": ...}; a plugin's own slice (else denied)
 husk state patch '<json>' [--if-revision <n>]   # {"slice": ..., "patch": ...}, merge patch
-husk state clear <namespace>          # reset a slice to its initial value (the user only)
+husk state clear <namespace> [--force]   # reset a slice to its initial value (the user only)
 husk action list [--owner <id>]       # the action catalog
 husk action invoke <action-id> [--arg k=v]... [--args-json '<json>']
 husk event emit <name> [--data '<json>']
@@ -73,11 +74,14 @@ husk hook list [--owner <id>]        # hook catalog; only the owner can fire a h
 husk keys [--action <id>] [--focus <surface>] [--shadowed] [--problems]
 husk settings get <key>
 husk settings list [--source]
+husk settings set <key> <value>       # value parsed as JSON, else sent as a string; 10s default timeout
 husk settings schema [--owner <owner>]
 husk settings validate
 husk theme show                       # serving palette, one ROLE/COLOR row per role
 husk theme roles                      # sorted role names
 husk theme check                      # dry-run contrast diagnostics from disk
+husk theme list                       # available theme names
+husk theme set <name>                 # select a theme; 10s default timeout
 husk profile list
 husk profile current                  # active entry; null in JSON when none is active
 husk profile use <name>               # an empty string clears the selection
@@ -95,7 +99,7 @@ The Services commands and `keys` default to 5 s, except `config reload` (10 s). 
 
 Global flags follow the subcommand (`husk ping --format json`); before it they would reach the instance's own flag parser. `ping` and `rpc` take `--instance <id>` or `--socket <path>` (not both), `--format json|table` (default `table` on a terminal, `json` otherwise) and `--timeout <duration>`; the flags may come before or after the arguments. `plugin` is a socket command (`plugin list`, `plugin log <id>`, 5s default; `plugin add <path>`, `plugin add --dir <dir>` and `plugin remove <id>`, 10s default). Addition resolves relative paths against the CLI's working directory and loads without saving configuration. It prints the full batch result on stdout; if any admitted plugin failed to launch, it also reports the failed plugin ids on stderr and exits 1. Refusals and reload-report problems alone remain exit 0. `instances` and `store` are local: `instances` reads the registry only, and `store` opens Store without an instance (it creates its config, state and data directories like any start, never the runtime directory; `reset-secrets` exits 1 `store` naming the instances while `Survey` finds any live or unresponsive one). Both take `--format` and reject `--instance`, `--socket` and `--timeout` (exit 2). Explicit targets (`--socket`, `--instance`, `HUSK_SOCKET_PATH`, `HUSK_INSTANCE`) are never probed; only discovery (no target, so the registry is surveyed) probes, 500 ms per entry. With exactly one live instance, that one is used; unresponsive entries are reported as `unresponsive` warnings. The client opens one connection and sends `session.ping` first to check the protocol major, then the command's request. `--timeout` starts after connecting (`ping` 2s, `rpc` 30s by default; `0` means the default, a negative value is a usage error). `husk` installs no signal handlers, so SIGINT, SIGTERM and SIGPIPE end it by the signal. An absent runtime directory is an empty registry (`husk instances` lists nothing, discovery exits 3); an unusable one (not private to the user, or a symlink) exits 7.
 
-Results go to stdout. Errors go to stderr in the chosen format: one JSON object in JSON mode, `husk: <message>` (plus candidate lines) in table mode. Exit codes: 0 success, 1 the instance replied with an error or an admitted plugin failed to launch, 2 usage, 3 no instance, 4 several instances and none chosen, 5 transport (connect failed, timeout, connection dropped, or only unresponsive instances), 6 protocol (unreadable reply or a different protocol major), 7 environment (unusable runtime directory). The JSON `code` is from a closed set: `usage`, `no_instance`, `ambiguous`, `transport`, `protocol`, `environment`, plus the instance's own code for exit 1 (`failed` for an admitted plugin that could not launch). See [Instances and the CLI](docs/docs/design/instances.md).
+Results go to stdout. Errors go to stderr in the chosen format: one JSON object in JSON mode, `husk: <message>` (plus candidate lines) in table mode. Exit codes: 0 success, 1 the instance replied with an error or an admitted plugin failed to launch, 2 usage, 3 no instance, 4 several instances and none chosen, 5 transport (connect failed, timeout, connection dropped, or only unresponsive instances), 6 protocol (unreadable reply or a different protocol major), 7 environment (unusable runtime directory). The JSON `code` is from a closed set: `usage`, `no_instance`, `ambiguous`, `transport`, `protocol`, `environment`, `store`, `create`, plus the instance's own code for exit 1 (`failed` for an admitted plugin that could not launch). See [Instances and the CLI](docs/docs/design/instances.md).
 
 ## Embedding in Go
 

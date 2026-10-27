@@ -14,6 +14,7 @@ import (
 
 	"github.com/hyperlab-sh/husk/pkg/cli"
 	"github.com/hyperlab-sh/husk/pkg/cli/createcmd"
+	"github.com/hyperlab-sh/husk/pkg/cli/output"
 	"github.com/hyperlab-sh/husk/pkg/cli/storecmd"
 	"github.com/hyperlab-sh/husk/pkg/host"
 	"github.com/hyperlab-sh/husk/pkg/host/contracts"
@@ -230,7 +231,7 @@ func main() {
 	runtimeDir, _, err := instance.LookupRuntimeDir()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "husk: runtime directory: %v\n", err)
-		os.Exit(1)
+		os.Exit(output.ExitEnvironment)
 	}
 	opt.NewHost = hostFactory(id, runtimeDir, instanceDocs, profileFlag, additions, (*converters)...)
 	if *dumpFrame {

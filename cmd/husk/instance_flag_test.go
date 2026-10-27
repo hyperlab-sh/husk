@@ -4,9 +4,12 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"testing"
+
+	"github.com/hyperlab-sh/husk/pkg/cli/output"
 )
 
 // TestMain lets a test re-execute this binary as the husk command: with
@@ -128,5 +131,32 @@ func TestBuildVersionPrefersLdflags(t *testing.T) {
 	version = "1.2.3"
 	if got := buildVersion(); got != "1.2.3" {
 		t.Errorf("buildVersion() = %q, want the ldflags version", got)
+	}
+}
+
+// An unusable runtime directory (not private to the user) is the environment
+// exit, 7, the same code the CLI uses for the same check.
+func TestStartUnusableRuntimeDirExits7(t *testing.T) {
+	xdg, err := os.MkdirTemp("/tmp", "hk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(xdg)
+	rt := filepath.Join(xdg, "husk")
+	if err := os.Mkdir(rt, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(rt, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(os.Args[0], "--instance", "notes")
+	cmd.Env = append(os.Environ(), "HUSK_TEST_RUN_MAIN=1", "XDG_RUNTIME_DIR="+xdg, "HOME="+xdg)
+	out, err := cmd.CombinedOutput()
+	var ee *exec.ExitError
+	if !errors.As(err, &ee) || ee.ExitCode() != output.ExitEnvironment {
+		t.Fatalf("err = %v, output = %s; want exit 7", err, out)
+	}
+	if !strings.Contains(string(out), "husk: runtime directory:") {
+		t.Fatalf("output = %s", out)
 	}
 }
