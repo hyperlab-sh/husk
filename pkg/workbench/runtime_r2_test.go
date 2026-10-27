@@ -187,6 +187,17 @@ func TestRuntimeCanvasFooterShowsOnlyDockKeysThatChangeTheFrame(t *testing.T) {
 						m.recomputeLayout()
 					}
 					if canvas {
+						// Under a shown canvas no dock is drawn: the keys leave the frame unchanged.
+						for _, id := range []string{"husk.sidebar.toggle", "husk.sidepanel.toggle", "husk.docks.cycle"} {
+							key := m.firstKey(id)
+							before := m.View().Content
+							press(m, key)
+							if after := m.View().Content; after != before {
+								t.Errorf("%s (%q) changes the frame under a runtime canvas", id, key)
+							}
+							m.showSidebar, m.showSidePane = left, panel
+							m.recomputeLayout()
+						}
 						// Hiding the stack (Home) does not close it; the docks are drawn again.
 						m.activateHomeWorkbench()
 						if m.runtimeCanvas() != "" || len(m.runtime) == 0 {
