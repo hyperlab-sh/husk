@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -241,8 +242,18 @@ func main() {
 	_, _ = os.Stderr.Write(tuiLog.Bytes())
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		os.Exit(startExit(err))
 	}
+}
+
+// startExit is the exit code of a failed start: 7 when the runtime directory
+// is unusable, else 1.
+func startExit(err error) int {
+	var rd *host.RuntimeDirError
+	if errors.As(err, &rd) {
+		return output.ExitEnvironment
+	}
+	return 1
 }
 
 // dumpFrameMain keeps the binary's output and exit policy outside the UI.
@@ -251,7 +262,7 @@ func dumpFrameMain(ctx context.Context, opt workbench.Options, stdout, stderr io
 	if frame == "" && err != nil {
 		// Host construction failed before a frame existed, as in start mode.
 		fmt.Fprintf(stderr, "husk: %v\n", err)
-		return 1
+		return startExit(err)
 	}
 	return printDumpFrame(frame, err, stdout, stderr)
 }

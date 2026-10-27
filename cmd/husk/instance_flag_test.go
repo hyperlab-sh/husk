@@ -160,3 +160,30 @@ func TestStartUnusableRuntimeDirExits7(t *testing.T) {
 		t.Fatalf("output = %s", out)
 	}
 }
+
+// An absent runtime directory that cannot be created is the same environment
+// failure, in start mode and under --dump-frame.
+func TestStartUncreatableRuntimeDirExits7(t *testing.T) {
+	for _, args := range [][]string{{"--instance", "notes"}, {"--instance", "notes", "--dump-frame"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			xdg, err := os.MkdirTemp("/tmp", "hk")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.RemoveAll(xdg)
+			if err := os.Chmod(xdg, 0o500); err != nil {
+				t.Fatal(err)
+			}
+			if os.Geteuid() == 0 {
+				t.Skip("root ignores directory permissions")
+			}
+			cmd := exec.Command(os.Args[0], args...)
+			cmd.Env = append(os.Environ(), "HUSK_TEST_RUN_MAIN=1", "XDG_RUNTIME_DIR="+xdg, "HOME="+xdg)
+			out, err := cmd.CombinedOutput()
+			var ee *exec.ExitError
+			if !errors.As(err, &ee) || ee.ExitCode() != output.ExitEnvironment {
+				t.Fatalf("err = %v, output = %s; want exit 7", err, out)
+			}
+		})
+	}
+}
