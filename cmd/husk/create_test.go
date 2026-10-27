@@ -22,7 +22,9 @@ func TestCreateLocalFlagsUsageAndHiddenHelp(t *testing.T) {
 		{"create", "bundle", "app", "--instance", "x"},
 		{"create", "bundle", "app", "--socket", "unused"},
 		{"create", "bundle", "app", "--timeout", "1s"},
-		{"create", "tui", "app"},
+		{"create", "tui", "app", "--instance", "x"},
+		{"create", "tui", "app", "--socket", "unused"},
+		{"create", "tui", "app", "--timeout", "1s"},
 		{"create", "bundle", "My App"},
 		{"--instance", "x", "create", "bundle", "app"},
 	} {
@@ -47,6 +49,73 @@ func TestCreateLocalFlagsUsageAndHiddenHelp(t *testing.T) {
 	out, err := cmd.CombinedOutput()
 	if err != nil || strings.Contains(string(out), "__guide-plugin") || !strings.Contains(string(out), "husk create bundle <name>") {
 		t.Fatalf("help=%s err=%v", out, err)
+	}
+}
+
+func TestCreateTUIInvalidArguments(t *testing.T) {
+	for _, format := range []string{"table", "json"} {
+		for _, args := range [][]string{{"tui"}, {"tui", "app", "example.test/app", "extra"}} {
+			t.Run(format+"/"+strings.Join(args, " "), func(t *testing.T) {
+				root := t.TempDir()
+				argv := append([]string{"create", "--format", format}, args...)
+				cmd := exec.CommandContext(t.Context(), os.Args[0], argv...)
+				cmd.Dir = root
+				cmd.Env = append(os.Environ(), "HUSK_TEST_RUN_MAIN=1", "HOME="+root)
+				var stdout, stderr bytes.Buffer
+				cmd.Stdout, cmd.Stderr = &stdout, &stderr
+				err := cmd.Run()
+				var ee *exec.ExitError
+				if !errors.As(err, &ee) || ee.ExitCode() != 2 {
+					t.Fatalf("exit=%v stdout=%s stderr=%s", err, &stdout, &stderr)
+				}
+				if stdout.Len() != 0 {
+					t.Fatalf("unsupported verb wrote stdout: %s", &stdout)
+				}
+				const usage = "usage: husk create bundle <name>"
+				if format == "json" {
+					var reply struct {
+						Error struct{ Code, Message string }
+					}
+					if err := json.Unmarshal(stderr.Bytes(), &reply); err != nil {
+						t.Fatalf("stderr is not a JSON error: %s: %v", &stderr, err)
+					}
+					if reply.Error.Code != "usage" || !strings.Contains(reply.Error.Message, usage) {
+						t.Fatalf("error=%+v, want usage", reply.Error)
+					}
+				} else if !strings.Contains(stderr.String(), usage) {
+					t.Fatalf("usage missing from stderr: %s", &stderr)
+				}
+				entries, err := os.ReadDir(root)
+				if err != nil || len(entries) != 0 {
+					t.Fatalf("unsupported verb created %v err=%v", entries, err)
+				}
+			})
+		}
+	}
+}
+
+func TestCreateTUICommandRegistered(t *testing.T) {
+	root := t.TempDir()
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "create", "tui", "app", "example.test/custom", "--format", "json")
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "HUSK_TEST_RUN_MAIN=1", "HOME="+root)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("create tui: %v: %s", err, out)
+	}
+	var result struct {
+		Dir   string
+		Files []string
+	}
+	if err := json.Unmarshal(out, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Dir != filepath.Join(root, "app") || len(result.Files) == 0 {
+		t.Fatalf("output=%s", out)
+	}
+	mod, err := os.ReadFile(filepath.Join(result.Dir, "go.mod"))
+	if err != nil || !strings.Contains(string(mod), "module \"example.test/custom\"") {
+		t.Fatalf("module=%s error=%v", mod, err)
 	}
 }
 

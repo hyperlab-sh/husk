@@ -60,8 +60,10 @@ type Declarations interface {
 // seam must never silently drop writes or fake liveness. Only the toast
 // bounds are optional, with the defaults below.
 type Options struct {
-	Clock        Clock
-	Liveness     Liveness
+	Clock    Clock
+	Liveness Liveness
+	// Logger receives diagnostics. A Logger that also has
+	// Warnf(format, v...) receives refused claims through it at warn level.
 	Logger       interface{ Printf(format string, v ...any) }
 	Publications Publications
 	Declarations Declarations
@@ -108,6 +110,18 @@ type RefusedClaim struct {
 	Surface protocol.SurfaceID
 	Plugin  string
 	At      time.Time
+}
+
+// warnLogger is the optional level a Logger may add; the engine writes
+// refused claims through it when present and through Printf otherwise.
+type warnLogger interface{ Warnf(format string, v ...any) }
+
+func (e *Engine) warnf(format string, v ...any) {
+	if w, ok := e.log.(warnLogger); ok {
+		w.Warnf(format, v...)
+		return
+	}
+	e.log.Printf(format, v...)
 }
 
 // maxRefused bounds the refused-claim history in Stats.
@@ -181,6 +195,7 @@ type Engine struct {
 	terminals     map[protocol.SurfaceID]attachment
 	terminalFocus map[protocol.SurfaceID]bool
 	terminalDirty bool
+	runtime       []contracts.RuntimeSurface // opening order, oldest first
 }
 
 // New creates the engine on st, registering husk.surfaces and the State
@@ -344,6 +359,26 @@ func (e *Engine) Flush() {
 	}
 
 	res := e.slice.Get()
+	// Runtime declarations belong to the engine, not to Pods or a cleared slice.
+	if res.Runtime == nil {
+		res.Runtime = map[protocol.SurfaceID]contracts.RuntimeSurface{}
+	}
+	kept := e.runtime[:0]
+	for _, r := range e.runtime {
+		if !e.live.Live(r.Plugin) {
+			e.notifyRuntimeClosed(r)
+			delete(res.Runtime, r.Surface)
+			delete(res.Occupants, r.Surface)
+			continue
+		}
+		kept = append(kept, r)
+		res.Runtime[r.Surface] = r
+		if res.Occupants == nil {
+			res.Occupants = Occupants{}
+		}
+		res.Occupants[r.Surface] = Occupant{Surface: r.Surface, Plugin: r.Plugin}
+	}
+	e.runtime = kept
 	if res.Occupants == nil {
 		res.Occupants = Occupants{}
 	}
@@ -539,7 +574,7 @@ func (e *Engine) resolvePlugin(plugin string, old, cur *pluginDecl, res *Surface
 			// Still ours from a release the Pod has not re-declared; no-op.
 		default:
 			e.recordRefusal(surface, plugin)
-			e.log.Printf("surfaces: %s occupied by %s; claim by %s refused", surface, occupant, plugin)
+			e.warnf("surfaces: %s occupied by %s; claim by %s refused", surface, occupant, plugin)
 		}
 	}
 
@@ -791,6 +826,11 @@ func (e *Engine) SurfaceUpdate(plugin string, p protocol.SurfaceUpdateParams) er
 	if _, ok := e.terminals[p.Surface]; ok {
 		return &Error{Code: protocol.CodeInvalidParams, Message: "surface has a terminal attached", Data: map[string]any{"reason": "terminal_attached"}}
 	}
+	for i, hit := range p.HitTargets {
+		if err := hit.Validate(); err != nil {
+			return errf(protocol.CodeInvalidParams, "hit_targets[%d]: %v", i, err)
+		}
+	}
 	if p.Capture != nil && !p.Capture.Valid() {
 		return errf(protocol.CodeInvalidParams, "invalid capture value")
 	}
@@ -851,15 +891,29 @@ func (e *Engine) release(surface protocol.SurfaceID, only string, yield bool) er
 		}
 		return errf(protocol.CodeDenied, "surface %q is occupied by %s", surface, occupant)
 	}
+	runtime := !surface.Layout()
+	if runtime {
+		for _, r := range e.runtime {
+			if r.Surface == surface {
+				e.notifyRuntimeClosed(r)
+				break
+			}
+		}
+	}
 	e.detachTerminal(surface)
 	e.absorbForeign()
 	if err := e.slice.Update(func(v *Surfaces) {
 		delete(v.Occupants, surface)
 		delete(v.Capture, surface)
+		delete(v.Runtime, surface)
 	}); err != nil {
 		return err
 	}
 	e.markRev()
+	if runtime {
+		e.runtime = slices.DeleteFunc(e.runtime, func(r contracts.RuntimeSurface) bool { return r.Surface == surface })
+		return nil
+	}
 	if occupant == "" {
 		return nil
 	}
@@ -908,8 +962,8 @@ func (e *Engine) UpdateView(fn func(*contracts.SurfaceView)) error {
 	view := contracts.SurfaceView{Visible: slices.Clone(cur.Visible), Placement: cur.Placement, Overlays: cur.Overlays}
 	fn(&view)
 	for _, id := range view.Visible {
-		if !id.Valid() {
-			return errf(protocol.CodeInvalidParams, "visible surface %q is not a host layout surface", id)
+		if !id.Layout() && cur.Runtime[id].Plugin == "" {
+			return errf(protocol.CodeInvalidParams, "visible surface %q is not an open surface", id)
 		}
 	}
 	e.absorbForeign()

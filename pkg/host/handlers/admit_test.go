@@ -62,6 +62,63 @@ func TestAdmit(t *testing.T) {
 	}
 }
 
+func TestAdmitUserOnlyMethods(t *testing.T) {
+	tested := 0
+	for method, home := range contracts.MethodHomes() {
+		if len(home.Kinds) != 1 || home.Kinds[0] != contracts.CallerCLI {
+			continue
+		}
+		tested++
+		t.Run(method, func(t *testing.T) {
+			req := admitReq(method)
+			// Admission precedes decoding, even for malformed params.
+			req.Params = json.RawMessage(`[]`)
+			for _, tc := range []struct {
+				name       string
+				caller     contracts.Caller
+				wantReason bool
+			}{
+				{"plugin", contracts.Caller{Kind: contracts.CallerPlugin, PluginID: "files"}, true},
+				{"plugin without id", contracts.Caller{Kind: contracts.CallerPlugin}, true},
+				{"host", contracts.Caller{Kind: contracts.CallerHost}, false},
+				{"input", contracts.Caller{Kind: contracts.CallerInput}, false},
+				{"zero", contracts.Caller{}, false},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					reply := Admit(req, tc.caller)
+					if reply == nil || reply.Error == nil || reply.Error.Code != protocol.CodeDenied {
+						t.Fatalf("reply = %+v, want denied", reply)
+					}
+					if idOf(*reply) != `"7"` {
+						t.Fatalf("reply id = %s, want request id", idOf(*reply))
+					}
+					if !tc.wantReason {
+						if len(reply.Error.Data) != 0 {
+							t.Fatalf("data = %s, want no reason for a non-plugin caller", reply.Error.Data)
+						}
+						return
+					}
+					var data struct {
+						Reason string `json:"reason"`
+					}
+					if err := json.Unmarshal(reply.Error.Data, &data); err != nil {
+						t.Fatalf("decoding denial data: %v", err)
+					}
+					if data.Reason != "user_only" {
+						t.Fatalf("reason = %q, want user_only", data.Reason)
+					}
+				})
+			}
+			if deny := Admit(req, contracts.Caller{Kind: contracts.CallerCLI}); deny != nil {
+				t.Fatalf("CLI caller refused: %+v", deny.Error)
+			}
+		})
+	}
+	if tested == 0 {
+		t.Fatal("no CLI-only methods tested")
+	}
+}
+
 func TestAdmitNamesCallerKind(t *testing.T) {
 	reply := Admit(admitReq(protocol.MethodStateSet), contracts.Caller{Kind: contracts.CallerCLI})
 	if reply == nil || reply.Error == nil || reply.Error.Code != protocol.CodeDenied {

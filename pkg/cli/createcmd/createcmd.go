@@ -1,4 +1,4 @@
-// Package createcmd writes runnable bundles without reading configuration or
+// Package createcmd writes runnable bundles and TUI applications without reading configuration or
 // contacting an instance.
 package createcmd
 
@@ -12,6 +12,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -26,7 +27,7 @@ var templates embed.FS
 
 var nameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 
-// Command returns the local create noun. Only bundle is currently supported.
+// Command returns the local create noun for bundles and Go TUI applications.
 func Command(version string) output.Command {
 	return command(version, guide.Files, os.Getwd, writeFile)
 }
@@ -52,16 +53,34 @@ type file struct {
 	mode fs.FileMode
 }
 
-func command(_ string, guideFS fs.FS, getwd func() (string, error), write func(string, []byte, fs.FileMode) error) output.Command {
-	return output.Command{Noun: "create", Usage: "husk create bundle <name>", Run: func(_ context.Context, args []string, o output.Options) error {
-		if len(args) != 2 || args[0] != "bundle" {
-			return output.Usage("usage: husk create bundle <name>")
+func command(version string, guideFS fs.FS, getwd func() (string, error), write func(string, []byte, fs.FileMode) error) output.Command {
+	const usage = "husk create bundle <name> | husk create tui <name> [<module>]"
+	return output.Command{Noun: "create", Usage: usage, Run: func(_ context.Context, args []string, o output.Options) error {
+		if len(args) < 2 || (args[0] != "bundle" && args[0] != "tui") || (args[0] == "bundle" && len(args) != 2) || len(args) > 3 {
+			return output.Usage("usage: %s", usage)
 		}
 		name := args[1]
 		if !nameRE.MatchString(name) {
 			return output.Usage("invalid name %q: use [a-z0-9][a-z0-9._-]{0,63}", name)
 		}
+		module := name
+		if args[0] == "tui" && len(args) == 3 {
+			module = args[2]
+		}
+		if args[0] == "tui" && !validModulePath(module) {
+			if len(args) == 2 {
+				return output.Usage("invalid name %q: not a valid Go module path; pass <module> explicitly", name)
+			}
+			return output.Usage("invalid module path %q", module)
+		}
 		files, err := bundleFiles(name, guideFS)
+		if err == nil && args[0] == "tui" {
+			goVersion := goDirective(runtime.Version())
+			if goVersion == "" {
+				return output.Create(nil, "cannot determine Go language version from %q", runtime.Version())
+			}
+			files, err = tuiFiles(name, module, version, goVersion, files)
+		}
 		if err != nil {
 			return output.Create(err, "%v", err)
 		}

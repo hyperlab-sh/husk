@@ -4,6 +4,7 @@ package ptyhost
 
 import (
 	"errors"
+	"syscall"
 
 	"github.com/hyperlab-sh/husk/pkg/protocol"
 )
@@ -31,6 +32,21 @@ func (*Child) Resize(int, int) error { return unsupported() }
 
 // Wait is unavailable without a supported PTY backend.
 func (*Child) Wait() error { return unsupported() }
+
+// PID returns no process on an unavailable backend.
+func (*Child) PID() int { return 0 }
+
+// Write is unavailable without a supported PTY backend.
+func (*Child) Write([]byte) (int, error) { return 0, unsupported() }
+
+// CloseTerminal is harmless on an unavailable backend.
+func (*Child) CloseTerminal() error { return nil }
+
+// Signal is unavailable without a supported PTY backend.
+func (*Child) Signal(syscall.Signal) error { return unsupported() }
+
+// GroupAlive reports no process on an unavailable backend.
+func (*Child) GroupAlive() bool { return false }
 
 // Close is harmless on an unavailable backend.
 func (*Child) Close() error { return nil }

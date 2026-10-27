@@ -53,6 +53,9 @@ func TestReadBootstrapPrecedencePathsAndNoWrites(t *testing.T) {
 		anonymous                                                 bool
 	}{
 		{name: "fresh"},
+		{name: "duplicate user absent", user: `{"husk.bundle":"~/first","husk":{"bundle":"~/second"}}`},
+		{name: "duplicate instance falls through", user: `{"husk":{"bundle":"~/user"}}`, instance: `{"husk.bundle":"~/first","husk":{"bundle":"~/second"}}`, want: "user", layer: "user"},
+		{name: "all layers duplicate absent", user: `{"husk.bundle":"~/first","husk":{"bundle":"~/second"}}`, instance: `{"husk.bundle":"~/third","husk":{"bundle":"~/fourth"}}`},
 		{name: "user", user: `{"husk":{"bundle":"~/user"}}`, want: "user", layer: "user"},
 		{name: "instance", user: `{"husk":{"bundle":"~/user"}}`, instance: `{"husk":{"bundle":"~/instance"}}`, want: "instance", layer: "instance"},
 		{name: "flag", user: `{"husk":{"bundle":"~/user"}}`, instance: `{"husk":{"bundle":"~/instance"}}`, flag: "flag", want: "flag", layer: "instance"},

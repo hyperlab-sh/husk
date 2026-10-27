@@ -57,6 +57,11 @@ type printfLog struct{ r *Root }
 
 func (p printfLog) Printf(format string, v ...any) { p.r.logf(format, v...) }
 
+// Warnf writes at warn level; the Surfaces engine uses it for refused claims.
+func (p printfLog) Warnf(format string, v ...any) {
+	p.r.log(pods.LogMsg{Level: "warn", Message: fmt.Sprintf(format, v...)})
+}
+
 // publisher lets Services publish events from any goroutine, and Pods from
 // the loop.
 type publisher struct{ r *Root }

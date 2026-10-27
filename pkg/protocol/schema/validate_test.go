@@ -23,7 +23,8 @@ type payload struct{ params, result any }
 // whose payloads belong to other specs, so the schema is an open object or
 // anything) carry a plain object and are checked for the envelope only.
 func payloads() map[string]payload {
-	hit := []protocol.RowHitTarget{{Line: 3, ID: "r1", Kind: "row", Action: "notes.open", Payload: map[string]string{"k": "v"}}}
+	start, end := 1, 4
+	hit := []protocol.RowHitTarget{{Line: 3, ID: "r1", Kind: "row", Action: "notes.open", Payload: map[string]string{"k": "v"}, ColStart: &start, ColEnd: &end}}
 	mods := protocol.ModifierState{Alt: true, Ctrl: true, Shift: true, Super: true}
 	obj := map[string]any{"future": 1}
 	yes := protocol.CaptureTrue
@@ -31,6 +32,7 @@ func payloads() map[string]payload {
 	return map[string]payload{
 		protocol.MethodSessionPing:       {protocol.SessionPingParams{}, protocol.SessionPingResult{ID: "i", PID: 1, ProtocolVersion: protocol.Version, HostVersion: "dev", UptimeMS: 5}},
 		protocol.MethodProtocolError:     {protocol.ProtocolErrorParams{Code: protocol.CodeParseError, Message: "bad", Method: "a.b", Data: json.RawMessage(`{"line":1}`)}, nil},
+		protocol.MethodSurfaceOpen:       {protocol.SurfaceOpenParams{Placement: protocol.SurfacePlacementModal, Name: "picker", Title: "Pick one", Width: protocol.SurfaceDimension(`"60%"`), Height: protocol.SurfaceDimension(`20`), Frame: &protocol.FrameSpec{Border: true, Label: "Picker", Close: true}}, protocol.SurfaceOpenResult{Surface: "notes.picker"}},
 		protocol.MethodSurfaceUpdate:     {protocol.SurfaceUpdateParams{PluginID: "notes", Surface: protocol.SurfaceMainStage, Title: "t", Subtitle: "s", Badge: "b", Lines: []string{"x"}, HitTargets: hit, StatusMeta: map[string]any{"n": 1}, Capture: &yes}, nil},
 		protocol.MethodSurfaceClose:      {protocol.SurfaceCloseParams{Surface: protocol.SurfaceMainStage, Yield: true}, nil},
 		protocol.MethodTerminalAttach:    {protocol.TerminalAttachParams{Surface: protocol.SurfaceMainStage, Capture: protocol.CaptureValueAll.Ptr(), Scrollback: &history}, protocol.TerminalAttachResult{Width: 80, Height: 24}},

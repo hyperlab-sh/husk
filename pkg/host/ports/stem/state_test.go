@@ -179,6 +179,20 @@ func TestStatePortNewPanics(t *testing.T) {
 	}
 }
 
+func TestStatePortGetPathKeepsLargeIntegers(t *testing.T) {
+	spec := specAtlas
+	w, _, _ := newPort(t, StatePortOptions{}, spec)
+	if _, err := w.Set(ctxBG, callerAtlas, "atlas.state", json.RawMessage(`{"n":9007199254740993,"a":[9007199254740993]}`)); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/n", "/a/0"} {
+		res, err := w.Get(ctxBG, callerCLI, "atlas.state", path)
+		if err != nil || string(res.Value) != "9007199254740993" {
+			t.Fatalf("%s = %s, %v", path, res.Value, err)
+		}
+	}
+}
+
 func TestStatePortGet(t *testing.T) {
 	w, _, _ := newPort(t, StatePortOptions{}, state.Spec{
 		Namespace: "atlas.state", Owner: "atlas", Scope: state.ScopeInstance,
@@ -198,6 +212,7 @@ func TestStatePortGet(t *testing.T) {
 		{path: "/k~0s", want: `1`},
 		{path: "/s~1l", want: `2`},
 		{path: "/missing", notFound: true},
+		{path: "/k~2s", notFound: true},
 		{path: "/list/5", notFound: true},
 		{path: "/list/-", notFound: true},
 		{path: "/list/01", notFound: true},
@@ -627,4 +642,31 @@ func TestStatePortClear(t *testing.T) {
 		err := w.Clear(ctxBG, callerCLI, "nope.state", false)
 		wantPortCode(t, err, protocol.CodeNotFound)
 	})
+	for _, force := range []bool{false, true} {
+		t.Run(fmt.Sprintf("tombstoned namespace keeps persisted copies (force=%v)", force), func(t *testing.T) {
+			copies := map[string]bool{"atlas.state": true}
+			cl := cleanerFunc(func(_ context.Context, ns string) error {
+				delete(copies, ns)
+				return nil
+			})
+			w, _, hs := newPort(t, StatePortOptions{Cleaner: cl}, specAtlas)
+			hs.live[specAtlas.Owner+"\x00"+specAtlas.Namespace].Unregister()
+			wantPortCode(t, w.Clear(ctxBG, callerCLI, "atlas.state", force), protocol.CodeNotFound)
+			if !copies["atlas.state"] {
+				t.Fatal("persisted copy was deleted by a clear of a removed plugin's slice")
+			}
+		})
+		t.Run(fmt.Sprintf("unregistered namespace keeps persisted copies (force=%v)", force), func(t *testing.T) {
+			copies := map[string]bool{"nope.state": true}
+			cl := cleanerFunc(func(_ context.Context, ns string) error {
+				delete(copies, ns)
+				return nil
+			})
+			w, _, _ := newPort(t, StatePortOptions{Cleaner: cl}, specAtlas)
+			wantPortCode(t, w.Clear(ctxBG, callerCLI, "nope.state", force), protocol.CodeNotFound)
+			if !copies["nope.state"] {
+				t.Fatal("persisted copy was deleted by a clear of an unregistered namespace")
+			}
+		})
+	}
 }

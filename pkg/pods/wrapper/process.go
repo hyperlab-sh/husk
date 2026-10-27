@@ -192,6 +192,23 @@ func (w *Wrapper) Start(opening []protocol.Message) error {
 		inWrite.Close()
 		outRead.Close()
 		outWrite.Close()
+		// Only explicit relative executables are resolved against WorkDir.
+		// PATH misses, absolute commands and missing interpreters retain the
+		// OS error: they do not mean a plugin executable needs building.
+		name := w.spec.CommandName
+		if name == "" {
+			name = w.spec.Command[0]
+		}
+		resolvedFromWorkDir := w.spec.WorkDir != "" && !filepath.IsAbs(name) && strings.ContainsAny(name, `/\`)
+		if resolvedFromWorkDir && errors.Is(err, os.ErrNotExist) {
+			// A vanished working directory also makes the executable stat
+			// fail. Preserve its native launch error instead of suggesting a build.
+			if _, dirErr := os.Stat(w.spec.WorkDir); dirErr == nil {
+				if _, statErr := os.Stat(argv[0]); errors.Is(statErr, os.ErrNotExist) {
+					err = fmt.Errorf("command %q not found in %s; build it first", name, w.spec.WorkDir)
+				}
+			}
+		}
 		return fail(err)
 	}
 	inRead.Close()

@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/hyperlab-sh/husk/pkg/host"
+	"github.com/hyperlab-sh/husk/pkg/host/contracts"
 )
 
 func pluginFlags(t *testing.T, args ...string) *flag.FlagSet {
@@ -102,10 +103,8 @@ func TestAddPluginPreservesConfiguredPaths(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			prog := newProgramRef()
-			h, err := newHost(prog, goldenModel(), "add-flags", shortRuntimeDir(t, "add-flags"), pluginInstanceDocs(fs), nil, host.WithPluginAdditions(additions))
+			h, err := newHost(contracts.Config{Post: func(any) bool { return false }}, "add-flags", shortRuntimeDir(t, "add-flags"), pluginInstanceDocs(fs), nil, host.WithPluginAdditions(additions))
 			if tc.wantPaths == nil {
-				prog.closeGate()
 				if h != nil {
 					_ = h.Close()
 				}
@@ -117,7 +116,7 @@ func TestAddPluginPreservesConfiguredPaths(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer func() { prog.closeGate(); _ = h.Close() }()
+			defer func() { _ = h.Close() }()
 			for key, want := range map[string][]string{"paths": tc.wantPaths, "dirs": tc.wantDirs} {
 				value, source, err := h.Frontend().Setting("husk.plugins." + key)
 				encoded, _ := json.Marshal(value)
@@ -223,13 +222,11 @@ func TestAddPluginPreservesNamedInstanceConfig(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			prog := newProgramRef()
-			h, err := newHost(prog, goldenModel(), "add-flags", shortRuntimeDir(t, "add-instance"), pluginInstanceDocs(fs), nil, host.WithPluginAdditions(additions))
+			h, err := newHost(contracts.Config{Post: func(any) bool { return false }}, "add-flags", shortRuntimeDir(t, "add-instance"), pluginInstanceDocs(fs), nil, host.WithPluginAdditions(additions))
 			if err != nil {
-				prog.closeGate()
 				t.Fatal(err)
 			}
-			defer func() { prog.closeGate(); _ = h.Close() }()
+			defer func() { _ = h.Close() }()
 			value, source, err := h.Frontend().Setting("husk.plugins." + tc.key)
 			encoded, _ := json.Marshal(value)
 			var got []string

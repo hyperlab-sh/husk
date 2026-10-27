@@ -1,6 +1,7 @@
 package host
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -39,7 +40,35 @@ func (r *Root) Palette() protocol.Palette { return r.rt.Theme.Wire() }
 // PaletteANSI implements contracts.Frontend.
 func (r *Root) PaletteANSI() (protocol.Palette, map[string]int) { return r.rt.Theme.WireANSI() }
 
-func (r *Root) keys() portsservices.Keys { return portsservices.Keys{Svc: r.rt.Keybinding} }
+func (r *Root) keys() portsservices.Keys {
+	return portsservices.Keys{Svc: r.rt.Keybinding, View: r.keyView}
+}
+
+// keyView captures loop-confined host actions alongside plugin declarations
+// and liveness. The frontend can call on-loop; socket callers post and wait.
+func (r *Root) keyView(ctx context.Context) (portsservices.KeyView, error) {
+	view := portsservices.KeyView{Actions: map[string]bool{}, Surfaces: map[string]map[string]bool{}}
+	capture := func() {
+		for _, action := range r.disp.List(protocol.Caller{Kind: protocol.CallerCLI}) {
+			view.Actions[action.ID] = action.Live
+		}
+		live := dispatcher.StateLiveness(r.st)
+		for plugin, surfaces := range r.readCatalog().surfaces {
+			if live.Live(plugin) {
+				view.Surfaces[plugin] = surfaces
+			}
+		}
+	}
+	if r.onLoop() {
+		capture()
+		return view, nil
+	}
+	err := r.do(ctx, capture)
+	if errors.Is(err, errLoopGone) {
+		err = contracts.NewError(protocol.CodeUnavailable, "the host loop no longer runs", nil)
+	}
+	return view, err
+}
 
 // Resolve implements contracts.Frontend.
 func (r *Root) Resolve(ctx contracts.KeyContext, keys []string) contracts.KeyResolution {
@@ -226,11 +255,12 @@ type declaredPlugin struct {
 // declaredCatalog is everything the frontend reads from the declared plugins
 // documents.
 type declaredCatalog struct {
-	index  declaredIndex
-	rail   []contracts.RailItem
-	slots  []contracts.PublishedSlot
-	frames map[string]map[protocol.SurfaceID]protocol.FrameSpec
-	acts   []contracts.PluginAction
+	index    declaredIndex
+	rail     []contracts.RailItem
+	slots    []contracts.PublishedSlot
+	frames   map[string]map[protocol.SurfaceID]protocol.FrameSpec
+	acts     []contracts.PluginAction
+	surfaces map[string]map[string]bool
 }
 
 // declaredIndex indexes the declared plugins documents.
@@ -277,6 +307,7 @@ func (r *Root) buildCatalog() declaredCatalog {
 	slots := []contracts.PublishedSlot{}
 	frames := map[string]map[protocol.SurfaceID]protocol.FrameSpec{}
 	acts := []contracts.PluginAction{}
+	surfaces := map[string]map[string]bool{}
 	for _, id := range ids {
 		raw, err := json.Marshal(docs[id])
 		var d declaredPlugin
@@ -299,7 +330,9 @@ func (r *Root) buildCatalog() declaredCatalog {
 		for _, sl := range d.PublishedSlots {
 			slots = append(slots, contracts.PublishedSlot{Plugin: id, ID: sl.ID, Kind: sl.Kind, Rect: sl.Rect})
 		}
+		surfaces[id] = map[string]bool{}
 		for _, sf := range d.Surfaces {
+			surfaces[id][string(sf.ID)] = true
 			if sf.Frame == nil {
 				continue
 			}
@@ -309,7 +342,7 @@ func (r *Root) buildCatalog() declaredCatalog {
 			frames[id][sf.ID] = *sf.Frame
 		}
 	}
-	return declaredCatalog{index: idx, rail: items, slots: slots, frames: frames, acts: acts}
+	return declaredCatalog{index: idx, rail: items, slots: slots, frames: frames, acts: acts, surfaces: surfaces}
 }
 
 // warnDeclaredOnce reports an undecodable plugins document the first time it
@@ -380,8 +413,15 @@ func (r *Root) ActiveToast() (contracts.Toast, bool) {
 }
 
 // Tick implements Looped: the end-of-Update flushes, for a frontend write
-// that was not caused by a host message.
-func (r *Root) Tick() { r.tick() }
+// that was not caused by a host message. A first Tick, like a first Update,
+// fixes the loop goroutine and runs the WithOnLoopStart hook.
+func (r *Root) Tick() {
+	if r.loopGID.Load() == 0 {
+		r.loopGID.Store(goroutineID())
+	}
+	r.runLoopStart()
+	r.tick()
+}
 
 // OwnSlices implements contracts.Frontend.
 func (r *Root) OwnSlices() (contracts.FrontendSlices, error) {
@@ -413,6 +453,12 @@ func (r *Root) OwnSlices() (contracts.FrontendSlices, error) {
 	r.frontendSlices = &s
 	return s, nil
 }
+
+// RuntimeSurfaces implements contracts.Frontend.
+func (r *Root) RuntimeSurfaces() []contracts.RuntimeSurface { return r.engine.RuntimeSurfaces() }
+
+// CloseSurface implements contracts.Frontend.
+func (r *Root) CloseSurface(id protocol.SurfaceID) error { return r.engine.CloseSurface(id) }
 
 // UpdateSurfaceView implements contracts.Frontend.
 func (r *Root) UpdateSurfaceView(fn func(*contracts.SurfaceView)) error {

@@ -11,8 +11,10 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -375,5 +377,110 @@ func TestHandlerValidationPanicsAndCloseCancellation(t *testing.T) {
 	}
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestUnknownMethodNotificationsAreIgnoredAndCoalesced(t *testing.T) {
+	for _, method := range []string{"sample.nope", "unregistered.nope"} {
+		t.Run(method, func(t *testing.T) {
+			s := inertServer(t)
+			clock := s.cfg.Clock.(*testclock.Clock)
+			entered := make(chan Notice, 8)
+			var posts atomic.Int32
+			s.cfg.Post = func(v any) bool {
+				posts.Add(1)
+				entered <- v.(Notice)
+				<-t.Context().Done()
+				return false
+			}
+			var calls atomic.Int64
+			s.Handle("sample", handlerFunc(func(_ context.Context, _ Caller, req protocol.Message, _ Notifier) protocol.Message {
+				calls.Add(1)
+				return protocol.Message{Error: &protocol.Error{Code: protocol.CodeUnknownMethod, Message: "no inbound handler for " + req.Method}}
+			}))
+			start(t, s)
+			c, r := dial(t, s)
+			var sent int64
+			// burst writes n notifications. Registered-prefix ones enter the
+			// bounded notification queue (overflow is a correct busy reply), so
+			// they go in chunks of half the queue, and the next chunk waits until
+			// the handler has run for every line written so far (a slot is
+			// released just after its handler returns, hence the margin). The
+			// unregistered prefix never queues.
+			burst := func(n int) {
+				chunkSize := MaxNotificationQueue / 2
+				if method != "sample.nope" {
+					chunkSize = n
+				}
+				for done := 0; done < n; {
+					chunk := min(n-done, chunkSize)
+					for i := 0; i < chunk; i++ {
+						write(t, c, fmt.Sprintf(`{"method":%q}`, method))
+					}
+					done += chunk
+					sent += int64(chunk)
+					if method == "sample.nope" {
+						for calls.Load() != sent {
+							runtime.Gosched()
+						}
+					}
+				}
+			}
+			burst(5 * MaxNotificationQueue)
+			clock.Await(t, DiagnosticInterval)
+			clock.Advance(DiagnosticInterval)
+			n := testclock.Receive(t, entered)
+			if n.Level != "debug" || n.Count == 0 || !strings.Contains(n.Message, method) {
+				t.Fatal(n)
+			}
+			// Post is now blocked: the worker must still drain a second batch.
+			burst(5 * MaxNotificationQueue)
+			// session.ping is answered inline on the reader after every earlier
+			// line was read; a protocol.error for a notification would be read
+			// before it.
+			write(t, c, `{"id":5,"method":"session.ping"}`)
+			m := read(t, r)
+			if m.ID == nil || m.ID.String() != "5" || m.Error != nil {
+				t.Fatal("unexpected wire message:", m)
+			}
+			if got := posts.Load(); got != 1 {
+				t.Fatal("posts:", got)
+			}
+		})
+	}
+}
+
+func TestUnknownMethodRequestInRegisteredPrefixStillReplies(t *testing.T) {
+	s := inertServer(t)
+	s.Handle("sample", handlerFunc(func(_ context.Context, _ Caller, req protocol.Message, _ Notifier) protocol.Message {
+		return protocol.Message{Error: &protocol.Error{Code: protocol.CodeUnknownMethod, Message: "no inbound handler for " + req.Method}}
+	}))
+	start(t, s)
+	c, r := dial(t, s)
+	write(t, c, `{"id":5,"method":"sample.nope"}`)
+	m := read(t, r)
+	if m.ID == nil || m.ID.String() != "5" || m.Error == nil || m.Error.Code != protocol.CodeUnknownMethod {
+		t.Fatal(m)
+	}
+}
+
+// The wire validator already limits a method to 256 bytes of [a-z0-9_-] and
+// one dot, so control characters never reach the log; the notice still caps
+// and quotes the method it keeps.
+func TestIgnoredNotificationMethodIsBoundedAndQuoted(t *testing.T) {
+	s := inertServer(t)
+	clock := s.cfg.Clock.(*testclock.Clock)
+	notices := make(chan Notice, 4)
+	s.cfg.Post = func(v any) bool { notices <- v.(Notice); return true }
+	start(t, s)
+	c, _ := dial(t, s)
+	method := "unregistered." + strings.Repeat("a", 240)
+	write(t, c, fmt.Sprintf(`{"method":%q}`, method))
+	clock.Await(t, DiagnosticInterval)
+	clock.Advance(DiagnosticInterval)
+	n := testclock.Receive(t, notices)
+	want := fmt.Sprintf("%q", method[:maxIgnoredMethod])
+	if n.Level != "debug" || !strings.HasSuffix(n.Message, want) || strings.Contains(n.Message, method) {
+		t.Fatalf("%d bytes: %q", len(n.Message), n.Message)
 	}
 }

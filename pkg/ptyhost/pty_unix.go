@@ -34,6 +34,7 @@ func Start(argv []string, o Options) (*Child, error) {
 		return nil, errors.New("invalid terminal command or geometry")
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Dir = o.Dir
 	parentDeath(cmd)
 	if o.StopGrace <= 0 {
 		o.StopGrace = 500 * time.Millisecond
@@ -101,7 +102,7 @@ func (c *Child) Input(p protocol.TerminalInputParams) error {
 	if err != nil {
 		return err
 	}
-	_, err = c.file.Write(b)
+	_, err = c.Write(b)
 	return err
 }
 
@@ -111,6 +112,25 @@ func (c *Child) Resize(w, h int) error {
 		return errors.New("invalid terminal geometry")
 	}
 	return pty.Setsize(c.file, &pty.Winsize{Cols: uint16(w), Rows: uint16(h)})
+}
+
+// PID returns the session leader's process id.
+func (c *Child) PID() int { return c.cmd.Process.Pid }
+
+// Write writes opaque encoded input to the terminal master.
+func (c *Child) Write(b []byte) (int, error) { return c.file.Write(b) }
+
+// CloseTerminal interrupts I/O without waiting for process shutdown. Callers
+// managing a group themselves must still signal and reap it, or call Close.
+func (c *Child) CloseTerminal() error { return c.file.Close() }
+
+// Signal sends a signal to the entire child process group.
+func (c *Child) Signal(s syscall.Signal) error { return syscall.Kill(-c.PID(), s) }
+
+// GroupAlive reports whether the process group still exists.
+func (c *Child) GroupAlive() bool {
+	err := c.Signal(0)
+	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
 // Wait returns the session leader's exit result. Concurrent callers share it.

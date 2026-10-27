@@ -253,6 +253,8 @@ unknown fields are retained by Store and ignored by Services for forward growth.
 | `slice` | Optional SliceDecl object; opaque to Services. |
 | `secret_requests` | Array of SecretRequest objects: `name` (string), `purpose` (string), `required` (bool, default false). Name/purpose form the grant digest; required does not. |
 | `settings_declared` | Array of SettingDecl objects: `key`, `type`, `default`, optional `enum`, `min`, `max`, `doc`, `apply`. `default` must be present, including false/zero/empty defaults; null is invalid for the supported types. Types and limits follow [Services](services.md). |
+| `problems` | Optional array of `{code,message,field?}` objects: an executable converter's problems, codes prefixed `converter:` ([Pods](pods.md), "Executable converters"); opaque to Services. |
+| `x-<name>` | At most one vendor object a v2 manifest carried, retained verbatim; the host ignores it ([Pods](pods.md), "Executable converters"). |
 
 Setting keys at this boundary are **fully qualified**: Pods prefix a manifest's
 local key with `plugins.<exact-source>.` once. The plugin-id segment is opaque,
@@ -372,6 +374,8 @@ type Bootstrap struct {
 	BundleLayer Layer  // user or instance; "" when Bundle is ""
 }
 ```
+
+Bootstrap applies the Settings duplicate-spelling rule to `husk.bundle` before merging each input: when a document spells that key both dotted and nested, that input contributes no bundle value. Both spellings are excluded, so a valid lower input remains eligible; if none supplies a value, no bundle is loaded. Other keys are untouched. The later Settings rebuild reports the `duplicate_key` diagnostic ([Services](services.md)); bootstrap does not manufacture a second diagnostic or load a bundle that Settings will reject.
 
 File format: config documents are HuJSON (JSON plus comments and trailing
 commas, `github.com/tailscale/hujson`), extension `.json`. HuJSON keeps `null`,
@@ -740,7 +744,7 @@ secrets. Explicit `GC` and `ResetSecrets` still do what they say.
 ### Startup and shutdown order
 
 1. `cmd/husk` parses flags into `InstanceDocs`; the composition root
-   (`internal/host.New`) calls `ReadBootstrap`, loads the bundle it names if
+   (`pkg/host` (`New`)) calls `ReadBootstrap`, loads the bundle it names if
    any (a bad bundle stops the start here, [Bundles](bundles.md)), and calls
    `store.Open` with them and the bundle's config as `Options.Bundle`.
 2. State is created with Store as `Hydrator`; `Store.Attach` registers the
@@ -800,7 +804,7 @@ startup snapshot. Configured arrays survive when their flag is absent.
   so no separate `--distribution <dir>` flag is added), `--profile <name>`
   ([Services](services.md)). `main` opens Store before the listener and closes
   it after `model.cleanup`.
-- `pkg/manifest`: deleted in the retirement; `internal/pods/manifest` reads
+- `pkg/manifest`: deleted in the retirement; `pkg/pods/manifest` reads
   `husk-plugin.json` read-only, and the catalog it yields reaches Store through
   `Declare`, called by Pods.
 - `pkg/huskipc`: became `pkg/protocol` ([Protocol](protocol.md)) and was deleted; its

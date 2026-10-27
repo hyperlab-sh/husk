@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"sort"
 	"strings"
@@ -113,8 +114,60 @@ type Resolver interface {
 	Listing() Listing
 }
 
-// maxLayerEntries is the per-document entry limit.
-const maxLayerEntries = 2048
+const (
+	// maxLayerEntries is the per-document entry limit.
+	maxLayerEntries = 2048
+	// maxEffective is the limit on effective entries over all layers.
+	maxEffective = 4096
+)
+
+// layerFile is the config-relative file of a layer: Store names it, and the
+// conventional name serves injected documents and parse problems.
+func layerFile(file string, layer store.Layer, profile *string) string {
+	if file != "" {
+		return file
+	}
+	file = "keymap.json"
+	if layer == store.LayerProfile {
+		name := ""
+		if profile != nil {
+			name = *profile
+		}
+		file = "profiles/" + name + "/" + file
+	}
+	return file
+}
+
+// sourceName renders a Source for a problem message.
+func sourceName(s Source) string {
+	name := string(s.Layer)
+	if s.Plugin != "" {
+		name += " " + s.Plugin
+	}
+	if s.File != "" {
+		name += " " + s.File
+	}
+	return fmt.Sprintf("%s #%d", name, s.Order)
+}
+
+// capLayerRank orders layers for the 4096 cap, strongest first. Plugin
+// (focus-local) entries rank last, so a flood of them is dropped before any
+// configuration layer or built-in binding.
+func capLayerRank(l Layer) int {
+	if l == LayerFocusLocal {
+		return -1
+	}
+	return rank(l)
+}
+
+// capOrder keeps entries layer first, then by the static order of loader step
+// 5 within a layer: scope, plugin condition, declaring plugin, file order.
+func capOrder(a, b Binding) bool {
+	if capLayerRank(a.Source.Layer) != capLayerRank(b.Source.Layer) {
+		return capLayerRank(a.Source.Layer) > capLayerRank(b.Source.Layer)
+	}
+	return stronger(a, b)
+}
 
 //go:embed keymap.json
 var builtin []byte
@@ -211,7 +264,7 @@ func begins(a, b []string) bool {
 	return true
 }
 func scope(b Binding, ctx KeyContext) bool {
-	return b.Focus == "" || b.Focus == ctx.FocusSurface && (b.Plugin == "" || b.Plugin == ctx.FocusOwner)
+	return b.Focus == "" || (b.Focus == ctx.FocusSurface || ctx.ModalOpen && b.Focus == string(protocol.SurfaceModal)) && (b.Plugin == "" || b.Plugin == ctx.FocusOwner)
 }
 
 // shadows is the static rule of "husk keys": a shadows b when their sequences
@@ -249,7 +302,7 @@ func (s *Service) Resolve(ctx KeyContext, keys []string) Result {
 		if ctx.Capture == protocol.CaptureAll && !b.Disable && (b.Action == "husk.modal.close" || b.Focus == "" && b.Action != "husk.capture.release") {
 			continue
 		}
-		if ctx.ModalOpen && !release && !b.Disable && b.Focus != "modal-surface" && !(b.Focus == "" && (b.Action == "husk.modal.close" || ctx.ModalAction != "" && b.Action == ctx.ModalAction)) {
+		if ctx.ModalOpen && !release && !b.Disable && b.Focus != "modal-surface" && b.Focus != ctx.FocusSurface && !(b.Focus == "" && (b.Action == "husk.modal.close" || ctx.ModalAction != "" && b.Action == ctx.ModalAction)) {
 			continue
 		}
 		// Capture keeps plain typing: a global text-key candidate is removed
@@ -379,63 +432,81 @@ func validVersion(value any) bool {
 	return false
 }
 
-// layerProblem is the file-level code for doc and the key the problem names.
-func layerProblem(doc store.Doc) (code, key string) {
+// layerProblem is the file-level code for doc, the key the problem names and
+// the cause.
+func layerProblem(doc store.Doc) (code, key, message string) {
 	if !validVersion(doc["version"]) {
-		return "unsupported_version", ""
+		return "unsupported_version", "", `"version" must be the integer 1`
 	}
 	encoded, err := json.Marshal(doc)
 	if err != nil {
-		return "invalid_entry", ""
+		return "invalid_entry", "", "the document cannot be serialized: " + err.Error()
 	}
 	if len(encoded) > 256*1024 {
-		return "too_large", ""
+		return "too_large", "", "the document is larger than 256 KiB"
 	}
 	if doc["bind"] == nil {
-		return "invalid_entry", "bind"
+		return "invalid_entry", "bind", `"bind" is required and must be an array of entries`
 	}
 	var entries []map[string]any
 	if c.Decode(doc["bind"], &entries) != nil {
-		return "invalid_entry", "bind"
+		return "invalid_entry", "bind", `"bind" must be an array of objects`
 	}
-	return "", ""
+	return "", "", ""
 }
 
-func parse(raw map[string]any, src Source) (Binding, string) {
+// entryProblem is why parse dropped one entry.
+type entryProblem struct{ code, message string }
+
+func invalid(format string, args ...any) *entryProblem {
+	return &entryProblem{"invalid_entry", fmt.Sprintf(format, args...)}
+}
+
+func parse(raw map[string]any, src Source) (Binding, *entryProblem) {
 	b := Binding{Source: src}
 	for _, field := range []string{"action", "focus", "plugin", "hint"} {
 		if value, exists := raw[field]; exists {
 			if _, ok := value.(string); !ok {
-				return b, "invalid_entry"
+				return b, invalid("%q must be a string, got %s", field, jsonType(value))
 			}
 		}
 	}
 	if value, exists := raw["disable"]; exists {
 		if _, ok := value.(bool); !ok {
-			return b, "invalid_entry"
+			return b, invalid(`"disable" must be a boolean, got %s`, jsonType(value))
 		}
 	}
 	key, hasKey := raw["key"]
 	keys, hasKeys := raw["keys"]
 	if hasKey == hasKeys {
-		return b, "invalid_entry"
+		return b, invalid(`exactly one of "key" or "keys" is required, got %s`, map[bool]string{true: "both", false: "neither"}[hasKey])
 	}
 	var sequence []string
 	if hasKey {
 		str, ok := key.(string)
 		if !ok {
-			return b, "invalid_entry"
+			return b, invalid(`"key" must be a string, got %s`, jsonType(key))
 		}
 		sequence = []string{str}
 	} else {
-		if c.Decode(keys, &sequence) != nil || len(sequence) < 2 || len(sequence) > 4 {
-			return b, "invalid_entry"
+		if c.Decode(keys, &sequence) != nil {
+			if list, ok := keys.([]any); ok {
+				for i, element := range list {
+					if _, ok := element.(string); !ok {
+						return b, invalid(`"keys"[%d] must be a string, got %s`, i, jsonType(element))
+					}
+				}
+			}
+			return b, invalid(`"keys" must be an array of strings, got %s`, jsonType(keys))
+		}
+		if len(sequence) < 2 || len(sequence) > 4 {
+			return b, invalid(`"keys" must hold 2 to 4 keys, got %d`, len(sequence))
 		}
 	}
 	for _, key := range sequence {
 		n, err := keyspelling.Normalize(key)
 		if err != nil {
-			return b, "invalid_key"
+			return b, &entryProblem{"invalid_key", err.Error()}
 		}
 		b.Keys = append(b.Keys, n)
 	}
@@ -444,38 +515,73 @@ func parse(raw map[string]any, src Source) (Binding, string) {
 	b.Plugin, _ = raw["plugin"].(string)
 	b.Hint, _ = raw["hint"].(string)
 	b.Disable, _ = raw["disable"].(bool)
-	if b.Plugin != "" && b.Focus == "" || utf8.RuneCountInString(b.Hint) > 40 {
-		return b, "invalid_entry"
+	if b.Plugin != "" && b.Focus == "" {
+		return b, invalid(`"plugin" requires "focus"`)
+	}
+	if n := utf8.RuneCountInString(b.Hint); n > 40 {
+		return b, invalid(`"hint" must be at most 40 runes, got %d`, n)
 	}
 	if b.Disable {
-		if raw["action"] != nil || raw["args"] != nil || raw["hint"] != nil {
-			return b, "invalid_entry"
+		for _, field := range []string{"action", "args", "hint"} {
+			if raw[field] != nil {
+				return b, invalid(`%q must be absent when "disable" is true`, field)
+			}
 		}
-	} else if b.Action == "" || !strings.Contains(b.Action, ".") {
-		return b, "invalid_entry"
+	} else if b.Action == "" {
+		return b, invalid(`"action" is required unless "disable" is true`)
+	} else if !strings.Contains(b.Action, ".") {
+		return b, invalid(`"action" must contain a ".", got %q`, b.Action)
 	}
 	if args, ok := raw["args"]; ok {
 		m, ok := args.(map[string]any)
 		if !ok {
-			return b, "invalid_entry"
+			return b, invalid(`"args" must be an object, got %s`, jsonType(args))
 		}
-		for _, v := range m {
-			switch v.(type) {
+		names := make([]string, 0, len(m))
+		for name := range m {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			switch m[name].(type) {
 			case string, bool, json.Number, float64, int, int64:
 			default:
-				return b, "invalid_entry"
+				return b, invalid(`"args" value %q must be a string, number or boolean, got %s`, name, jsonType(m[name]))
 			}
 		}
 		encoded, err := json.Marshal(m)
-		if err != nil || len(encoded) > 1024 {
-			return b, "invalid_entry"
+		if err != nil {
+			return b, invalid(`"args" cannot be serialized: %v`, err)
+		}
+		if len(encoded) > 1024 {
+			return b, invalid(`"args" must be at most 1 KiB serialized, got %d bytes`, len(encoded))
 		}
 		b.Args = c.Clone(m)
 	}
-	return b, ""
+	return b, nil
 }
 
-func invalidKeyDetail(raw map[string]any) (string, string) {
+// jsonType names the JSON type of a decoded value for a problem message.
+func jsonType(v any) string {
+	switch v.(type) {
+	case nil:
+		return "null"
+	case string:
+		return "a string"
+	case bool:
+		return "a boolean"
+	case json.Number, float64, int, int64:
+		return "a number"
+	case []any:
+		return "an array"
+	case map[string]any:
+		return "an object"
+	}
+	return fmt.Sprintf("%T", v)
+}
+
+// invalidKeySpelling is the first key spelling of raw that does not normalize.
+func invalidKeySpelling(raw map[string]any) string {
 	var keys []string
 	if key, ok := raw["key"].(string); ok {
 		keys = []string{key}
@@ -484,10 +590,10 @@ func invalidKeyDetail(raw map[string]any) (string, string) {
 	}
 	for _, key := range keys {
 		if _, err := keyspelling.Normalize(key); err != nil {
-			return key, err.Error()
+			return key
 		}
 	}
-	return "", ""
+	return ""
 }
 
 // Rebuild parses every layer and prepares a complete immutable index.
@@ -495,14 +601,14 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 	old := s.current.Load()
 	r := c.Report{Service: "keybinding", Gen: old.gen}
 	next := &snapshot{gen: old.gen + 1, index: map[string][]Binding{}, documents: map[string]store.Doc{}, actionOwners: map[string]string{}, railItems: map[string]bool{}}
-	issue := func(code string, src Source, key string) {
+	issue := func(code string, src Source, key, message string) {
 		layer := src.Layer
 		if src.Plugin != "" {
 			layer = "plugin:" + src.Plugin
 		}
 		source := src
-		next.listing.Problems = append(next.listing.Problems, Problem{Severity: "warning", Code: code, Layer: layer, Key: key, Message: code, Source: &source})
-		c.Issue(&r.Problems, "warning", code, layer, key, code)
+		next.listing.Problems = append(next.listing.Problems, Problem{Severity: "warning", Code: code, Layer: layer, Key: key, Message: message, Source: &source})
+		c.Issue(&r.Problems, "warning", code, layer, key, message)
 	}
 	catalog, catalogProblems := c.Catalogs(in)
 	r.Problems = append(r.Problems, catalogProblems...)
@@ -525,15 +631,59 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 	var built store.Doc
 	json.Unmarshal(builtin, &built)
 	useBuiltin := true
+	// A layer file that failed to parse is absent from in.Layers; its last
+	// good document stands in, and the parse problem is reported once.
+	present := map[store.Layer]bool{}
+	for _, layer := range in.Layers {
+		present[layer.Layer] = true
+	}
+	// The distribution layer folds an embedded and a bundle part: when one
+	// part failed to parse, the partial fold gives way to the last good one.
+	partialDistribution := false
+	type missingLayer struct {
+		layer store.Layer
+		file  string
+	}
+	var missing []missingLayer
+	for _, p := range in.KeymapProblems {
+		if p.Code != "invalid_document" || p.Layer == store.LayerInstance {
+			continue
+		}
+		src := Source{Layer: Layer(p.Layer), File: p.File, Line: p.Line}
+		if p.Layer != store.LayerDistribution {
+			src.File = layerFile("", p.Layer, in.Profile)
+		}
+		issue("parse_error", src, "", p.Message)
+		if p.Layer == store.LayerDistribution && present[p.Layer] && old.documents[string(LayerDistribution)] != nil {
+			partialDistribution = true
+		}
+		if !present[p.Layer] {
+			present[p.Layer] = true
+			missing = append(missing, missingLayer{p.Layer, src.File})
+		}
+	}
+	if partialDistribution {
+		in.Layers = append([]store.LayerDoc(nil), in.Layers...)
+		for i := range in.Layers {
+			if in.Layers[i].Layer == store.LayerDistribution {
+				in.Layers[i].Doc = nil
+			}
+		}
+	}
 	for _, layer := range in.Layers {
 		if layer.Layer == store.LayerDistribution {
 			doc := layer.Doc
-			if code, _ := layerProblem(doc); code != "" {
+			if code, _, _ := layerProblem(doc); code != "" {
 				doc = old.documents[string(LayerDistribution)]
 			}
 			if doc["builtin"] == false {
 				useBuiltin = false
 			}
+		}
+	}
+	for _, m := range missing {
+		if m.layer == store.LayerDistribution && old.documents[string(LayerDistribution)]["builtin"] == false {
+			useBuiltin = false
 		}
 	}
 	if useBuiltin {
@@ -557,22 +707,16 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 		if l.Layer == store.LayerInstance {
 			continue
 		}
-		// Store names the file; the conventional fallback serves injected documents.
-		file := l.File
-		if file == "" {
-			file = "keymap.json"
-			if l.Layer == store.LayerProfile {
-				name := ""
-				if in.Profile != nil {
-					name = *in.Profile
-				}
-				file = "profiles/" + name + "/" + file
-			}
-		}
 		layers = append(layers, struct {
 			doc store.Doc
 			src Source
-		}{l.Doc, Source{Layer: Layer(l.Layer), File: file}})
+		}{l.Doc, Source{Layer: Layer(l.Layer), File: layerFile(l.File, l.Layer, in.Profile)}})
+	}
+	for _, m := range missing {
+		layers = append(layers, struct {
+			doc store.Doc
+			src Source
+		}{nil, Source{Layer: Layer(m.layer), File: m.file}})
 	}
 	seen := map[string]Source{}
 	for _, layer := range layers {
@@ -588,16 +732,26 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 			}
 			cacheKey += "\x00" + identity
 		}
-		if code, key := layerProblem(doc); code != "" {
-			issue(code, src, key)
+		if doc == nil {
+			// The parse problem is already reported above.
+			doc = old.documents[cacheKey]
+			if doc == nil {
+				continue
+			}
+		} else if code, key, message := layerProblem(doc); code != "" {
+			issue(code, src, key, message)
 			doc = old.documents[cacheKey]
 			if doc == nil {
 				continue
 			}
 		}
 		next.documents[cacheKey] = c.Clone(doc)
-		if _, exists := doc["builtin"]; exists && src.Layer != LayerDistribution {
-			issue("invalid_entry", src, "builtin")
+		if value, exists := doc["builtin"]; exists {
+			if src.Layer != LayerDistribution {
+				issue("invalid_entry", src, "builtin", `"builtin" is only allowed in the distribution layer`)
+			} else if _, ok := value.(bool); !ok {
+				issue("invalid_entry", src, "builtin", fmt.Sprintf(`"builtin" must be a boolean, got %s`, jsonType(value)))
+			}
 		}
 		if src.Plugin != "" {
 			var imported []struct {
@@ -614,46 +768,39 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 				if p.Key == "" {
 					problemSource.Order = p.Index
 				}
-				issue(p.Code, problemSource, p.Key)
-				if p.Message != "" {
-					next.listing.Problems[len(next.listing.Problems)-1].Message = p.Message
-					r.Problems[len(r.Problems)-1].Message = p.Message
+				message := p.Message
+				if message == "" {
+					message = "reported by manifest conversion as " + p.Code
 				}
+				issue(p.Code, problemSource, p.Key, message)
 			}
 			if suggestions, ok := doc["suggestions"].([]any); ok {
 				for range suggestions {
-					issue("suggestion_ignored", src, "")
+					issue("suggestion_ignored", src, "", "a rail item or command shortcut is a suggestion and binds nothing; bind it in a keymap layer")
 				}
 			}
 		}
 		var entries []map[string]any
 		if doc["bind"] == nil || c.Decode(doc["bind"], &entries) != nil {
-			issue("invalid_entry", src, "bind")
+			issue("invalid_entry", src, "bind", `"bind" is required and must be an array of objects`)
 			continue
 		}
 		for i, raw := range entries {
 			src.Order = i
 			if i >= maxLayerEntries {
-				issue("too_many", src, "")
+				issue("too_many", src, "", fmt.Sprintf("entry %d is past the %d-entry limit of one layer file and is dropped", i, maxLayerEntries))
 				continue
 			}
-			b, code := parse(raw, src)
-			if code != "" {
+			b, problem := parse(raw, src)
+			if problem != nil {
+				code, key := problem.code, ""
 				if src.Layer == LayerFocusLocal && code == "invalid_key" {
 					code = "unparsable_key"
 				}
-				issue(code, src, "")
 				if code == "invalid_key" || code == "unparsable_key" {
-					key, message := invalidKeyDetail(raw)
-					if message != "" {
-						last := len(next.listing.Problems) - 1
-						next.listing.Problems[last].Key = key
-						next.listing.Problems[last].Message = message
-						last = len(r.Problems) - 1
-						r.Problems[last].Key = key
-						r.Problems[last].Message = message
-					}
+					key = invalidKeySpelling(raw)
 				}
+				issue(code, src, key, problem.message)
 				continue
 			}
 			// Manifest conversion already enforced ownership, scope and the
@@ -666,11 +813,23 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 			if first, exists := seen[dup]; exists {
 				entry.State, entry.dropped = "shadowed", true
 				entry.ShadowedBy = &first
-				issue("duplicate", src, sequence(b.Keys))
+				issue("duplicate", src, sequence(b.Keys), fmt.Sprintf("same keys, focus and plugin as an earlier entry of this layer (%s); the first stays effective", sourceName(first)))
 			} else {
 				seen[dup] = src
 			}
 			next.listing.Entries = append(next.listing.Entries, entry)
+		}
+	}
+	// The last good profile document is kept per profile name, so switching
+	// away from a profile and back still finds it. The selected profile is
+	// excluded: a deleted file leaves no last good document.
+	selected := ""
+	if in.Profile != nil {
+		selected = string(LayerProfile) + "\x00" + *in.Profile
+	}
+	for key, kept := range old.documents {
+		if _, exists := next.documents[key]; !exists && key != selected && strings.HasPrefix(key, string(LayerProfile)+"\x00") {
+			next.documents[key] = kept
 		}
 	}
 	es := next.listing.Entries
@@ -685,15 +844,15 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 			effective = append(effective, i)
 		}
 	}
-	if len(effective) > 4096 {
-		sort.SliceStable(effective, func(a, b int) bool { return stronger(es[effective[a]].Binding, es[effective[b]].Binding) })
-		for _, i := range effective[4096:] {
+	if len(effective) > maxEffective {
+		sort.SliceStable(effective, func(a, b int) bool { return capOrder(es[effective[a]].Binding, es[effective[b]].Binding) })
+		for _, i := range effective[maxEffective:] {
 			es[i].State, es[i].dropped = "shadowed", true
 		}
-		dropped := effective[4096:]
+		dropped := effective[maxEffective:]
 		sort.Ints(dropped)
 		for _, i := range dropped {
-			issue("too_many", es[i].Source, sequence(es[i].Keys))
+			issue("too_many", es[i].Source, sequence(es[i].Keys), fmt.Sprintf("over the %d-entry cap on effective entries; the lowest layers are dropped first", maxEffective))
 		}
 	}
 	quit, palette := false, false
@@ -717,7 +876,14 @@ func (s *Service) Rebuild(ctx context.Context, in c.ReloadInput) (c.Candidate, c
 		sort.SliceStable(bs, func(i, j int) bool { return stronger(bs[i], bs[j]) })
 	}
 	if !quit || !palette {
-		issue("no_exit_binding", Source{Layer: LayerHusk}, "")
+		var missing []string
+		if !quit {
+			missing = append(missing, "husk.quit")
+		}
+		if !palette {
+			missing = append(missing, "husk.palette.open")
+		}
+		issue("no_exit_binding", Source{Layer: LayerHusk}, "", fmt.Sprintf("no effective entry binds %s; use `husk action invoke husk.quit` or a signal to exit", strings.Join(missing, " or ")))
 	}
 	if ctx.Err() != nil {
 		return c.ContextError(ctx, r)
@@ -777,7 +943,7 @@ func shadowEntries(es []Entry) {
 // unreachable drops, within one layer, scope and plugin condition, every
 // effective sequence that has an effective strict prefix binding: the shorter
 // binding always resolves first. A tombstone is not a prefix here.
-func unreachable(es []Entry, issue func(code string, src Source, key string)) {
+func unreachable(es []Entry, issue func(code string, src Source, key, message string)) {
 	effective, resolving := map[string]bool{}, map[string]bool{}
 	group := func(b Binding) string { return string(b.Source.Layer) + "\x00" + b.Focus + "\x00" + b.Plugin + "\x00" }
 	for _, e := range es {
@@ -805,7 +971,7 @@ func unreachable(es []Entry, issue func(code string, src Source, key string)) {
 			// only leaves the resolution index.
 			if es[i].State == "effective" {
 				es[i].State = "shadowed"
-				issue("unreachable", es[i].Source, sequence(es[i].Keys))
+				issue("unreachable", es[i].Source, sequence(es[i].Keys), fmt.Sprintf("a shorter effective binding in the same layer, scope and condition takes its prefix %s, so this sequence can never be typed", sequence(es[i].Keys[:n])))
 			}
 			es[i].dropped = true
 			break

@@ -8,14 +8,16 @@ Husk is an application-agnostic TUI workbench; everything app-specific lives in 
 
 ## Status
 
-Early. The workbench core, wire protocol, activity rail, command palette, mouse-resizable slots and plugin manifests work. The bundled plugins are a small reference plugin pair (`plugins/reference`, `plugins/reference-actions`). See the [documentation](docs/) and the open work in beads.
+Early. The workbench core, wire protocol, activity rail, command palette, mouse-resizable slots and plugin manifests work. The bundled plugins are the reference pair (`plugins/reference`, `plugins/reference-actions`), a terminal host (`plugins/terminal`) and an optional layout guide (`plugins/guide`). See the [documentation](docs/) and the open work in beads.
 
 ## Quick start
 
 ```bash
 go build -o bin/husk ./cmd/husk
 ./bin/husk                                # empty workbench, no plugins
-go build -o plugins/reference/reference ./plugins/reference   # the reference plugins run this binary
+go build -o plugins/reference/reference ./plugins/reference   # shared by the reference pair
+go build -o plugins/terminal/terminal ./plugins/terminal
+go build -o plugins/guide/guide ./plugins/guide/cmd/guide
 ./bin/husk --plugin-dir ./plugins         # load every bundled plugin
 ./bin/husk --plugin ./plugins/reference   # load one plugin (dir, manifest, or executable)
 ./bin/husk --instance notes               # a named instance: husk ping --instance notes reaches it
@@ -48,6 +50,7 @@ husk plugin add --dir ./plugins           # load claimed immediate subdirectorie
 husk plugin log go.reference             # the log file of one plugin (not_found before it exists)
 husk plugin remove go.reference          # unload one plugin from this instance (stops it, undeclares it, reloads Services); not remembered across restarts
 husk create bundle demo               # write a runnable bundle with hello and the layout guide (local)
+husk create tui mytool [<module>]     # write a Go TUI application (local)
 husk store paths                      # config, state, data and runtime directories (local)
 husk store check                      # corrupt, quarantined and orphan records; deletes nothing
 husk store gc                         # run retention now
@@ -61,7 +64,7 @@ husk state dump                       # every slice with its value
 husk state watch [<slice>...]         # baseline, then one JSON line per change
 husk state set '<json>'               # {"slice": ..., "value": ...}; a plugin's own slice (else denied)
 husk state patch '<json>' [--if-revision <n>]   # {"slice": ..., "patch": ...}, merge patch
-husk state clear <namespace>          # reset a slice to its initial value (the user only)
+husk state clear <namespace> [--force]   # reset a slice to its initial value (the user only); --force skips the subscribers' veto hook
 husk action list [--owner <id>]       # the action catalog
 husk action invoke <action-id> [--arg k=v]... [--args-json '<json>']
 husk event emit <name> [--data '<json>']
@@ -71,11 +74,14 @@ husk hook list [--owner <id>]        # hook catalog; only the owner can fire a h
 husk keys [--action <id>] [--focus <surface>] [--shadowed] [--problems]
 husk settings get <key>
 husk settings list [--source]
+husk settings set <key> <value>       # value parsed as JSON, else sent as a string; 10s default timeout
 husk settings schema [--owner <owner>]
 husk settings validate
 husk theme show                       # serving palette, one ROLE/COLOR row per role
 husk theme roles                      # sorted role names
 husk theme check                      # dry-run contrast diagnostics from disk
+husk theme list                       # available theme names
+husk theme set <name>                 # select a theme; 10s default timeout
 husk profile list
 husk profile current                  # active entry; null in JSON when none is active
 husk profile use <name>               # an empty string clears the selection
@@ -89,11 +95,21 @@ husk config reload                    # Service reports; 10s default timeout
 
 JSON arguments (`<json>`, `--args-json`, `--data`) must be objects; `-` reads one from stdin. `--arg` pairs build an object of strings and exclude `--args-json`. `state watch` and `event watch` print the opening reply and then one JSON line per notification until a signal ends them; they reject `--timeout`, bound the opening at 5 s, and exit 5 (`instance went away`) when the instance exits. The CLI checks syntax only: ownership, namespace and permission rules are the instance's and come back as exit 1 with its message.
 
-The Services commands and `keys` default to 5 s, except `config reload` (10 s). They validate syntax only. A validation result with `ok:false` or a reload report with `applied:false` is still exit 0; an error reply is exit 1. Keys filters apply in both formats, shadowed entries are hidden by default, and `--problems` cannot be combined with `--action` or `--focus`. `settings schema --owner` is sent to the instance unchanged. Secret input strips exactly one trailing LF or CRLF; empty input is valid, and malformed UTF-8 is rejected before connecting. With table output, grant/revoke/set print nothing and reveal prints just the value; JSON retains the instance's result.
+The Services commands and `keys` default to 5 s, except `config reload`, `settings set` and `theme set` (10 s each). They validate syntax only. A validation result with `ok:false` or a reload report with `applied:false` is still exit 0; an error reply is exit 1. Keys filters apply in both formats, shadowed entries are hidden by default, and `--problems` cannot be combined with `--action` or `--focus`. `settings schema --owner` is sent to the instance unchanged. Secret input strips exactly one trailing LF or CRLF; empty input is valid, and malformed UTF-8 is rejected before connecting. With table output, grant/revoke/set print nothing and reveal prints just the value; JSON retains the instance's result.
 
 Global flags follow the subcommand (`husk ping --format json`); before it they would reach the instance's own flag parser. `ping` and `rpc` take `--instance <id>` or `--socket <path>` (not both), `--format json|table` (default `table` on a terminal, `json` otherwise) and `--timeout <duration>`; the flags may come before or after the arguments. `plugin` is a socket command (`plugin list`, `plugin log <id>`, 5s default; `plugin add <path>`, `plugin add --dir <dir>` and `plugin remove <id>`, 10s default). Addition resolves relative paths against the CLI's working directory and loads without saving configuration. It prints the full batch result on stdout; if any admitted plugin failed to launch, it also reports the failed plugin ids on stderr and exits 1. Refusals and reload-report problems alone remain exit 0. `instances` and `store` are local: `instances` reads the registry only, and `store` opens Store without an instance (it creates its config, state and data directories like any start, never the runtime directory; `reset-secrets` exits 1 `store` naming the instances while `Survey` finds any live or unresponsive one). Both take `--format` and reject `--instance`, `--socket` and `--timeout` (exit 2). Explicit targets (`--socket`, `--instance`, `HUSK_SOCKET_PATH`, `HUSK_INSTANCE`) are never probed; only discovery (no target, so the registry is surveyed) probes, 500 ms per entry. With exactly one live instance, that one is used; unresponsive entries are reported as `unresponsive` warnings. The client opens one connection and sends `session.ping` first to check the protocol major, then the command's request. `--timeout` starts after connecting (`ping` 2s, `rpc` 30s by default; `0` means the default, a negative value is a usage error). `husk` installs no signal handlers, so SIGINT, SIGTERM and SIGPIPE end it by the signal. An absent runtime directory is an empty registry (`husk instances` lists nothing, discovery exits 3); an unusable one (not private to the user, or a symlink) exits 7.
 
-Results go to stdout. Errors go to stderr in the chosen format: one JSON object in JSON mode, `husk: <message>` (plus candidate lines) in table mode. Exit codes: 0 success, 1 the instance replied with an error or an admitted plugin failed to launch, 2 usage, 3 no instance, 4 several instances and none chosen, 5 transport (connect failed, timeout, connection dropped, or only unresponsive instances), 6 protocol (unreadable reply or a different protocol major), 7 environment (unusable runtime directory). The JSON `code` is from a closed set: `usage`, `no_instance`, `ambiguous`, `transport`, `protocol`, `environment`, plus the instance's own code for exit 1 (`failed` for an admitted plugin that could not launch). See [Instances and the CLI](docs/docs/design/instances.md).
+Results go to stdout. Errors go to stderr in the chosen format: one JSON object in JSON mode, `husk: <message>` (plus candidate lines) in table mode. Exit codes: 0 success, 1 the instance replied with an error or an admitted plugin failed to launch, 2 usage, 3 no instance, 4 several instances and none chosen, 5 transport (connect failed, timeout, connection dropped, or only unresponsive instances), 6 protocol (unreadable reply or a different protocol major), 7 environment (unusable runtime directory). The JSON `code` is from a closed set: `usage`, `no_instance`, `ambiguous`, `transport`, `protocol`, `environment`, `store`, `create`, plus the instance's own code for exit 1 (`failed` for an admitted plugin that could not launch). See [Instances and the CLI](docs/docs/design/instances.md).
+
+## Embedding in Go
+
+All packages under `pkg/` are public API, versioned with the module
+`github.com/hyperlab-sh/husk`; Go-internal directories contain test helpers only.
+Use `pkg/host` and `pkg/host/contracts` to embed a host. The existing
+`contracts.Frontend` seam exposes State snapshots and owner handles through
+`pkg/substrate/state`, now importable by embedding applications without an API
+change. Out-of-process plugins still need only the JSON-lines protocol (or
+`pkg/protocol` in Go). See [Package layout and embedding](docs/docs/architecture.md#package-layout-and-embedding).
 
 ## Concepts
 
@@ -155,6 +171,7 @@ A plugin directory contains a `husk-plugin.json` manifest:
 - `surfaces` lists the surfaces the plugin may occupy, each with an optional frame. `published_slots`, `hooks`, `events`, `actions`, `rail_items` and focus-local `keybindings` are declared here too, never on the wire; Husk registers them before the plugin starts. See [Architecture](docs/docs/architecture.md#declaring-in-the-manifest).
 - The host starts the plugin with `HUSK_SOCKET_PATH` and `HUSK_PLUGIN_TOKEN`; the plugin sends its requests and notifications on the socket with the token in each message.
 - `--plugin <path>` accepts an executable, a plugin directory, or a `husk-plugin.json` path, and may be repeated. `--plugin-dir <dir>` loads every immediate subdirectory of `<dir>` that contains a `husk-plugin.json`, and may also be repeated.
+- `--converter <path>` (repeatable; absolute path or PATH name) registers an executable manifest converter after the built-in ones, then `husk.plugins.converters` entries; each converter's `discover` runs once at start. See [Pods: Executable converters](docs/docs/design/pods.md#executable-converters).
 - `--plugin` / `--plugin-dir` replace the configured `husk.plugins.paths` / `husk.plugins.dirs` arrays. Use repeatable `--add-plugin <path>` / `--add-plugin-dir <dir>` to append to the effective configured arrays, including the named-instance file (which replaces lower-layer arrays as usual). The resulting array is deduplicated by cleaned absolute path (duplicates already configured collapse too), retaining the first occurrence. Combining a replace flag with its own add flag is a usage error (exit 2); mixing across arrays is allowed.
 - `--bundle <dir>` loads a directory with `husk-bundle.json`, optional configuration defaults and a `plugins/` directory. The equivalent `husk.bundle` setting is read from user and named-instance config; the flag wins, and `--bundle ""` disables it. Explicit plugins win over bundle copies with the same id. See [Bundles](docs/docs/design/bundles.md).
 

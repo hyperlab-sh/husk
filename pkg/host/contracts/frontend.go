@@ -55,7 +55,10 @@ type Frontend interface {
 	Setting(key string) (value any, source string, err error)
 
 	// KeyListing returns the full CLI keys.list view, including states and
-	// shadowed entries, through the shared listing port. Any goroutine.
+	// shadowed entries, through the shared listing port. Any goroutine. An
+	// off-loop call blocks until the loop captures the runtime catalog; it
+	// requires a running, responsive loop (including before the first Update).
+	// Call on the loop to avoid waiting. This is not a snapshot-only read.
 	KeyListing() KeyListing
 
 	// Profiles returns the serving profile.list entries. Any goroutine.
@@ -78,6 +81,30 @@ type Frontend interface {
 	// the loop; reply runs exactly once on the loop, never synchronously,
 	// with the result or a CodedError. During shutdown reply may never arrive.
 	RemovePlugin(id string, reply func(PluginRemoval, error))
+
+	// AddPlugin loads a plugin or a directory of plugins into the running
+	// instance off-loop, through the same PluginPort.Add as plugin.add with a
+	// host caller: same sources, refusals and reload reports. Call on the
+	// loop; reply runs exactly once on the loop, never synchronously, with the
+	// result or a CodedError. During shutdown reply may never arrive.
+	AddPlugin(source PluginSource, reply func(PluginAddition, error))
+
+	// WatchEvents subscribes fn to events matching pattern (an exact name or
+	// "<prefix>.*", the event.watch rules) through EventPort.Watch with a host
+	// caller. fn runs on the loop during the host's end-of-Update event flush
+	// (after State flushes), in bus order, with the params exactly as
+	// event.deliver carries them (numbers as json.Number), source as stamped
+	// by the host. State writes fn makes flush with the next Update; fn must
+	// not call Looped.Tick. A refused
+	// pattern returns its CodedError (invalid_params) and registers nothing.
+	// cancel removes the subscription and is idempotent and safe from any
+	// goroutine; called on the loop (from fn included) it stops fn at once;
+	// called from another goroutine, at most one delivery the loop is already
+	// handing to fn may still run after it returns. The secrets. and services.
+	// patterns are accepted (the host has the user's trust; only a plugin
+	// caller is refused them). Host shutdown ends the subscription. Delivery uses the bus's per-subscriber queue and
+	// back-pressure. Call on the loop.
+	WatchEvents(pattern string, fn func(protocol.EventDeliverParams)) (cancel func(), err error)
 
 	// Catalog returns a detached view of the optional catalog cache. Any
 	// goroutine; never performs Store I/O. Warmed off-loop after startup and
@@ -202,6 +229,11 @@ type Frontend interface {
 	// husk.surfaces (visibility, placement, overlays) and commits it; the
 	// engine keeps writing occupants and contributions. Loop only.
 	UpdateSurfaceView(fn func(*SurfaceView)) error
+	// RuntimeSurfaces returns detached runtime declarations ordered by last open
+	// or explicit focus, oldest first. Loop only.
+	RuntimeSurfaces() []RuntimeSurface
+	// CloseSurface force-releases a surface, including runtime lifetime. Loop only.
+	CloseSurface(protocol.SurfaceID) error
 }
 
 // PublishedSlot is one published extension point a plugin declared in its
@@ -332,16 +364,20 @@ type Overlays struct {
 
 // ModalOverlay is the modal overlay: which plugin's rail item is open.
 type ModalOverlay struct {
-	Plugin   string `json:"plugin"`
-	RailItem string `json:"rail_item"`
+	// Surface identifies the actual modal, fixed or runtime.
+	Surface  protocol.SurfaceID `json:"surface"`
+	Plugin   string             `json:"plugin"`
+	RailItem string             `json:"rail_item"`
 }
 
 // KeyContext carries the focus and overlay facts a key resolution needs.
 type KeyContext struct {
+	// FocusSurface is overlays.modal.surface while a modal is open: the fixed
+	// modal-surface for a rail modal, or the dynamic id for a runtime modal.
 	FocusSurface string
 	FocusOwner   string
 	ModalOpen    bool
-	// ModalAction is the open modal's rail action id.
+	// ModalAction is the open modal's rail action id; empty for runtime modals.
 	ModalAction string
 	// Capture is set while the focused occupant takes text input on
 	// FocusSurface (husk.surfaces.capture).

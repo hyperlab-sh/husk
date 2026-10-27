@@ -35,17 +35,9 @@ const (
 	SurfaceWorkspaceStage SurfaceID = "workspace-stage"
 )
 
-// Valid reports whether s is a defined host layout surface.
-func (s SurfaceID) Valid() bool {
-	switch s {
-	case SurfaceActivityRail, SurfaceSidebarNavigation, SurfaceSidebarList,
-		SurfaceThreadRowStatus, SurfaceSidebarFooter, SurfaceMainHeader,
-		SurfaceMainStage, SurfaceSidePanel, SurfaceAppOverlay, SurfaceModal,
-		SurfaceFullCanvas, SurfaceWorkspaceStage:
-		return true
-	}
-	return false
-}
+// Valid reports whether s is a layout identifier or a namespaced runtime id.
+// Existence and ownership are checked by the receiving host module.
+func (s SurfaceID) Valid() bool { return s.Layout() || validRuntimeID(string(s)) }
 
 // Humanised returns the surface id with every hyphen replaced by a space and
 // its first rune upper-cased, leaving all other runes unchanged.
@@ -109,6 +101,21 @@ type RowHitTarget struct {
 	Kind    string            `json:"kind"`
 	Action  string            `json:"action"`
 	Payload map[string]string `json:"payload,omitempty"`
+	// ColStart and ColEnd optionally restrict the target to surface-relative
+	// cells in [ColStart, ColEnd). Both must be present or both absent.
+	ColStart *int `json:"col_start,omitempty"`
+	ColEnd   *int `json:"col_end,omitempty"`
+}
+
+// Validate checks the optional column range without restricting legacy rows.
+func (h RowHitTarget) Validate() error {
+	if h.ColStart == nil && h.ColEnd == nil {
+		return nil
+	}
+	if h.ColStart == nil || h.ColEnd == nil || *h.ColStart < 0 || *h.ColEnd <= *h.ColStart {
+		return &Error{Code: CodeInvalidParams, Message: "hit target requires both col_start and col_end with col_end > col_start >= 0"}
+	}
+	return nil
 }
 
 // SurfaceUpdateParams replaces a surface's content. The host ignores PluginID

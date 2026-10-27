@@ -387,10 +387,10 @@ func TestKeybindingResolvedCapKeepsStrongestLayers(t *testing.T) {
 			kept[entry.Source.Layer]++
 		}
 	}
-	// The cap order is scope first, so the built-in surface-scoped modal-close
-	// entry outranks every global one; among the globals the weakest go first.
-	if kept[keybinding.LayerProfile] != 2048 || kept[keybinding.LayerUser] != 2047 || kept[keybinding.LayerDistribution] != 0 || kept[keybinding.LayerHusk] != 1 {
-		t.Errorf("kept per layer = %v, want profile whole, the surface-scoped built-in entry, then the strongest globals", kept)
+	// The cap order is layer first (D216): scope does not protect the built-in
+	// surface-scoped modal-close entry from the stronger layers.
+	if kept[keybinding.LayerProfile] != 2048 || kept[keybinding.LayerUser] != 2048 || kept[keybinding.LayerDistribution] != 0 || kept[keybinding.LayerHusk] != 0 {
+		t.Errorf("kept per layer = %v, want profile and user whole, nothing from the lower layers", kept)
 	}
 	dropped := 0
 	for _, p := range kb.Listing().Problems {

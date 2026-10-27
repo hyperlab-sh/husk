@@ -5,6 +5,30 @@ description: "Slots, plugins and the wire protocol."
 
 # Architecture
 
+## Package layout and embedding
+
+Everything under `pkg/` is public Go API, versioned with the module
+`github.com/hyperlab-sh/husk`. Go-internal directories are reserved for test
+helpers: `pkg/pods/internal/testclock` is not API.
+
+| Path | Purpose |
+| :--- | :--- |
+| `pkg/host` and `pkg/host/contracts` | Host composition root and the ports and frontend seam embedders use |
+| `pkg/substrate` | State and Store |
+| `pkg/stem` | Calls, Dispatcher, hooks, events, surfaces and terminals |
+| `pkg/services` | Profile, settings, theme, keybindings, secrets and their coordinator |
+| `pkg/pods` | Plugin lifecycle, manifests, server and process wrappers |
+| `pkg/cli`, `pkg/instance`, `pkg/bundle`, `pkg/keyspelling` | CLI, discovery, bundle loading and shared key spelling |
+| `pkg/frame`, `pkg/protocol`, `pkg/ptyhost`, `pkg/theme` | Frame geometry, wire types, plugin-side PTYs and palette helpers |
+| `cmd/` and `plugins/` | Executables and out-of-process plugin examples |
+
+An embedding frontend drives `Host.Frontend()` through
+`pkg/host/contracts` (`Frontend`). Its existing `Snapshot` and `OwnSlices` methods
+return `*state.Snapshot` and `*state.Handle` values from the now-public
+`pkg/substrate/state`, so embedders can use the seam directly. The package move
+changes import paths, not the frontend API or wire protocol. See
+[Frontend seams](design/pods.md#level-2-migration-from-today).
+
 ## Process model
 
 The Go host uses Bubble Tea v2 (`charm.land/bubbletea/v2`) for its event loop and Lip Gloss v2 (`charm.land/lipgloss/v2`) for styling. Views declare alternate-screen and mouse tracking settings; typed key and mouse events are translated to the wire's key and mouse notifications.
@@ -143,7 +167,7 @@ Fields with a closed vocabulary use named Go string types in `pkg/protocol`, and
 
 ### Versioning
 
-`protocol.Version` is `"MAJOR.MINOR"` (currently `2.6`). A minor release only adds optional fields, methods, error codes and enum values, which both sides ignore when they do not know them; a major release is a breaking change. Husk speaks one major at a time and accepts any minor of its own.
+`protocol.Version` is `"MAJOR.MINOR"` (currently `2.11`). A minor release only adds optional fields, methods, error codes and enum values, which both sides ignore when they do not know them; a major release is a breaking change. Minor 2.11, which removed two methods no plugin used, is the one exception ([Protocol](design/protocol.md), "Versioning"). Husk speaks one major at a time and accepts any minor of its own.
 
 There is no handshake, so the check happens where the plugin is introduced: its manifest's integer `protocol` must equal `protocol.Major` (checked by `Spec.Validate` at conversion; a mismatched plugin is not launched). A plugin that still sends a v1 `hello` gets one v1-shaped `protocol_error` line, and its Pod fails with `version_mismatch`. The host's full version is in the plugin's `HUSK_PROTOCOL_VERSION` environment variable and in the `session.ping` result. `protocol.CheckVersion` validates a "MAJOR.MINOR" string for Go plugins.
 
@@ -173,7 +197,7 @@ Husk binds no keys to any application. Keys are resolved against layered keymaps
 
 1. **Palette and modal.** While the palette is open it takes every key; printable text of any script (not only ASCII) is appended to the query and `backspace` removes one character. While a modal rail item is open, only bindings scoped to `modal-surface` and the toggle that opened it are considered: `esc` or that item's own key closes it and every other key goes to the modal plugin as `input.key` on `modal-surface`.
 2. **Keymap bindings.** The host workbench keys (quit, home, palette, dock toggles, resize, the slot explorer, `tab` focus cycling) are ordinary bindings of the built-in layer that a user can rebind. A binding runs an action: a `husk.*` host action or a rail item ID runs in the host; any other ID is sent as `action.invoke` to the one plugin that owns it.
-3. **Focus-local bindings.** A plugin's manifest `keybindings` (`{"key":"n","action":"a.new","focus":"sidebar-list"}`) apply only while the focused surface is one that plugin occupies, and may name only its own actions or `husk.*` host actions. While that surface has focus they beat global bindings on the same key; a user takes a key back with a surface-scoped entry in a keymap layer. While the occupant declares text capture, unmodified text keys skip every global binding and reach the plugin. While it declares full capture (`capture: "all"`, which `terminal.attach` implies), every global binding is skipped, modifiers, function keys and `esc` included, and so is every modal-close binding, except `husk.capture.release` (`ctrl+]` in the built-in layer), which suspends capture for the next key only. There are no plugin-wide global bindings, so a plugin's `r` or `1` never steals typing from another plugin's focused surface. A rail item's `shortcut` is only a suggestion; a key for it is bound in a keymap layer.
+3. **Focus-local bindings.** A plugin's manifest `keybindings` (`{"key":"n","action":"a.new","focus":"sidebar-list"}`) apply only while the focused surface is one that plugin occupies, and may name only its own actions, its own rail item ids or `husk.*` host actions. While that surface has focus they beat global bindings on the same key; a user takes a key back with a surface-scoped entry in a keymap layer. While the occupant declares text capture, unmodified text keys skip every global binding and reach the plugin. While it declares full capture (`capture: "all"`, which `terminal.attach` implies), every global binding is skipped, modifiers, function keys and `esc` included, and so is every modal-close binding, except `husk.capture.release` (`ctrl+]` in the built-in layer), which suspends capture for the next key only. There are no plugin-wide global bindings, so a plugin's `r` or `1` never steals typing from another plugin's focused surface. A rail item's `shortcut` is only a suggestion; a key for it is bound in a keymap layer.
 4. **Focused surface.** Anything left goes as `input.key` to the plugin occupying the focused surface; on a terminal surface the host's emulator encodes it for the program and sends the bytes as `terminal.input` instead. For the `full-canvas` or `workspace-stage` surface opened by an active rail item, that is the rail item's plugin when no plugin claimed the surface in its manifest. A key for an unoccupied surface is dropped.
 
 Keys use one spelling (`"f4"`, `"ctrl+g"`, `"alt+2"`, `"n"`, `" "`) and match exactly. `alt+` bindings need a terminal that sends Alt as Meta; layout-specific characters a terminal produces for Option combinations are passed through unchanged. Below the minimum size only the quit binding resolves.
@@ -307,7 +331,7 @@ Declarations are manifest-only. A plugin's `husk-plugin.json` carries its
 `protocol` major, `command`, `surfaces` (each with an optional `frame`), `actions`, `keybindings`,
 `rail_items`, `published_slots`, `hooks` and `events`, plus optional State
 slice, settings and secrets declarations. [Pods](design/pods.md) specifies the
-schema and `internal/pods/manifest` converts it into the plain declaration
+schema and `pkg/pods/manifest` converts it into the plain declaration
 catalog the rest of the host reads:
 
 ```json

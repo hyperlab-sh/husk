@@ -55,6 +55,8 @@ type StoreReader interface {
 	Invalidate()
 	Resolve(store.DocName, string) (store.Resolved, error)
 	Layers(store.DocName, string) ([]store.LayerDoc, error)
+	// LayersWithProblems is Layers plus the parse problems of the files it left out, from one load.
+	LayersWithProblems(store.DocName, string) ([]store.LayerDoc, []store.Problem, error)
 	Declared(store.DocName) map[string]store.Doc
 	Profiles() []string
 }
@@ -676,7 +678,7 @@ func (co *Coordinator) loadInput(ctx context.Context, f *flight) inputResult {
 	if err != nil {
 		return inputResult{err: err}
 	}
-	layers, err := co.opts.Store.Layers("keymap", selected)
+	layers, keymapProblems, err := co.opts.Store.LayersWithProblems("keymap", selected)
 	if ended := ctx.Err(); ended != nil {
 		return inputResult{err: ended}
 	}
@@ -697,7 +699,7 @@ func (co *Coordinator) loadInput(ctx context.Context, f *flight) inputResult {
 			return inputResult{err: err}
 		}
 	}
-	return inputResult{in: ReloadInput{Doc: resolved, Layers: layers, ConfigLayers: configLayers, Themes: themes, Declared: declared, Profile: &selected, ProfileNames: profileNames, ProfileProblems: selectionProblems, ProfileWrite: profileWrite}}
+	return inputResult{in: ReloadInput{Doc: resolved, Layers: layers, KeymapProblems: keymapProblems, ConfigLayers: configLayers, Themes: themes, Declared: declared, Profile: &selected, ProfileNames: profileNames, ProfileProblems: selectionProblems, ProfileWrite: profileWrite}}
 }
 
 // Inputs collects fresh user-authorized disk input for a dry run

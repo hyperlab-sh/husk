@@ -1,0 +1,217 @@
+package host
+
+import (
+	"encoding/json"
+	"testing"
+
+	"github.com/hyperlab-sh/husk/pkg/host/contracts"
+	portsstem "github.com/hyperlab-sh/husk/pkg/host/ports/stem"
+	"github.com/hyperlab-sh/husk/pkg/protocol"
+	"github.com/hyperlab-sh/husk/pkg/stem/eventbus"
+)
+
+func TestFrontendAddPlugin(t *testing.T) {
+	h, f, fe := bootFrontend(t, nil)
+	beta := writeFrontendPlugin(t, "beta", nil, nil)
+	res, err := awaitFrontend(t, h, func(reply func(contracts.PluginAddition, error)) {
+		fe.AddPlugin(contracts.PluginSource{Path: beta}, reply)
+	})
+	if err != nil || len(res.Added) != 1 || res.Added[0].Plugin != "beta" || len(res.Reports) != 5 {
+		t.Fatalf("%+v %v", res, err)
+	}
+	<-f.started
+	infos, err := h.root.pods.List(t.Context(), contracts.Caller{Kind: protocol.CallerCLI})
+	if err != nil || len(infos) != 2 {
+		t.Fatalf("%+v %v", infos, err)
+	}
+}
+
+func TestFrontendAddPluginRefusals(t *testing.T) {
+	h, _, fe := bootFrontend(t, nil)
+	_, err := awaitFrontend(t, h, func(reply func(contracts.PluginAddition, error)) {
+		fe.AddPlugin(contracts.PluginSource{Path: "relative"}, reply)
+	})
+	if contracts.CodeOf(err) != string(protocol.CodeInvalidParams) {
+		t.Fatalf("relative: %v", err)
+	}
+	// A duplicate id is refused with the CLI path's coded error.
+	_, err = awaitFrontend(t, h, func(reply func(contracts.PluginAddition, error)) {
+		fe.AddPlugin(contracts.PluginSource{Path: writeFrontendPlugin(t, "alpha", nil, nil)}, reply)
+	})
+	data, ok := err.(contracts.DataError)
+	if err == nil || !ok || data.Data()["reason"] != "duplicate_plugin_id" {
+		t.Fatalf("duplicate: %v", err)
+	}
+}
+
+// emitAs publishes an event as the named plugin does over the wire.
+func emitAs(t *testing.T, h *harness, plugin, name string, data map[string]any) {
+	t.Helper()
+	raw, _ := json.Marshal(data)
+	ev := portsstem.NewEvents(h.root.bus, h.root.loopSeam)
+	if err := ev.Emit(t.Context(), contracts.Caller{Kind: contracts.CallerPlugin, PluginID: plugin}, name, raw); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFrontendWatchEvents(t *testing.T) {
+	h, _, fe := bootFrontend(t, nil)
+	var got []protocol.EventDeliverParams
+	var cancel func()
+	h.loop(func() {
+		var err error
+		cancel, err = fe.WatchEvents("alpha.*", func(p protocol.EventDeliverParams) {
+			if !h.root.onLoop() {
+				t.Error("fn off-loop")
+			}
+			got = append(got, p)
+		})
+		if err != nil {
+			t.Error(err)
+		}
+	})
+	emitAs(t, h, "alpha", "alpha.saved", map[string]any{"n": 1})
+	emitAs(t, h, "alpha", "alpha.other", map[string]any{"n": 2})
+	h.loop(func() {})
+	h.loop(func() {
+		if len(got) != 2 || got[0].Name != "alpha.saved" || got[0].Source != "alpha" || got[1].Name != "alpha.other" {
+			t.Errorf("got %+v", got)
+		}
+		if len(got) > 0 && got[0].Data["n"] != json.Number("1") {
+			t.Errorf("data %+v", got[0].Data)
+		}
+	})
+	// Not matching: other namespace, never delivered.
+	h.loop(func() { got = nil })
+	h.loop(func() { h.root.bus.Publish(eventbus.Event{Name: "beta.saved", Source: "beta"}) })
+	h.loop(func() {})
+	h.loop(func() {
+		if len(got) != 0 {
+			t.Errorf("non-matching event delivered: %+v", got)
+		}
+	})
+	h.loop(func() { cancel(); cancel() })
+	emitAs(t, h, "alpha", "alpha.saved", nil)
+	h.loop(func() {})
+	h.loop(func() {
+		if len(got) != 0 {
+			t.Errorf("delivered after cancel: %+v", got)
+		}
+	})
+}
+
+// A delivery queued in the same Update as the cancel must not reach fn.
+func TestFrontendWatchEventsCancelBeatsQueuedDelivery(t *testing.T) {
+	h, _, fe := bootFrontend(t, nil)
+	var calls int
+	h.loop(func() {
+		cancel, err := fe.WatchEvents("alpha.*", func(protocol.EventDeliverParams) { calls++ })
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		h.root.bus.Publish(eventbus.Event{Name: "alpha.saved", Source: "alpha"})
+		cancel()
+	})
+	h.loop(func() {})
+	h.loop(func() {
+		if calls != 0 {
+			t.Errorf("fn called %d times after cancel", calls)
+		}
+	})
+}
+
+func TestFrontendWatchEventsInvalidPattern(t *testing.T) {
+	h, _, fe := bootFrontend(t, nil)
+	h.loop(func() {
+		cancel, err := fe.WatchEvents("bad pattern *", func(protocol.EventDeliverParams) { t.Error("delivered") })
+		if contracts.CodeOf(err) != string(protocol.CodeInvalidParams) || cancel != nil {
+			t.Errorf("err=%v cancel=%v", err, cancel != nil)
+		}
+	})
+}
+
+func TestFrontendWatchEventsNumbersAreVerbatim(t *testing.T) {
+	h, _, fe := bootFrontend(t, nil)
+	var got []protocol.EventDeliverParams
+	h.loop(func() {
+		if _, err := fe.WatchEvents("alpha.*", func(p protocol.EventDeliverParams) { got = append(got, p) }); err != nil {
+			t.Error(err)
+		}
+	})
+	emitAs(t, h, "alpha", "alpha.big", map[string]any{"big": json.Number("9007199254740993"), "dec": json.Number("0.1000000000000000055")})
+	h.loop(func() {})
+	h.loop(func() {
+		if len(got) != 1 || got[0].Data["big"] != json.Number("9007199254740993") || got[0].Data["dec"] != json.Number("0.1000000000000000055") {
+			t.Errorf("got %+v", got)
+		}
+	})
+}
+
+// cancel is safe from a non-loop goroutine, and a delivery queued before it
+// returns is dropped.
+func TestFrontendWatchEventsCancelOffLoop(t *testing.T) {
+	h, _, fe := bootFrontend(t, nil)
+	var calls int
+	var cancel func()
+	h.loop(func() {
+		var err error
+		cancel, err = fe.WatchEvents("alpha.*", func(protocol.EventDeliverParams) { calls++ })
+		if err != nil {
+			t.Error(err)
+		}
+	})
+	done := make(chan struct{})
+	go func() { cancel(); cancel(); close(done) }()
+	<-done
+	emitAs(t, h, "alpha", "alpha.saved", nil)
+	h.loop(func() {})
+	h.loop(func() {
+		if calls != 0 {
+			t.Errorf("fn called %d times after off-loop cancel", calls)
+		}
+	})
+}
+
+// Host shutdown ends the subscription: nothing reaches fn afterwards.
+func TestFrontendWatchEventsShutdownEndsSubscription(t *testing.T) {
+	h, _, fe := bootFrontend(t, nil)
+	var calls int
+	h.loop(func() {
+		if _, err := fe.WatchEvents("alpha.*", func(protocol.EventDeliverParams) { calls++ }); err != nil {
+			t.Error(err)
+		}
+	})
+	h.root.endClosingCtx()
+	emitAs(t, h, "alpha", "alpha.saved", nil)
+	h.loop(func() {})
+	h.loop(func() {
+		if calls != 0 {
+			t.Errorf("fn called %d times after shutdown", calls)
+		}
+	})
+}
+
+// The host caller has the user's trust: secrets. and services. patterns
+// register and receive their events (a plugin caller is refused them).
+func TestFrontendWatchEventsHostReceivesCLIOnlyEvents(t *testing.T) {
+	h, _, fe := bootFrontend(t, nil)
+	got := map[string]string{}
+	h.loop(func() {
+		for _, pat := range []string{"secrets.*", "services.reloaded"} {
+			if _, err := fe.WatchEvents(pat, func(p protocol.EventDeliverParams) { got[p.Name] = p.Source }); err != nil {
+				t.Errorf("%s: %v", pat, err)
+			}
+		}
+	})
+	h.loop(func() {
+		h.root.bus.Publish(eventbus.Event{Name: "secrets.read", Source: eventbus.SourceHost})
+		h.root.bus.Publish(eventbus.Event{Name: "services.reloaded", Source: eventbus.SourceHost})
+	})
+	h.loop(func() {})
+	h.loop(func() {
+		if got["secrets.read"] != eventbus.SourceHost || got["services.reloaded"] != eventbus.SourceHost {
+			t.Errorf("got %+v", got)
+		}
+	})
+}

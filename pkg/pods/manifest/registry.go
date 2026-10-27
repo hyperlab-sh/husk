@@ -22,8 +22,10 @@ type Source struct {
 
 // Warning is a nonfatal conversion diagnostic, with a zero-based entry index.
 type Warning struct {
-	Code, Field, Message string
-	Index                int
+	Code    string `json:"code"`
+	Field   string `json:"field,omitempty"`
+	Message string `json:"message"`
+	Index   int    `json:"index,omitempty"`
 }
 
 // Converter claims a directory and converts only its captured input.
@@ -232,7 +234,8 @@ type V2Converter struct{}
 // Format identifies the v2 file format.
 func (V2Converter) Format() string { return "husk-plugin.json/v2" }
 
-// Detect claims only an explicit numeric version 2; bad files fall to v1 errors.
+// Detect claims only an explicit numeric version 2; any other file, including a
+// malformed one or one with another manifest_version, falls to V1Converter.
 func (V2Converter) Detect(dir string) (Source, bool) {
 	src, ok := source(dir)
 	if !ok || src.err != nil {
@@ -248,13 +251,15 @@ func (V2Converter) Detect(dir string) (Source, bool) {
 // Convert validates and normalizes an explicitly versioned manifest snapshot.
 func (V2Converter) Convert(src Source) (*Spec, []Warning, error) { return convert(src, true) }
 
-// V1Converter handles all other built-in files and implicit plugin forms.
+// V1Converter handles built-in files without manifest_version (or null) and implicit
+// plugin forms; a present unsupported manifest_version is refused in Convert.
 type V1Converter struct{}
 
 // Format identifies the legacy file format.
 func (V1Converter) Format() string { return "husk-plugin.json/v1" }
 
-// Detect claims any existing built-in manifest, including malformed/unreadable ones.
+// Detect claims any existing built-in manifest, including malformed/unreadable ones;
+// Convert then reports the failure.
 func (V1Converter) Detect(dir string) (Source, bool) { return source(dir) }
 
 // Convert maps legacy declarations and warns about ignored language/transport.

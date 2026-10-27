@@ -309,11 +309,18 @@ func (s *Store) loadLayers(name DocName, profile string) (layerLoad, error) {
 // A distribution profile is folded into its single distribution layer; flags
 // are folded into the single instance layer. Parse failures are reported by Resolve.
 func (s *Store) Layers(name DocName, profile string) ([]LayerDoc, error) {
+	layers, _, err := s.LayersWithProblems(name, profile)
+	return layers, err
+}
+
+// LayersWithProblems is Layers plus the parse problems (code invalid_document)
+// of the layer files that were left out, both from one load under one lock.
+func (s *Store) LayersWithProblems(name DocName, profile string) ([]LayerDoc, []Problem, error) {
 	s.configMu.Lock()
 	defer s.configMu.Unlock()
 	load, err := s.cachedLayers(name, profile)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	out := make([]LayerDoc, len(load.layers))
 	for i, l := range load.layers {
@@ -321,7 +328,13 @@ func (s *Store) Layers(name DocName, profile string) ([]LayerDoc, error) {
 		out[i].Doc = copyDoc(l.Doc)
 		out[i].MemberOrder = copyOrder(l.MemberOrder)
 	}
-	return out, nil
+	var problems []Problem
+	for _, p := range load.problems {
+		if p.Code == "invalid_document" {
+			problems = append(problems, p)
+		}
+	}
+	return out, problems, nil
 }
 func (s *Store) cachedLayers(name DocName, profile string) (layerLoad, error) {
 	k := docKey{name, profile}

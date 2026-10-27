@@ -47,6 +47,7 @@ func TestSettingsVisibilityMatrix(t *testing.T) {
 		{"plugins.a.enabled", [4]bool{true, true, true, true}},
 		{"plugins.b.enabled", [4]bool{true, true, true, false}},
 		{"theme.name", [4]bool{true, true, true, false}},
+		{"husk.bundle", [4]bool{true, true, true, true}},
 		{"dist.pub", [4]bool{true, true, true, true}},
 		{"dist.priv", [4]bool{true, true, true, false}},
 		{"nope.x", [4]bool{true, true, true, false}},
@@ -69,7 +70,7 @@ func TestSettingsVisibilityMatrix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantKeys := map[string]bool{"plugins.a.enabled": true, "dist.pub": true}
+	wantKeys := map[string]bool{"plugins.a.enabled": true, "dist.pub": true, "husk.bundle": true}
 	for _, e := range all {
 		if _, ok := view.Raw(e.Key); ok != wantKeys[e.Key] {
 			t.Errorf("plugin snapshot holds %s = %v, want %v", e.Key, ok, wantKeys[e.Key])

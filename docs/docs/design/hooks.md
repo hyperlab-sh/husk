@@ -840,11 +840,11 @@ socket client. Rejected: palette entries that fire hooks, and a
 
 ## Level 2: Migration from today
 
-Today's code is the cut-out: `internal/stem/hooks` fans out every live
+Today's code is the cut-out: `pkg/stem/hooks` fans out every live
 subscriber at once, aggregates in completion order, and knows no owner, kind
 or priority. It is the starting point; the changes below extend it.
 
-- `internal/stem/hooks`: `Subscriptions` becomes `Catalog` (`Lookup`,
+- `pkg/stem/hooks`: `Subscriptions` becomes `Catalog` (`Lookup`,
   `Subscribers` returning sorted `Subscription`s, `List`). `Call` gains the
   ownership check, the in-flight cap and a per-kind runner: the existing
   fan-out serves `collect` and `gate`, with reply interpretation (`items`,
@@ -854,7 +854,7 @@ or priority. It is the starting point; the changes below extend it.
   one hook) and gains `Items`, `Veto` and `Reason`; `Outcome` wraps the
   slice. Params gain `kind`. The per-leg timeout comes from the `HookDef`;
   today's `Options.Timeout` is removed, since every `HookDef` carries one.
-- `internal/pods/manifest`: `HookDecl` gains `Kind` (required) and
+- `pkg/pods/manifest`: `HookDecl` gains `Kind` (required) and
   `TimeoutMs`; `HookRegistration` gains `Priority`; `hooks.subscribe` accepts
   strings and objects; conversion validates the ranges and the namespace of
   publish ids; the v1 converter maps legacy entries to `gate`. `CatalogJSON`
@@ -867,13 +867,13 @@ or priority. It is the starting point; the changes below extend it.
   (`catalogView.Problems`, by plugin id) and logged once when it first
   appears; a hook whose resolved timeout would be zero is logged once and
   left out.
-- `internal/host/contracts`: `HookPort.HookCall` returns an outcome instead of
+- `pkg/host/contracts`: `HookPort.HookCall` returns an outcome instead of
   a slice; `HookPort.HookList` is new; `MethodHomes` narrows `hook.call` to
   `plugin` callers and gains `hook.list` for `cli` and `plugin` callers;
   `StatePort.Clear` gains `force`. Fakes follow.
-- `internal/host/handlers/stem/hook.go`: marshals the outcome shapes above and
+- `pkg/host/handlers/stem/hook.go`: marshals the outcome shapes above and
   serves `hook.list`. `state.go` reads `force`.
-- `internal/host/ports/stem/hooks.go`: passes the caller through for the
+- `pkg/host/ports/stem/hooks.go`: passes the caller through for the
   ownership check and converts the outcome. `state.go` `Clear` fires
   `husk.before-state-clear` through the injected `HookFirer` before
   `Store.ClearSlice`, maps a veto to `denied`/`vetoed`, and skips the hook

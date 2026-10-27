@@ -347,7 +347,7 @@ func (h *Host) Handle(msg tea.Msg) bool {
 		}
 		p.info.LastError = m.Err.Error()
 		h.loop.Liveness(LivenessMsg{Info: p.Info()})
-		h.loop.Log(LogMsg{PluginID: m.PluginID, Level: "error", Message: fmt.Sprintf("failed to launch plugin %s: %v", m.PluginID, m.Err)})
+		h.loop.Log(LogMsg{PluginID: m.PluginID, Level: "error", Message: fmt.Sprintf("launch failed: %v", m.Err)})
 		h.publishExited(p.Info())
 		return true
 	case ExitMsg:
@@ -364,10 +364,14 @@ func (h *Host) Handle(msg tea.Msg) bool {
 		p.info.StderrTail = slices.Clone(m.Info.StderrTail)
 		h.loop.Liveness(LivenessMsg{Info: p.Info()})
 		level := "info"
+		message := fmt.Sprintf("plugin %s exited (%s); stderr log: %s", m.Info.PluginID, m.Info.ExitStatus, m.Info.LogPath)
 		if p.info.Status == wrapper.Failed {
 			level = "warn"
+			if p.info.LastError != "" {
+				message = fmt.Sprintf("plugin %s failed: %s (%s); stderr log: %s", m.Info.PluginID, p.info.LastError, m.Info.ExitStatus, m.Info.LogPath)
+			}
 		}
-		h.loop.Log(LogMsg{PluginID: m.Info.PluginID, Level: level, Message: fmt.Sprintf("plugin %s exited (%s); stderr log: %s", m.Info.PluginID, m.Info.ExitStatus, m.Info.LogPath)})
+		h.loop.Log(LogMsg{PluginID: m.Info.PluginID, Level: level, Message: message})
 		for _, line := range m.Info.StderrTail {
 			h.loop.Log(LogMsg{PluginID: m.Info.PluginID, Level: level, Message: "plugin " + m.Info.PluginID + " stderr: " + line})
 		}

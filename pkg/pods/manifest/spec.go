@@ -3,6 +3,7 @@
 package manifest
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -15,12 +16,14 @@ import (
 // Spec is the converted process configuration and plugin declaration catalog.
 // Command is resolved argv; WorkDir is the absolute manifest directory.
 type Spec struct {
-	ID                string             `json:"id"`
-	Name              string             `json:"name"`
-	Version           string             `json:"version"`
-	Description       string             `json:"description"`
-	Protocol          int                `json:"protocol"`
-	Command           []string           `json:"command"`
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Version     string   `json:"version"`
+	Description string   `json:"description"`
+	Protocol    int      `json:"protocol"`
+	Command     []string `json:"command"`
+	// CommandName preserves the manifest's executable spelling for diagnostics.
+	CommandName       string             `json:"-"`
 	WorkDir           string             `json:"work_dir"`
 	Actions           []ActionDecl       `json:"actions,omitempty"`
 	Surfaces          []SurfaceDecl      `json:"surfaces,omitempty"`
@@ -39,6 +42,10 @@ type Spec struct {
 	// SubscriptionProblems records subscriptions dropped at conversion; they
 	// are served beside the binding problems in the declared keymap document.
 	SubscriptionProblems []BindingProblem `json:"subscription_problems,omitempty"`
+	// Vendor retains opaque x- objects for the declared catalog only.
+	Vendor map[string]json.RawMessage `json:"-"`
+	// Problems contains external converter diagnostics in the declared catalog.
+	Problems []Warning `json:"problems,omitempty"`
 	// Dir is the resolved plugin source directory, empty for command lines.
 	Dir string `json:"dir"`
 }

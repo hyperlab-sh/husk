@@ -1,0 +1,54 @@
+package main
+
+import (
+	"reflect"
+	"runtime/debug"
+	"testing"
+
+	"github.com/hyperlab-sh/husk/pkg/host/contracts"
+)
+
+func TestDependencyVersion(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		deps []*debug.Module
+		want string
+	}{
+		{"absent", nil, ""},
+		{"upgrade", []*debug.Module{{Path: "other", Version: "v9.0.0"}, {Path: "github.com/hyperlab-sh/husk", Version: "v2.3.4"}}, "v2.3.4"},
+		{"devel", []*debug.Module{{Path: "github.com/hyperlab-sh/husk", Version: "(devel)"}}, ""},
+		{"replacement", []*debug.Module{{Path: "github.com/hyperlab-sh/husk", Version: "v1.0.0", Replace: &debug.Module{Path: "example.test/fork", Version: "v2.0.0"}}}, "v2.0.0"},
+		{"local replacement", []*debug.Module{{Path: "github.com/hyperlab-sh/husk", Version: "v1.0.0", Replace: &debug.Module{Path: "."}}}, ""},
+		{"devel replacement", []*debug.Module{{Path: "github.com/hyperlab-sh/husk", Version: "v1.0.0", Replace: &debug.Module{Version: "(devel)"}}}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := dependencyVersion(&debug.BuildInfo{Deps: tc.deps}); got != tc.want {
+				t.Fatalf("dependency version = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBundleMerge(t *testing.T) {
+	cfg := contracts.Config{InstanceDocs: map[string]map[string]any{
+		"config": {"theme": "keep", "husk": map[string]any{"plugins": "keep", "bundle": "old"}},
+		"keymap": {"version": 1},
+	}}
+	got := withBundle(cfg, "selected")
+	want := map[string]map[string]any{
+		"config": {"theme": "keep", "husk": map[string]any{"plugins": "keep", "bundle": "selected"}},
+		"keymap": {"version": 1},
+	}
+	if !reflect.DeepEqual(got.InstanceDocs, want) {
+		t.Fatalf("merged documents = %#v", got.InstanceDocs)
+	}
+	if cfg.InstanceDocs["config"]["husk"].(map[string]any)["bundle"] != "old" {
+		t.Fatal("input documents were mutated")
+	}
+	for _, docs := range []map[string]map[string]any{nil, {"config": nil}, {"config": {"husk": nil}}} {
+		got := withBundle(contracts.Config{InstanceDocs: docs}, "")
+		if got.InstanceDocs["config"]["husk"].(map[string]any)["bundle"] != "" {
+			t.Fatal("standalone defaults did not disable the user bundle")
+		}
+	}
+}

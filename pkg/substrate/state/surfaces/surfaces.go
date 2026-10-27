@@ -75,6 +75,8 @@ type Surfaces struct {
 	Contributions map[string][]Contribution `json:"contributions"`
 	// Capture holds each occupant's normalized key policy; none is absent.
 	Capture map[protocol.SurfaceID]protocol.CaptureMode `json:"capture"`
+	// Runtime contains every open plugin-created surface, including hidden ones.
+	Runtime map[protocol.SurfaceID]contracts.RuntimeSurface `json:"runtime"`
 	// Terminals contains metadata only, never screen cells.
 	Terminals map[protocol.SurfaceID]contracts.TerminalMetadata `json:"terminals"`
 	// Visible lists the surfaces the layout currently shows.
@@ -158,6 +160,7 @@ func RegisterSurfaces(s *state.State) (*state.Slice[Surfaces], error) {
 		Owner:     state.OwnerHusk,
 		Scope:     state.ScopeInstance,
 	}, Surfaces{
+		Runtime:   map[protocol.SurfaceID]contracts.RuntimeSurface{},
 		Capture:   map[protocol.SurfaceID]protocol.CaptureMode{},
 		Terminals: map[protocol.SurfaceID]contracts.TerminalMetadata{},
 	})
@@ -288,7 +291,7 @@ func (o Occupants) Validate(pluginID string) error {
 		if occ.Surface != surface {
 			return fmt.Errorf("surfaces: occupant stored under %q names surface %q", surface, occ.Surface)
 		}
-		if !occ.Surface.Valid() {
+		if !occ.Surface.Layout() {
 			return fmt.Errorf("surfaces: occupant names %q, not a defined host layout surface", occ.Surface)
 		}
 	}

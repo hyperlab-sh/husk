@@ -81,6 +81,13 @@ func convert(src Source, modern bool) (*Spec, []Warning, error) {
 	if fields == nil {
 		return nil, nil, errors.New("manifest must be an object")
 	}
+	if !modern {
+		// The v2 detector claims only the number 2, so any other present
+		// version reaches here and must not load as v1.
+		if v := bytes.TrimSpace(fields["manifest_version"]); len(v) != 0 && !bytes.Equal(v, []byte("null")) {
+			return nil, nil, fmt.Errorf("unsupported manifest_version %s (supported: 2, or absent/null for v1)", v)
+		}
+	}
 	s := &Spec{WorkDir: src.Dir, Protocol: protocol.Major}
 	for _, f := range []struct {
 		key  string
@@ -105,6 +112,19 @@ func convert(src Source, modern bool) (*Spec, []Warning, error) {
 		s.Surfaces = append(s.Surfaces, SurfaceDecl{ID: protocol.SurfaceID(slot)})
 	}
 	if modern {
+		for key, value := range fields {
+			if !strings.HasPrefix(key, "x-") {
+				continue
+			}
+			var object map[string]json.RawMessage
+			if json.Unmarshal(value, &object) != nil || object == nil {
+				return nil, nil, fmt.Errorf("%s must be an object", key)
+			}
+			if len(s.Vendor) != 0 {
+				return nil, nil, errors.New("manifest permits one x- vendor object")
+			}
+			s.Vendor = map[string]json.RawMessage{key: bytes.Clone(value)}
+		}
 		var version int
 		if err := decodeField(fields, "manifest_version", &version); err != nil || version != 2 {
 			return nil, nil, errors.New("v2 manifest requires manifest_version 2")
@@ -205,6 +225,9 @@ func convert(src Source, modern bool) (*Spec, []Warning, error) {
 		for _, a := range s.Actions {
 			actions[a.ID] = true
 		}
+		for _, r := range s.RailItems {
+			actions[r.ID] = true
+		}
 		surfaces := make(map[string]bool)
 		for _, surface := range s.Surfaces {
 			surfaces[string(surface.ID)] = true
@@ -218,7 +241,7 @@ func convert(src Source, modern bool) (*Spec, []Warning, error) {
 			if b.Focus == "" || !surfaces[b.Focus] || b.Plugin != nil || b.Disable != nil {
 				code, message = "global_not_allowed", "focus must be a surface owned by this plugin; plugin/disable fields are not allowed"
 			} else if !actions[b.Action] && !(strings.HasPrefix(b.Action, "husk.") && len(b.Action) > 5) {
-				code, message = "foreign_action", "focus binding must target an own action or husk.*"
+				code, message = "foreign_action", "focus binding must target an own action, own rail item or husk.*"
 			}
 			if code != "" {
 				s.BindingProblems = append(s.BindingProblems, BindingProblem{Index: i, Code: code, Message: message})
@@ -260,6 +283,7 @@ func convert(src Source, modern bool) (*Spec, []Warning, error) {
 	if err := validateDeclarations(s); err != nil {
 		return nil, warnings, err
 	}
+	s.CommandName = s.Command[0]
 	s.Command = s.Argv()
 	return s, warnings, nil
 }
@@ -309,7 +333,7 @@ func eventPattern(pattern string) bool {
 func validateDeclarations(s *Spec) error {
 	surfaces := make(map[protocol.SurfaceID]bool)
 	for _, v := range s.Surfaces {
-		if !v.ID.Valid() || surfaces[v.ID] {
+		if !v.ID.Layout() || surfaces[v.ID] {
 			return fmt.Errorf("invalid or duplicate surface %q", v.ID)
 		}
 		surfaces[v.ID] = true

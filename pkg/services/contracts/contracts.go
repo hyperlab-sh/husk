@@ -51,12 +51,16 @@ type SettingsSnapshot interface {
 
 // ReloadInput is one consistent set of Store inputs for candidate preparation.
 type ReloadInput struct {
-	Doc          store.Resolved
-	Layers       []store.LayerDoc
-	Declared     map[store.DocName]map[string]store.Doc
-	Settings     SettingsSnapshot
-	Profile      *string
-	ConfigLayers []store.LayerDoc
+	Doc    store.Resolved
+	Layers []store.LayerDoc
+	// KeymapProblems are the Store's parse problems (invalid_document) for
+	// keymap layer files Store left out; a distribution part that failed
+	// leaves the folded distribution layer present but partial.
+	KeymapProblems []store.Problem
+	Declared       map[store.DocName]map[string]store.Doc
+	Settings       SettingsSnapshot
+	Profile        *string
+	ConfigLayers   []store.LayerDoc
 	// Themes are unmerged theme documents, with source member order retained.
 	Themes []store.LayerDoc
 	// ProfileNames are the names Store.Profiles listed in this flight's step 2,

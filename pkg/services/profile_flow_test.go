@@ -53,6 +53,10 @@ func (s *recStore) Layers(n store.DocName, _ string) ([]store.LayerDoc, error) {
 	}
 	return nil, nil
 }
+func (s *recStore) LayersWithProblems(n store.DocName, p string) ([]store.LayerDoc, []store.Problem, error) {
+	layers, err := s.Layers(n, p)
+	return layers, nil, err
+}
 func (s *recStore) Resolved() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -144,6 +148,7 @@ func TestProfileSelectionAtStartup(t *testing.T) {
 		code     string // a problem the flight must carry, or ""
 		written  bool   // the flight records a choice in the slice
 	}{
+		{"duplicate default selects none", []string{"work", "other"}, []store.LayerDoc{userLayer(`{"profile.default":"other","profile":{"default":"work"}}`)}, nil, "", "duplicate_key", false},
 		{"user default", []string{"work", "other"}, []store.LayerDoc{userLayer(`{"profile":{"default":"work"}}`)}, nil, "work", "", false},
 		{"flag beats default", []string{"work", "other"}, []store.LayerDoc{userLayer(`{"profile":{"default":"work"}}`)}, str("other"), "other", "", true},
 		{"no input", []string{"work"}, nil, nil, "", "", false},

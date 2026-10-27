@@ -7,6 +7,6 @@
   "description": "Hosts a user shell or argv in a terminal surface",
   "command": ["./terminal"],
   "surfaces": [
-    {"id": "main-stage", "frame": {"border": true, "label": "Terminal", "close": true}}
+    {"id": "side-panel", "frame": {"border": true, "label": "Terminal", "close": true}}
   ]
 }

@@ -99,10 +99,11 @@ func Builtins() []Entry {
 
 // startConsumedEntries is the single catalog of keys whose values startup
 // consumes before any successful Settings load is guaranteed. Future start-time
-// keys, including husk.plugins.converters when it lands, must join this catalog.
+// keys must join this catalog.
 func startConsumedEntries() []Entry {
 	return []Entry{
-		{Key: "husk.bundle", Type: TypeString, Default: "", Owner: "husk", Apply: "restart", Doc: "Bundle directory loaded once at start, from user and instance layers only."},
+		{Key: "husk.bundle", Type: TypeString, Default: "", Owner: "husk", Apply: "restart", Public: true, Doc: "Bundle directory loaded once at start, from user and instance layers only."},
+		{Key: "husk.plugins.converters", Type: TypeStrings, Default: []string{}, Owner: "husk", Apply: "restart", Doc: "Executable manifest converters registered once at start, after --converter flags and built-in converters; absolute paths or PATH names."},
 		{Key: "husk.plugins.paths", Type: TypeStrings, Default: []string{}, Owner: "husk", Apply: "restart", Doc: "Plugin arguments loaded once at start, interpreted like --plugin; --plugin documents are the instance layer on top, and --add-plugin appends to the effective value (named-instance file included), deduplicated by cleaned absolute path."},
 		{Key: "husk.plugins.dirs", Type: TypeStrings, Default: []string{}, Owner: "husk", Apply: "restart", Doc: "Plugin directories loaded once at start, interpreted like --plugin-dir; --plugin-dir documents are the instance layer on top, and --add-plugin-dir appends to the effective value (named-instance file included), deduplicated by cleaned absolute path."},
 	}
@@ -424,7 +425,8 @@ func (s *Service) rebuild(ctx context.Context, in c.ReloadInput, startup bool) (
 		layerFiles[string(l.Layer)] = l.File
 	}
 	flat := map[string]any{}
-	flatten("", in.Doc.Doc, schema, flat)
+	ambiguous := c.FlattenSettings(in.Doc.Doc, schema, flat)
+	layers, resolvedSources := resolveSpellings(in.ConfigLayers, schema, flat, ambiguous, &r.Problems)
 	for name := range s.opts.PluginAdditions {
 		if name == "paths" || name == "dirs" {
 			delete(flat, "husk.plugins."+name)
@@ -435,7 +437,7 @@ func (s *Service) rebuild(ctx context.Context, in c.ReloadInput, startup bool) (
 	// hide the user value or manufacture a restart_required warning.
 	delete(flat, "husk.bundle")
 	bundleLayer := "default"
-	for _, l := range in.ConfigLayers {
+	for _, l := range layers {
 		raw, present := c.Dotted(l.Doc, "husk.bundle")
 		if l.Layer != store.LayerUser && l.Layer != store.LayerInstance {
 			if present {
@@ -478,6 +480,9 @@ func (s *Service) rebuild(ctx context.Context, in c.ReloadInput, startup bool) (
 	}
 	for key, raw := range flat {
 		layer := originOf(in.Doc.Origins, key)
+		if resolved, ok := resolvedSources[key]; ok {
+			layer = resolved
+		}
 		if key == "husk.bundle" {
 			layer = bundleLayer
 		}
@@ -497,7 +502,7 @@ func (s *Service) rebuild(ctx context.Context, in c.ReloadInput, startup bool) (
 		next.sources[key] = layer
 		next.values[key] = v
 	}
-	s.addPlugins(next, in.ConfigLayers, layerFiles, &r.Problems)
+	s.addPlugins(next, layers, layerFiles, &r.Problems)
 	// Most restart keys take effect on the first successful load. Start-consumed
 	// keys are fixed even at generation zero. Removing a key counts as a change
 	// back to the default.
@@ -619,38 +624,6 @@ func originOf(origins map[string]store.Layer, key string) string {
 	return string(origins[best])
 }
 
-// flatten turns a document into dotted keys. It stops at a schema key, so a
-// value of the wrong shape there (an object for a scalar) reaches validation
-// whole instead of becoming unknown leaves. An empty object at a schema
-// prefix says nothing and is dropped.
-func flatten(prefix string, m map[string]any, schema map[string]Entry, out map[string]any) {
-	for k, v := range m {
-		key := k
-		if prefix != "" {
-			key = prefix + "." + k
-		}
-		obj, isObj := v.(map[string]any)
-		if _, known := schema[key]; known || !isObj {
-			out[key] = v
-			continue
-		}
-		if len(obj) == 0 {
-			if !isSchemaPrefix(schema, key) {
-				out[key] = v
-			}
-			continue
-		}
-		flatten(key, obj, schema, out)
-	}
-}
-func isSchemaPrefix(schema map[string]Entry, key string) bool {
-	for k := range schema {
-		if strings.HasPrefix(k, key+".") {
-			return true
-		}
-	}
-	return false
-}
 func cloneTyped(v any) any {
 	if ss, ok := v.([]string); ok {
 		return append([]string{}, ss...)

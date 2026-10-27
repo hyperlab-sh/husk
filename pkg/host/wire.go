@@ -88,7 +88,7 @@ func (r *Root) buildServer() error {
 		Secrets:  portsservices.Secrets{Svc: r.rt.Secrets},
 		Profile:  portsservices.Profile{Svc: r.rt.Profile},
 		Theme:    portsservices.Theme{Svc: r.rt.Theme, Settings: r.rt.Settings, Inputs: co},
-		Keys:     portsservices.Keys{Svc: r.rt.Keybinding},
+		Keys:     r.keys(),
 		Config:   portsservices.Config{Co: co},
 		Limiter:  servicesh.NewWindowLimiter(r.clock, contracts.RateLimitPerSecond),
 	})

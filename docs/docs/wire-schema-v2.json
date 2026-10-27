@@ -386,9 +386,26 @@
       "type": "object"
     },
     "RowHitTarget": {
+      "dependentRequired": {
+        "col_end": [
+          "col_start"
+        ],
+        "col_start": [
+          "col_end"
+        ]
+      },
+      "description": "Optional surface-relative cell range [col_start, col_end); both or neither, with col_end \u003e col_start \u003e= 0. The host validates the relative bound.",
       "properties": {
         "action": {
           "type": "string"
+        },
+        "col_end": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "col_start": {
+          "minimum": 0,
+          "type": "integer"
         },
         "id": {
           "type": "string"
@@ -588,6 +605,67 @@
         "x",
         "y",
         "button"
+      ],
+      "type": "object"
+    },
+    "SurfaceOpenParams": {
+      "properties": {
+        "frame": {
+          "$ref": "#/$defs/FrameSpec"
+        },
+        "height": {
+          "oneOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "pattern": "^[0-9]+%$",
+              "type": "string"
+            }
+          ]
+        },
+        "name": {
+          "maxLength": 32,
+          "pattern": "^[a-z0-9_-]{1,32}$",
+          "type": "string"
+        },
+        "placement": {
+          "enum": [
+            "modal",
+            "canvas"
+          ],
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 80,
+          "type": "string"
+        },
+        "width": {
+          "oneOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "pattern": "^[0-9]+%$",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "required": [
+        "placement",
+        "name"
+      ],
+      "type": "object"
+    },
+    "SurfaceOpenResult": {
+      "properties": {
+        "surface": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "surface"
       ],
       "type": "object"
     },
@@ -1122,6 +1200,12 @@
     "surface.close.result": {
       "description": "Result owned by design/protocol.md; no additional field constraints specified here."
     },
+    "surface.open.params": {
+      "$ref": "#/$defs/SurfaceOpenParams"
+    },
+    "surface.open.result": {
+      "$ref": "#/$defs/SurfaceOpenResult"
+    },
     "surface.resized.params": {
       "$ref": "#/$defs/SurfaceResizedParams"
     },
@@ -1195,7 +1279,7 @@
   "$id": "https://github.com/hyperlab-sh/husk/blob/main/docs/docs/wire-schema-v2.json",
   "$ref": "#/$defs/Message",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "One UTF-8 JSON object per line, at most 4194304 bytes. Protocol 2.6. Generated from pkg/protocol; do not edit. x-methods indexes payload schemas; unknown fields are accepted.",
+  "description": "One UTF-8 JSON object per line, at most 4194304 bytes. Protocol 2.11. Generated from pkg/protocol; do not edit. x-methods indexes payload schemas; unknown fields are accepted.",
   "title": "Husk wire protocol v2",
   "x-methods": {
     "action.invoke": {
@@ -1565,6 +1649,15 @@
       },
       "result": {
         "$ref": "#/$defs/surface.close.result"
+      }
+    },
+    "surface.open": {
+      "form": "request",
+      "params": {
+        "$ref": "#/$defs/surface.open.params"
+      },
+      "result": {
+        "$ref": "#/$defs/surface.open.result"
       }
     },
     "surface.resized": {

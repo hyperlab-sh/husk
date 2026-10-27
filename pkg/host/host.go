@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -34,8 +35,12 @@ import (
 	"github.com/hyperlab-sh/husk/pkg/substrate/store"
 )
 
-// storeCloseTimeout bounds the final Store flush at shutdown.
-const storeCloseTimeout = 10 * time.Second
+// workerWaitTimeout bounds the wait for host workers at shutdown.
+const workerWaitTimeout = 10 * time.Second
+
+// storeFlushTimeout bounds the final Store flush at shutdown (store.md, exit
+// flush deadline).
+const storeFlushTimeout = 2 * time.Second
 
 // loopWait bounds how long Close waits for the loop to run a loop-confined
 // shutdown step. A loop that does not run it in time is wedged: the step is
@@ -106,14 +111,15 @@ type Root struct {
 	startupReports []services.Report // immutable construction result for the frontend
 
 	// Lifecycle.
-	live      atomicBool   // New returned: the loop may be running
-	loopGID   atomic.Int64 // goroutine id of the loop, learned on its first Update
-	mu        sync.Mutex   // guards running and closing
-	running   bool
-	closing   bool         // shutdown began: spawn refuses new workers
-	workers   atomic.Int32 // host workers not yet finished (for the shutdown error)
-	closeOnce sync.Once
-	closeErr  error
+	live        atomicBool   // New returned: the loop may be running
+	loopGID     atomic.Int64 // goroutine id of the loop, learned on its first Update
+	loopStarted bool         // the start hook ran; loop-only
+	mu          sync.Mutex   // guards running and closing
+	running     bool
+	closing     bool         // shutdown began: spawn refuses new workers
+	workers     atomic.Int32 // host workers not yet finished (for the shutdown error)
+	closeOnce   sync.Once
+	closeErr    error
 	// closingCtx ends when shutdown reaches the Server: socket requests still
 	// waiting on the loop fail fast instead of holding the Server's drain.
 	closingCtx    context.Context
@@ -255,7 +261,35 @@ func (r *Root) loadSpecs() error {
 	}
 	r.converter = manifest.NewRegistry()
 	reg := r.converter
+	snap := r.rt.Settings.Snapshot()
+	var converters []*manifest.ExecConverter
+	registered := map[string]bool{}
+	supplied := map[string]bool{}
+	for _, path := range append(append([]string(nil), r.opts.converters...), snap.Strings("husk.plugins.converters")...) {
+		if supplied[path] {
+			continue
+		}
+		supplied[path] = true
+		converter, err := manifest.NewExecConverter(path, manifest.ExecOptions{Clock: r.clock})
+		if err != nil {
+			r.log(pods.LogMsg{Level: "warn", Message: err.Error()})
+			r.refuse("", err.Error())
+			continue
+		}
+		if registered[converter.Path()] {
+			continue
+		}
+		registered[converter.Path()] = true
+		reg.Register(converter)
+		converters = append(converters, converter)
+	}
 	seen := map[string]bool{}
+	attempted := map[string]bool{}
+	remember := func(dir string) {
+		if abs, err := filepath.Abs(dir); err == nil {
+			attempted[filepath.Clean(abs)] = true
+		}
+	}
 	add := func(spec *manifest.Spec, warns []manifest.Warning) {
 		for _, w := range warns {
 			r.log(pods.LogMsg{PluginID: specID(spec), Level: "warn", Message: fmt.Sprintf("manifest %s: %s", w.Field, w.Message)})
@@ -270,8 +304,14 @@ func (r *Root) loadSpecs() error {
 		seen[spec.ID] = true
 		r.specs = append(r.specs, *spec)
 	}
-	snap := r.rt.Settings.Snapshot()
 	for i, arg := range snap.Strings("husk.plugins.paths") {
+		if info, err := os.Stat(arg); err == nil {
+			if info.IsDir() {
+				remember(arg)
+			} else if filepath.Base(arg) == manifest.FileName {
+				remember(filepath.Dir(arg))
+			}
+		}
 		spec, warns, err := reg.Load(arg)
 		if err != nil {
 			return fmt.Errorf("husk.plugins.paths[%d] %q (layer %s): %w", i, arg, snap.Source("husk.plugins.paths"), err)
@@ -288,12 +328,34 @@ func (r *Root) loadSpecs() error {
 			return fmt.Errorf("husk.plugins.dirs[%d] %q (layer %s): not a readable directory: %w", i, dir, snap.Source("husk.plugins.dirs"), err)
 		}
 		for _, res := range results {
+			remember(res.Dir)
 			if res.Err != nil {
 				r.log(pods.LogMsg{Level: "warn", Message: fmt.Sprintf("husk.plugins.dirs %q: %v", dir, res.Err)})
 				r.refuse("", res.Err.Error())
 				continue
 			}
 			add(res.Spec, res.Warnings)
+		}
+	}
+	for _, converter := range converters {
+		discovered, err := converter.Discover()
+		if err != nil {
+			r.log(pods.LogMsg{Level: "warn", Message: err.Error()})
+			r.refuse("", err.Error())
+			continue
+		}
+		for _, dir := range discovered {
+			if attempted[dir] {
+				continue
+			}
+			remember(dir)
+			spec, warnings, err := reg.LoadPath(dir)
+			if err != nil {
+				r.log(pods.LogMsg{Level: "warn", Message: err.Error()})
+				r.refuse("", err.Error())
+				continue
+			}
+			add(spec, warnings)
 		}
 	}
 	return nil
@@ -318,6 +380,17 @@ func (e *bundleStartError) Error() string {
 	return fmt.Sprintf("bundle %s: %v", e.dir, e.err)
 }
 func (e *bundleStartError) Unwrap() error { return e.err }
+
+// RuntimeDirError is returned (wrapped) by New when the runtime directory is
+// missing and cannot be created, or is not private to the user. A caller maps
+// it to the environment failure.
+type RuntimeDirError struct {
+	Dir string
+	Err error
+}
+
+func (e *RuntimeDirError) Error() string { return e.Err.Error() }
+func (e *RuntimeDirError) Unwrap() error { return e.Err }
 
 func (r *Root) instanceDocs() map[store.DocName]store.Doc {
 	docs := make(map[store.DocName]store.Doc, len(r.cfg.InstanceDocs))
@@ -346,7 +419,7 @@ func (r *Root) buildStore() error {
 	// This is deliberately after bundle validation, including in CLI start
 	// mode, so fatal bundle errors leave the user's directory tree untouched.
 	if err := instance.CheckRuntimeDir(r.cfg.RuntimeDir); err != nil {
-		return err
+		return &RuntimeDirError{Dir: r.cfg.RuntimeDir, Err: err}
 	}
 	var config fs.FS
 	if r.bundle != nil {
@@ -354,6 +427,7 @@ func (r *Root) buildStore() error {
 	}
 	docs := r.instanceDocs()
 	s, err := store.Open(store.Options{
+		Distribution: r.cfg.Distribution,
 		Bundle:       config,
 		InstanceDocs: docs,
 		Instance:     store.InstanceRef{ID: r.cfg.InstanceID},
@@ -739,9 +813,10 @@ func (r *Root) spawn(cmd tea.Cmd) bool {
 // then returns false instead of blocking, which is what Config.Post requires
 // of a closed gate. The pods.Stop kill path and the wrapper's exit notice also
 // call Post on the loop goroutine and need the gate closed; nothing bounds
-// them. Only the wait for host workers is bounded (storeCloseTimeout): when it
-// expires Close returns an error with the count of stuck workers and does not
-// close the Store, so a worker still inside a command never sees a closed
+// them. The wait for host workers is bounded (workerWaitTimeout); the final
+// Store flush is bounded by storeFlushTimeout (2 s, the store.md exit flush
+// deadline). When the worker wait expires Close returns an error with the
+// count of stuck workers and does not close the Store, so a worker still inside a command never sees a closed
 // Store. The Store then stays open until the process exits.
 func (r *Root) Close() error {
 	r.closeOnce.Do(func() {
@@ -814,16 +889,19 @@ func (r *Root) shutdown() error {
 	workersStuck := false
 	workersDone := make(chan struct{})
 	go func() { r.wg.Wait(); close(workersDone) }()
-	wctx, wcancel := context.WithTimeout(context.Background(), r.opts.workerWaitOr(storeCloseTimeout))
+	wctx, wcancel := context.WithTimeout(context.Background(), r.opts.workerWaitOr(workerWaitTimeout))
 	select {
 	case <-workersDone:
 	case <-wctx.Done():
 		workersStuck = true
-		errs = append(errs, fmt.Errorf("%d workers still running after %v: store left open", r.workers.Load(), r.opts.workerWaitOr(storeCloseTimeout)))
+		errs = append(errs, fmt.Errorf("%d workers still running after %v: store left open", r.workers.Load(), r.opts.workerWaitOr(workerWaitTimeout)))
 	}
 	wcancel()
 	if r.store != nil && !workersStuck {
-		ctx, cancel := context.WithTimeout(context.Background(), storeCloseTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), storeFlushTimeout)
+		if r.opts.onStoreFlush != nil {
+			r.opts.onStoreFlush(ctx)
+		}
 		if err := r.store.Close(ctx); err != nil {
 			errs = append(errs, fmt.Errorf("store: %w", err))
 		}

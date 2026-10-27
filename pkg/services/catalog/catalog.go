@@ -168,7 +168,7 @@ func validate(id string, raw any) (Entry, string, string) {
 			}
 			if f == "surfaces" {
 				surface := protocol.SurfaceID(s)
-				if !surface.Valid() {
+				if !surface.Layout() {
 					return e, f, "unknown surface"
 				}
 				if seen[s] {

@@ -19,10 +19,11 @@ Surfaces module keeps focus and layout in it, `husk state` reads it from the
 CLI, Store persists from it and hydrates it on start, and a test harness
 inspects it instead of reaching into the Bubble Tea model.
 
-The problem it solves: today the truth is scattered across `WorkbenchModel`
-fields and the publication registry in `cmd/husk`, mixed with config-derived
-catalog data and with input bookkeeping. Nothing outside the model can read it,
-nothing persists it, and nothing tells a plugin it changed.
+The problem it solves: before State, truth was scattered across workbench model
+fields and the publication registry in the command host, mixed with config-derived
+catalog data and input bookkeeping. Nothing outside the model could read it,
+nothing persisted it, and nothing told a plugin it changed. The private
+`workbenchModel` now lives in `pkg/workbench` and reads the host's State snapshots.
 
 State is **not**:
 
@@ -401,10 +402,11 @@ Value shapes:
   "occupants":{"main-stage":{"surface":"main-stage","plugin":"example.editor"}},
   "contributions":{"example.editor.toolbar":[{"slot":"example.editor.toolbar","id":"example.git.branch","plugin":"example.git","label":"main"}]},
   "capture":{"main-stage":"text"},
+  "runtime":{},
   "terminals":{},
   "visible":["activity-rail","main-header","main-stage","side-panel","sidebar-footer","sidebar-list","sidebar-navigation"],
   "placement":{"rail_item":"","kind":""},
-  "overlays":{"modal":{"plugin":"","rail_item":""},"palette":false,"slot_explorer":false,"settings_center":""}
+  "overlays":{"modal":{"plugin":"","rail_item":"","surface":""},"palette":false,"slot_explorer":false,"settings_center":""}
 }}
 {"slice":"example.editor.occupants","value":{"main-stage":{"surface":"main-stage","plugin":"example.editor"}}}
 {"slice":"example.git.contributions","value":{
@@ -424,7 +426,7 @@ resolution.
 The declarations live in the Pod-owned slices: `<plugin_id>.occupants` and
 `<plugin_id>.contributions` hold one plugin's own claims and entries, their
 Pod is the owner, and their value types are the frozen
-`internal/host/contracts` shapes. Every write is owner-checked — an occupant
+`pkg/host/contracts` shapes. Every write is owner-checked — an occupant
 names its own plugin and a defined host layout surface; a contribution's id
 and `on_click` are the owning plugin's own `<plugin_id>.<name>` with a
 non-empty dot-free name — so nothing outside the plugin's authority commits.
@@ -493,20 +495,29 @@ on immediate reoccupation. Yield requires occupancy through a layout
 claim; it is not available to an unclaimed or runtime surface
 (`invalid_params` naming `yield`, [Protocol](protocol.md) "Surface close").
 An absent or false `yield` keeps the retracting close, and a host
-force-release always retracts. A refused claim stays
-recorded in the declaration, the occupant is unchanged, and the refusal is
-counted; a returning plugin's re-registered declarations resolve again,
+force-release always retracts. A refused claim stays recorded in the
+declaration, the occupant is unchanged, and the refusal is counted and
+written to the host log at warn level each time the claim is refused (once
+per arrival or re-resolution), naming the plugin, the surface and the
+occupant (no toast); a returning plugin's re-registered declarations
+resolve again,
 first live claim wins among the claims that arrive after the re-registration.
 
 #### Runtime and terminal surfaces
 
-**Terminal metadata and capture modes land in protocol minor 2.5** ([Protocol](protocol.md), "Runtime and terminal surfaces"). Runtime surfaces remain Level 1, specified but not landed. The following facts are written by the Surfaces engine like the rest of its half:
+**Terminal metadata and capture modes land in protocol minor 2.5** ([Protocol](protocol.md), "Runtime and terminal surfaces"). **Runtime surfaces land in protocol minor 2.8.** The following facts are written by the Surfaces engine like the rest of its half:
 
 - `runtime`, a map from dynamic surface id (`<plugin_id>.<name>`) to `{"plugin", "placement", "title", "width", "height"}` for every surface a `surface.open` created and nothing has closed. Such a surface also appears in `occupants` (the opener is its occupant from the reply on) and in the frontend's `visible` while shown, and its rect in `husk.geometry.rects`, so a consumer that only knows the layout surfaces still sees it as occupied space. `capture`, `visible` and `rects` are keyed by the same dynamic id. The engine removes the entry on `surface.close`, on the host's close, and when the opener's Pod leaves `live`; a runtime surface is never handed to another claimant (there is no declaration to resolve).
 - `terminals`, a map from surface id to `{"title", "alt_screen", "mouse", "scrollback"}` for every attached surface: the title the application set (OSC 0/2), whether it is on the alternate screen, whether it enabled mouse reporting (so Input knows whether a wheel scrolls the application or the host's scrollback) and the scrollback line count. The engine updates it from the emulator's callbacks, coalesced per tick; the screen contents themselves are not State (see "What is not State"), exactly as `surface.update` lines are not.
 - `capture` values become `"text"` or `"all"` instead of `true` (`true` on the wire is recorded as `"text"`); `terminal.attach` records `"all"` unless the request said `true` or `"text"` (recorded as `"text"`) or `false` (no entry). A 2.1 reader that tests the entry for presence is unchanged.
 
-With runtime surfaces (not landed), `overlays.modal` gains `surface`: the id of the modal's surface, `modal-surface` for a rail item and the dynamic id for a runtime modal, so the frontend's `FocusSurface` while a modal is open is whichever of the two it is. The example value above becomes `"overlays":{"modal":{"plugin":"","rail_item":"","surface":""},...}` and `"runtime":{}` is always present, `{}` when empty, like `capture` and the landed `terminals`.
+Runtime canvases form one instance-wide stack across plugins, ordered by most recent open, newest first. Opening a canvas shows and focuses the new top. Older runtime canvases stay open and occupied but hidden; the limit remains eight runtime surfaces per plugin. Closing a hidden canvas removes only that entry and does not change visibility or focus. Closing the top through any close path shows the next-newest still-open runtime canvas. When the last canvas closes, the frontend restores the underlying rail selection or Home placement and the focus captured when the stack was most recently shown. Showing a hidden stack, either by a new open or by restore, captures the current underlying focus again.
+
+Activating Home or any rail item hides the runtime canvas stack without closing any entry: occupancy, `runtime` and plugin lifetimes are unchanged. The host action `husk.surfaces.restore` re-shows the hidden stack, newest first, and focuses its top. It has no default binding, appears in the palette only while a hidden stack exists, and is a no-op otherwise. Opening a new runtime canvas shows and focuses the new top even when the existing stack was hidden.
+
+`placement` continues to describe the underlying rail/Home selection while a runtime canvas is shown: `kind` is `stage` or `full-canvas` with that rail item's `rail_item`, or both fields are empty for Home. There is no `placement.kind: "canvas"`. The shown runtime canvas is the dynamic id in `visible` whose entry in `runtime` has `placement: "canvas"`; hidden canvases remain in `runtime` and occupancy but not `visible`.
+
+With runtime surfaces (landed in minor 2.8), `overlays.modal` gains `surface`: the id of the modal's surface, `modal-surface` for a rail item and the dynamic id for a runtime modal, so the frontend's `FocusSurface` while a modal is open is whichever of the two it is. The example value above becomes `"overlays":{"modal":{"plugin":"","rail_item":"","surface":""},...}` and `"runtime":{}` is always present, `{}` when empty, like `capture` and the landed `terminals`.
 
 `overlays` carries the landed `settings_center` (string, with the Settings center of [Settings center](settings-center.md), whose Theme tab is the theme selector of [Services](services.md), "The theme selector"): the id of the active tab (`general`, `keys`, `theme`, `store`, `installed`) while the frontend's Settings center modal is open, `""` while it is closed. It is written by the frontend through `UpdateSurfaceView` like `palette` and `slot_explorer`, rewritten on every tab switch, read by Input (the center consumes every key while open, [Keybindings](keybindings.md) context filters) and by `husk state get husk.surfaces`, and is `""` whenever the center is closed by any path. There is no separate `theme_selector` flag: the selector is a tab, as shown in the `husk.surfaces` example above.
 
@@ -533,9 +544,9 @@ namespaces while "Migration from today" had the TUI's `recomputeLayout` and
   handle and exposes `Engine.UpdateView`, reached through
   `Frontend.UpdateSurfaceView(fn)`: `fn` edits a copy of `visible`,
   `placement` and `overlays`, and the engine commits it, leaving occupants
-  and contributions as they are. An entry of `visible` that is not a host
-  layout surface refuses the whole update and nothing commits. The view
-  write takes the same foreign-write guard as a surface release, so a
+  and contributions as they are. An entry of `visible` that is neither a host
+  layout surface nor an open runtime surface refuses the whole update and
+  nothing commits. The view write takes the same foreign-write guard as a surface release, so a
   `state.clear` of `husk.surfaces` in the same Update is still re-resolved
   from the declarations at the next pass. A resolution pass never touches the
   view half.
@@ -663,7 +674,7 @@ With one:
   - `ownID` and `validPluginID`: the rule is restated in `substrate/state` for
     namespaces, without importing the wire package; a shared test asserts both
     accept the same inputs.
-- `cmd/husk/model.go`, `WorkbenchModel` fields:
+- `pkg/workbench/model.go`, `workbenchModel` fields:
   - To `husk.focus`: `focusedSlot`, `focusFallback`, `blurred` (inverted as
     `terminal_focused`).
   - To `husk.surfaces` (view half, written through `Frontend.UpdateSurfaceView`):
@@ -688,19 +699,19 @@ With one:
     `subChan`, `procs`, `quit`, `stopGrace`, `handoffGrace`,
     `handoffPending`, `pluginCtx`, `pluginCancel`, `sendQueueCapacity`,
     `writeTimeout`, `logOut` (plumbing).
-- `cmd/husk/layout.go`: `showSidebar`, `sidebarWidth`, `sidebarNavH`,
+- `pkg/workbench/layout.go`: `showSidebar`, `sidebarWidth`, `sidebarNavH`,
   `sidebarFootH`, `mainHeaderH`, `showSidePane` and `sidePaneW` move to
   `husk.layout`; `width`, `height`, `slotRects`, `modalRect` and the result of
   `tooSmall()` move to `husk.geometry`, written by `recomputeLayout` through
-  the handle `cmd/husk` obtains from `Frontend.OwnSlices`.
-  `dropVanishedSides` writes `husk.focus` through its handle. `cmd/husk` owns
+  the handle `pkg/workbench` obtains from `Frontend.OwnSlices`.
+  `dropVanishedSides` writes `husk.focus` through its handle. `pkg/workbench` owns
   these three namespaces and the view half of `husk.surfaces` (see "Frontend-owned
   slices"); the Surfaces engine owns none of them, and its `Resized` is
   driven by the geometry writes. `minTermWidth`, `minTermHeight` and
   `surfaceGutter` stay as Surfaces constants. `leftSideShown` and
   `rightSideShown` become reads of `husk.layout` and `husk.surfaces`.
 - `pkg/huskipc`: deleted in the retirement. `WorkspaceContextPayload` is gone with it, and the `state.*` request and reply shapes live in `pkg/protocol`.
-- `pkg/manifest` (deleted; now `internal/pods/manifest`): `Plugin` gains an optional `State` block (`scope`,
+- `pkg/manifest` (deleted; now `pkg/pods/manifest`): `Plugin` gains an optional `State` block (`scope`,
   `persistent`, `retention`, `max_bytes`). `Slots` stays: which surfaces a
   plugin claims is declared config; which surface it actually occupies is
   resolved in `husk.surfaces`.
@@ -765,6 +776,17 @@ With one:
     holds it. `surface.resized` follows the frontend's geometry, focus and
     visibility writes: the host diffs the computed sizes at the end of each
     tick and pushes only the changes.
+20. **Runtime canvases form one stack** (lead ruling for runtime surfaces,
+    pending operator review of the restore action and of hide-not-close).
+    Runtime canvases use one global newest-first opening-order stack, not
+    one stack per plugin and not replace-and-close. Home and rail activation
+    hide it without changing runtime lifetime, so selecting the underlying
+    rail item while the stack is shown reveals that item rather than
+    toggling Home. `husk.surfaces.restore` explicitly re-shows the hidden
+    top, with no default key and a palette entry only while hidden. Focus is
+    captured each time the stack becomes shown, and restored when its last
+    canvas closes. Future runtime `stage` and `panel` stacks follow the same
+    rule (open question 6).
 
 ## Open questions
 
@@ -789,11 +811,13 @@ With one:
 5. **Test harness access to render buffers.** A harness may want surface lines
    from `husk state`. Recommendation: no; it uses the existing frame dump path,
    keeping frame-rate data out of State.
-6. **Runtime `stage` and `panel` placements.** `surface.open` (Level 1) offers
-   `modal` and `canvas`; a plugin that wants to sit in the main stage or the
+6. **Runtime `stage` and `panel` placements.** `surface.open` (minor 2.8)
+   offers `modal` and `canvas`; a plugin that wants to sit in the main stage or the
    side panel beside the layout occupant has no placement yet. Recommendation:
-   add both in a later minor with one stack rule: the newest runtime surface
-   in a slot shows, the layout occupant and older runtime surfaces are hidden
+   add both in a later minor with a stack rule matching runtime canvases:
+   newest-first, with hidden entries kept open and the previous placement
+   restored when the stack empties. The newest runtime surface in a slot
+   shows, the layout occupant and older runtime surfaces are hidden
    (told `visible: false`) and return when it closes, and `husk.surfaces.runtime`
    gains a `slot` field. A split that resizes the occupant is not offered: the
    frontend's layout is fixed slots, not a tree.

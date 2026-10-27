@@ -52,10 +52,15 @@ func TestSettingsSetRestartWrittenAndReported(t *testing.T) {
 	found := false
 	for _, rep := range r.Reports {
 		for _, p := range rep.Problems {
-			if p.Code == "restart_required" && p.Key == "husk.plugins.paths" {
+			// The problem names the written layer; the reply's source below
+			// names the layer supplying the value in force.
+			if p.Code == "restart_required" && p.Key == "husk.plugins.paths" && p.Layer == "user" {
 				found = true
 			}
 		}
+	}
+	if want := h.root.rt.Settings.Snapshot().Source("husk.plugins.paths"); r.Source != want || r.Source == "user" {
+		t.Fatalf("source=%q, want in-force %q (not the written user layer)", r.Source, want)
 	}
 	b, err := os.ReadFile(filepath.Join(h.root.store.Paths().Config, "config.json"))
 	if err != nil {

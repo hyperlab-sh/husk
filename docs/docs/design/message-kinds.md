@@ -223,7 +223,7 @@ type Dispatcher interface {
 }
 
 // Read-only views the Dispatcher is given. It owns neither. ActionCatalog is
-// implemented outside Stem, by cmd/husk over Store.Declared("plugins") and
+// implemented outside Stem, by the host over Store.Declared("plugins") and
 // the host action list, because Stem never imports Store (Store invariant 4).
 type ActionCatalog interface {
     Lookup(action string) (ActionDef, bool) // config, reloadable
@@ -276,7 +276,7 @@ The rule is `Public`-based for host actions too: a plugin may invoke a `husk.*`
 action only when the host's catalog marks it public. A caller of unknown kind,
 or a plugin caller with no plugin id, is denied.
 
-Notes fixed by the implementation (`internal/stem/dispatcher`):
+Notes fixed by the implementation (`pkg/stem/dispatcher`):
 
 - A well-formed id has at least two non-empty dot-separated segments, no
   whitespace, `;`, `=` or backslash, and at most 256 bytes. `args` over 1 MiB, or not
@@ -465,14 +465,18 @@ undeclares a plugin, [Pods](pods.md)), `pods.plugin-added` (the same
 shape, published after a `plugin.add` batch's launch gate opens), `services.reloaded` and
 `secrets.read` now, and the `state.`, `surface.`, `input.`, `pods.`,
 `services.`, `secrets.`, `user.` and `husk.` prefixes. `secrets.read` and
-`services.reloaded` are delivered to CLI watchers only, never to a plugin
-subscriber ([Services](services.md)). The mechanism is at subscription time,
+`services.reloaded` are delivered to user-trust watchers only, never to a
+plugin subscriber ([Services](services.md)): a `cli` caller's `event.watch`
+and an in-process `host` subscription (the `WatchEvents` frontend seam,
+[Pods](pods.md) "Frontend seams"), which acts with the user's trust as the
+Settings center's seams do. The mechanism is at subscription time,
 not delivery: manifest conversion rejects a plugin pattern that would match a
 `secrets.` or `services.` name (an exact name, or a prefix pattern at or above
 them, `secrets.*` included; only that pattern is dropped, with a `problems`
 entry on the plugin's declared document, the way conversion treats a bad
 binding; the plugin's other subscriptions are applied), and `event.watch` from a plugin caller answers
-`denied` for such a pattern. A plugin may declare
+`denied` for such a pattern. The `cli` and `host` callers are not refused
+these patterns. A plugin may declare
 events in its manifest for introspection
 (`"events": {"publish": [{"name": "notes.saved", "title": "...", "coalesce": false}]}`).
 
@@ -579,7 +583,7 @@ introspection; the shapes are in [Hooks](hooks.md).
   legacy plugins until the major protocol bump, then goes. The catalog half
   of `hello.commands` and manifest declarations becomes the action catalog;
   plugin liveness becomes a State slice.
-- `cmd/husk/commands.go`: `executeCommand`'s `husk.*` switch cases become
+- `pkg/workbench/commands.go`: `executeCommand`'s `husk.*` switch cases become
   `RegisterHost` handlers. The rail item fallback becomes a host handler per
   rail item id, registered by the frontend through `Frontend.RegisterHostAction`
   ([Pods](pods.md), "Frontend seams"). The loop over `cp.Info.Commands` becomes `catalog.Lookup`.
@@ -588,7 +592,7 @@ introspection; the shapes are in [Hooks](hooks.md).
   and `isHostCommand` disappear: Input passes an action id and the Dispatcher
   decides host or plugin. `keyBinding` and `isChordKey` leave for the
   Keybinding service.
-- `cmd/husk/input.go`: key resolution still ends in an action id, now passed
+- `pkg/workbench/input.go`: key resolution still ends in an action id, now passed
   to `Dispatcher.Invoke` with a continuation. `slot_key` to the focused
   surface is not an action and is outside this spec.
 - `pkg/huskipc` (deleted; the replacements live in `pkg/protocol`): `CommandInvokePayload`, `HookCallPayload`,
@@ -596,7 +600,7 @@ introspection; the shapes are in [Hooks](hooks.md).
   `EventSubscribePayload` are replaced by the Protocol request and
   notification envelopes. The legacy `type`-keyed envelope is gone with the
   package.
-- `pkg/manifest` (deleted; the converter is `internal/pods/manifest`): gains `actions[].public`, `events.subscribe`,
+- `pkg/manifest` (deleted; the converter is `pkg/pods/manifest`): gains `actions[].public`, `events.subscribe`,
   `events.publish[].coalesce` and `hooks.subscribe`. Existing `hooks` and
   `events` declaration arrays are read as publish declarations.
 - `docs/docs/architecture.md`: "Hooks" and "Events and lifetime" describe the
@@ -668,15 +672,15 @@ introspection; the shapes are in [Hooks](hooks.md).
    distributions ship host-side extensions, `husk.*` handlers may need a
    registry outside `cmd/husk`. Recommended: defer; `RegisterHost` already
    covers it.
-6. **Terminal deliveries (protocol minor 2.5).** `terminal.input` (landed)
-   and `terminal.link` (deferred) are host-to-plugin deliveries like
+6. **Terminal deliveries.** `terminal.input` (landed in protocol minor 2.5)
+   is a host-to-plugin delivery like
    `input.key`: direct, never on the Event bus, never coalesced (a byte
    stream must arrive in order), sent only to the Pod occupying the attached
    surface through its bounded queue, which drops and logs when full rather
    than block the loop, and homed as `Outbound` in `MethodHomes`.
    `terminal.attach`, `terminal.write` and `terminal.detach` are plugin-only
-   inbound methods on the Terminal port; `surface.open` (deferred) will be
-   one on the Surface port ([Pods](pods.md), Frontend seams).
+   inbound methods on the Terminal port; `surface.open` (minor 2.8) is
+   on the Surface port ([Pods](pods.md), Frontend seams).
    Recommended: keep them out of the bus; a watcher that wants terminal
    activity reads `husk.surfaces.terminals` through `state.watch`.
 7. Items 6 to 10 of earlier drafts recorded what the hook cut-out did that

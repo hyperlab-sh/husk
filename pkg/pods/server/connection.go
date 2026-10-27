@@ -30,6 +30,8 @@ type connection struct {
 	count                                 int
 	diagnosticCount, diagnosticSuppressed uint64
 	lastDiagnosticCode                    protocol.Code
+	ignoredCount                          uint64
+	lastIgnoredMethod                     string
 	diagnosticTimer                       protocol.Timer
 	lastDiagnosticPost                    time.Time
 	hasDiagnosticPost                     bool
@@ -258,7 +260,7 @@ func (c *connection) receive(req protocol.Message) {
 		if req.ID != nil {
 			c.reject(req, protocol.CodeUnknownMethod, "unknown method", nil)
 		} else {
-			c.noteDiagnostic(protocol.CodeUnknownMethod)
+			c.noteIgnored(req.Method)
 		}
 		return
 	}
@@ -315,6 +317,12 @@ func (c *connection) invoke(h Handler, caller Caller, req protocol.Message) {
 		return h.Serve(c.ctx, caller, req, c)
 	}()
 	if req.ID == nil {
+		if reply.Error != nil && reply.Error.Code == protocol.CodeUnknownMethod {
+			// protocol.md: a notification for an unknown method gets no
+			// response and is logged at debug level (a newer minor may send it).
+			c.noteIgnored(req.Method)
+			return
+		}
 		if reply.Error != nil {
 			c.reject(req, reply.Error.Code, reply.Error.Message, reply.Error.Data)
 		}

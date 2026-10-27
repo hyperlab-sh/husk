@@ -5,6 +5,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/hyperlab-sh/husk/pkg/host/contracts"
 	"github.com/hyperlab-sh/husk/pkg/pods"
 	"github.com/hyperlab-sh/husk/pkg/pods/server"
 	"github.com/hyperlab-sh/husk/pkg/protocol"
@@ -23,6 +24,8 @@ type options struct {
 	factory         pods.Factory
 	modifiers       func() protocol.ModifierState
 	pluginAdditions map[string][]string
+	converters      []string
+	onLoopStart     func(contracts.Frontend)
 
 	// Test seams.
 	catalogReader catalog.Reader
@@ -32,8 +35,9 @@ type options struct {
 	loopWait      time.Duration // overrides the package loopWait when set
 	afterFail     func(*Root)   // called with the partial root after New's cleanup
 	onSpawn       func(accepted bool)
-	keyring       store.Keyring // replaces the OS keyring under Store when set
-	workerWait    time.Duration // overrides storeCloseTimeout for the worker wait when set
+	keyring       store.Keyring         // replaces the OS keyring under Store when set
+	onStoreFlush  func(context.Context) // sees the context handed to Store.Close
+	workerWait    time.Duration         // overrides workerWaitTimeout for the worker wait when set
 }
 
 func (o *options) workerWaitOr(d time.Duration) time.Duration {
@@ -71,6 +75,26 @@ func WithPrompt(fn func(ctx context.Context, p secrets.Prompt) secrets.Answer) O
 // flags remain in the instance documents instead.
 func WithPluginAdditions(additions map[string][]string) Option {
 	return func(o *options) { o.pluginAdditions = additions }
+}
+
+// WithConverters registers executable converters in flag order, before settings.
+func WithConverters(paths []string) Option {
+	return func(o *options) { o.converters = append([]string(nil), paths...) }
+}
+
+// WithOnLoopStart runs fn once, on the loop, before the host delivers any event
+// to a WatchEvents subscriber: at the first Update (or Tick) whatever the
+// message, ahead of the first end-of-Update event flush. fn receives the
+// host's Frontend, so it can call loop-only methods such as WatchEvents. Nil is
+// ignored (it never clears an earlier fn); otherwise a later option replaces an
+// earlier one. A panic in fn is not
+// recovered here.
+func WithOnLoopStart(fn func(contracts.Frontend)) Option {
+	return func(o *options) {
+		if fn != nil {
+			o.onLoopStart = fn
+		}
+	}
 }
 
 // WithFactory replaces the process Wrapper factory (fake plugins in tests).

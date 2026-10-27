@@ -47,10 +47,18 @@ func TestNamesAndArgumentsBeforeFilesystem(t *testing.T) {
 			}
 		})
 	}
-	for _, args := range [][]string{nil, {"bundle"}, {"tui", "app"}, {"bundle", "app", "extra"}} {
-		_, err := invoke(t, t.TempDir(), args, output.JSON, writeFile)
-		if output.AsError(err).Exit != 2 {
+	for _, args := range [][]string{nil, {"bundle"}, {"tui"}, {"tui", "app", ""}, {"tui", "app."}, {"tui", "con"}, {"tui", "app", "module", "extra"}, {"bundle", "app", "extra"}} {
+		cmd := command("", fakeGuide, func() (string, error) { t.Fatal("filesystem reached for invalid arguments"); return "", nil }, writeFile)
+		err := cmd.Run(t.Context(), args, output.Options{})
+		e := output.AsError(err)
+		if e.Exit != 2 || e.Code != output.CodeUsage {
 			t.Fatalf("args %q: %v", args, err)
+		}
+		if len(args) == 2 && args[0] == "tui" {
+			want := "invalid name " + strconvQuote(args[1]) + ": not a valid Go module path; pass <module> explicitly"
+			if e.Message != want {
+				t.Fatalf("args %q: message = %q, want %q", args, e.Message, want)
+			}
 		}
 	}
 	for _, name := range []string{"0", "app", "a._-9", strings.Repeat("a", 64)} {
@@ -176,7 +184,17 @@ func TestGuideCommandArgumentsAndEnvironment(t *testing.T) {
 }
 
 func TestWriteFailureAtEveryFileLeavesEarlierFiles(t *testing.T) {
+	for _, verb := range []string{"bundle", "tui"} {
+		t.Run(verb, func(t *testing.T) { testWriteFailures(t, verb) })
+	}
+}
+
+func testWriteFailures(t *testing.T, verb string) {
+	t.Helper()
 	files, err := bundleFiles("app", fakeGuide)
+	if err == nil && verb == "tui" {
+		files, err = tuiFiles("app", "app", "", "1.26", files)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +203,7 @@ func TestWriteFailureAtEveryFileLeavesEarlierFiles(t *testing.T) {
 			root := t.TempDir()
 			calls := 0
 			failure := errors.New("injected write failure")
-			_, err := invoke(t, root, []string{"bundle", "app"}, output.JSON, func(p string, b []byte, m fs.FileMode) error {
+			_, err := invoke(t, root, []string{verb, "app"}, output.JSON, func(p string, b []byte, m fs.FileMode) error {
 				calls++
 				if calls == n {
 					return failure
@@ -193,7 +211,7 @@ func TestWriteFailureAtEveryFileLeavesEarlierFiles(t *testing.T) {
 				return writeFile(p, b, m)
 			})
 			e := output.AsError(err)
-			if e.Exit != 1 || e.Code != output.CodeCreate || !errors.Is(err, failure) || !strings.Contains(e.Message, "write "+filepath.Join(root, "app", filepath.FromSlash(files[n-1].name))+":") {
+			if e.Exit != 1 || e.Code != output.CodeCreate || !errors.Is(err, failure) || e.Message != "write "+filepath.Join(root, "app", filepath.FromSlash(files[n-1].name))+": "+failure.Error() {
 				t.Fatalf("error=%#v", e)
 			}
 			for i, f := range files {
@@ -234,7 +252,7 @@ func tree(t *testing.T, root string) map[string]string {
 	return result
 }
 
-func assertWrittenModes(t *testing.T, root string) {
+func assertWrittenModes(t *testing.T, root string, rootCreated bool) {
 	t.Helper()
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -244,8 +262,12 @@ func assertWrittenModes(t *testing.T, root string) {
 		if err != nil {
 			return err
 		}
+		if rel == "." && !rootCreated {
+			// The root is skipped only when the caller already owned it (e.g. t.TempDir()); a root the command created is checked like any directory.
+			return nil
+		}
 		want := fs.FileMode(0644)
-		if d.IsDir() || filepath.ToSlash(rel) == "plugins/hello/hello" || filepath.ToSlash(rel) == "plugins/guide/guide" {
+		if d.IsDir() || strings.HasSuffix(filepath.ToSlash(rel), "plugins/hello/hello") || strings.HasSuffix(filepath.ToSlash(rel), "plugins/guide/guide") {
 			want = 0755
 		}
 		info, err := d.Info()
@@ -370,7 +392,7 @@ func TestGoldenBundleTreeModesAndOutput(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	assertWrittenModes(t, dir)
+	assertWrittenModes(t, dir, true)
 	if got, want := tree(t, dir), tree(t, golden); !reflect.DeepEqual(got, want) {
 		t.Fatalf("tree differs:\ngot %#v\nwant %#v", got, want)
 	}

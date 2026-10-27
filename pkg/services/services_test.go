@@ -337,6 +337,10 @@ func (s *fakeStore) Layers(name store.DocName, profile string) ([]store.LayerDoc
 	s.call("layers:" + string(name) + ":" + profile)
 	return nil, nil
 }
+func (s *fakeStore) LayersWithProblems(name store.DocName, profile string) ([]store.LayerDoc, []store.Problem, error) {
+	layers, err := s.Layers(name, profile)
+	return layers, nil, err
+}
 func (s *fakeStore) Declared(name store.DocName) map[string]store.Doc {
 	s.call("declared:" + string(name))
 	return nil

@@ -161,8 +161,8 @@ type HookError struct {
 	Message string
 	// Data is the wire error's structured data member; nil when absent.
 	// Calls only delivers an error whose data is a JSON object (anything else
-	// becomes its own pkg/invalid_reply error), so this carries the
-	// member whole.
+	// becomes its own `internal` error with data.reason "invalid_reply"), so
+	// this carries the member whole.
 	Data map[string]any
 	// Cause is the error this one wraps, such as the context error behind a
 	// cancelled wait; nil when none.

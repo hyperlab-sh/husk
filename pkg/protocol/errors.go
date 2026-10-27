@@ -14,7 +14,9 @@ const (
 	CodeLineTooLong Code = "line_too_long"
 	// CodeVersionMismatch means an absent, unparsable or incompatible version.
 	CodeVersionMismatch Code = "version_mismatch"
-	// CodeUnknownMethod means the receiver has no handler.
+	// CodeUnknownMethod means the receiver has no handler. Handlers return it
+	// only when the method has no inbound handler; the transport drops it
+	// silently (debug log only) when it answers a notification.
 	CodeUnknownMethod Code = "unknown_method"
 	// CodeInvalidParams means the method's parameters failed validation.
 	CodeInvalidParams Code = "invalid_params"

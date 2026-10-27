@@ -153,6 +153,7 @@ func (r *Root) Update(msg any) bool {
 	if r.loopGID.Load() == 0 {
 		r.loopGID.Store(goroutineID())
 	}
+	r.runLoopStart()
 	handled := true
 	switch m := msg.(type) {
 	case fnMsg:
@@ -181,6 +182,18 @@ func (r *Root) Update(msg any) bool {
 		r.tick()
 	}
 	return handled
+}
+
+// runLoopStart runs the embedder's start hook the first time the loop enters
+// the host, before any message is applied or any flush runs. Loop-only.
+func (r *Root) runLoopStart() {
+	if r.loopStarted {
+		return
+	}
+	r.loopStarted = true
+	if fn := r.opts.onLoopStart; fn != nil {
+		fn(r.Frontend())
+	}
 }
 
 // complete hands Calls results to their requesters.

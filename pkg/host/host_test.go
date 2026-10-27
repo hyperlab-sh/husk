@@ -1150,6 +1150,31 @@ func TestCloseFromUpdateBoundsTheWaitOnABlockedPost(t *testing.T) {
 	close(g.gate) // release the worker so the test leaks nothing
 }
 
+// The final Store flush gets the 2 s exit deadline from store.md.
+func TestCloseGivesTheStoreFlushTwoSeconds(t *testing.T) {
+	var rem time.Duration
+	var ok bool
+	h, err := boot(t, nil, func(o *options) {
+		o.onStoreFlush = func(ctx context.Context) {
+			var dl time.Time
+			dl, ok = ctx.Deadline()
+			rem = time.Until(dl)
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.root.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if !ok {
+		t.Fatal("Store.Close ran without a deadline")
+	}
+	if rem <= 2*time.Second-200*time.Millisecond || rem > 2*time.Second {
+		t.Fatalf("flush deadline remaining = %v, want within (1.8s, 2s]", rem)
+	}
+}
+
 func TestTeardownOfUnknownPodLeavesDeclarations(t *testing.T) {
 	h, err := boot(t, nil)
 	if err != nil {
